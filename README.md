@@ -1,76 +1,214 @@
-# Godot Engine
+# Godot Engine with NVIDIA DLSS, path tracing and PhysX 5
 
 <p align="center">
   <a href="https://godotengine.org">
-    <img src="misc/logo/logo_outlined.svg" width="400" alt="Godot Engine logo">
+    <img src="misc/logo/logo_outlined.svg" width="300" alt="Godot Engine logo">
   </a>
 </p>
 
-## 2D and 3D cross-platform game engine
+This is a fork of [Godot Engine](https://github.com/godotengine/godot) (`master`,
+4.8-dev) that combines three things in one source tree:
 
-**[Godot Engine](https://godotengine.org) is a feature-packed, cross-platform
-game engine to create 2D and 3D games from a unified interface.** It provides a
-comprehensive set of [common tools](https://godotengine.org/features), so that
-users can focus on making games without having to reinvent the wheel. Games can
-be exported with one click to a number of platforms, including the major desktop
-platforms (Linux, macOS, Windows), mobile platforms (Android, iOS), as well as
-Web-based platforms and [consoles](https://godotengine.org/consoles).
+| Part | Source | What it adds |
+| --- | --- | --- |
+| Godot Engine | [godotengine/godot](https://github.com/godotengine/godot) `master` | The engine itself, kept up to date with upstream. |
+| NVIDIA RTX branch | [NVIDIA-RTX/godot](https://github.com/NVIDIA-RTX/godot) `nvidia-pt-dlss` | DLSS through NVIDIA Streamline, a real-time path tracer with DLSS Ray Reconstruction, Reflex, and Nsight Aftermath crash dumps. |
+| PhysX 5 module | [uno1982/godot](https://github.com/uno1982/godot/tree/feature/physx5-module) `feature/physx5-module` | `modules/godot_physx`: an NVIDIA PhysX 5 physics server with CUDA GPU dynamics, plus GPU fluid, cloth, soft bodies, destruction, vehicles and water. |
 
-## Free, open source and community-driven
+All credit for those features goes to their authors: the Godot contributors,
+NVIDIA's RTX team, and the PhysX module's author. This fork merges them,
+fixes the conflicts between them, and keeps them building against the latest
+Godot `master`.
 
-Godot is completely free and open source under the very permissive [MIT license](https://godotengine.org/license).
-No strings attached, no royalties, nothing. The users' games are theirs, down
-to the last line of engine code. Godot's development is fully independent and
-community-driven, empowering users to help shape their engine to match their
-expectations. It is supported by the [Godot Foundation](https://godot.foundation/)
-not-for-profit.
+**Platform:** Windows 10/11 x64 with an NVIDIA RTX GPU. DLSS, Ray
+Reconstruction and the path tracer need an RTX card. PhysX GPU dynamics need an
+NVIDIA GPU with CUDA. Everything else falls back gracefully (PhysX runs on the
+CPU, rendering without DLSS).
 
-Before being open sourced in [February 2014](https://github.com/godotengine/godot/commit/0b806ee0fc9097fa7bda7ac0109191c9c5e0a1ac),
-Godot had been developed by [Juan Linietsky](https://github.com/reduz) and
-[Ariel Manzur](https://github.com/punto-) for several years as an in-house
-engine, used to publish several work-for-hire titles.
+## What's inside
 
-![Screenshot of a 3D scene in the Godot Engine editor](https://raw.githubusercontent.com/godotengine/godot-design/master/screenshots/editor_tps_demo_1920x1080.jpg)
+### NVIDIA DLSS, path tracing and Streamline (from NVIDIA-RTX/godot)
 
-## Getting the engine
+- **DLSS Super Resolution** as a 3D scaling mode (Project Settings >
+  Rendering > Scaling 3D > Mode = DLSS), with selectable presets
+  (`rendering/streamline/dlss_preset`).
+- **Real-time path tracer** in the Forward+ renderer: enable it per
+  `Environment` (`pathtracing_enabled`, samples per pixel, max bounces, debug
+  views). It uses hardware ray tracing pipelines, so it needs the **Vulkan**
+  driver (Godot's D3D12 driver has no ray tracing).
+- **DLSS Ray Reconstruction** as the path tracer's denoiser
+  (`Environment.pathtracing_denoiser = 1`).
+- **NVIDIA Reflex** low-latency modes (`rendering/streamline/reflex_mode`).
+- Streamline plugins for NIS, DeepDVC and DLSS Frame Generation are loaded when
+  their DLLs are present.
+- **Nsight Aftermath** GPU crash dumps (`use_aftermath=yes` at build time),
+  plus `--gpu-markers`, `--debug-shaders` and `--raytracing-validation`
+  command-line flags.
 
-### Binary downloads
+### PhysX 5 (from the godot_physx module)
 
-Official binaries for the Godot editor and the export templates can be found
-[on the Godot website](https://godotengine.org/download).
+Select it in Project Settings > Physics > 3D > Physics Engine = `PhysX`. Every
+standard 3D physics node keeps working. On top of that:
 
-### Compiling from source
+- GPU rigid-body dynamics on NVIDIA GPUs (CUDA), with automatic CPU fallback.
+- `PhysXParticleFluid3D` (GPU fluid with surface meshing), `PhysXGranular3D`
+  (sand and snow), `PhysXGas3D` (smoke and fire), `PhysXCloth3D`, GPU soft
+  bodies for the stock `SoftBody3D`, `PhysXChunkEmitter3D` debris.
+- `PhysXDestructible3D`: runtime mesh fracture with NVIDIA Blast (optional
+  SDK), plus an in-editor fracture tool.
+- Vehicles (`PhysXVehicle3D`, `PhysXMotorcycle3D`, `PhysXTank3D`), water
+  (`PhysXWaterSurface3D`, FFT ocean, caustics) and boats.
 
-[See the official docs](https://docs.godotengine.org/en/latest/engine_details/development/compiling)
-for compilation instructions for every supported platform.
+The module's full documentation is in
+[`modules/godot_physx/README.md`](modules/godot_physx/README.md).
 
-## Community and contributing
+### Changes in this fork
 
-Godot is not only an engine but an ever-growing community of users and engine
-developers. The main community channels are listed [on the homepage](https://godotengine.org/community).
+- Merged with the latest Godot `master`, with every conflict resolved by hand
+  (both sides kept).
+- Shader container format bumped to version 5, so shader caches from older
+  builds are rejected instead of crashing D3D12 startup.
+- New projects default to the Vulkan driver on Windows, because the path
+  tracer needs it. Requesting path tracing on D3D12 prints an explanatory
+  warning.
+- `misc/scripts/package_editor_win64.ps1` packages a release editor with all
+  runtime DLLs.
+- [`CUSTOM_BUILD.md`](CUSTOM_BUILD.md) is the maintenance runbook for keeping
+  the three sources in sync.
 
-The best way to get in touch with the core engine developers is to join the
-[Godot Contributors Chat](https://chat.godotengine.org).
+## Building on Windows
 
-To get started contributing to the project, see the [contributing guide](CONTRIBUTING.md).
-This document also includes guidelines for reporting bugs.
+### 1. Prerequisites
 
-## Documentation and demos
+- **Visual Studio 2022** (or Build Tools) with the "Desktop development with
+  C++" workload and a Windows SDK.
+- **Python 3** and **SCons**: `python -m pip install scons`.
+- **Git** and **CMake** (the PhysX SDK builds with CMake).
+- **CUDA Toolkit 12.8**, only for PhysX GPU dynamics:
+  `winget install Nvidia.CUDA --version 12.8`. Open a new terminal afterwards
+  so `CUDA_PATH` is set.
+- **.NET SDK 8 or newer**, only for the C# (.NET) editor.
+- The **D3D12 build dependencies** (Mesa NIR and the Agility SDK), once:
+  ```
+  python misc/scripts/install_d3d12_sdk_windows.py
+  ```
 
-The official documentation is hosted on [Read the Docs](https://docs.godotengine.org).
-It is maintained by the Godot community in its own [GitHub repository](https://github.com/godotengine/godot-docs).
+### 2. Get the source
 
-The [class reference](https://docs.godotengine.org/en/latest/classes/)
-is also accessible from the Godot editor.
+```
+git clone -b nvidia-dlss-physx https://github.com/Diginaat/godot.git godot-rtx
+cd godot-rtx
+```
 
-We also maintain official demos in their own [GitHub repository](https://github.com/godotengine/godot-demo-projects)
-as well as the [Asset Store](https://store.godotengine.org/).
+### 3. Build the PhysX SDK
 
-There are also a number of other
-[learning resources](https://docs.godotengine.org/en/latest/community/tutorials.html)
-provided by the community, such as text and video tutorials, demos, etc.
-Consult the [community channels](https://godotengine.org/community)
-for more information.
+The PhysX SDK is not included. A script clones NVIDIA's PhysX repository at a
+pinned version, applies the Godot build preset and patches, and builds it:
 
-[![Code Triagers Badge](https://www.codetriage.com/godotengine/godot/badges/users.svg)](https://www.codetriage.com/godotengine/godot)
-[![Translate on Weblate](https://hosted.weblate.org/widgets/godot-engine/-/godot/svg-badge.svg)](https://hosted.weblate.org/engage/godot-engine/?utm_source=widget)
+```
+python modules/godot_physx/misc/build_physx.py --gpu
+```
+
+Leave out `--gpu` for a CPU-only build, and add `--blast` to also build the
+NVIDIA Blast SDK for destruction. The script prints the `physx_sdk=` (and
+`blast_sdk=`) path to use in the next step. It clones into a `physx-sdk`
+folder next to this repository.
+
+### 4. Build the editor
+
+```
+python -m SCons platform=windows target=editor production=yes physx_sdk=<path from step 3> physx_gpu=yes
+```
+
+- Add `blast_sdk=<path>` if you built Blast.
+- Leave out `physx_gpu=yes` for a CPU-only PhysX build. Leave out `physx_sdk`
+  completely to build without PhysX.
+- The editor lands in `bin\godot.windows.editor.x86_64.exe`.
+  `PhysXGpu_64.dll` is copied next to it automatically.
+
+### 5. Add the NVIDIA Streamline DLLs
+
+Streamline's runtime DLLs are not in this repository; NVIDIA distributes them
+in the Streamline SDK. This source is built against **Streamline SDK 2.10.0**
+(see `thirdparty/streamline/include/sl_version.h`).
+
+1. Download **Streamline SDK 2.10.0** from the NVIDIA Streamline releases page:
+   [github.com/NVIDIA-RTX/Streamline/releases](https://github.com/NVIDIA-RTX/Streamline/releases).
+   Product page: [developer.nvidia.com/rtx/streamline](https://developer.nvidia.com/rtx/streamline).
+2. From the SDK's `bin\x64` folder, copy these files into this repository's `bin\`
+   folder, next to the editor:
+   - `sl.interposer.dll` and the other `sl.*.dll` plugins,
+   - `nvngx_dlss.dll` (DLSS), `nvngx_dlssd.dll` (Ray Reconstruction),
+     `nvngx_dlssg.dll` (Frame Generation), `nvngx_deepdvc.dll`,
+   - `NvLowLatencyVk.dll` (Reflex on Vulkan),
+   - the license files (`nvngx_dlss.license.txt`, `reflex.license.txt`,
+     `nis.license.txt`).
+3. Use the **release** DLLs from `bin\x64`, not `bin\x64\development`. The
+   development DLLs are unsigned debug builds with an on-screen overlay. They're
+   for debugging only and must not be shipped.
+
+Without these DLLs the editor still runs, just without DLSS, Ray
+Reconstruction and Reflex.
+
+### 6. Optional: C# (.NET) editor
+
+```
+python -m SCons platform=windows target=editor production=yes module_mono_enabled=yes physx_sdk=<path> physx_gpu=yes
+bin\godot.windows.editor.x86_64.mono.console.exe --headless --generate-mono-glue modules\mono\glue
+python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=windows
+```
+
+This produces `bin\godot.windows.editor.x86_64.mono.exe` and the
+`bin\GodotSharp` folder with the C# API assemblies.
+
+### 7. Optional: package a distributable zip
+
+```
+powershell -File misc/scripts/package_editor_win64.ps1          # standard editor
+powershell -File misc/scripts/package_editor_win64.ps1 -Mono    # .NET editor
+```
+
+The zip goes to `dist\`. It contains the editor and the Streamline release
+DLLs, plus `PhysXGpu_64.dll`, the D3D12 Agility SDK DLLs, the license files
+and, for .NET, the `GodotSharp` folder.
+
+## Using the features
+
+- **DLSS:** Project Settings > Rendering > Scaling 3D > Mode = DLSS. Pick a
+  scale, for example 0.67 for Quality.
+- **Path tracing:** use the Forward+ renderer with the Vulkan driver, add a
+  `WorldEnvironment`, and in its `Environment` enable **Pathtracing**. In
+  GDScript:
+  ```gdscript
+  var env: Environment = $WorldEnvironment.environment
+  env.pathtracing_enabled = true
+  env.pathtracing_samples_per_pixel = 1
+  env.pathtracing_max_bounces = 2
+  env.pathtracing_denoiser = 1  # DLSS Ray Reconstruction
+  ```
+- **PhysX:** Project Settings > Physics > 3D > Physics Engine = PhysX. GPU
+  dynamics start automatically on a CUDA-capable GPU; the log shows
+  `PhysX ... initialized [GPU]`.
+
+## Keeping it up to date
+
+The fork tracks three upstreams. The update procedure, conflict rules and smoke
+tests are in [`CUSTOM_BUILD.md`](CUSTOM_BUILD.md). Its tables and examples use
+the maintainer's own local paths; replace them with yours.
+
+## Licenses
+
+- Godot Engine: MIT, see [`LICENSE.txt`](LICENSE.txt) and
+  [`COPYRIGHT.txt`](COPYRIGHT.txt).
+- NVIDIA PhysX and Blast: BSD-3-Clause, see
+  [`modules/godot_physx/PHYSX-LICENSE.md`](modules/godot_physx/PHYSX-LICENSE.md).
+- NVIDIA Streamline, DLSS and Reflex: the Streamline SDK headers in
+  `thirdparty/streamline` are MIT. The runtime DLLs come with NVIDIA's own
+  license terms (the `*.license.txt` files in the SDK). Read them before
+  redistributing.
+
+This fork is not affiliated with or endorsed by the Godot Foundation or
+NVIDIA. For general Godot documentation, see
+[docs.godotengine.org](https://docs.godotengine.org), and for the upstream
+project README, see
+[godotengine/godot](https://github.com/godotengine/godot#readme).

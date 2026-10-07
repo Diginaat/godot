@@ -400,3 +400,6 @@ $RECYCLE.BIN/
 *.msp
 *.lnk
 *.generated.props
+
+# Packaged editor zips (misc/scripts/package_editor_win64.ps1)
+/dist/
