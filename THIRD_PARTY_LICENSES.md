@@ -7,9 +7,11 @@ repository** and the **editor builds on the Releases page**.
 > **NVIDIA DLSS, Ray Reconstruction, Frame Generation and Reflex runtime
 > files are NOT included in this repository or in any release.** They are
 > licensed by NVIDIA under terms that don't allow them to be redistributed
-> this way. Download them yourself from the
+> this way. **You only need them if you want DLSS**: everything else works
+> without them. If you do, download them yourself from the
 > [NVIDIA Streamline SDK releases](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0)
-> (version 2.10.0). Setup instructions are in [README.md](README.md#5-add-the-nvidia-streamline-dlls).
+> (version 2.10.0). Setup instructions are in
+> [README.md](README.md#5-optional-add-the-nvidia-streamline-dlls-only-for-dlss).
 > By downloading them you accept NVIDIA's license terms.
 
 ## Summary
@@ -67,10 +69,10 @@ can't meet for a standalone open-source download (among them: no open-source
 relicensing, required attribution, and notifying NVIDIA before commercial
 release).
 
-To use DLSS, download the
+Only if you want DLSS, download the
 [Streamline SDK 2.10.0](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0)
 yourself and copy the DLLs from its `bin\x64` folder next to the editor, as the
-[README](README.md#5-add-the-nvidia-streamline-dlls) explains. NVIDIA's license
+[README](README.md#5-optional-add-the-nvidia-streamline-dlls-only-for-dlss) explains. NVIDIA's license
 files come with that download and apply to your use of those files. If you ship
 a game that uses DLSS, follow NVIDIA's terms, including attribution and the
 [software notification](https://developer.nvidia.com/sw-notification) before
