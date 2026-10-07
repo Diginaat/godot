@@ -100,6 +100,7 @@ class EditorTitleBar;
 class ExportTemplateManager;
 class EditorQuickOpenDialog;
 class FBXImporterManager;
+class StreamlineInstaller;
 class FileSystemDock;
 class HistoryDock;
 class OrphanResourcesDialog;
@@ -201,6 +202,7 @@ public:
 		EDITOR_MANAGE_FEATURE_PROFILES,
 		EDITOR_MANAGE_EXPORT_TEMPLATES,
 		EDITOR_CONFIGURE_FBX_IMPORTER,
+		EDITOR_INSTALL_STREAMLINE,
 
 		LAYOUT_SAVE,
 		LAYOUT_DELETE,
@@ -287,6 +289,7 @@ private:
 	ProjectSettingsEditor *project_settings_editor = nullptr;
 
 	FBXImporterManager *fbx_importer_manager = nullptr;
+	StreamlineInstaller *streamline_installer = nullptr;
 
 	Vector<EditorPlugin *> editor_plugins;
 	bool _initializing_plugins = false;
@@ -351,6 +354,7 @@ private:
 	Control *menu_btn_spacer = nullptr;
 	MenuButton *main_menu_button = nullptr;
 	MenuBar *main_menu_bar = nullptr;
+	Button *dlss_install_button = nullptr;
 
 	PopupMenu *apple_menu = nullptr;
 	PopupMenu *file_menu = nullptr;
