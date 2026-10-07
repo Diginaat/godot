@@ -108,7 +108,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 	source_triangle_count = 0;
 
 	switch (type) {
-		case PhysicsServer3D::SHAPE_SPHERE: {
+		case PS3DE::SHAPE_SPHERE: {
 			const real_t radius = p_data;
 			ERR_FAIL_COND(radius <= 0.0);
 			geom.type = PxGeometryType::eSPHERE;
@@ -116,7 +116,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 			geom_valid = true;
 		} break;
 
-		case PhysicsServer3D::SHAPE_BOX: {
+		case PS3DE::SHAPE_BOX: {
 			const Vector3 half_extents = p_data;
 			ERR_FAIL_COND(half_extents.x <= 0.0 || half_extents.y <= 0.0 || half_extents.z <= 0.0);
 			geom.type = PxGeometryType::eBOX;
@@ -124,7 +124,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 			geom_valid = true;
 		} break;
 
-		case PhysicsServer3D::SHAPE_CAPSULE: {
+		case PS3DE::SHAPE_CAPSULE: {
 			const Dictionary d = p_data;
 			ERR_FAIL_COND(!d.has("radius") || !d.has("height"));
 			const real_t radius = d["radius"];
@@ -140,7 +140,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 			geom_valid = true;
 		} break;
 
-		case PhysicsServer3D::SHAPE_WORLD_BOUNDARY: {
+		case PS3DE::SHAPE_WORLD_BOUNDARY: {
 			const Plane plane = p_data;
 			geom.type = PxGeometryType::ePLANE;
 			geom.plane = PxPlaneGeometry();
@@ -151,7 +151,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 			geom_valid = true;
 		} break;
 
-		case PhysicsServer3D::SHAPE_CONVEX_POLYGON: {
+		case PS3DE::SHAPE_CONVEX_POLYGON: {
 			const Vector<Vector3> points = p_data;
 			ERR_FAIL_COND(points.size() < 4);
 			PxPhysics *physics = GodotPhysXServer3D::get_singleton() ? GodotPhysXServer3D::get_singleton()->get_px_physics() : nullptr;
@@ -182,7 +182,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 			geom_valid = true;
 		} break;
 
-		case PhysicsServer3D::SHAPE_CONCAVE_POLYGON: {
+		case PS3DE::SHAPE_CONCAVE_POLYGON: {
 			Vector<Vector3> faces;
 			if (p_data.get_type() == Variant::DICTIONARY) {
 				const Dictionary d = p_data;
@@ -245,7 +245,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 			geom_valid = true;
 		} break;
 
-		case PhysicsServer3D::SHAPE_CYLINDER: {
+		case PS3DE::SHAPE_CYLINDER: {
 			// PhysX has no native cylinder; approximate with a convex prism.
 			const Dictionary d = p_data;
 			ERR_FAIL_COND(!d.has("radius") || !d.has("height"));
@@ -284,7 +284,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 			geom_valid = true;
 		} break;
 
-		case PhysicsServer3D::SHAPE_HEIGHTMAP: {
+		case PS3DE::SHAPE_HEIGHTMAP: {
 			const Dictionary d = p_data;
 			ERR_FAIL_COND(!d.has("width") || !d.has("depth") || !d.has("heights"));
 			const int width = d["width"]; // samples along X
@@ -350,7 +350,7 @@ void GodotPhysXShape3D::set_data(const Variant &p_data) {
 			print_verbose(vformat("PhysX: built %dx%d height field (range %.2f).", width, depth, (double)range));
 		} break;
 
-		case PhysicsServer3D::SHAPE_SEPARATION_RAY: {
+		case PS3DE::SHAPE_SEPARATION_RAY: {
 			const Dictionary d = p_data;
 			ray_length = d.get("length", 1.0);
 			ray_slide_on_slope = d.get("slide_on_slope", false);

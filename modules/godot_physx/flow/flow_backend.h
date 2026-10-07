@@ -55,10 +55,10 @@ struct Grid;
 
 struct Emitter {
 	enum Shape {
-		SHAPE_SPHERE,
-		SHAPE_BOX,
+		PS3DE::SHAPE_SPHERE,
+		PS3DE::SHAPE_BOX,
 	};
-	Shape shape = SHAPE_SPHERE;
+	Shape shape = PS3DE::SHAPE_SPHERE;
 	// Godot Transform3D: basis columns, then origin (meters).
 	float basis[3][3] = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } };
 	float origin[3] = { 0, 0, 0 };

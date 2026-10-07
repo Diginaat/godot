@@ -110,8 +110,8 @@ public:
 	void set_gravity_vector(const Vector3 &p_gravity);
 	void set_gravity_magnitude(real_t p_magnitude);
 	void set_gravity_direction(const Vector3 &p_direction);
-	void set_param(PhysicsServer3D::SpaceParameter p_param, real_t p_value);
-	real_t get_param(PhysicsServer3D::SpaceParameter p_param) const;
+	void set_param(PS3DE::SpaceParameter p_param, real_t p_value);
+	real_t get_param(PS3DE::SpaceParameter p_param) const;
 
 	void register_body(GodotPhysXBody3D *p_body) { bodies.insert(p_body); }
 	void unregister_body(GodotPhysXBody3D *p_body) {
@@ -177,7 +177,7 @@ public:
 	void step(real_t p_step);
 	void call_queries();
 
-	bool test_body_motion(GodotPhysXBody3D *p_body, const PhysicsServer3D::MotionParameters &p_params, PhysicsServer3D::MotionResult *r_result);
+	bool test_body_motion(GodotPhysXBody3D *p_body, const PS3DT::MotionParameters &p_params, PS3DT::MotionResult *r_result);
 
 	GodotPhysXDirectSpaceState3D *get_direct_state();
 

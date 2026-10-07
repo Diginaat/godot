@@ -186,10 +186,10 @@ void GodotPhysXBlastProbe::_spawn_body_for_chunk(uint32_t p_chunk_index) {
 	ps->shape_set_data(shape, points);
 
 	RID body = ps->body_create();
-	ps->body_set_mode(body, PhysicsServer3D::BODY_MODE_RIGID);
+	ps->body_set_mode(body, PS3DE::BODY_MODE_RIGID);
 	ps->body_add_shape(body, shape);
-	ps->body_set_state(body, PhysicsServer3D::BODY_STATE_TRANSFORM, base_transform);
-	ps->body_set_state(body, PhysicsServer3D::BODY_STATE_LINEAR_VELOCITY, base_velocity);
+	ps->body_set_state(body, PS3DE::BODY_STATE_TRANSFORM, base_transform);
+	ps->body_set_state(body, PS3DE::BODY_STATE_LINEAR_VELOCITY, base_velocity);
 	if (space.is_valid()) {
 		ps->body_set_space(body, space);
 	}

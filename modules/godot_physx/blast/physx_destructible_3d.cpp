@@ -476,7 +476,7 @@ void PhysXDestructible3D::_notification(int p_what) {
 				// owning this piece's transform later (see spawn_scale's note).
 				spawn_scale = get_global_transform().basis.get_scale();
 				if (pieces[0].body.is_valid()) {
-					PhysicsServer3D::get_singleton()->body_set_state(pieces[0].body, PhysicsServer3D::BODY_STATE_TRANSFORM, get_global_transform());
+					PhysicsServer3D::get_singleton()->body_set_state(pieces[0].body, PS3DE::BODY_STATE_TRANSFORM, get_global_transform());
 				}
 				RenderingServer::get_singleton()->instance_set_transform(pieces[0].instance, get_global_transform());
 			}
@@ -720,10 +720,10 @@ void PhysXDestructible3D::_spawn_intact() {
 		if (dynamic) {
 			// A real falling/colliding body, not a fixed prop -- and contact
 			// reporting so _check_impact_fracture() can see what it hit.
-			ps->body_set_mode(pieces[0].body, PhysicsServer3D::BODY_MODE_RIGID);
+			ps->body_set_mode(pieces[0].body, PS3DE::BODY_MODE_RIGID);
 			ps->body_set_max_contacts_reported(pieces[0].body, 8);
 		} else {
-			ps->body_set_mode(pieces[0].body, PhysicsServer3D::BODY_MODE_STATIC);
+			ps->body_set_mode(pieces[0].body, PS3DE::BODY_MODE_STATIC);
 		}
 	}
 }
@@ -754,13 +754,13 @@ void PhysXDestructible3D::_spawn_piece(uint32_t p_chunk_index, const Transform3D
 		// body_entered (e.g. destructible_demo_rig.gd's bomb): it would
 		// bounce off every time and never register a hit.
 		ps->body_attach_object_instance_id(body, get_instance_id());
-		ps->body_set_mode(body, PhysicsServer3D::BODY_MODE_RIGID);
+		ps->body_set_mode(body, PS3DE::BODY_MODE_RIGID);
 		ps->body_add_shape(body, shape);
 		ps->body_set_collision_layer(body, collision_layer);
 		ps->body_set_collision_mask(body, collision_mask);
-		ps->body_set_param(body, PhysicsServer3D::BODY_PARAM_MASS, _chunk_mass(p_chunk_index));
-		ps->body_set_state(body, PhysicsServer3D::BODY_STATE_TRANSFORM, p_transform);
-		ps->body_set_state(body, PhysicsServer3D::BODY_STATE_LINEAR_VELOCITY, p_linear_velocity);
+		ps->body_set_param(body, PS3DE::BODY_PARAM_MASS, _chunk_mass(p_chunk_index));
+		ps->body_set_state(body, PS3DE::BODY_STATE_TRANSFORM, p_transform);
+		ps->body_set_state(body, PS3DE::BODY_STATE_LINEAR_VELOCITY, p_linear_velocity);
 		if (is_inside_world() && get_world_3d().is_valid()) {
 			ps->body_set_space(body, get_world_3d()->get_space());
 		}

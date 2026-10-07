@@ -84,15 +84,15 @@ private:
 	bool ray_pickable = true; // input_ray_pickable: hit by the viewport's picking ray
 
 	// Space overrides applied to overlapping bodies (see apply_overrides()).
-	PhysicsServer3D::AreaSpaceOverrideMode gravity_override_mode = PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED;
+	PS3DE::AreaSpaceOverrideMode gravity_override_mode = PS3DE::AREA_SPACE_OVERRIDE_DISABLED;
 	real_t gravity = 9.8;
 	Vector3 gravity_vector = Vector3(0, -1, 0);
 	bool gravity_is_point = false;
 	real_t gravity_point_unit_distance = 0.0;
 
-	PhysicsServer3D::AreaSpaceOverrideMode linear_damp_override_mode = PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED;
+	PS3DE::AreaSpaceOverrideMode linear_damp_override_mode = PS3DE::AREA_SPACE_OVERRIDE_DISABLED;
 	real_t linear_damp = 0.1;
-	PhysicsServer3D::AreaSpaceOverrideMode angular_damp_override_mode = PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED;
+	PS3DE::AreaSpaceOverrideMode angular_damp_override_mode = PS3DE::AREA_SPACE_OVERRIDE_DISABLED;
 	real_t angular_damp = 0.1;
 
 	real_t wind_force_magnitude = 0.0;
@@ -188,16 +188,16 @@ public:
 	// only "does this area actively look for other areas" signal that exists.
 	bool wants_area_monitoring() const { return !area_monitor_callback.is_null(); }
 
-	void set_param(PhysicsServer3D::AreaParameter p_param, const Variant &p_value);
-	Variant get_param(PhysicsServer3D::AreaParameter p_param) const;
+	void set_param(PS3DE::AreaParameter p_param, const Variant &p_value);
+	Variant get_param(PS3DE::AreaParameter p_param) const;
 
 	int get_priority() const { return priority; }
 
 	// True if this area changes gravity, damping or wind for overlapping bodies.
 	bool has_force_override() const {
-		return gravity_override_mode != PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED ||
-				linear_damp_override_mode != PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED ||
-				angular_damp_override_mode != PhysicsServer3D::AREA_SPACE_OVERRIDE_DISABLED ||
+		return gravity_override_mode != PS3DE::AREA_SPACE_OVERRIDE_DISABLED ||
+				linear_damp_override_mode != PS3DE::AREA_SPACE_OVERRIDE_DISABLED ||
+				angular_damp_override_mode != PS3DE::AREA_SPACE_OVERRIDE_DISABLED ||
 				wind_force_magnitude != 0.0;
 	}
 
@@ -206,9 +206,9 @@ public:
 	Vector3 wind_at(const Vector3 &p_position) const;
 
 	const HashMap<GodotPhysXBody3D *, uint32_t> &get_overlapping_bodies() const { return overlapping_bodies; }
-	PhysicsServer3D::AreaSpaceOverrideMode get_gravity_mode() const { return gravity_override_mode; }
-	PhysicsServer3D::AreaSpaceOverrideMode get_linear_damp_mode() const { return linear_damp_override_mode; }
-	PhysicsServer3D::AreaSpaceOverrideMode get_angular_damp_mode() const { return angular_damp_override_mode; }
+	PS3DE::AreaSpaceOverrideMode get_gravity_mode() const { return gravity_override_mode; }
+	PS3DE::AreaSpaceOverrideMode get_linear_damp_mode() const { return linear_damp_override_mode; }
+	PS3DE::AreaSpaceOverrideMode get_angular_damp_mode() const { return angular_damp_override_mode; }
 	real_t get_linear_damp_value() const { return linear_damp; }
 	real_t get_angular_damp_value() const { return angular_damp; }
 

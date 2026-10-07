@@ -298,13 +298,13 @@ void PhysXParticleFluid3D::_mpm_step(double p_delta) {
 			}
 			PhysicsServer3D::get_singleton()->shape_set_data(_mpm_query_shape, mpm_domain_size * 0.5f);
 
-			PhysicsDirectSpaceState3D::ShapeParameters qp;
+			PS3DT::ShapeParameters qp;
 			qp.shape_rid = _mpm_query_shape;
 			qp.transform = get_global_transform();
 			qp.collide_with_bodies = true;
 			qp.collide_with_areas = false;
 
-			PhysicsDirectSpaceState3D::ShapeResult res[COLLIDER_BUDGET];
+			PS3DT::ShapeResult res[COLLIDER_BUDGET];
 			const int hits = ss->intersect_shape(qp, res, COLLIDER_BUDGET);
 
 			struct AutoCand {

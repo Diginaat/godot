@@ -80,7 +80,7 @@ private:
 	// Bodies this one never collides with (add_collision_exception_with()).
 	HashSet<RID> collision_exceptions;
 
-	PhysicsServer3D::BodyMode mode = PhysicsServer3D::BODY_MODE_RIGID;
+	PS3DE::BodyMode mode = PS3DE::BODY_MODE_RIGID;
 	GodotPhysXSpace3D *space = nullptr;
 	physx::PxRigidActor *px_actor = nullptr;
 
@@ -98,7 +98,7 @@ private:
 	real_t friction = 1.0;
 	real_t linear_damp = 0.0;
 	real_t angular_damp = 0.0;
-	// RigidBody3D only ever sends this (via BODY_PARAM_CENTER_OF_MASS) when
+	// RigidBody3D only ever sends this (via PS3DE::BODY_PARAM_CENTER_OF_MASS) when
 	// center_of_mass_mode is CUSTOM -- there's no separate "mode" param, so a
 	// value having been sent at all IS the "custom" signal. _build_actor()
 	// destroys and recreates px_actor on almost any shape/mode change, which
@@ -106,7 +106,7 @@ private:
 	// pose every time -- reapplied there too, not just in set_param().
 	bool has_custom_center_of_mass = false;
 	Vector3 center_of_mass;
-	// BODY_PARAM_INERTIA, in the body's local axes; a component <= 0 keeps the
+	// PS3DE::BODY_PARAM_INERTIA, in the body's local axes; a component <= 0 keeps the
 	// shape-computed value for that axis (same rule as Jolt).
 	Vector3 inertia;
 	// Applied every step until changed (RigidBody3D.constant_force/_torque),
@@ -115,7 +115,7 @@ private:
 	Vector3 constant_torque;
 	uint32_t collision_layer = 1;
 	uint32_t collision_mask = 1;
-	uint32_t axis_lock = 0; // PhysicsServer3D::BodyAxis bitmask
+	uint32_t axis_lock = 0; // PS3DE::BodyAxis bitmask
 	bool ccd = false;
 	bool ray_pickable = true; // input_ray_pickable: hit by the viewport's picking ray
 	bool can_sleep = true;
@@ -133,11 +133,11 @@ private:
 	Callable fi_callback;
 	Variant fi_userdata;
 
-	// PhysicsServer3D::BodyDampMode -- COMBINE adds the area-level damping (the
+	// PS3DE::BodyDampMode -- COMBINE adds the area-level damping (the
 	// project default, physics/3d/default_*_damp, unless an Area3D overrides
 	// it) to this body's own; REPLACE uses this body's own alone.
-	PhysicsServer3D::BodyDampMode linear_damp_mode = PhysicsServer3D::BODY_DAMP_MODE_COMBINE;
-	PhysicsServer3D::BodyDampMode angular_damp_mode = PhysicsServer3D::BODY_DAMP_MODE_COMBINE;
+	PS3DE::BodyDampMode linear_damp_mode = PS3DE::BODY_DAMP_MODE_COMBINE;
+	PS3DE::BodyDampMode angular_damp_mode = PS3DE::BODY_DAMP_MODE_COMBINE;
 	// The area-level damping, set by the space.
 	real_t area_linear_damp = 0.0;
 	real_t area_angular_damp = 0.0;
@@ -198,8 +198,8 @@ public:
 
 	void set_space(GodotPhysXSpace3D *p_space);
 
-	void set_mode(PhysicsServer3D::BodyMode p_mode);
-	PhysicsServer3D::BodyMode get_mode() const { return mode; }
+	void set_mode(PS3DE::BodyMode p_mode);
+	PS3DE::BodyMode get_mode() const { return mode; }
 
 	void add_shape(GodotPhysXShape3D *p_shape, const Transform3D &p_xform, bool p_disabled);
 	void set_shape(int p_idx, GodotPhysXShape3D *p_shape);
@@ -211,11 +211,11 @@ public:
 	const ShapeRef *get_shape_ref(int p_idx) const;
 	void shape_changed(GodotPhysXShape3D *p_shape);
 
-	void set_param(PhysicsServer3D::BodyParameter p_param, const Variant &p_value);
-	Variant get_param(PhysicsServer3D::BodyParameter p_param) const;
+	void set_param(PS3DE::BodyParameter p_param, const Variant &p_value);
+	Variant get_param(PS3DE::BodyParameter p_param) const;
 
-	void set_state(PhysicsServer3D::BodyState p_state, const Variant &p_value);
-	Variant get_state(PhysicsServer3D::BodyState p_state) const;
+	void set_state(PS3DE::BodyState p_state, const Variant &p_value);
+	Variant get_state(PS3DE::BodyState p_state) const;
 
 	void set_collision_layer(uint32_t p_layer);
 	uint32_t get_collision_layer() const { return collision_layer; }
@@ -228,8 +228,8 @@ public:
 	void set_ray_pickable(bool p_enable) { ray_pickable = p_enable; }
 	bool is_ray_pickable() const { return ray_pickable; }
 
-	void set_axis_lock(PhysicsServer3D::BodyAxis p_axis, bool p_lock);
-	bool is_axis_locked(PhysicsServer3D::BodyAxis p_axis) const { return axis_lock & p_axis; }
+	void set_axis_lock(PS3DE::BodyAxis p_axis, bool p_lock);
+	bool is_axis_locked(PS3DE::BodyAxis p_axis) const { return axis_lock & p_axis; }
 
 	void set_max_contacts_reported(int p_amount);
 	int get_max_contacts_reported() const { return max_contacts_reported; }
@@ -250,8 +250,8 @@ public:
 	// Called by the space before simulate() while omit_force_integration is set.
 	void call_force_integration();
 
-	PhysicsServer3D::BodyDampMode get_linear_damp_mode() const { return linear_damp_mode; }
-	PhysicsServer3D::BodyDampMode get_angular_damp_mode() const { return angular_damp_mode; }
+	PS3DE::BodyDampMode get_linear_damp_mode() const { return linear_damp_mode; }
+	PS3DE::BodyDampMode get_angular_damp_mode() const { return angular_damp_mode; }
 
 	// Called by the space after fetchResults(): pull the simulated pose/velocity
 	// back onto this wrapper.

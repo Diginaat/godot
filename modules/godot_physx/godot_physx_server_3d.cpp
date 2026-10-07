@@ -86,7 +86,7 @@ GodotPhysXServer3D::~GodotPhysXServer3D() {
 
 /* SHAPE API */
 
-RID GodotPhysXServer3D::_shape_create(PhysicsServer3D::ShapeType p_type) {
+RID GodotPhysXServer3D::_shape_create(PS3DE::ShapeType p_type) {
 	GodotPhysXShape3D *shape = memnew(GodotPhysXShape3D);
 	shape->set_type(p_type);
 	RID rid = shape_owner.make_rid(shape);
@@ -95,43 +95,43 @@ RID GodotPhysXServer3D::_shape_create(PhysicsServer3D::ShapeType p_type) {
 }
 
 RID GodotPhysXServer3D::world_boundary_shape_create() {
-	return _shape_create(SHAPE_WORLD_BOUNDARY);
+	return _shape_create(PS3DE::SHAPE_WORLD_BOUNDARY);
 }
 
 RID GodotPhysXServer3D::sphere_shape_create() {
-	return _shape_create(SHAPE_SPHERE);
+	return _shape_create(PS3DE::SHAPE_SPHERE);
 }
 
 RID GodotPhysXServer3D::box_shape_create() {
-	return _shape_create(SHAPE_BOX);
+	return _shape_create(PS3DE::SHAPE_BOX);
 }
 
 RID GodotPhysXServer3D::capsule_shape_create() {
-	return _shape_create(SHAPE_CAPSULE);
+	return _shape_create(PS3DE::SHAPE_CAPSULE);
 }
 
 RID GodotPhysXServer3D::convex_polygon_shape_create() {
-	return _shape_create(SHAPE_CONVEX_POLYGON);
+	return _shape_create(PS3DE::SHAPE_CONVEX_POLYGON);
 }
 
 RID GodotPhysXServer3D::concave_polygon_shape_create() {
-	return _shape_create(SHAPE_CONCAVE_POLYGON);
+	return _shape_create(PS3DE::SHAPE_CONCAVE_POLYGON);
 }
 
 RID GodotPhysXServer3D::cylinder_shape_create() {
-	return _shape_create(SHAPE_CYLINDER);
+	return _shape_create(PS3DE::SHAPE_CYLINDER);
 }
 
 RID GodotPhysXServer3D::separation_ray_shape_create() {
-	return _shape_create(SHAPE_SEPARATION_RAY);
+	return _shape_create(PS3DE::SHAPE_SEPARATION_RAY);
 }
 
 RID GodotPhysXServer3D::heightmap_shape_create() {
-	return _shape_create(SHAPE_HEIGHTMAP);
+	return _shape_create(PS3DE::SHAPE_HEIGHTMAP);
 }
 
 RID GodotPhysXServer3D::custom_shape_create() {
-	return _shape_create(SHAPE_CUSTOM);
+	return _shape_create(PS3DE::SHAPE_CUSTOM);
 }
 
 void GodotPhysXServer3D::shape_set_data(RID p_shape, const Variant &p_data) {
@@ -161,9 +161,9 @@ real_t GodotPhysXServer3D::shape_get_margin(RID p_shape) const {
 	return shape->get_margin();
 }
 
-PhysicsServer3D::ShapeType GodotPhysXServer3D::shape_get_type(RID p_shape) const {
+PS3DE::ShapeType GodotPhysXServer3D::shape_get_type(RID p_shape) const {
 	GodotPhysXShape3D *shape = shape_owner.get_or_null(p_shape);
-	ERR_FAIL_NULL_V(shape, SHAPE_CUSTOM);
+	ERR_FAIL_NULL_V(shape, PS3DE::SHAPE_CUSTOM);
 	return shape->get_type();
 }
 
@@ -199,13 +199,13 @@ bool GodotPhysXServer3D::space_is_active(RID p_space) const {
 	return active_spaces.has(space);
 }
 
-void GodotPhysXServer3D::space_set_param(RID p_space, SpaceParameter p_param, real_t p_value) {
+void GodotPhysXServer3D::space_set_param(RID p_space, PS3DE::SpaceParameter p_param, real_t p_value) {
 	GodotPhysXSpace3D *space = space_owner.get_or_null(p_space);
 	ERR_FAIL_NULL(space);
 	space->set_param(p_param, p_value);
 }
 
-real_t GodotPhysXServer3D::space_get_param(RID p_space, SpaceParameter p_param) const {
+real_t GodotPhysXServer3D::space_get_param(RID p_space, PS3DE::SpaceParameter p_param) const {
 	GodotPhysXSpace3D *space = space_owner.get_or_null(p_space);
 	ERR_FAIL_NULL_V(space, 0.0);
 	return space->get_param(p_param);
@@ -369,18 +369,18 @@ void GodotPhysXServer3D::area_set_area_monitor_callback(RID p_area, const Callab
 	area->set_area_monitor_callback(p_callback);
 }
 
-void GodotPhysXServer3D::area_set_param(RID p_area, AreaParameter p_param, const Variant &p_value) {
+void GodotPhysXServer3D::area_set_param(RID p_area, PS3DE::AreaParameter p_param, const Variant &p_value) {
 	// The scene tree writes default gravity to the space RID, which doubles as
 	// the space's default area.
 	GodotPhysXSpace3D *space = space_owner.get_or_null(p_area);
 	if (space) {
-		if (p_param == AREA_PARAM_GRAVITY) {
+		if (p_param == PS3DE::AREA_PARAM_GRAVITY) {
 			space->set_gravity_magnitude(p_value);
-		} else if (p_param == AREA_PARAM_GRAVITY_VECTOR) {
+		} else if (p_param == PS3DE::AREA_PARAM_GRAVITY_VECTOR) {
 			space->set_gravity_direction(p_value);
-		} else if (p_param == AREA_PARAM_LINEAR_DAMP) {
+		} else if (p_param == PS3DE::AREA_PARAM_LINEAR_DAMP) {
 			space->set_default_damping(p_value, space->get_default_angular_damp());
-		} else if (p_param == AREA_PARAM_ANGULAR_DAMP) {
+		} else if (p_param == PS3DE::AREA_PARAM_ANGULAR_DAMP) {
 			space->set_default_damping(space->get_default_linear_damp(), p_value);
 		}
 		return;
@@ -390,16 +390,16 @@ void GodotPhysXServer3D::area_set_param(RID p_area, AreaParameter p_param, const
 	area->set_param(p_param, p_value);
 }
 
-Variant GodotPhysXServer3D::area_get_param(RID p_area, AreaParameter p_param) const {
+Variant GodotPhysXServer3D::area_get_param(RID p_area, PS3DE::AreaParameter p_param) const {
 	GodotPhysXSpace3D *space = space_owner.get_or_null(p_area);
 	if (space) {
-		if (p_param == AREA_PARAM_GRAVITY) {
+		if (p_param == PS3DE::AREA_PARAM_GRAVITY) {
 			return space->get_gravity().length();
-		} else if (p_param == AREA_PARAM_GRAVITY_VECTOR) {
+		} else if (p_param == PS3DE::AREA_PARAM_GRAVITY_VECTOR) {
 			return space->get_gravity().normalized();
-		} else if (p_param == AREA_PARAM_LINEAR_DAMP) {
+		} else if (p_param == PS3DE::AREA_PARAM_LINEAR_DAMP) {
 			return space->get_default_linear_damp();
-		} else if (p_param == AREA_PARAM_ANGULAR_DAMP) {
+		} else if (p_param == PS3DE::AREA_PARAM_ANGULAR_DAMP) {
 			return space->get_default_angular_damp();
 		}
 		return Variant();
@@ -431,15 +431,15 @@ RID GodotPhysXServer3D::body_get_space(RID p_body) const {
 	return space ? space->get_self() : RID();
 }
 
-void GodotPhysXServer3D::body_set_mode(RID p_body, BodyMode p_mode) {
+void GodotPhysXServer3D::body_set_mode(RID p_body, PS3DE::BodyMode p_mode) {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL(body);
 	body->set_mode(p_mode);
 }
 
-PhysicsServer3D::BodyMode GodotPhysXServer3D::body_get_mode(RID p_body) const {
+PS3DE::BodyMode GodotPhysXServer3D::body_get_mode(RID p_body) const {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
-	ERR_FAIL_NULL_V(body, BODY_MODE_STATIC);
+	ERR_FAIL_NULL_V(body, PS3DE::BODY_MODE_STATIC);
 	return body->get_mode();
 }
 
@@ -566,25 +566,25 @@ void GodotPhysXServer3D::body_set_ray_pickable(RID p_body, bool p_enable) {
 	body->set_ray_pickable(p_enable);
 }
 
-void GodotPhysXServer3D::body_set_param(RID p_body, BodyParameter p_param, const Variant &p_value) {
+void GodotPhysXServer3D::body_set_param(RID p_body, PS3DE::BodyParameter p_param, const Variant &p_value) {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL(body);
 	body->set_param(p_param, p_value);
 }
 
-Variant GodotPhysXServer3D::body_get_param(RID p_body, BodyParameter p_param) const {
+Variant GodotPhysXServer3D::body_get_param(RID p_body, PS3DE::BodyParameter p_param) const {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(body, Variant());
 	return body->get_param(p_param);
 }
 
-void GodotPhysXServer3D::body_set_state(RID p_body, BodyState p_state, const Variant &p_variant) {
+void GodotPhysXServer3D::body_set_state(RID p_body, PS3DE::BodyState p_state, const Variant &p_variant) {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL(body);
 	body->set_state(p_state, p_variant);
 }
 
-Variant GodotPhysXServer3D::body_get_state(RID p_body, BodyState p_state) const {
+Variant GodotPhysXServer3D::body_get_state(RID p_body, PS3DE::BodyState p_state) const {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(body, Variant());
 	return body->get_state(p_state);
@@ -680,13 +680,13 @@ void GodotPhysXServer3D::body_reset_mass_properties(RID p_body) {
 	body->reset_mass_properties();
 }
 
-void GodotPhysXServer3D::body_set_axis_lock(RID p_body, BodyAxis p_axis, bool p_lock) {
+void GodotPhysXServer3D::body_set_axis_lock(RID p_body, PS3DE::BodyAxis p_axis, bool p_lock) {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL(body);
 	body->set_axis_lock(p_axis, p_lock);
 }
 
-bool GodotPhysXServer3D::body_is_axis_locked(RID p_body, BodyAxis p_axis) const {
+bool GodotPhysXServer3D::body_is_axis_locked(RID p_body, PS3DE::BodyAxis p_axis) const {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(body, false);
 	return body->is_axis_locked(p_axis);
@@ -734,7 +734,7 @@ PhysicsDirectBodyState3D *GodotPhysXServer3D::body_get_direct_state(RID p_body) 
 	return body->get_direct_state();
 }
 
-bool GodotPhysXServer3D::body_test_motion(RID p_body, const MotionParameters &p_parameters, MotionResult *r_result) {
+bool GodotPhysXServer3D::body_test_motion(RID p_body, const PS3DT::MotionParameters &p_parameters, PS3DT::MotionResult *r_result) {
 	GodotPhysXBody3D *body = body_owner.get_or_null(p_body);
 	ERR_FAIL_NULL_V(body, false);
 	GodotPhysXSpace3D *space = body->get_space();
@@ -763,8 +763,8 @@ void GodotPhysXServer3D::joint_clear(RID p_joint) {
 	joint->clear();
 }
 
-PhysicsServer3D::JointType GodotPhysXServer3D::joint_get_type(RID p_joint) const {
-	GET_JOINT(joint, p_joint, JOINT_TYPE_MAX);
+PS3DE::JointType GodotPhysXServer3D::joint_get_type(RID p_joint) const {
+	GET_JOINT(joint, p_joint, PS3DE::JOINT_TYPE_MAX);
 	return joint->get_type();
 }
 
@@ -793,16 +793,16 @@ void GodotPhysXServer3D::joint_make_pin(RID p_joint, RID p_body_A, const Vector3
 	joint->make_pin(body_owner.get_or_null(p_body_A), p_local_A, body_owner.get_or_null(p_body_B), p_local_B);
 }
 
-void GodotPhysXServer3D::pin_joint_set_param(RID p_joint, PinJointParam p_param, real_t p_value) {
+void GodotPhysXServer3D::pin_joint_set_param(RID p_joint, PS3DE::PinJointParam p_param, real_t p_value) {
 	// Bullet-era bias / damping / impulse clamp -- unsupported here, as in
 	// Jolt; a warning only when set away from the default (joint nodes and
 	// PhysicalBone3D send the defaults every time).
-	const real_t def = p_param == PIN_JOINT_DAMPING ? 1.0 : (p_param == PIN_JOINT_IMPULSE_CLAMP ? 0.0 : 0.3);
+	const real_t def = p_param == PS3DE::PIN_JOINT_DAMPING ? 1.0 : (p_param == PS3DE::PIN_JOINT_IMPULSE_CLAMP ? 0.0 : 0.3);
 	if (!Math::is_equal_approx(p_value, def)) {
 		WARN_PRINT_ONCE("PhysX: pin joint parameters are not supported and will be ignored.");
 	}
 }
-real_t GodotPhysXServer3D::pin_joint_get_param(RID p_joint, PinJointParam p_param) const {
+real_t GodotPhysXServer3D::pin_joint_get_param(RID p_joint, PS3DE::PinJointParam p_param) const {
 	return 0.0;
 }
 
@@ -844,19 +844,19 @@ void GodotPhysXServer3D::joint_make_hinge_simple(RID p_joint, RID p_body_A, cons
 	joint_make_hinge(p_joint, p_body_A, frame_from(p_pivot_A, p_axis_A), p_body_B, frame_from(p_pivot_B, p_axis_B));
 }
 
-void GodotPhysXServer3D::hinge_joint_set_param(RID p_joint, HingeJointParam p_param, real_t p_value) {
+void GodotPhysXServer3D::hinge_joint_set_param(RID p_joint, PS3DE::HingeJointParam p_param, real_t p_value) {
 	GET_JOINT_VOID(joint, p_joint);
 	joint->set_hinge_param(p_param, p_value);
 }
-real_t GodotPhysXServer3D::hinge_joint_get_param(RID p_joint, HingeJointParam p_param) const {
+real_t GodotPhysXServer3D::hinge_joint_get_param(RID p_joint, PS3DE::HingeJointParam p_param) const {
 	GET_JOINT(joint, p_joint, 0.0);
 	return joint->get_hinge_param(p_param);
 }
-void GodotPhysXServer3D::hinge_joint_set_flag(RID p_joint, HingeJointFlag p_flag, bool p_enabled) {
+void GodotPhysXServer3D::hinge_joint_set_flag(RID p_joint, PS3DE::HingeJointFlag p_flag, bool p_enabled) {
 	GET_JOINT_VOID(joint, p_joint);
 	joint->set_hinge_flag(p_flag, p_enabled);
 }
-bool GodotPhysXServer3D::hinge_joint_get_flag(RID p_joint, HingeJointFlag p_flag) const {
+bool GodotPhysXServer3D::hinge_joint_get_flag(RID p_joint, PS3DE::HingeJointFlag p_flag) const {
 	GET_JOINT(joint, p_joint, false);
 	return joint->get_hinge_flag(p_flag);
 }
@@ -865,11 +865,11 @@ void GodotPhysXServer3D::joint_make_slider(RID p_joint, RID p_body_A, const Tran
 	GET_JOINT_VOID(joint, p_joint);
 	joint->make_slider(body_owner.get_or_null(p_body_A), p_local_frame_A, body_owner.get_or_null(p_body_B), p_local_frame_B);
 }
-void GodotPhysXServer3D::slider_joint_set_param(RID p_joint, SliderJointParam p_param, real_t p_value) {
+void GodotPhysXServer3D::slider_joint_set_param(RID p_joint, PS3DE::SliderJointParam p_param, real_t p_value) {
 	GET_JOINT_VOID(joint, p_joint);
 	joint->set_slider_param(p_param, p_value);
 }
-real_t GodotPhysXServer3D::slider_joint_get_param(RID p_joint, SliderJointParam p_param) const {
+real_t GodotPhysXServer3D::slider_joint_get_param(RID p_joint, PS3DE::SliderJointParam p_param) const {
 	GET_JOINT(joint, p_joint, 0.0);
 	return joint->get_slider_param(p_param);
 }
@@ -878,11 +878,11 @@ void GodotPhysXServer3D::joint_make_cone_twist(RID p_joint, RID p_body_A, const 
 	GET_JOINT_VOID(joint, p_joint);
 	joint->make_cone_twist(body_owner.get_or_null(p_body_A), p_local_frame_A, body_owner.get_or_null(p_body_B), p_local_frame_B);
 }
-void GodotPhysXServer3D::cone_twist_joint_set_param(RID p_joint, ConeTwistJointParam p_param, real_t p_value) {
+void GodotPhysXServer3D::cone_twist_joint_set_param(RID p_joint, PS3DE::ConeTwistJointParam p_param, real_t p_value) {
 	GET_JOINT_VOID(joint, p_joint);
 	joint->set_cone_twist_param(p_param, p_value);
 }
-real_t GodotPhysXServer3D::cone_twist_joint_get_param(RID p_joint, ConeTwistJointParam p_param) const {
+real_t GodotPhysXServer3D::cone_twist_joint_get_param(RID p_joint, PS3DE::ConeTwistJointParam p_param) const {
 	GET_JOINT(joint, p_joint, 0.0);
 	return joint->get_cone_twist_param(p_param);
 }
@@ -891,19 +891,19 @@ void GodotPhysXServer3D::joint_make_generic_6dof(RID p_joint, RID p_body_A, cons
 	GET_JOINT_VOID(joint, p_joint);
 	joint->make_6dof(body_owner.get_or_null(p_body_A), p_local_frame_A, body_owner.get_or_null(p_body_B), p_local_frame_B);
 }
-void GodotPhysXServer3D::generic_6dof_joint_set_param(RID p_joint, Vector3::Axis p_axis, G6DOFJointAxisParam p_param, real_t p_value) {
+void GodotPhysXServer3D::generic_6dof_joint_set_param(RID p_joint, Vector3::Axis p_axis, PS3DE::G6DOFJointAxisParam p_param, real_t p_value) {
 	GET_JOINT_VOID(joint, p_joint);
 	joint->set_6dof_param(p_axis, p_param, p_value);
 }
-real_t GodotPhysXServer3D::generic_6dof_joint_get_param(RID p_joint, Vector3::Axis p_axis, G6DOFJointAxisParam p_param) const {
+real_t GodotPhysXServer3D::generic_6dof_joint_get_param(RID p_joint, Vector3::Axis p_axis, PS3DE::G6DOFJointAxisParam p_param) const {
 	GET_JOINT(joint, p_joint, 0.0);
 	return joint->get_6dof_param(p_axis, p_param);
 }
-void GodotPhysXServer3D::generic_6dof_joint_set_flag(RID p_joint, Vector3::Axis p_axis, G6DOFJointAxisFlag p_flag, bool p_enable) {
+void GodotPhysXServer3D::generic_6dof_joint_set_flag(RID p_joint, Vector3::Axis p_axis, PS3DE::G6DOFJointAxisFlag p_flag, bool p_enable) {
 	GET_JOINT_VOID(joint, p_joint);
 	joint->set_6dof_flag(p_axis, p_flag, p_enable);
 }
-bool GodotPhysXServer3D::generic_6dof_joint_get_flag(RID p_joint, Vector3::Axis p_axis, G6DOFJointAxisFlag p_flag) const {
+bool GodotPhysXServer3D::generic_6dof_joint_get_flag(RID p_joint, Vector3::Axis p_axis, PS3DE::G6DOFJointAxisFlag p_flag) const {
 	GET_JOINT(joint, p_joint, false);
 	return joint->get_6dof_flag(p_axis, p_flag);
 }
@@ -1247,27 +1247,27 @@ void GodotPhysXServer3D::soft_body_get_collision_exceptions(RID p_body, List<RID
 	}
 }
 
-void GodotPhysXServer3D::soft_body_set_state(RID p_body, BodyState p_state, const Variant &p_variant) {
+void GodotPhysXServer3D::soft_body_set_state(RID p_body, PS3DE::BodyState p_state, const Variant &p_variant) {
 	GET_SOFT_BODY_V();
-	if (p_state == BODY_STATE_TRANSFORM) {
+	if (p_state == PS3DE::BODY_STATE_TRANSFORM) {
 		soft_body->set_transform(p_variant);
 	}
 	// Linear/angular velocity and sleep have no meaning for a vertex cloud here.
 }
 
-Variant GodotPhysXServer3D::soft_body_get_state(RID p_body, BodyState p_state) const {
+Variant GodotPhysXServer3D::soft_body_get_state(RID p_body, PS3DE::BodyState p_state) const {
 	GET_SOFT_BODY(Variant());
 	switch (p_state) {
-		case BODY_STATE_TRANSFORM: {
+		case PS3DE::BODY_STATE_TRANSFORM: {
 			// Origin at the current bounds center; basis stays identity (the sim
 			// runs in world space, like every other backend's soft body).
 			return Transform3D(Basis(), soft_body->get_bounds().get_center());
 		}
-		case BODY_STATE_LINEAR_VELOCITY:
-		case BODY_STATE_ANGULAR_VELOCITY:
+		case PS3DE::BODY_STATE_LINEAR_VELOCITY:
+		case PS3DE::BODY_STATE_ANGULAR_VELOCITY:
 			return Vector3();
-		case BODY_STATE_SLEEPING:
-		case BODY_STATE_CAN_SLEEP:
+		case PS3DE::BODY_STATE_SLEEPING:
+		case PS3DE::BODY_STATE_CAN_SLEEP:
 			return false;
 	}
 	return Variant();
@@ -1546,8 +1546,8 @@ void GodotPhysXServer3D::finish() {
 	PhysicsServer3DDummy::finish();
 }
 
-int GodotPhysXServer3D::get_process_info(ProcessInfo p_info) {
-	if (p_info == INFO_ACTIVE_OBJECTS) {
+int GodotPhysXServer3D::get_process_info(PS3DE::ProcessInfo p_info) {
+	if (p_info == PS3DE::INFO_ACTIVE_OBJECTS) {
 		return active_objects;
 	}
 	return 0;

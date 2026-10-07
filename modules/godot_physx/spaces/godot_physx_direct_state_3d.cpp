@@ -135,7 +135,7 @@ Vector3 GodotPhysXDirectBodyState3D::get_angular_velocity() const {
 }
 
 void GodotPhysXDirectBodyState3D::set_transform(const Transform3D &p_transform) {
-	body->set_state(PhysicsServer3D::BODY_STATE_TRANSFORM, p_transform);
+	body->set_state(PS3DE::BODY_STATE_TRANSFORM, p_transform);
 }
 
 Transform3D GodotPhysXDirectBodyState3D::get_transform() const {
@@ -452,7 +452,7 @@ GodotPhysXShape3D *query_shape(RID p_shape_rid) {
 
 } //namespace
 
-bool GodotPhysXDirectSpaceState3D::intersect_ray(const RayParameters &p_parameters, RayResult &r_result) {
+bool GodotPhysXDirectSpaceState3D::intersect_ray(const PS3DT::RayParameters &p_parameters, PS3DT::RayResult &r_result) {
 	PxScene *scene = space ? space->get_px_scene() : nullptr;
 	ERR_FAIL_NULL_V(scene, false);
 
@@ -499,7 +499,7 @@ bool GodotPhysXDirectSpaceState3D::intersect_ray(const RayParameters &p_paramete
 	return true;
 }
 
-int GodotPhysXDirectSpaceState3D::intersect_point(const PointParameters &p_parameters, ShapeResult *r_results, int p_result_max) {
+int GodotPhysXDirectSpaceState3D::intersect_point(const PS3DT::PointParameters &p_parameters, PS3DT::ShapeResult *r_results, int p_result_max) {
 	PxScene *scene = space ? space->get_px_scene() : nullptr;
 	ERR_FAIL_NULL_V(scene, 0);
 	if (p_result_max <= 0) {
@@ -533,7 +533,7 @@ int GodotPhysXDirectSpaceState3D::intersect_point(const PointParameters &p_param
 	return count;
 }
 
-int GodotPhysXDirectSpaceState3D::intersect_shape(const ShapeParameters &p_parameters, ShapeResult *r_results, int p_result_max) {
+int GodotPhysXDirectSpaceState3D::intersect_shape(const PS3DT::ShapeParameters &p_parameters, PS3DT::ShapeResult *r_results, int p_result_max) {
 	PxScene *scene = space ? space->get_px_scene() : nullptr;
 	ERR_FAIL_NULL_V(scene, 0);
 	GodotPhysXShape3D *shape = query_shape(p_parameters.shape_rid);
@@ -569,7 +569,7 @@ int GodotPhysXDirectSpaceState3D::intersect_shape(const ShapeParameters &p_param
 	return count;
 }
 
-bool GodotPhysXDirectSpaceState3D::cast_motion(const ShapeParameters &p_parameters, real_t &p_closest_safe, real_t &p_closest_unsafe, ShapeRestInfo *r_info) {
+bool GodotPhysXDirectSpaceState3D::cast_motion(const PS3DT::ShapeParameters &p_parameters, real_t &p_closest_safe, real_t &p_closest_unsafe, PS3DT::ShapeRestInfo *r_info) {
 	p_closest_safe = 1.0;
 	p_closest_unsafe = 1.0;
 
@@ -612,7 +612,7 @@ bool GodotPhysXDirectSpaceState3D::cast_motion(const ShapeParameters &p_paramete
 	return true;
 }
 
-bool GodotPhysXDirectSpaceState3D::collide_shape(const ShapeParameters &p_parameters, Vector3 *r_results, int p_result_max, int &r_result_count) {
+bool GodotPhysXDirectSpaceState3D::collide_shape(const PS3DT::ShapeParameters &p_parameters, Vector3 *r_results, int p_result_max, int &r_result_count) {
 	r_result_count = 0;
 	PxScene *scene = space ? space->get_px_scene() : nullptr;
 	ERR_FAIL_NULL_V(scene, false);
@@ -649,7 +649,7 @@ bool GodotPhysXDirectSpaceState3D::collide_shape(const ShapeParameters &p_parame
 	return r_result_count > 0;
 }
 
-bool GodotPhysXDirectSpaceState3D::rest_info(const ShapeParameters &p_parameters, ShapeRestInfo *r_info) {
+bool GodotPhysXDirectSpaceState3D::rest_info(const PS3DT::ShapeParameters &p_parameters, PS3DT::ShapeRestInfo *r_info) {
 	PxScene *scene = space ? space->get_px_scene() : nullptr;
 	ERR_FAIL_NULL_V(scene, false);
 	GodotPhysXShape3D *shape = query_shape(p_parameters.shape_rid);

@@ -1006,18 +1006,18 @@ void PhysXWaterSurface3D::_sample_seabed() {
 				continue;
 			}
 			const Vector2 p = grid_min + Vector2(x + 0.5f, z + 0.5f) * cell;
-			PhysicsDirectSpaceState3D::RayParameters ray;
+			PS3DT::RayParameters ray;
 			ray.from = Vector3(p.x, surface_y + PROBE_ABOVE, p.y);
 			ray.to = Vector3(p.x, surface_y - PROBE_BELOW, p.y);
 			ray.collision_mask = seabed_collision_mask;
 			ray.collide_with_areas = false;
 			float d = depth; // nothing below: open water of the constant depth
 			for (int skip = 0; skip < MAX_SKIPS; skip++) {
-				PhysicsDirectSpaceState3D::RayResult result;
+				PS3DT::RayResult result;
 				if (space == nullptr || !space->intersect_ray(ray, result)) {
 					break;
 				}
-				if (ps->body_get_mode(result.rid) == PhysicsServer3D::BODY_MODE_STATIC) {
+				if (ps->body_get_mode(result.rid) == PS3DE::BODY_MODE_STATIC) {
 					d = surface_y - result.position.y;
 					hits++;
 					break;

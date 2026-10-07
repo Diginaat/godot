@@ -430,7 +430,7 @@ void PhysXCloth3D::_collide() {
 	}
 	ps->shape_set_data(collision_sphere, radius);
 
-	PhysicsDirectSpaceState3D::ShapeParameters params;
+	PS3DT::ShapeParameters params;
 	params.shape_rid = collision_sphere;
 	params.collision_mask = collision_mask;
 	params.collide_with_bodies = true;
@@ -444,7 +444,7 @@ void PhysXCloth3D::_collide() {
 			continue;
 		}
 		params.transform = Transform3D(Basis(), pos[i]);
-		PhysicsDirectSpaceState3D::ShapeRestInfo info;
+		PS3DT::ShapeRestInfo info;
 		if (!ss->rest_info(params, &info)) {
 			continue;
 		}

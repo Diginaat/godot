@@ -289,15 +289,15 @@ void GodotPhysXSpace3D::set_gravity_direction(const Vector3 &p_direction) {
 	set_gravity_vector(gravity_direction * gravity_magnitude);
 }
 
-void GodotPhysXSpace3D::set_param(PhysicsServer3D::SpaceParameter p_param, real_t p_value) {
+void GodotPhysXSpace3D::set_param(PS3DE::SpaceParameter p_param, real_t p_value) {
 	switch (p_param) {
-		case PhysicsServer3D::SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD:
+		case PS3DE::SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD:
 			sleep_threshold_linear = p_value;
 			break;
-		case PhysicsServer3D::SPACE_PARAM_BODY_ANGULAR_VELOCITY_SLEEP_THRESHOLD:
+		case PS3DE::SPACE_PARAM_BODY_ANGULAR_VELOCITY_SLEEP_THRESHOLD:
 			sleep_threshold_angular = p_value;
 			break;
-		case PhysicsServer3D::SPACE_PARAM_BODY_TIME_TO_SLEEP:
+		case PS3DE::SPACE_PARAM_BODY_TIME_TO_SLEEP:
 			time_before_sleep = p_value;
 			break;
 		default:
@@ -307,13 +307,13 @@ void GodotPhysXSpace3D::set_param(PhysicsServer3D::SpaceParameter p_param, real_
 	}
 }
 
-real_t GodotPhysXSpace3D::get_param(PhysicsServer3D::SpaceParameter p_param) const {
+real_t GodotPhysXSpace3D::get_param(PS3DE::SpaceParameter p_param) const {
 	switch (p_param) {
-		case PhysicsServer3D::SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD:
+		case PS3DE::SPACE_PARAM_BODY_LINEAR_VELOCITY_SLEEP_THRESHOLD:
 			return sleep_threshold_linear;
-		case PhysicsServer3D::SPACE_PARAM_BODY_ANGULAR_VELOCITY_SLEEP_THRESHOLD:
+		case PS3DE::SPACE_PARAM_BODY_ANGULAR_VELOCITY_SLEEP_THRESHOLD:
 			return sleep_threshold_angular;
-		case PhysicsServer3D::SPACE_PARAM_BODY_TIME_TO_SLEEP:
+		case PS3DE::SPACE_PARAM_BODY_TIME_TO_SLEEP:
 			return time_before_sleep;
 		default:
 			return 0.0;
@@ -457,7 +457,7 @@ void GodotPhysXSpace3D::_apply_area_overrides() {
 		}
 		for (const KeyValue<GodotPhysXBody3D *, uint32_t> &E : area->get_overlapping_bodies()) {
 			GodotPhysXBody3D *body = E.key;
-			if (body->get_mode() != PhysicsServer3D::BODY_MODE_RIGID && body->get_mode() != PhysicsServer3D::BODY_MODE_RIGID_LINEAR) {
+			if (body->get_mode() != PS3DE::BODY_MODE_RIGID && body->get_mode() != PS3DE::BODY_MODE_RIGID_LINEAR) {
 				continue;
 			}
 			if (body->is_omitting_force_integration()) {
@@ -484,36 +484,36 @@ void GodotPhysXSpace3D::_apply_area_overrides() {
 
 		for (GodotPhysXArea3D *area : list) {
 			switch (area->get_gravity_mode()) {
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE:
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
+				case PS3DE::AREA_SPACE_OVERRIDE_COMBINE:
+				case PS3DE::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
 					grav += area->gravity_at(pos);
 					break;
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE:
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
+				case PS3DE::AREA_SPACE_OVERRIDE_REPLACE:
+				case PS3DE::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
 					grav = area->gravity_at(pos);
 					break;
 				default:
 					break;
 			}
 			switch (area->get_linear_damp_mode()) {
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE:
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
+				case PS3DE::AREA_SPACE_OVERRIDE_COMBINE:
+				case PS3DE::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
 					lin_damp += area->get_linear_damp_value();
 					break;
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE:
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
+				case PS3DE::AREA_SPACE_OVERRIDE_REPLACE:
+				case PS3DE::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
 					lin_damp = area->get_linear_damp_value();
 					break;
 				default:
 					break;
 			}
 			switch (area->get_angular_damp_mode()) {
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE:
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
+				case PS3DE::AREA_SPACE_OVERRIDE_COMBINE:
+				case PS3DE::AREA_SPACE_OVERRIDE_COMBINE_REPLACE:
 					ang_damp += area->get_angular_damp_value();
 					break;
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE:
-				case PhysicsServer3D::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
+				case PS3DE::AREA_SPACE_OVERRIDE_REPLACE:
+				case PS3DE::AREA_SPACE_OVERRIDE_REPLACE_COMBINE:
 					ang_damp = area->get_angular_damp_value();
 					break;
 				default:
@@ -703,12 +703,12 @@ bool skip_one_sided_overlap(const PxRigidActor *p_actor, const PxShape *p_shape,
 
 } //namespace
 
-bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const PhysicsServer3D::MotionParameters &p_params, PhysicsServer3D::MotionResult *r_result) {
+bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const PS3DT::MotionParameters &p_params, PS3DT::MotionResult *r_result) {
 	ERR_FAIL_NULL_V(px_scene, false);
 	ERR_FAIL_NULL_V(p_body, false);
 
 	if (r_result) {
-		*r_result = PhysicsServer3D::MotionResult();
+		*r_result = PS3DT::MotionResult();
 		r_result->travel = p_params.motion;
 		r_result->collision_safe_fraction = 1.0;
 		r_result->collision_unsafe_fraction = 1.0;
@@ -932,7 +932,7 @@ bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const Physics
 
 		if (has_hit) {
 			GodotPhysXBody3D *other = static_cast<GodotPhysXBody3D *>(best_hit.actor->userData);
-			PhysicsServer3D::MotionCollision &c = r_result->collisions[0];
+			PS3DT::MotionCollision &c = r_result->collisions[0];
 			c.position = to_godot(best_hit.position);
 			c.normal = to_godot(best_hit.normal);
 			c.collider = other ? other->get_self() : RID();
@@ -945,7 +945,7 @@ bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const Physics
 			r_result->collision_depth = margin;
 		} else if (recovery_hit) {
 			GodotPhysXBody3D *other = static_cast<GodotPhysXBody3D *>(rec_actor->userData);
-			PhysicsServer3D::MotionCollision &c = r_result->collisions[0];
+			PS3DT::MotionCollision &c = r_result->collisions[0];
 			c.position = to_godot(rec_point);
 			c.normal = to_godot(rec_normal);
 			c.collider = other ? other->get_self() : RID();
@@ -1028,7 +1028,7 @@ void GodotPhysXSpace3D::_apply_separation_rays(real_t p_step) {
 
 			// Friction: cancel the contact's sliding velocity (as it will be
 			// after the push), at most mu * jn.
-			PxReal mu = (PxReal)(real_t)body->get_param(PhysicsServer3D::BODY_PARAM_FRICTION);
+			PxReal mu = (PxReal)(real_t)body->get_param(PS3DE::BODY_PARAM_FRICTION);
 			PxMaterial *other_material = nullptr;
 			if (rh.block.shape && rh.block.shape->getNbMaterials() > 0) {
 				rh.block.shape->getMaterials(&other_material, 1);

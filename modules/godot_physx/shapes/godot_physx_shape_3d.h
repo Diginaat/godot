@@ -68,7 +68,7 @@ struct GodotPhysXShapeGeometry {
 
 class GodotPhysXShape3D {
 	RID self;
-	PhysicsServer3D::ShapeType type = PhysicsServer3D::SHAPE_CUSTOM;
+	PS3DE::ShapeType type = PS3DE::SHAPE_CUSTOM;
 	Variant data;
 	real_t margin = 0.04;
 
@@ -100,8 +100,8 @@ public:
 	void set_self(const RID &p_self) { self = p_self; }
 	RID get_self() const { return self; }
 
-	void set_type(PhysicsServer3D::ShapeType p_type) { type = p_type; }
-	PhysicsServer3D::ShapeType get_type() const { return type; }
+	void set_type(PS3DE::ShapeType p_type) { type = p_type; }
+	PS3DE::ShapeType get_type() const { return type; }
 
 	void set_data(const Variant &p_data);
 	Variant get_data() const { return data; }
@@ -110,9 +110,9 @@ public:
 	real_t get_margin() const { return margin; }
 
 	bool is_valid() const { return geom_valid; }
-	bool is_trimesh() const { return type == PhysicsServer3D::SHAPE_CONCAVE_POLYGON; }
+	bool is_trimesh() const { return type == PS3DE::SHAPE_CONCAVE_POLYGON; }
 	bool has_backface_collision() const { return backface_collision; }
-	bool is_separation_ray() const { return type == PhysicsServer3D::SHAPE_SEPARATION_RAY; }
+	bool is_separation_ray() const { return type == PS3DE::SHAPE_SEPARATION_RAY; }
 	real_t get_ray_length() const { return ray_length; }
 	bool is_ray_sliding_on_slope() const { return ray_slide_on_slope; }
 	// Trimesh: Godot's face index for a triangle index PhysX reports (cooking
@@ -120,7 +120,7 @@ public:
 	// i.e. the back of the source face. -1 if unknown.
 	int source_face_index(uint32_t p_cooked_index, bool &r_back) const;
 	// Trimesh and height field: PhysX only allows these on static/kinematic actors.
-	bool is_static_only() const { return type == PhysicsServer3D::SHAPE_CONCAVE_POLYGON || type == PhysicsServer3D::SHAPE_HEIGHTMAP; }
+	bool is_static_only() const { return type == PS3DE::SHAPE_CONCAVE_POLYGON || type == PS3DE::SHAPE_HEIGHTMAP; }
 	const GodotPhysXShapeGeometry &get_geometry() const { return geom; }
 
 	// A shape resource is shared, so per-attach node scale can't be baked at

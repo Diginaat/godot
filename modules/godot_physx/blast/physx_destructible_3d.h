@@ -226,7 +226,7 @@ public:
 	void set_auto_mass(bool p_auto);
 	bool get_auto_mass() const { return auto_mass; }
 
-	// If true, the intact piece is a real dynamic (BODY_MODE_RIGID) body --
+	// If true, the intact piece is a real dynamic (PS3DE::BODY_MODE_RIGID) body --
 	// it falls under gravity and collides normally, like any other physics
 	// object, instead of hanging in place until something explicitly calls
 	// apply_radial_damage() on it. Also enables impact_strength/

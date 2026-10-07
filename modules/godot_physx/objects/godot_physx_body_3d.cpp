@@ -72,7 +72,7 @@ PxMaterial *GodotPhysXBody3D::_get_material() {
 }
 
 bool GodotPhysXBody3D::_is_dynamic() const {
-	return mode == PhysicsServer3D::BODY_MODE_RIGID || mode == PhysicsServer3D::BODY_MODE_RIGID_LINEAR;
+	return mode == PS3DE::BODY_MODE_RIGID || mode == PS3DE::BODY_MODE_RIGID_LINEAR;
 }
 
 void GodotPhysXBody3D::_destroy_actor() {
@@ -105,24 +105,24 @@ void GodotPhysXBody3D::_build_actor() {
 		PxRigidDynamic *dyn = physics->createRigidDynamic(pose);
 		ERR_FAIL_NULL(dyn);
 		px_actor = dyn;
-		if (mode == PhysicsServer3D::BODY_MODE_KINEMATIC) {
+		if (mode == PS3DE::BODY_MODE_KINEMATIC) {
 			dyn->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
 		}
 		dyn->setLinearVelocity(to_px(linear_velocity));
 		dyn->setAngularVelocity(to_px(angular_velocity));
-	} else if (mode == PhysicsServer3D::BODY_MODE_KINEMATIC) {
+	} else if (mode == PS3DE::BODY_MODE_KINEMATIC) {
 		PxRigidDynamic *dyn = physics->createRigidDynamic(pose);
 		ERR_FAIL_NULL(dyn);
 		dyn->setRigidBodyFlag(PxRigidBodyFlag::eKINEMATIC, true);
 		px_actor = dyn;
-	} else { // BODY_MODE_STATIC
+	} else { // PS3DE::BODY_MODE_STATIC
 		px_actor = physics->createRigidStatic(pose);
 		ERR_FAIL_NULL(px_actor);
 	}
 
 	px_actor->userData = this;
 
-	const bool non_kinematic_dynamic = _is_dynamic() && mode != PhysicsServer3D::BODY_MODE_KINEMATIC;
+	const bool non_kinematic_dynamic = _is_dynamic() && mode != PS3DE::BODY_MODE_KINEMATIC;
 
 	// PhysX actor poses carry no scale, so the node's scale is baked into each
 	// shape's geometry here (combined with any per-shape transform scale).
@@ -159,7 +159,7 @@ void GodotPhysXBody3D::_build_actor() {
 	space->set_body_separation_rays(this, has_separation_ray && non_kinematic_dynamic);
 
 	if (PxRigidDynamic *dyn = px_actor->is<PxRigidDynamic>()) {
-		if (mode != PhysicsServer3D::BODY_MODE_KINEMATIC) {
+		if (mode != PS3DE::BODY_MODE_KINEMATIC) {
 			// setMassAndUpdateInertia takes an absolute mass, matching Godot's
 			// RigidBody3D.mass semantics -- updateMassAndInertia's argument is a
 			// *density*, which silently gave the wrong mass for any shape whose
@@ -230,7 +230,7 @@ void GodotPhysXBody3D::set_space(GodotPhysXSpace3D *p_space) {
 	}
 }
 
-void GodotPhysXBody3D::set_mode(PhysicsServer3D::BodyMode p_mode) {
+void GodotPhysXBody3D::set_mode(PS3DE::BodyMode p_mode) {
 	if (mode == p_mode) {
 		return;
 	}
@@ -307,35 +307,35 @@ void GodotPhysXBody3D::shape_changed(GodotPhysXShape3D *p_shape) {
 	}
 }
 
-void GodotPhysXBody3D::set_param(PhysicsServer3D::BodyParameter p_param, const Variant &p_value) {
+void GodotPhysXBody3D::set_param(PS3DE::BodyParameter p_param, const Variant &p_value) {
 	switch (p_param) {
-		case PhysicsServer3D::BODY_PARAM_MASS:
+		case PS3DE::BODY_PARAM_MASS:
 			mass = p_value;
 			break;
-		case PhysicsServer3D::BODY_PARAM_GRAVITY_SCALE:
+		case PS3DE::BODY_PARAM_GRAVITY_SCALE:
 			gravity_scale = p_value;
 			break;
-		case PhysicsServer3D::BODY_PARAM_BOUNCE:
+		case PS3DE::BODY_PARAM_BOUNCE:
 			bounce = p_value;
 			break;
-		case PhysicsServer3D::BODY_PARAM_FRICTION:
+		case PS3DE::BODY_PARAM_FRICTION:
 			friction = p_value;
 			break;
-		case PhysicsServer3D::BODY_PARAM_LINEAR_DAMP:
+		case PS3DE::BODY_PARAM_LINEAR_DAMP:
 			linear_damp = p_value;
 			break;
-		case PhysicsServer3D::BODY_PARAM_ANGULAR_DAMP:
+		case PS3DE::BODY_PARAM_ANGULAR_DAMP:
 			angular_damp = p_value;
 			break;
-		case PhysicsServer3D::BODY_PARAM_LINEAR_DAMP_MODE:
-			linear_damp_mode = (PhysicsServer3D::BodyDampMode)(int)p_value;
+		case PS3DE::BODY_PARAM_LINEAR_DAMP_MODE:
+			linear_damp_mode = (PS3DE::BodyDampMode)(int)p_value;
 			_apply_damping();
 			break;
-		case PhysicsServer3D::BODY_PARAM_ANGULAR_DAMP_MODE:
-			angular_damp_mode = (PhysicsServer3D::BodyDampMode)(int)p_value;
+		case PS3DE::BODY_PARAM_ANGULAR_DAMP_MODE:
+			angular_damp_mode = (PS3DE::BodyDampMode)(int)p_value;
 			_apply_damping();
 			break;
-		case PhysicsServer3D::BODY_PARAM_CENTER_OF_MASS:
+		case PS3DE::BODY_PARAM_CENTER_OF_MASS:
 			// RigidBody3D only sends this when center_of_mass_mode is CUSTOM
 			// -- there's no separate mode param, so receiving one at all is
 			// the signal (see the header comment on has_custom_center_of_mass).
@@ -343,66 +343,66 @@ void GodotPhysXBody3D::set_param(PhysicsServer3D::BodyParameter p_param, const V
 			has_custom_center_of_mass = true;
 			center_of_mass = p_value;
 			break;
-		case PhysicsServer3D::BODY_PARAM_INERTIA:
+		case PS3DE::BODY_PARAM_INERTIA:
 			inertia = p_value;
 			break;
 		default:
 			break;
 	}
 
-	if (px_material && (p_param == PhysicsServer3D::BODY_PARAM_FRICTION || p_param == PhysicsServer3D::BODY_PARAM_BOUNCE)) {
+	if (px_material && (p_param == PS3DE::BODY_PARAM_FRICTION || p_param == PS3DE::BODY_PARAM_BOUNCE)) {
 		px_material->setStaticFriction((PxReal)friction);
 		px_material->setDynamicFriction((PxReal)friction);
 		px_material->setRestitution((PxReal)CLAMP(bounce, 0.0, 1.0));
 	}
 
 	if (space && px_actor) {
-		if (p_param == PhysicsServer3D::BODY_PARAM_LINEAR_DAMP || p_param == PhysicsServer3D::BODY_PARAM_ANGULAR_DAMP) {
+		if (p_param == PS3DE::BODY_PARAM_LINEAR_DAMP || p_param == PS3DE::BODY_PARAM_ANGULAR_DAMP) {
 			_apply_damping();
 		}
 		if (PxRigidDynamic *dyn = px_actor->is<PxRigidDynamic>()) {
-			if (p_param == PhysicsServer3D::BODY_PARAM_MASS || p_param == PhysicsServer3D::BODY_PARAM_CENTER_OF_MASS || p_param == PhysicsServer3D::BODY_PARAM_INERTIA) {
+			if (p_param == PS3DE::BODY_PARAM_MASS || p_param == PS3DE::BODY_PARAM_CENTER_OF_MASS || p_param == PS3DE::BODY_PARAM_INERTIA) {
 				// Recompute mass+inertia around the (new) target -- not a bare
 				// setCMassLocalPose (see the comment in _build_actor).
 				_update_mass_properties();
 			}
-			if (p_param == PhysicsServer3D::BODY_PARAM_GRAVITY_SCALE) {
+			if (p_param == PS3DE::BODY_PARAM_GRAVITY_SCALE) {
 				dyn->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, gravity_scale == 0.0);
 			}
 		}
 	}
 }
 
-Variant GodotPhysXBody3D::get_param(PhysicsServer3D::BodyParameter p_param) const {
+Variant GodotPhysXBody3D::get_param(PS3DE::BodyParameter p_param) const {
 	switch (p_param) {
-		case PhysicsServer3D::BODY_PARAM_MASS:
+		case PS3DE::BODY_PARAM_MASS:
 			return mass;
-		case PhysicsServer3D::BODY_PARAM_GRAVITY_SCALE:
+		case PS3DE::BODY_PARAM_GRAVITY_SCALE:
 			return gravity_scale;
-		case PhysicsServer3D::BODY_PARAM_BOUNCE:
+		case PS3DE::BODY_PARAM_BOUNCE:
 			return bounce;
-		case PhysicsServer3D::BODY_PARAM_FRICTION:
+		case PS3DE::BODY_PARAM_FRICTION:
 			return friction;
-		case PhysicsServer3D::BODY_PARAM_LINEAR_DAMP:
+		case PS3DE::BODY_PARAM_LINEAR_DAMP:
 			return linear_damp;
-		case PhysicsServer3D::BODY_PARAM_ANGULAR_DAMP:
+		case PS3DE::BODY_PARAM_ANGULAR_DAMP:
 			return angular_damp;
-		case PhysicsServer3D::BODY_PARAM_LINEAR_DAMP_MODE:
+		case PS3DE::BODY_PARAM_LINEAR_DAMP_MODE:
 			return linear_damp_mode;
-		case PhysicsServer3D::BODY_PARAM_ANGULAR_DAMP_MODE:
+		case PS3DE::BODY_PARAM_ANGULAR_DAMP_MODE:
 			return angular_damp_mode;
-		case PhysicsServer3D::BODY_PARAM_CENTER_OF_MASS:
+		case PS3DE::BODY_PARAM_CENTER_OF_MASS:
 			return center_of_mass;
-		case PhysicsServer3D::BODY_PARAM_INERTIA:
+		case PS3DE::BODY_PARAM_INERTIA:
 			return inertia;
 		default:
 			return 0.0;
 	}
 }
 
-void GodotPhysXBody3D::set_state(PhysicsServer3D::BodyState p_state, const Variant &p_value) {
+void GodotPhysXBody3D::set_state(PS3DE::BodyState p_state, const Variant &p_value) {
 	switch (p_state) {
-		case PhysicsServer3D::BODY_STATE_TRANSFORM: {
+		case PS3DE::BODY_STATE_TRANSFORM: {
 			body_transform = p_value;
 			if (px_actor) {
 				if (!body_transform.basis.get_scale().is_equal_approx(built_scale)) {
@@ -412,7 +412,7 @@ void GodotPhysXBody3D::set_state(PhysicsServer3D::BodyState p_state, const Varia
 				}
 				const PxTransform pose = to_px(body_transform);
 				if (PxRigidDynamic *dyn = px_actor->is<PxRigidDynamic>()) {
-					if (mode == PhysicsServer3D::BODY_MODE_KINEMATIC) {
+					if (mode == PS3DE::BODY_MODE_KINEMATIC) {
 						dyn->setKinematicTarget(pose);
 					} else {
 						dyn->setGlobalPose(pose);
@@ -422,16 +422,16 @@ void GodotPhysXBody3D::set_state(PhysicsServer3D::BodyState p_state, const Varia
 				}
 			}
 		} break;
-		case PhysicsServer3D::BODY_STATE_LINEAR_VELOCITY: {
+		case PS3DE::BODY_STATE_LINEAR_VELOCITY: {
 			set_linear_velocity(p_value);
 		} break;
-		case PhysicsServer3D::BODY_STATE_ANGULAR_VELOCITY: {
+		case PS3DE::BODY_STATE_ANGULAR_VELOCITY: {
 			set_angular_velocity(p_value);
 		} break;
-		case PhysicsServer3D::BODY_STATE_SLEEPING: {
+		case PS3DE::BODY_STATE_SLEEPING: {
 			set_sleep_state(p_value);
 		} break;
-		case PhysicsServer3D::BODY_STATE_CAN_SLEEP: {
+		case PS3DE::BODY_STATE_CAN_SLEEP: {
 			can_sleep = p_value;
 			if (space && px_actor) {
 				if (PxRigidDynamic *dyn = px_actor->is<PxRigidDynamic>()) {
@@ -445,17 +445,17 @@ void GodotPhysXBody3D::set_state(PhysicsServer3D::BodyState p_state, const Varia
 	}
 }
 
-Variant GodotPhysXBody3D::get_state(PhysicsServer3D::BodyState p_state) const {
+Variant GodotPhysXBody3D::get_state(PS3DE::BodyState p_state) const {
 	switch (p_state) {
-		case PhysicsServer3D::BODY_STATE_TRANSFORM:
+		case PS3DE::BODY_STATE_TRANSFORM:
 			return body_transform;
-		case PhysicsServer3D::BODY_STATE_LINEAR_VELOCITY:
+		case PS3DE::BODY_STATE_LINEAR_VELOCITY:
 			return get_linear_velocity();
-		case PhysicsServer3D::BODY_STATE_ANGULAR_VELOCITY:
+		case PS3DE::BODY_STATE_ANGULAR_VELOCITY:
 			return get_angular_velocity();
-		case PhysicsServer3D::BODY_STATE_SLEEPING:
+		case PS3DE::BODY_STATE_SLEEPING:
 			return is_sleeping();
-		case PhysicsServer3D::BODY_STATE_CAN_SLEEP:
+		case PS3DE::BODY_STATE_CAN_SLEEP:
 			return can_sleep;
 	}
 	return Variant();
@@ -497,7 +497,7 @@ real_t GodotPhysXBody3D::get_total_linear_damp() const {
 	if (omit_force_integration) {
 		return 0.0;
 	}
-	const real_t total = linear_damp_mode == PhysicsServer3D::BODY_DAMP_MODE_REPLACE ? linear_damp : area_linear_damp + linear_damp;
+	const real_t total = linear_damp_mode == PS3DE::BODY_DAMP_MODE_REPLACE ? linear_damp : area_linear_damp + linear_damp;
 	return MAX(total, (real_t)0.0);
 }
 
@@ -505,7 +505,7 @@ real_t GodotPhysXBody3D::get_total_angular_damp() const {
 	if (omit_force_integration) {
 		return 0.0;
 	}
-	const real_t total = angular_damp_mode == PhysicsServer3D::BODY_DAMP_MODE_REPLACE ? angular_damp : area_angular_damp + angular_damp;
+	const real_t total = angular_damp_mode == PS3DE::BODY_DAMP_MODE_REPLACE ? angular_damp : area_angular_damp + angular_damp;
 	return MAX(total, (real_t)0.0);
 }
 
@@ -576,17 +576,17 @@ void GodotPhysXBody3D::_apply_axis_lock() {
 	if (!dyn) {
 		return;
 	}
-	// PxRigidDynamicLockFlag bits match PhysicsServer3D::BodyAxis 1:1.
+	// PxRigidDynamicLockFlag bits match PS3DE::BodyAxis 1:1.
 	uint32_t lock = axis_lock;
-	if (mode == PhysicsServer3D::BODY_MODE_RIGID_LINEAR) {
-		lock |= PhysicsServer3D::BODY_AXIS_ANGULAR_X |
-				PhysicsServer3D::BODY_AXIS_ANGULAR_Y |
-				PhysicsServer3D::BODY_AXIS_ANGULAR_Z;
+	if (mode == PS3DE::BODY_MODE_RIGID_LINEAR) {
+		lock |= PS3DE::BODY_AXIS_ANGULAR_X |
+				PS3DE::BODY_AXIS_ANGULAR_Y |
+				PS3DE::BODY_AXIS_ANGULAR_Z;
 	}
 	dyn->setRigidDynamicLockFlags(PxRigidDynamicLockFlags((PxU8)(lock & 0x3Fu)));
 }
 
-void GodotPhysXBody3D::set_axis_lock(PhysicsServer3D::BodyAxis p_axis, bool p_lock) {
+void GodotPhysXBody3D::set_axis_lock(PS3DE::BodyAxis p_axis, bool p_lock) {
 	if (p_lock) {
 		axis_lock |= p_axis;
 	} else {
@@ -669,7 +669,7 @@ void GodotPhysXBody3D::set_linear_velocity(const Vector3 &p_v) {
 	linear_velocity = p_v;
 	if (px_actor) {
 		if (PxRigidDynamic *dyn = px_actor->is<PxRigidDynamic>()) {
-			if (mode != PhysicsServer3D::BODY_MODE_KINEMATIC) {
+			if (mode != PS3DE::BODY_MODE_KINEMATIC) {
 				dyn->setLinearVelocity(to_px(p_v));
 			}
 		}
@@ -680,7 +680,7 @@ void GodotPhysXBody3D::set_angular_velocity(const Vector3 &p_v) {
 	angular_velocity = p_v;
 	if (px_actor) {
 		if (PxRigidDynamic *dyn = px_actor->is<PxRigidDynamic>()) {
-			if (mode != PhysicsServer3D::BODY_MODE_KINEMATIC) {
+			if (mode != PS3DE::BODY_MODE_KINEMATIC) {
 				dyn->setAngularVelocity(to_px(p_v));
 			}
 		}
@@ -700,7 +700,7 @@ void GodotPhysXBody3D::set_sleep_state(bool p_sleep) {
 	sleeping = p_sleep;
 	if (px_actor) {
 		if (PxRigidDynamic *dyn = px_actor->is<PxRigidDynamic>()) {
-			if (mode != PhysicsServer3D::BODY_MODE_KINEMATIC && dyn->getScene()) {
+			if (mode != PS3DE::BODY_MODE_KINEMATIC && dyn->getScene()) {
 				if (p_sleep) {
 					dyn->putToSleep();
 				} else {
@@ -797,7 +797,7 @@ void GodotPhysXBody3D::apply_torque(const Vector3 &p_torque) {
 }
 
 void GodotPhysXBody3D::_update_mass_properties() {
-	if (!px_actor || mode == PhysicsServer3D::BODY_MODE_KINEMATIC) {
+	if (!px_actor || mode == PS3DE::BODY_MODE_KINEMATIC) {
 		return;
 	}
 	PxRigidDynamic *dyn = px_actor->is<PxRigidDynamic>();

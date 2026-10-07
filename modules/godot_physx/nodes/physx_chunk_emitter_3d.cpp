@@ -174,7 +174,7 @@ void PhysXChunkEmitter3D::_spawn_one(const Vector3 &p_world_pos, const Vector3 &
 	rand_basis.rotate(Vector3(Math::randf(), Math::randf(), Math::randf()).normalized(), Math::random(0.0f, (float)Math::TAU));
 
 	RID body = ps->body_create();
-	ps->body_set_mode(body, PhysicsServer3D::BODY_MODE_RIGID);
+	ps->body_set_mode(body, PS3DE::BODY_MODE_RIGID);
 	ps->body_set_collision_layer(body, collision_layer);
 	ps->body_set_collision_mask(body, collision_mask);
 
@@ -192,15 +192,15 @@ void PhysXChunkEmitter3D::_spawn_one(const Vector3 &p_world_pos, const Vector3 &
 	ps->body_add_shape(body, shape);
 
 	const real_t mass = MAX(density * volume, (real_t)0.001);
-	ps->body_set_param(body, PhysicsServer3D::BODY_PARAM_MASS, mass);
-	ps->body_set_param(body, PhysicsServer3D::BODY_PARAM_FRICTION, friction);
-	ps->body_set_param(body, PhysicsServer3D::BODY_PARAM_BOUNCE, bounce);
-	ps->body_set_param(body, PhysicsServer3D::BODY_PARAM_LINEAR_DAMP, linear_damp);
-	ps->body_set_param(body, PhysicsServer3D::BODY_PARAM_ANGULAR_DAMP, angular_damp);
-	ps->body_set_state(body, PhysicsServer3D::BODY_STATE_TRANSFORM, Transform3D(rand_basis, p_world_pos));
-	ps->body_set_state(body, PhysicsServer3D::BODY_STATE_LINEAR_VELOCITY, p_dir * speed);
+	ps->body_set_param(body, PS3DE::BODY_PARAM_MASS, mass);
+	ps->body_set_param(body, PS3DE::BODY_PARAM_FRICTION, friction);
+	ps->body_set_param(body, PS3DE::BODY_PARAM_BOUNCE, bounce);
+	ps->body_set_param(body, PS3DE::BODY_PARAM_LINEAR_DAMP, linear_damp);
+	ps->body_set_param(body, PS3DE::BODY_PARAM_ANGULAR_DAMP, angular_damp);
+	ps->body_set_state(body, PS3DE::BODY_STATE_TRANSFORM, Transform3D(rand_basis, p_world_pos));
+	ps->body_set_state(body, PS3DE::BODY_STATE_LINEAR_VELOCITY, p_dir * speed);
 	Vector3 spin = Vector3(Math::random(-1.0f, 1.0f), Math::random(-1.0f, 1.0f), Math::random(-1.0f, 1.0f)) * spin_impulse;
-	ps->body_set_state(body, PhysicsServer3D::BODY_STATE_ANGULAR_VELOCITY, spin);
+	ps->body_set_state(body, PS3DE::BODY_STATE_ANGULAR_VELOCITY, spin);
 	ps->body_set_space(body, p_space);
 
 	Chunk chunk;
