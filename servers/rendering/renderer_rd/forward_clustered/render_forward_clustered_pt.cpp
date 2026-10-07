@@ -30,6 +30,7 @@
 
 #include "render_forward_clustered_pt.h"
 
+#include "core/os/os.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_raytracing.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
@@ -497,7 +498,11 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 
 bool RenderForwardClusteredPT::_setup_rt() {
 	if (!RD::get_singleton()->has_feature(RD::SUPPORTS_RAYTRACING_PIPELINE)) {
-		WARN_PRINT_ONCE("Raytracing not supported on this device.");
+		if (OS::get_singleton()->get_current_rendering_driver_name() == "d3d12") {
+			WARN_PRINT_ONCE("Path tracing is disabled: the D3D12 driver does not support ray tracing. Set Project Settings > Rendering > Rendering Device > Driver (Windows) to \"vulkan\" or run with --rendering-driver vulkan.");
+		} else {
+			WARN_PRINT_ONCE("Raytracing not supported on this device.");
+		}
 		return false;
 	}
 
