@@ -42,7 +42,7 @@ class RenderingShaderContainer : public RefCounted {
 
 public:
 	static const uint32_t CONTAINER_MAGIC_NUMBER = 0x43535247;
-	static const uint32_t CONTAINER_VERSION = 4; // Bumped for unbounded uniform support + texture type/format reflection
+	static const uint32_t CONTAINER_VERSION = 5; // Bumped for unbounded uniforms, texture type/format reflection and physical storage buffer addresses.
 
 protected:
 	using RDC = RenderingDeviceCommons;
