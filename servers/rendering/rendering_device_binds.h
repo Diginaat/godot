@@ -812,8 +812,8 @@ protected:
 		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, aabb_stride);
 		RD_BIND(Variant::INT, RDAccelerationStructureGeometry, aabb_count);
 
-		BIND_ENUM_CONSTANT(TYPE_TRIANGLES);
-		BIND_ENUM_CONSTANT(TYPE_AABBS);
+		get_gdtype_static_mutable().bind_integer_constant_raw("RDAccelerationStructureGeometry.Type", "TYPE_TRIANGLES", static_cast<int64_t>(TYPE_TRIANGLES));
+		get_gdtype_static_mutable().bind_integer_constant_raw("RDAccelerationStructureGeometry.Type", "TYPE_AABBS", static_cast<int64_t>(TYPE_AABBS));
 	}
 };
 
