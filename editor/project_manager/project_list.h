@@ -114,6 +114,7 @@ public:
 	void set_unsupported_features(PackedStringArray p_features);
 
 	bool should_load_project_icon() const;
+	bool is_older_version() const { return version_match_type == VersionMatchType::PROJECT_USES_OLDER_MAJOR || version_match_type == VersionMatchType::PROJECT_USES_OLDER_MINOR; }
 	void set_selected(bool p_selected, bool p_hide_focus = false);
 
 	void set_is_favorite(bool p_favorite);
@@ -228,6 +229,7 @@ private:
 	ConfigFile _config;
 
 	Vector<Item> _projects;
+	static inline HashMap<String, int> modified_time_cache;
 
 	int _icon_load_index = 0;
 	bool project_opening_initiated = false;
@@ -269,6 +271,7 @@ private:
 	// Project list items.
 
 	void _create_project_item_control(int p_index);
+	void _update_project_control_translatable_fields(const Item &item);
 	void _toggle_project(int p_index);
 	void _remove_project(int p_index, bool p_update_settings);
 

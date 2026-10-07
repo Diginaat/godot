@@ -1,0 +1,323 @@
+/**************************************************************************/
+/*  godot_physx_body_3d.h                                                 */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
+/**************************************************************************/
+
+#pragma once
+
+#include "core/math/transform_3d.h"
+#include "core/object/object_id.h"
+#include "core/templates/hash_set.h"
+#include "core/templates/local_vector.h"
+#include "core/templates/rid.h"
+#include "core/variant/callable.h"
+#include "servers/physics_3d/physics_server_3d.h"
+
+namespace physx {
+class PxRigidActor;
+class PxMaterial;
+} //namespace physx
+
+class GodotPhysXSpace3D;
+class GodotPhysXShape3D;
+class GodotPhysXDirectBodyState3D;
+class GodotPhysXJoint3D;
+
+class GodotPhysXBody3D {
+public:
+	struct ShapeRef {
+		GodotPhysXShape3D *shape = nullptr;
+		Transform3D xform;
+		bool disabled = false;
+	};
+
+	struct Contact {
+		Vector3 position; // world-space contact point
+		Vector3 normal;
+		Vector3 impulse;
+		int local_shape = 0;
+		RID collider;
+		ObjectID collider_id;
+		int collider_shape = 0;
+		Vector3 collider_velocity;
+	};
+
+	// PxFilterData word3 on a body's shapes, so the scene filter callback can
+	// tell a body's actor from anything else's.
+	static constexpr uint32_t FILTER_BODY_MARKER = 0x47504231; // "GPB1"
+	// PxFilterData word2 bits, read by the scene filter shader.
+	static constexpr uint32_t FILTER_REPORTS_CONTACTS = 1u << 0;
+	static constexpr uint32_t FILTER_HAS_EXCEPTIONS = 1u << 1;
+
+private:
+	RID self;
+	ObjectID instance_id;
+	// Bodies this one never collides with (add_collision_exception_with()).
+	HashSet<RID> collision_exceptions;
+
+	PS3DE::BodyMode mode = PS3DE::BODY_MODE_RIGID;
+	GodotPhysXSpace3D *space = nullptr;
+	physx::PxRigidActor *px_actor = nullptr;
+
+	LocalVector<ShapeRef> shapes;
+
+	Transform3D body_transform;
+	// Node scale baked into the shapes on the last _build_actor(); a change
+	// re-cooks (PhysX actor poses carry no scale).
+	Vector3 built_scale = Vector3(1, 1, 1);
+	Vector3 linear_velocity;
+	Vector3 angular_velocity;
+	real_t mass = 1.0;
+	real_t gravity_scale = 1.0;
+	real_t bounce = 0.0;
+	real_t friction = 1.0;
+	real_t linear_damp = 0.0;
+	real_t angular_damp = 0.0;
+	// RigidBody3D only ever sends this (via PS3DE::BODY_PARAM_CENTER_OF_MASS) when
+	// center_of_mass_mode is CUSTOM -- there's no separate "mode" param, so a
+	// value having been sent at all IS the "custom" signal. _build_actor()
+	// destroys and recreates px_actor on almost any shape/mode change, which
+	// would otherwise silently drop this back to the shape-auto-computed
+	// pose every time -- reapplied there too, not just in set_param().
+	bool has_custom_center_of_mass = false;
+	Vector3 center_of_mass;
+	// PS3DE::BODY_PARAM_INERTIA, in the body's local axes; a component <= 0 keeps the
+	// shape-computed value for that axis (same rule as Jolt).
+	Vector3 inertia;
+	// Applied every step until changed (RigidBody3D.constant_force/_torque),
+	// world axes. Skipped for custom-integrator bodies, as on Jolt.
+	Vector3 constant_force;
+	Vector3 constant_torque;
+	uint32_t collision_layer = 1;
+	uint32_t collision_mask = 1;
+	uint32_t axis_lock = 0; // PS3DE::BodyAxis bitmask
+	bool ccd = false;
+	bool ray_pickable = true; // input_ray_pickable: hit by the viewport's picking ray
+	bool can_sleep = true;
+	bool sleeping = false;
+
+	physx::PxMaterial *px_material = nullptr;
+
+	Callable body_state_callback;
+	GodotPhysXDirectBodyState3D *direct_state = nullptr;
+
+	// The node integrates its own forces: suppress the built-in gravity/damping
+	// integration and invoke fi_callback once per step instead (Custom Integrator
+	// bodies, active ragdolls).
+	bool omit_force_integration = false;
+	Callable fi_callback;
+	Variant fi_userdata;
+
+	// PS3DE::BodyDampMode -- COMBINE adds the area-level damping (the
+	// project default, physics/3d/default_*_damp, unless an Area3D overrides
+	// it) to this body's own; REPLACE uses this body's own alone.
+	PS3DE::BodyDampMode linear_damp_mode = PS3DE::BODY_DAMP_MODE_COMBINE;
+	PS3DE::BodyDampMode angular_damp_mode = PS3DE::BODY_DAMP_MODE_COMBINE;
+	// The area-level damping, set by the space.
+	real_t area_linear_damp = 0.0;
+	real_t area_angular_damp = 0.0;
+
+	int max_contacts_reported = 0;
+	LocalVector<Contact> contacts;
+
+	HashSet<GodotPhysXJoint3D *> joints;
+
+	// PhysX's own default of 4 position / 1 velocity iterations is marginal
+	// for any body under a strong, rapidly-varying constraint load -- joint
+	// chains (pendulums, ragdolls, cloth strips) are the case this was added
+	// for. Tried applying this bump universally (to every dynamic body, not
+	// just jointed ones) while root-causing a VehicleBody3D rollover -- it
+	// helped there, but cost a real, measured regression on CUDA/GPU dynamics
+	// for scenes with a large simultaneously-active body count and no joints
+	// at all (snow.tscn's chunk pile, ~250 free rigid actors): the GPU solver
+	// processes a partitioned island's iterations together, so bumping every
+	// body in a big island multiplies the GPU kernel's per-substep work
+	// directly, not just the cost of the individual bumped bodies (unlike the
+	// ~7% CPU-only cost measured on physx_playground's 2000-box pile, which
+	// has no comparably large single GPU-solved island). The vehicle's actual
+	// fix turned out to be apply_impulse's frame-convention bug (see its
+	// comment), not this iteration bump -- so back to jointed-only, which is
+	// what pendulums/ragdolls/cloth actually need and doesn't touch every
+	// free body in a GPU scene.
+	static constexpr uint32_t SOLVER_ITERS_DEFAULT_POS = 4;
+	static constexpr uint32_t SOLVER_ITERS_DEFAULT_VEL = 1;
+	static constexpr uint32_t SOLVER_ITERS_JOINTED_POS = 8;
+	static constexpr uint32_t SOLVER_ITERS_JOINTED_VEL = 2;
+
+	bool _is_dynamic() const;
+	void _destroy_actor();
+	void _apply_solver_iterations();
+	void _build_actor();
+	void _apply_filter_data();
+	void _collision_exceptions_changed();
+	void _apply_damping();
+	void _apply_axis_lock();
+	void _update_mass_properties();
+	void _constant_forces_changed();
+	physx::PxMaterial *_get_material();
+
+public:
+	void set_self(const RID &p_self) { self = p_self; }
+	RID get_self() const { return self; }
+
+	void add_collision_exception(RID p_body);
+	void remove_collision_exception(RID p_body);
+	const HashSet<RID> &get_collision_exceptions() const { return collision_exceptions; }
+	bool has_collision_exception(RID p_body) const { return collision_exceptions.has(p_body); }
+
+	void set_instance_id(ObjectID p_id) { instance_id = p_id; }
+	ObjectID get_instance_id() const { return instance_id; }
+
+	physx::PxRigidActor *get_px_actor() const { return px_actor; }
+	GodotPhysXSpace3D *get_space() const { return space; }
+
+	void set_space(GodotPhysXSpace3D *p_space);
+
+	void set_mode(PS3DE::BodyMode p_mode);
+	PS3DE::BodyMode get_mode() const { return mode; }
+
+	void add_shape(GodotPhysXShape3D *p_shape, const Transform3D &p_xform, bool p_disabled);
+	void set_shape(int p_idx, GodotPhysXShape3D *p_shape);
+	void set_shape_transform(int p_idx, const Transform3D &p_xform);
+	void set_shape_disabled(int p_idx, bool p_disabled);
+	void remove_shape(int p_idx);
+	void clear_shapes();
+	int get_shape_count() const { return shapes.size(); }
+	const ShapeRef *get_shape_ref(int p_idx) const;
+	void shape_changed(GodotPhysXShape3D *p_shape);
+
+	void set_param(PS3DE::BodyParameter p_param, const Variant &p_value);
+	Variant get_param(PS3DE::BodyParameter p_param) const;
+
+	void set_state(PS3DE::BodyState p_state, const Variant &p_value);
+	Variant get_state(PS3DE::BodyState p_state) const;
+
+	void set_collision_layer(uint32_t p_layer);
+	uint32_t get_collision_layer() const { return collision_layer; }
+	void set_collision_mask(uint32_t p_mask);
+	uint32_t get_collision_mask() const { return collision_mask; }
+
+	void set_ccd(bool p_enable);
+	bool is_ccd_enabled() const { return ccd; }
+
+	void set_ray_pickable(bool p_enable) { ray_pickable = p_enable; }
+	bool is_ray_pickable() const { return ray_pickable; }
+
+	void set_axis_lock(PS3DE::BodyAxis p_axis, bool p_lock);
+	bool is_axis_locked(PS3DE::BodyAxis p_axis) const { return axis_lock & p_axis; }
+
+	void set_max_contacts_reported(int p_amount);
+	int get_max_contacts_reported() const { return max_contacts_reported; }
+	bool reports_contacts() const { return max_contacts_reported > 0; }
+
+	// Called by the space's simulation event callback while contacts are being
+	// processed (inside fetchResults).
+	void clear_contacts() { contacts.clear(); }
+	void add_contact(const Contact &p_contact);
+	int get_contact_count() const { return contacts.size(); }
+	const Contact &get_contact(int p_idx) const { return contacts[p_idx]; }
+
+	void set_state_sync_callback(const Callable &p_callable) { body_state_callback = p_callable; }
+
+	void set_omit_force_integration(bool p_enable);
+	bool is_omitting_force_integration() const { return omit_force_integration; }
+	void set_force_integration_callback(const Callable &p_callable, const Variant &p_udata);
+	// Called by the space before simulate() while omit_force_integration is set.
+	void call_force_integration();
+
+	PS3DE::BodyDampMode get_linear_damp_mode() const { return linear_damp_mode; }
+	PS3DE::BodyDampMode get_angular_damp_mode() const { return angular_damp_mode; }
+
+	// Called by the space after fetchResults(): pull the simulated pose/velocity
+	// back onto this wrapper.
+	void pull_transform_from_px();
+	// Called by the space during flush_queries().
+	void call_queries();
+
+	Transform3D get_transform() const { return body_transform; }
+	Vector3 get_linear_velocity() const;
+	Vector3 get_angular_velocity() const;
+	void set_linear_velocity(const Vector3 &p_v);
+	void set_angular_velocity(const Vector3 &p_v);
+	real_t get_mass() const { return mass; }
+	real_t get_gravity_scale() const { return gravity_scale; }
+	real_t get_linear_damp() const { return linear_damp; }
+	real_t get_angular_damp() const { return angular_damp; }
+	// What the solver actually damps by: the area level and this body's own,
+	// per the damp modes (none while the body integrates its own forces).
+	real_t get_total_linear_damp() const;
+	real_t get_total_angular_damp() const;
+	// The space sets the area-level damping: its default, or an area's.
+	void set_area_damping(real_t p_linear, real_t p_angular);
+	bool is_sleeping() const;
+	void set_sleep_state(bool p_sleep);
+	void apply_impulse(const Vector3 &p_impulse, const Vector3 &p_position);
+	void apply_central_impulse(const Vector3 &p_impulse);
+	void apply_torque_impulse(const Vector3 &p_impulse);
+	void apply_central_force(const Vector3 &p_force);
+	void apply_force(const Vector3 &p_force, const Vector3 &p_position);
+	void apply_torque(const Vector3 &p_torque);
+
+	void add_constant_central_force(const Vector3 &p_force);
+	void add_constant_force(const Vector3 &p_force, const Vector3 &p_position);
+	void add_constant_torque(const Vector3 &p_torque);
+	void set_constant_force(const Vector3 &p_force);
+	Vector3 get_constant_force() const { return constant_force; }
+	void set_constant_torque(const Vector3 &p_torque);
+	Vector3 get_constant_torque() const { return constant_torque; }
+	bool has_constant_forces() const { return !constant_force.is_zero_approx() || !constant_torque.is_zero_approx(); }
+	// Called by the space before simulate() for bodies with constant forces.
+	void apply_constant_forces();
+
+	void set_axis_velocity(const Vector3 &p_axis_velocity);
+	void reset_mass_properties();
+
+	// Center of mass: offset from the body origin in world axes / in the
+	// body's own axes. Principal inertia axes in world space; inverse inertia
+	// about those axes.
+	Vector3 get_center_of_mass_relative() const;
+	Vector3 get_center_of_mass_local() const;
+	Basis get_principal_inertia_axes() const;
+	Vector3 get_inverse_inertia() const;
+	// Velocity of the body's material at a world-space point, spin included.
+	Vector3 get_velocity_at_position(const Vector3 &p_position) const;
+
+	GodotPhysXDirectBodyState3D *get_direct_state();
+
+	void add_joint(GodotPhysXJoint3D *p_joint) {
+		joints.insert(p_joint);
+		_apply_solver_iterations();
+	}
+	void remove_joint(GodotPhysXJoint3D *p_joint) {
+		joints.erase(p_joint);
+		_apply_solver_iterations();
+	}
+
+	GodotPhysXBody3D();
+	~GodotPhysXBody3D();
+};
