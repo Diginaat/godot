@@ -8347,6 +8347,19 @@ void EditorNode::_add_to_main_menu(const String &p_name, PopupMenu *p_menu) {
 	main_menu_items.push_back(p_menu);
 }
 
+void EditorNode::_update_dlss_install_button() {
+	if (!dlss_install_button) {
+		return;
+	}
+	if (FileAccess::exists(OS::get_singleton()->get_executable_path().get_base_dir().path_join("sl.interposer.dll"))) {
+		dlss_install_button->set_text(TTRC("DLSS Setup"));
+		dlss_install_button->set_tooltip_text(TTRC("NVIDIA Streamline (DLSS) is installed next to the editor. Open the installer to check it or reinstall."));
+	} else {
+		dlss_install_button->set_text(TTRC("Get NVIDIA DLSS..."));
+		dlss_install_button->set_tooltip_text(TTRC("Download NVIDIA's Streamline SDK and install its DLSS runtime DLLs next to the editor. Shows every step and asks you to accept NVIDIA's license first."));
+	}
+}
+
 void EditorNode::_update_main_menu_type() {
 	bool can_expand = bool(EDITOR_GET("interface/editor/appearance/expand_to_title")) && DisplayServer::get_singleton()->has_feature(DisplayServerEnums::FEATURE_EXTEND_TO_TITLE);
 	bool use_menu_button = EDITOR_GET("interface/editor/appearance/collapse_main_menu");
@@ -9293,13 +9306,14 @@ EditorNode::EditorNode() {
 #if defined(WINDOWS_ENABLED) && defined(STREAMLINE_ENABLED)
 	// Shortcut to the DLSS installer, placed after the main menu by _update_main_menu_type().
 	dlss_install_button = memnew(Button);
-	dlss_install_button->set_text(TTRC("Get DLSS Installed"));
-	dlss_install_button->set_tooltip_text(TTRC("Download NVIDIA's Streamline SDK and install its DLSS runtime DLLs next to the editor. Shows every step and asks you to accept NVIDIA's license first."));
 	dlss_install_button->set_theme_type_variation("MainMenuBar");
 	dlss_install_button->set_focus_mode(Control::FOCUS_NONE);
 	dlss_install_button->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
 	dlss_install_button->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_menu_option).bind(EDITOR_INSTALL_STREAMLINE));
 	title_bar->add_child(dlss_install_button);
+	// The installer changes what's installed, so refresh the label when it closes.
+	streamline_installer->connect(SceneStringName(visibility_changed), callable_mp(this, &EditorNode::_update_dlss_install_button));
+	_update_dlss_install_button();
 #endif
 
 	_update_main_menu_type();
