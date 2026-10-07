@@ -20,6 +20,20 @@ NVIDIA's RTX team, and the PhysX module's author. This fork merges them,
 fixes the conflicts between them, and keeps them building against the latest
 Godot `master`.
 
+## Downloads
+
+Prebuilt Windows editors (standard and .NET) are on the
+[**Releases page**](https://github.com/Diginaat/godot/releases).
+
+> [!IMPORTANT]
+> **NVIDIA DLSS is not included** in this repository or in the release
+> downloads. NVIDIA's license doesn't allow redistributing the DLSS,
+> Ray Reconstruction, Frame Generation and Reflex runtime files this way.
+> **To use DLSS, download the
+> [NVIDIA Streamline SDK 2.10.0](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0)**
+> and copy its DLLs next to the editor ([step 5 below](#5-add-the-nvidia-streamline-dlls)).
+> Everything else, including the path tracer and PhysX GPU, works without them.
+
 **Platform:** Windows 10/11 x64 with an NVIDIA RTX GPU. DLSS, Ray
 Reconstruction and the path tracer need an RTX card. PhysX GPU dynamics need an
 NVIDIA GPU with CUDA. Everything else falls back gracefully (PhysX runs on the
@@ -132,8 +146,8 @@ Streamline's runtime DLLs are not in this repository; NVIDIA distributes them
 in the Streamline SDK. This source is built against **Streamline SDK 2.10.0**
 (see `thirdparty/streamline/include/sl_version.h`).
 
-1. Download **Streamline SDK 2.10.0** from the NVIDIA Streamline releases page:
-   [github.com/NVIDIA-RTX/Streamline/releases](https://github.com/NVIDIA-RTX/Streamline/releases).
+1. Download **Streamline SDK 2.10.0** from NVIDIA:
+   [github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0).
    Product page: [developer.nvidia.com/rtx/streamline](https://developer.nvidia.com/rtx/streamline).
 2. From the SDK's `bin\x64` folder, copy these files into this repository's `bin\`
    folder, next to the editor:
@@ -168,9 +182,12 @@ powershell -File misc/scripts/package_editor_win64.ps1          # standard edito
 powershell -File misc/scripts/package_editor_win64.ps1 -Mono    # .NET editor
 ```
 
-The zip goes to `dist\`. It contains the editor and the Streamline release
-DLLs, plus `PhysXGpu_64.dll`, the D3D12 Agility SDK DLLs, the license files
-and, for .NET, the `GodotSharp` folder.
+The zip goes to `dist\`. It contains the editor, `PhysXGpu_64.dll`, the D3D12
+Agility SDK DLLs, all license files, a notice explaining where to get NVIDIA
+DLSS and, for .NET, the `GodotSharp` folder. It does **not** include NVIDIA's
+Streamline/DLSS runtime files, so it's safe to share. `-WithNvidiaRuntime`
+adds them for your own machines only; don't publish that zip (see
+[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)).
 
 ## Using the features
 
@@ -198,14 +215,21 @@ the maintainer's own local paths; replace them with yours.
 
 ## Licenses
 
-- Godot Engine: MIT, see [`LICENSE.txt`](LICENSE.txt) and
-  [`COPYRIGHT.txt`](COPYRIGHT.txt).
+All components and their licenses are listed in
+[**`THIRD_PARTY_LICENSES.md`**](THIRD_PARTY_LICENSES.md). In short:
+
+- Godot Engine and this fork's changes: MIT, see [`LICENSE.txt`](LICENSE.txt)
+  and [`COPYRIGHT.txt`](COPYRIGHT.txt).
 - NVIDIA PhysX and Blast: BSD-3-Clause, see
   [`modules/godot_physx/PHYSX-LICENSE.md`](modules/godot_physx/PHYSX-LICENSE.md).
-- NVIDIA Streamline, DLSS and Reflex: the Streamline SDK headers in
-  `thirdparty/streamline` are MIT. The runtime DLLs come with NVIDIA's own
-  license terms (the `*.license.txt` files in the SDK). Read them before
-  redistributing.
+- NVIDIA Streamline SDK headers: MIT, see
+  [`thirdparty/streamline/LICENSE.txt`](thirdparty/streamline/LICENSE.txt).
+- NVIDIA DLSS, Reflex and the Streamline runtime DLLs: **not included**.
+  They're under NVIDIA's own license terms, which come with the
+  [SDK download](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0).
+- Microsoft DirectX Agility SDK (`D3D12Core.dll`, `d3d12SDKLayers.dll`, in the
+  release zips only): Microsoft DirectX license, see
+  [`misc/dist/licenses/`](misc/dist/licenses/).
 
 This fork is not affiliated with or endorsed by the Godot Foundation or
 NVIDIA. For general Godot documentation, see
