@@ -8507,7 +8507,8 @@ HashMap<String, Variant> EditorNode::get_initial_settings() {
 	settings["gui/common/auto_focus_strategy"] = Control::AutoFocusStrategy::STRATEGY_BALLOON;
 	settings["input_devices/joypads/ignore_joypad_on_unfocused_application"] = true;
 	settings["physics/3d/physics_engine"] = PhysicsServer3DManager::JOLT_PHYSICS_NAME;
-	settings["rendering/rendering_device/driver.windows"] = "d3d12";
+	// Vulkan, not D3D12: the D3D12 driver has no ray tracing, so path tracing needs Vulkan.
+	settings["rendering/rendering_device/driver.windows"] = "vulkan";
 	settings["rendering/lights_and_shadows/multi_bounce_occlusion/enabled"] = true;
 	return settings;
 }
