@@ -64,6 +64,10 @@ if ($WithNvidiaRuntime) {
 NVIDIA DLSS IS NOT INCLUDED IN THIS DOWNLOAD
 ============================================
 
+You don't need to do anything to use this editor. Everything works out of the
+box, including the path tracer and PhysX GPU. Read on ONLY if you want NVIDIA
+DLSS, DLSS Ray Reconstruction, DLSS Frame Generation or NVIDIA Reflex.
+
 This editor supports NVIDIA DLSS Super Resolution, DLSS Ray Reconstruction,
 DLSS Frame Generation and NVIDIA Reflex through the NVIDIA Streamline SDK.
 NVIDIA's license terms don't allow those runtime files to be redistributed
@@ -72,12 +76,12 @@ in this download, so they are not included.
 Without them the editor works normally (including the path tracer and PhysX),
 only DLSS, Ray Reconstruction, Frame Generation and Reflex are unavailable.
 
-To enable them:
+To enable them (optional, only for DLSS):
 
 1. Download NVIDIA Streamline SDK 2.10.0:
    https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0
 2. From the SDK's bin\x64 folder (NOT bin\x64\development), copy these
-   files next to $exe:
+   files next to ${exe}:
      sl.interposer.dll and the other sl.*.dll files
      nvngx_dlss.dll, nvngx_dlssd.dll, nvngx_dlssg.dll, nvngx_deepdvc.dll
      NvLowLatencyVk.dll

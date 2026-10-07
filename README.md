@@ -26,13 +26,17 @@ Prebuilt Windows editors (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
 
 > [!IMPORTANT]
-> **NVIDIA DLSS is not included** in this repository or in the release
-> downloads. NVIDIA's license doesn't allow redistributing the DLSS,
-> Ray Reconstruction, Frame Generation and Reflex runtime files this way.
-> **To use DLSS, download the
-> [NVIDIA Streamline SDK 2.10.0](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0)**
-> and copy its DLLs next to the editor ([step 5 below](#5-add-the-nvidia-streamline-dlls)).
-> Everything else, including the path tracer and PhysX GPU, works without them.
+> **The downloads work out of the box. You only need the NVIDIA Streamline SDK
+> if you want DLSS.**
+>
+> NVIDIA DLSS is not included in this repository or in the release downloads,
+> because NVIDIA's license doesn't allow redistributing the DLSS, Ray
+> Reconstruction, Frame Generation and Reflex runtime files this way.
+> The editor, the path tracer and PhysX GPU all work without them.
+>
+> **Only if you want DLSS** (or Ray Reconstruction, Frame Generation or Reflex):
+> download the [NVIDIA Streamline SDK 2.10.0](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0)
+> and copy its DLLs next to the editor ([step 5 below](#5-optional-add-the-nvidia-streamline-dlls-only-for-dlss)).
 
 **Platform:** Windows 10/11 x64 with an NVIDIA RTX GPU. DLSS, Ray
 Reconstruction and the path tracer need an RTX card. PhysX GPU dynamics need an
@@ -140,7 +144,10 @@ python -m SCons platform=windows target=editor production=yes physx_sdk=<path fr
 - The editor lands in `bin\godot.windows.editor.x86_64.exe`.
   `PhysXGpu_64.dll` is copied next to it automatically.
 
-### 5. Add the NVIDIA Streamline DLLs
+### 5. Optional: add the NVIDIA Streamline DLLs (only for DLSS)
+
+**Skip this step unless you want DLSS, Ray Reconstruction, Frame Generation or
+Reflex.** Everything else works without it.
 
 Streamline's runtime DLLs are not in this repository; NVIDIA distributes them
 in the Streamline SDK. This source is built against **Streamline SDK 2.10.0**
@@ -161,8 +168,9 @@ in the Streamline SDK. This source is built against **Streamline SDK 2.10.0**
    development DLLs are unsigned debug builds with an on-screen overlay. They're
    for debugging only and must not be shipped.
 
-Without these DLLs the editor still runs, just without DLSS, Ray
-Reconstruction and Reflex.
+Without these DLLs the editor runs normally, including the path tracer and
+PhysX GPU. Only DLSS, Ray Reconstruction, Frame Generation and Reflex are
+unavailable.
 
 ### 6. Optional: C# (.NET) editor
 
@@ -191,8 +199,9 @@ adds them for your own machines only; don't publish that zip (see
 
 ## Using the features
 
-- **DLSS:** Project Settings > Rendering > Scaling 3D > Mode = DLSS. Pick a
-  scale, for example 0.67 for Quality.
+- **DLSS** (needs the optional Streamline DLLs from step 5): Project Settings >
+  Rendering > Scaling 3D > Mode = DLSS. Pick a scale, for example 0.67 for
+  Quality.
 - **Path tracing:** use the Forward+ renderer with the Vulkan driver, add a
   `WorldEnvironment`, and in its `Environment` enable **Pathtracing**. In
   GDScript:
@@ -201,7 +210,7 @@ adds them for your own machines only; don't publish that zip (see
   env.pathtracing_enabled = true
   env.pathtracing_samples_per_pixel = 1
   env.pathtracing_max_bounces = 2
-  env.pathtracing_denoiser = 1  # DLSS Ray Reconstruction
+  env.pathtracing_denoiser = 1  # DLSS Ray Reconstruction (needs step 5); 0 = none
   ```
 - **PhysX:** Project Settings > Physics > 3D > Physics Engine = PhysX. GPU
   dynamics start automatically on a CUDA-capable GPU; the log shows
