@@ -750,6 +750,7 @@ private:
 	void _build_help_menu(bool p_dark_mode);
 
 	void _update_main_menu_type();
+	void _update_dlss_install_button();
 	void _add_to_main_menu(const String &p_name, PopupMenu *p_menu);
 
 	void _bottom_panel_resized();
