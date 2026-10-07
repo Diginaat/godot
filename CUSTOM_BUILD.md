@@ -12,13 +12,16 @@ for humans and coding agents.
 | `origin` | https://github.com/NVIDIA-RTX/godot | `nvidia-pt-dlss` | DLSS (Streamline), Ray Reconstruction, path tracer, Aftermath |
 | `physx` | https://github.com/uno1982/godot | `feature/physx5-module` | `modules/godot_physx/` (PhysX 5, GPU dynamics, Blast, Flow, water, vehicles) |
 
-Working branch: `nvidia-pt-dlss` (local). Not pushed anywhere unless the owner asks.
+Working branch: `nvidia-pt-dlss` (local). Published to the public fork
+**https://github.com/Diginaat/godot**, branch `nvidia-dlss-physx` (the fork's
+default branch), via the `fork` remote. Never push to `origin` (NVIDIA-RTX).
 
 If a remote is missing:
 
 ```
 git remote add upstream https://github.com/godotengine/godot.git
 git remote add physx https://github.com/uno1982/godot.git
+git remote add fork https://github.com/Diginaat/godot.git
 ```
 
 ## How the three sources are combined
@@ -64,6 +67,9 @@ Update this table after every sync.
 8. **Build with `-k`** and fix all errors in one pass (see Build).
 9. **Smoke test** (see Test). Both must pass before committing.
 10. **Commit,** then update the sync state log above.
+11. **Publish:** `git push fork nvidia-pt-dlss:nvidia-dlss-physx`. Before pushing,
+    check that no private paths or project names are in tracked files
+    (`git grep`); the fork is public.
 
 ### Conflict rules (learned the hard way)
 
