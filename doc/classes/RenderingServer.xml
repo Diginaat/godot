@@ -1362,6 +1362,25 @@
 				Sets the maximum layer to use if using Canvas background mode.
 			</description>
 		</method>
+		<method name="environment_set_ddgi">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="cascades" type="int" />
+			<param index="3" name="probe_spacing" type="float" />
+			<param index="4" name="probe_grid" type="Vector3i" />
+			<param index="5" name="energy" type="float" />
+			<param index="6" name="normal_bias" type="float" />
+			<param index="7" name="view_bias" type="float" />
+			<param index="8" name="hysteresis" type="float" />
+			<param index="9" name="probe_relocation" type="bool" />
+			<param index="10" name="probe_classification" type="bool" />
+			<param index="11" name="follow_camera" type="bool" />
+			<param index="12" name="debug_mode" type="int" />
+			<description>
+				Configures dynamic diffuse global illumination (DDGI) for the environment. See [member Environment.ddgi_enabled] and the other [code]ddgi_*[/code] properties of [Environment] for details.
+			</description>
+		</method>
 		<method name="environment_set_fog">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

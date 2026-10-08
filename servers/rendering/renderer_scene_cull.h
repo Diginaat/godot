@@ -1389,6 +1389,9 @@ public:
 	PASS6(environment_set_pathtracing, RID, bool, int, int, int, RSE::PathtracingDenoiser)
 
 	PASS1RC(bool, environment_get_pathtracing_enabled, RID)
+	PASS13(environment_set_ddgi, RID, bool, int, float, const Vector3i &, float, float, float, float, bool, bool, bool, int)
+	PASS4(environment_set_ddgi_volume, RID, bool, const Vector3 &, const Vector3 &)
+	PASS1RC(bool, environment_get_ddgi_enabled, RID)
 	PASS1RC(int, environment_get_pathtracing_debug_mode, RID)
 	PASS1RC(int, environment_get_pathtracing_samples_per_pixel, RID)
 	PASS1RC(int, environment_get_pathtracing_max_bounces, RID)

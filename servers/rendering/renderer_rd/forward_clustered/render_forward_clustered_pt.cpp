@@ -558,6 +558,52 @@ void RenderForwardClusteredPT::_age_out_motion_vectors(const RenderDataRD *p_ren
 	}
 }
 
+bool RenderForwardClusteredPT::_ddgi_begin_frame(RenderDataRD *p_render_data) {
+	if (!RenderDDGI::is_enabled_for(p_render_data)) {
+		RID env = p_render_data->environment;
+		if (env.is_valid() && environment_get_ddgi_enabled(env) && !RD::get_singleton()->has_feature(RD::SUPPORTS_RAYTRACING_PIPELINE)) {
+			if (OS::get_singleton()->get_current_rendering_driver_name() == "d3d12") {
+				WARN_PRINT_ONCE("DDGI is disabled: it needs hardware ray tracing, which the D3D12 driver doesn't implement. Set Project Settings > Rendering > Rendering Device > Driver (Windows) to \"vulkan\" or run with --rendering-driver vulkan.");
+			} else {
+				WARN_PRINT_ONCE("DDGI is disabled: this GPU or driver doesn't support Vulkan ray tracing pipelines. The scene renders without DDGI.");
+			}
+		}
+		return false;
+	}
+	if (!_setup_rt() || !raytracing->get_shader()) {
+		return false;
+	}
+	if (!ddgi) {
+		ddgi = memnew(RenderDDGI);
+		ddgi->initialize();
+	}
+	return true;
+}
+
+void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) {
+	ERR_FAIL_NULL(ddgi);
+
+	// Probe rays never write the camera outputs, so no debug views or DLSS RR
+	// guide buffers; fog is a camera effect and stays off too.
+	uint32_t rt_flags = SceneShaderRaytracing::compute_rt_flags(p_render_data->environment, false);
+	rt_flags &= ~uint32_t(SceneShaderRaytracing::RT_FLAG_DEBUG_VIS_ENABLED | SceneShaderRaytracing::RT_FLAG_DLSS_RR_ENABLED);
+
+	RD::get_singleton()->draw_command_begin_label("DDGI");
+	RENDER_TIMESTAMP("DDGI Build Acceleration Structures");
+	RTViewportState *rt_state = raytracing->build_tlas(p_render_data, rt_flags);
+	if (rt_state) {
+		ddgi->update_probes(p_render_data, raytracing, rt_state, rt_flags);
+	}
+	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution);
+	RD::get_singleton()->draw_command_end_label();
+}
+
+void RenderForwardClusteredPT::_ddgi_debug_draw(RenderDataRD *p_render_data) {
+	if (ddgi) {
+		ddgi->debug_draw(p_render_data);
+	}
+}
+
 void RenderForwardClusteredPT::_free_rt_viewport_state(RenderSceneBuffersRD *p_render_buffers) {
 	ERR_FAIL_NULL(p_render_buffers);
 	p_render_buffers->clear_context(RB_SCOPE_DLSS_RR);
@@ -578,6 +624,12 @@ void RenderForwardClusteredPT::_render_buffers_debug_draw(const RenderDataRD *p_
 	ERR_FAIL_COND(rb_data.is_null());
 
 	RID render_target = rb->get_render_target();
+
+	// DDGI "Indirect Light" and "Cascades" debug views show the GI ambient buffer.
+	if (RenderDDGI::debug_shows_gi_buffer(p_render_data) && rb->has_texture(RB_SCOPE_GI, RB_TEX_AMBIENT)) {
+		Size2i rtsize = texture_storage->render_target_get_size(render_target);
+		copy_effects->copy_to_fb_rect(rb->get_texture(RB_SCOPE_GI, RB_TEX_AMBIENT), texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, false, false, true, RID(), rb->get_view_count() > 1, true);
+	}
 
 	// DLSS Ray Reconstruction debug views
 	if (raytracing && raytracing->dlss_rr_has_buffers(rb.ptr())) {
@@ -613,6 +665,9 @@ RenderForwardClusteredPT::RenderForwardClusteredPT() {
 }
 
 RenderForwardClusteredPT::~RenderForwardClusteredPT() {
+	if (ddgi) {
+		memdelete(ddgi);
+	}
 	if (raytracing) {
 		memdelete(raytracing);
 	}

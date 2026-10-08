@@ -34,6 +34,7 @@
 #include "editor/editor_string_names.h"
 #include "editor/scene/3d/gizmos/gizmo_3d_helper.h"
 #include "editor/settings/editor_settings.h"
+#include "scene/3d/ddgi_volume.h"
 #include "scene/3d/voxel_gi.h"
 
 VoxelGIGizmoPlugin::VoxelGIGizmoPlugin() {
@@ -42,6 +43,7 @@ VoxelGIGizmoPlugin::VoxelGIGizmoPlugin() {
 	Color gizmo_color = EDITOR_GET("editors/3d_gizmos/gizmo_colors/voxel_gi");
 
 	create_material("voxel_gi_material", gizmo_color);
+	create_material("ddgi_volume_material", Color(0.15, 0.85, 1.0));
 
 	// This gizmo draws a lot of lines. Use a low opacity to make it not too intrusive.
 	gizmo_color.a = 0.02;
@@ -52,7 +54,7 @@ VoxelGIGizmoPlugin::VoxelGIGizmoPlugin() {
 }
 
 bool VoxelGIGizmoPlugin::has_gizmo(Node3D *p_spatial) {
-	return Object::cast_to<VoxelGI>(p_spatial) != nullptr;
+	return Object::cast_to<VoxelGI>(p_spatial) != nullptr || Object::cast_to<DDGIVolume>(p_spatial) != nullptr;
 }
 
 String VoxelGIGizmoPlugin::get_gizmo_name() const {
@@ -68,8 +70,11 @@ String VoxelGIGizmoPlugin::get_handle_name(const EditorNode3DGizmo *p_gizmo, int
 }
 
 Variant VoxelGIGizmoPlugin::get_handle_value(const EditorNode3DGizmo *p_gizmo, int p_id, bool p_secondary) const {
-	VoxelGI *probe = Object::cast_to<VoxelGI>(p_gizmo->get_node_3d());
-	return probe->get_size();
+	if (VoxelGI *probe = Object::cast_to<VoxelGI>(p_gizmo->get_node_3d())) {
+		return probe->get_size();
+	}
+	DDGIVolume *volume = Object::cast_to<DDGIVolume>(p_gizmo->get_node_3d());
+	return volume->get_size();
 }
 
 void VoxelGIGizmoPlugin::begin_handle_action(const EditorNode3DGizmo *p_gizmo, int p_id, bool p_secondary) {
@@ -77,16 +82,25 @@ void VoxelGIGizmoPlugin::begin_handle_action(const EditorNode3DGizmo *p_gizmo, i
 }
 
 void VoxelGIGizmoPlugin::set_handle(const EditorNode3DGizmo *p_gizmo, int p_id, bool p_secondary, Camera3D *p_camera, const Point2 &p_point) {
-	VoxelGI *probe = Object::cast_to<VoxelGI>(p_gizmo->get_node_3d());
+	Node3D *node = p_gizmo->get_node_3d();
 
 	Vector3 sg[2];
 	helper->get_segment(p_camera, p_point, sg);
 
-	Vector3 size = probe->get_size();
+	Vector3 size;
+	if (VoxelGI *probe = Object::cast_to<VoxelGI>(node)) {
+		size = probe->get_size();
+	} else {
+		size = Object::cast_to<DDGIVolume>(node)->get_size();
+	}
 	Vector3 position;
 	helper->box_set_handle(sg, p_id, size, position);
-	probe->set_size(size);
-	probe->set_global_position(position);
+	if (VoxelGI *probe = Object::cast_to<VoxelGI>(node)) {
+		probe->set_size(size);
+	} else {
+		Object::cast_to<DDGIVolume>(node)->set_size(size);
+	}
+	node->set_global_position(position);
 }
 
 void VoxelGIGizmoPlugin::commit_handle(const EditorNode3DGizmo *p_gizmo, int p_id, bool p_secondary, const Variant &p_restore, bool p_cancel) {
@@ -96,19 +110,17 @@ void VoxelGIGizmoPlugin::commit_handle(const EditorNode3DGizmo *p_gizmo, int p_i
 void VoxelGIGizmoPlugin::redraw(EditorNode3DGizmo *p_gizmo) {
 	p_gizmo->clear();
 
+	Node3D *node = p_gizmo->get_node_3d();
 	if (p_gizmo->is_selected()) {
-		VoxelGI *probe = Object::cast_to<VoxelGI>(p_gizmo->get_node_3d());
-		Ref<Material> material = get_material("voxel_gi_material", p_gizmo);
+		VoxelGI *probe = Object::cast_to<VoxelGI>(node);
+		DDGIVolume *volume = Object::cast_to<DDGIVolume>(node);
+		Ref<Material> material = get_material(volume ? "ddgi_volume_material" : "voxel_gi_material", p_gizmo);
 		Ref<Material> material_internal = get_material("voxel_gi_internal_material", p_gizmo);
 
 		Vector<Vector3> lines;
-		Vector3 size = probe->get_size();
-
-		static const int subdivs[VoxelGI::SUBDIV_MAX] = { 64, 128, 256, 512 };
+		Vector3 size = volume ? volume->get_size() : probe->get_size();
 
 		AABB aabb = AABB(-size / 2, size);
-		int subdiv = subdivs[probe->get_subdiv()];
-		float cell_size = aabb.get_longest_axis_size() / subdiv;
 
 		for (int i = 0; i < 12; i++) {
 			Vector3 a, b;
@@ -119,46 +131,54 @@ void VoxelGIGizmoPlugin::redraw(EditorNode3DGizmo *p_gizmo) {
 
 		p_gizmo->add_lines(lines, material);
 
-		lines.clear();
+		if (probe) {
+			lines.clear();
 
-		for (int i = 1; i < subdiv; i++) {
-			for (int j = 0; j < 3; j++) {
-				if (cell_size * i > aabb.size[j]) {
-					continue;
-				}
+			static const int subdivs[VoxelGI::SUBDIV_MAX] = { 64, 128, 256, 512 };
+			int subdiv = subdivs[probe->get_subdiv()];
+			float cell_size = aabb.get_longest_axis_size() / subdiv;
 
-				int j_n1 = (j + 1) % 3;
-				int j_n2 = (j + 2) % 3;
-
-				for (int k = 0; k < 4; k++) {
-					Vector3 from = aabb.position, to = aabb.position;
-					from[j] += cell_size * i;
-					to[j] += cell_size * i;
-
-					if (k & 1) {
-						to[j_n1] += aabb.size[j_n1];
-					} else {
-						to[j_n2] += aabb.size[j_n2];
+			for (int i = 1; i < subdiv; i++) {
+				for (int j = 0; j < 3; j++) {
+					if (cell_size * i > aabb.size[j]) {
+						continue;
 					}
 
-					if (k & 2) {
-						from[j_n1] += aabb.size[j_n1];
-						from[j_n2] += aabb.size[j_n2];
-					}
+					int j_n1 = (j + 1) % 3;
+					int j_n2 = (j + 2) % 3;
 
-					lines.push_back(from);
-					lines.push_back(to);
+					for (int k = 0; k < 4; k++) {
+						Vector3 from = aabb.position, to = aabb.position;
+						from[j] += cell_size * i;
+						to[j] += cell_size * i;
+
+						if (k & 1) {
+							to[j_n1] += aabb.size[j_n1];
+						} else {
+							to[j_n2] += aabb.size[j_n2];
+						}
+
+						if (k & 2) {
+							from[j_n1] += aabb.size[j_n1];
+							from[j_n2] += aabb.size[j_n2];
+						}
+
+						lines.push_back(from);
+						lines.push_back(to);
+					}
 				}
 			}
+
+			p_gizmo->add_lines(lines, material_internal);
 		}
 
-		p_gizmo->add_lines(lines, material_internal);
-
-		Vector<Vector3> handles = helper->box_get_handles(probe->get_size());
+		Vector<Vector3> handles = helper->box_get_handles(size);
 
 		p_gizmo->add_handles(handles, get_material("handles"));
 	}
 
-	Ref<Material> icon = get_material("voxel_gi_icon", p_gizmo);
-	p_gizmo->add_unscaled_billboard(icon, 0.05);
+	if (Object::cast_to<VoxelGI>(node)) {
+		Ref<Material> icon = get_material("voxel_gi_icon", p_gizmo);
+		p_gizmo->add_unscaled_billboard(icon, 0.05);
+	}
 }

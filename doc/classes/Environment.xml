@@ -82,6 +82,46 @@
 		<member name="background_mode" type="int" setter="set_background" getter="get_background" enum="Environment.BGMode" default="0">
 			The background mode.
 		</member>
+		<member name="ddgi_cascades" type="int" setter="set_ddgi_cascades" getter="get_ddgi_cascades" default="3">
+			The number of probe grids (cascades) centered on the camera. Each cascade has twice the probe spacing of the previous one, so it covers twice the distance with the same number of probes. Use more cascades for large outdoor scenes.
+		</member>
+		<member name="ddgi_debug_mode" type="int" setter="set_ddgi_debug_mode" getter="get_ddgi_debug_mode" enum="Environment.DDGIDebugMode" default="0">
+			Shows DDGI internals instead of (or over) the final image. See [enum DDGIDebugMode].
+		</member>
+		<member name="ddgi_enabled" type="bool" setter="set_ddgi_enabled" getter="is_ddgi_enabled" default="false">
+			If [code]true[/code], enables dynamic diffuse global illumination (DDGI): a grid of irradiance probes, updated every frame with hardware ray tracing, provides the diffuse indirect light (color bleeding, light from emissive surfaces and the sky, indirect shadows) for opaque surfaces. Lights, emissive materials and geometry can change at any time.
+			While DDGI is active, [member sdfgi_enabled] and [VoxelGI] nodes are ignored for the view, so indirect light isn't counted twice. Objects using a [LightmapGI] keep their lightmap. Specular reflections are not affected.
+			[b]Note:[/b] Requires the Forward+ renderer with the Vulkan rendering driver on hardware with ray tracing support. Elsewhere DDGI is disabled with a warning and the scene renders as if it were off.
+			[b]Note:[/b] When [member pathtracing_enabled] is [code]true[/code], the path tracer computes all indirect light and DDGI is not used.
+			[b]Note:[/b] The workload (rays per probe, probes updated per frame, probe resolution) is set in [member ProjectSettings.rendering/global_illumination/ddgi/quality].
+		</member>
+		<member name="ddgi_energy" type="float" setter="set_ddgi_energy" getter="get_ddgi_energy" default="1.0">
+			Multiplier for the indirect light DDGI adds to surfaces.
+		</member>
+		<member name="ddgi_follow_camera" type="bool" setter="set_ddgi_follow_camera" getter="is_ddgi_following_camera" default="true">
+			If [code]true[/code], the probe grids move with the camera in whole probe steps (they scroll): probes that stay inside keep their light, and only the newly covered probes start over. If [code]false[/code], the grids stay where the camera was when DDGI started.
+		</member>
+		<member name="ddgi_hysteresis" type="float" setter="set_ddgi_hysteresis" getter="get_ddgi_hysteresis" default="0.95">
+			How much of a probe's previous light is kept on each update. Higher values give smoother, less noisy indirect light that reacts more slowly to changes. When the light at a probe changes strongly, DDGI temporarily lowers this value so the change shows up quickly.
+		</member>
+		<member name="ddgi_normal_bias" type="float" setter="set_ddgi_normal_bias" getter="get_ddgi_normal_bias" default="0.1">
+			Moves the point where probes are sampled away from the surface, along its normal, as a fraction of the probe spacing. Increase it if surfaces show dark blotches (self shadowing); decrease it if light leaks through thin walls.
+		</member>
+		<member name="ddgi_probe_classification" type="bool" setter="set_ddgi_probe_classification" getter="is_ddgi_probe_classification_enabled" default="true">
+			If [code]true[/code], probes inside geometry are excluded, and probes with no surface nearby are updated much less often. Improves quality near walls and saves ray tracing time in open spaces.
+		</member>
+		<member name="ddgi_probe_grid" type="Vector3i" setter="set_ddgi_probe_grid" getter="get_ddgi_probe_grid" default="Vector3i(24, 12, 24)">
+			The number of probes along each axis in every cascade. The finest cascade covers [code]ddgi_probe_grid * ddgi_probe_spacing[/code] meters around the camera. More probes cost more video memory and need more updates to stay current.
+		</member>
+		<member name="ddgi_probe_relocation" type="bool" setter="set_ddgi_probe_relocation" getter="is_ddgi_probe_relocation_enabled" default="true">
+			If [code]true[/code], probes that end up inside or very close to geometry are moved (by up to 45% of the probe spacing) to a position where they can see the surfaces they light.
+		</member>
+		<member name="ddgi_probe_spacing" type="float" setter="set_ddgi_probe_spacing" getter="get_ddgi_probe_spacing" default="1.0">
+			The distance between probes in the finest cascade, in meters. Smaller values capture smaller lighting details (and leak less) at the cost of a smaller covered area.
+		</member>
+		<member name="ddgi_view_bias" type="float" setter="set_ddgi_view_bias" getter="get_ddgi_view_bias" default="0.3">
+			Moves the point where probes are sampled toward the camera, as a fraction of the probe spacing. Reduces self shadowing and light leaks at grazing angles.
+		</member>
 		<member name="fog_aerial_perspective" type="float" setter="set_fog_aerial_perspective" getter="get_fog_aerial_perspective" default="0.0">
 			If set above [code]0.0[/code] (exclusive), blends between the fog's color and the color of the background [Sky], as read from the radiance cubemap. This has a small performance cost when set above [code]0.0[/code]. Must have [member background_mode] set to [constant BG_SKY].
 			This is useful to simulate [url=https://en.wikipedia.org/wiki/Aerial_perspective]aerial perspective[/url] in large scenes with low density fog. However, it is not very useful for high-density fog, as the sky will shine through. When set to [code]1.0[/code], the fog color comes completely from the [Sky]. If set to [code]0.0[/code], aerial perspective is disabled.
@@ -548,6 +588,30 @@
 		</constant>
 		<constant name="RT_DEBUG_BRDF_REJECTION" value="22" enum="PathtracingDebugMode">
 			Displays rays that were rejected by the BRDF sampling process, useful for debugging importance sampling issues.
+		</constant>
+		<constant name="DDGI_DEBUG_DISABLED" value="0" enum="DDGIDebugMode">
+			No debug view.
+		</constant>
+		<constant name="DDGI_DEBUG_INDIRECT_LIGHT" value="1" enum="DDGIDebugMode">
+			Shows only the indirect diffuse light DDGI adds (the GI buffer), without surface colors or direct light.
+		</constant>
+		<constant name="DDGI_DEBUG_PROBE_IRRADIANCE" value="2" enum="DDGIDebugMode">
+			Draws the probes as spheres colored with the light they store in each direction.
+		</constant>
+		<constant name="DDGI_DEBUG_PROBE_DISTANCE" value="3" enum="DDGIDebugMode">
+			Draws the probes as spheres shaded by the mean distance to the nearest surface in each direction (white = far).
+		</constant>
+		<constant name="DDGI_DEBUG_PROBE_STATES" value="4" enum="DDGIDebugMode">
+			Draws the probes colored by state: blue = not updated yet, green = active, gray = inactive (no surface nearby), red = inside geometry.
+		</constant>
+		<constant name="DDGI_DEBUG_PROBE_PRIORITY" value="5" enum="DDGIDebugMode">
+			Draws the probes colored by how much their light changes (green = stable, red = changing, so updated more often). Probes updated in the current frame are white.
+		</constant>
+		<constant name="DDGI_DEBUG_CASCADES" value="6" enum="DDGIDebugMode">
+			Colors surfaces by the finest probe cascade that covers them.
+		</constant>
+		<constant name="DDGI_DEBUG_MAX" value="7" enum="DDGIDebugMode">
+			Represents the size of the [enum DDGIDebugMode] enum.
 		</constant>
 		<constant name="FOG_MODE_EXPONENTIAL" value="0" enum="FogMode">
 			Use a physically-based fog model defined primarily by fog density.
