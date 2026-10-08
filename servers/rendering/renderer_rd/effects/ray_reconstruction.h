@@ -30,6 +30,9 @@
 
 #pragma once
 
+#include "core/math/projection.h"
+#include "core/math/transform_3d.h"
+#include "core/templates/hash_map.h"
 #include "servers/rendering/renderer_rd/shaders/effects/ray_reconstruction.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 
@@ -49,30 +52,62 @@ public:
 		RID velocity; // prev_uv - curr_uv (rg16f).
 		RID output; // Internal color texture (rgba16f).
 		Size2i size;
+		Projection projection; // As the path tracer's primary rays use it (depth correction and jitter included).
+		Transform3D cam_transform;
+		Transform3D prev_cam_transform;
 	};
 
 	RayReconstruction();
 	~RayReconstruction();
 
 	void process(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs);
+	// Drops the per-viewport state (history parity, parameter buffer).
+	void free_viewport(RenderSceneBuffersRD *p_render_buffers);
 
 private:
 	enum Mode {
-		MODE_COMPOSE,
+		MODE_TEMPORAL,
+		MODE_VARIANCE,
+		MODE_ATROUS,
 		MODE_MAX,
 	};
 
+	enum {
+		FLAG_FEEDBACK = 1,
+		FLAG_COMPOSE = 2,
+	};
+
+	// Matches Params in ray_reconstruction.glsl (std140).
+	struct ParamsUBO {
+		float inv_projection[16];
+		float view_to_world_rotation[16];
+		float current_to_previous_view[16];
+		float size[4];
+		float history[4];
+		float filter_params[4];
+		float view_ray[4];
+	};
+	static_assert(sizeof(ParamsUBO) == 256);
+
 	struct PushConstant {
-		int32_t size[2];
+		int32_t step_size;
+		int32_t iteration;
+		uint32_t flags;
 		uint32_t debug_mode;
-		uint32_t pad;
+	};
+
+	struct ViewportState {
+		RID params_buffer;
+		uint32_t frame = 0;
 	};
 
 	RayReconstructionShaderRD shader;
 	RID shader_version;
 	RID pipelines[MODE_MAX];
+	HashMap<RenderSceneBuffersRD *, ViewportState> viewports;
 
 	RID _get_shader(Mode p_mode);
+	bool _ensure_history(Ref<RenderSceneBuffersRD> p_render_buffers);
 };
 
 } // namespace RendererRD
