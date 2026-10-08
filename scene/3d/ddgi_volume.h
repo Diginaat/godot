@@ -1,5 +1,31 @@
 /**************************************************************************/
-/*  ddgi_volume.h                                                          */
+/*  ddgi_volume.h                                                         */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
 #pragma once
@@ -11,15 +37,16 @@ class DDGIVolume : public VisualInstance3D {
 	GDCLASS(DDGIVolume, VisualInstance3D);
 
 	bool enabled = true;
-	Vector3 size = Vector3(60.264f, 5.774f, 62.86f);
-	float probe_spacing = 2.0f;
+	Vector3 size = Vector3(24, 12, 24);
+	float probe_spacing = 1.0f;
 	int cascades = 3;
 	float energy = 1.0f;
 	float normal_bias = 0.1f;
 	float view_bias = 0.3f;
 	float hysteresis = 0.95f;
-	bool probe_relocation = false;
-	bool probe_classification = false;
+	bool probe_relocation = true;
+	bool probe_classification = true;
+	bool follow_camera = false;
 	Environment::DDGIDebugMode debug_mode = Environment::DDGI_DEBUG_DISABLED;
 	Ref<Environment> applied_environment;
 
@@ -61,6 +88,9 @@ public:
 
 	void set_probe_classification(bool p_enabled);
 	bool is_probe_classification_enabled() const;
+
+	void set_follow_camera(bool p_enabled);
+	bool is_following_camera() const;
 
 	void set_debug_mode(Environment::DDGIDebugMode p_mode);
 	Environment::DDGIDebugMode get_debug_mode() const;

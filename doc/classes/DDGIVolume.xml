@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DDGIVolume" inherits="VisualInstance3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Ray traced dynamic diffuse global illumination (DDGI) for the scene.
+	</brief_description>
+	<description>
+			Adds dynamic diffuse global illumination (DDGI) to the scene: grids of irradiance probes that trace rays every frame with hardware ray tracing. Opaque surfaces get their diffuse indirect light from the probes. Lights, emissive materials, the sky and geometry can all change at runtime; the indirect light follows over a few frames.
+			The node drives the [code]ddgi_*[/code] properties of the [Environment] of its [World3D] (the [WorldEnvironment]), and turns DDGI off when it leaves the scene. Use one [DDGIVolume] per scene; with several, the last one that changed wins.
+			By default the probes fill the box given by [member size], centered on the node. With [member follow_camera], they follow the camera instead and the box only sets how many probes there are.
+			The workload (rays per probe, probes updated per frame, probe resolution) is set in [member ProjectSettings.rendering/global_illumination/ddgi/quality].
+			[b]Note:[/b] Needs the Forward+ renderer and the Vulkan rendering driver on a GPU with ray tracing. Elsewhere (D3D12, Mobile, Compatibility) DDGI does nothing and the scene renders as without it.
+			[b]Note:[/b] SDFGI and [VoxelGI] are skipped for views that use DDGI, so indirect light isn't counted twice. Objects with a [LightmapGI] lightmap keep it.
+			[b]Note:[/b] The probe grid is always aligned with the world axes; the node's rotation and scale are ignored.
+	</description>
+	<tutorials>
+	</tutorials>
+	<members>
+		<member name="cascades" type="int" setter="set_cascades" getter="get_cascades" default="3">
+			The number of probe grids. Each cascade has twice the probe spacing of the previous one and covers twice the distance, so far surfaces get coarser indirect light.
+		</member>
+		<member name="debug_mode" type="int" setter="set_debug_mode" getter="get_debug_mode" enum="Environment.DDGIDebugMode" default="0">
+			Shows the indirect light, the probes or the cascades instead of the normal image, for finding lighting problems. See [enum Environment.DDGIDebugMode].
+		</member>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="true">
+			If [code]true[/code], DDGI is on. If [code]false[/code], the scene renders without it.
+		</member>
+		<member name="energy" type="float" setter="set_energy" getter="get_energy" default="1.0">
+			Multiplier for the indirect light.
+		</member>
+		<member name="follow_camera" type="bool" setter="set_follow_camera" getter="is_following_camera" default="false">
+			If [code]true[/code], the probe grids follow the camera and scroll as it moves, so DDGI covers any area. [member size] and [member probe_spacing] then only set the number of probes per axis. If [code]false[/code], the probes stay in the box around the node.
+		</member>
+		<member name="hysteresis" type="float" setter="set_hysteresis" getter="get_hysteresis" default="0.95">
+			How much of a probe's previous light is kept at each update. Higher values give less noise but slower reaction to light changes. Large changes lower it automatically for a while.
+		</member>
+		<member name="normal_bias" type="float" setter="set_normal_bias" getter="get_normal_bias" default="0.1">
+			Offset of the probe lookup along the surface normal, as a fraction of the probe spacing. Raise it against dark blotches near corners (self shadowing).
+		</member>
+		<member name="probe_classification" type="bool" setter="set_probe_classification" getter="is_probe_classification_enabled" default="true">
+			If [code]true[/code], probes inside geometry are switched off and probes with no surface nearby are updated less often. Saves ray tracing time.
+		</member>
+		<member name="probe_relocation" type="bool" setter="set_probe_relocation" getter="is_probe_relocation_enabled" default="true">
+			If [code]true[/code], probes that end up inside or too close to geometry are moved away from it (by at most half a cell), which reduces light leaks and dark spots.
+		</member>
+		<member name="probe_spacing" type="float" setter="set_probe_spacing" getter="get_probe_spacing" default="1.0">
+			The distance between probes of the finest cascade, in meters. Smaller spacing gives more detailed indirect light and fewer leaks through thin walls, but needs more probes for the same area.
+		</member>
+		<member name="size" type="Vector3" setter="set_size" getter="get_size" default="Vector3(24, 12, 24)">
+			The size of the box filled with probes, in meters. The number of probes per axis is [code]size / probe_spacing + 1[/code] (at most 64 per axis). The box can be resized with the gizmo handles in the 3D editor.
+		</member>
+		<member name="view_bias" type="float" setter="set_view_bias" getter="get_view_bias" default="0.3">
+			Offset of the probe lookup toward the camera, as a fraction of the probe spacing. Raise it against dark blotches and leaks.
+		</member>
+	</members>
+</class>
