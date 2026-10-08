@@ -445,6 +445,9 @@ void StreamlineInstaller::_cancel_pressed() {
 }
 
 void StreamlineInstaller::_restart_pressed() {
+	_log(TTR("Saving open scenes and restarting the editor..."));
+	EditorNode::get_singleton()->save_all_scenes();
+	// Still asks about scenes that were never saved to a file.
 	EditorNode::get_singleton()->restart_editor();
 }
 
@@ -553,6 +556,8 @@ void StreamlineInstaller::_extract_next() {
 		_log(vformat(TTR("Deleted the downloaded zip %s."), _get_download_path()));
 		_log(vformat(TTR("Done: %d files installed. Restart the editor to load Streamline, then select DLSS in Project Settings > Rendering > Scaling 3D > Mode."), installed_count), get_theme_color(SNAME("success_color"), EditorStringName(Editor)));
 		progress_label->set_text(TTR("Installed. Restart the editor to use DLSS."));
+		restart_confirm->reset_size();
+		restart_confirm->popup_centered();
 		_update_status();
 		_update_buttons();
 		return;
@@ -682,7 +687,8 @@ StreamlineInstaller::StreamlineInstaller() {
 	cancel_button = memnew(Button(TTR("Cancel Download")));
 	cancel_button->connect(SceneStringName(pressed), callable_mp(this, &StreamlineInstaller::_cancel_pressed));
 	hb->add_child(cancel_button);
-	restart_button = memnew(Button(TTR("Restart Editor")));
+	restart_button = memnew(Button(TTR("Save & Restart")));
+	restart_button->set_tooltip_text(TTR("Save all open scenes, then restart the editor so it loads DLSS."));
 	restart_button->connect(SceneStringName(pressed), callable_mp(this, &StreamlineInstaller::_restart_pressed));
 	hb->add_child(restart_button);
 	progress_label = memnew(Label(TTR("Accept the license terms to enable the install button.")));
@@ -722,6 +728,14 @@ StreamlineInstaller::StreamlineInstaller() {
 	download_confirm->connect(SceneStringName(confirmed), callable_mp(this, &StreamlineInstaller::_start_install));
 	download_confirm->connect("canceled", callable_mp(this, &StreamlineInstaller::_log).bind(TTR("Download declined. Nothing was downloaded."), Color()));
 	add_child(download_confirm);
+
+	restart_confirm = memnew(ConfirmationDialog);
+	restart_confirm->set_title(TTR("DLSS Installed"));
+	restart_confirm->set_text(TTR("DLSS is installed. The editor loads it when it starts.\n\nSave your open scenes and restart the editor now?"));
+	restart_confirm->set_ok_button_text(TTR("Save & Restart"));
+	restart_confirm->set_cancel_button_text(TTR("Later"));
+	restart_confirm->connect(SceneStringName(confirmed), callable_mp(this, &StreamlineInstaller::_restart_pressed));
+	add_child(restart_confirm);
 
 	link_confirm = memnew(ConfirmationDialog);
 	link_confirm->set_title(TTR("Open Link?"));

@@ -99,6 +99,7 @@ class StreamlineInstaller : public AcceptDialog {
 	HTTPRequest *downloader = nullptr;
 	ConfirmationDialog *download_confirm = nullptr;
 	RichTextLabel *download_confirm_text = nullptr;
+	ConfirmationDialog *restart_confirm = nullptr;
 	ConfirmationDialog *link_confirm = nullptr;
 	String pending_url;
 
