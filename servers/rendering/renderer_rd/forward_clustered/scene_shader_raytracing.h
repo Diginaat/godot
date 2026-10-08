@@ -99,7 +99,12 @@ public:
 	static constexpr int RT_PARAM_SAMPLE_COUNT = 1;
 	static constexpr int RT_PARAM_MAX_BOUNCES = 2;
 	static constexpr int RT_PARAM_DENOISER = 3;
-	// Indices 4-12 reserved for future use.
+	static constexpr int RT_PARAM_VOLUMETRIC_FOG_INV_LENGTH = 4;
+	static constexpr int RT_PARAM_VOLUMETRIC_FOG_DETAIL_SPREAD = 5;
+	static constexpr int RT_PARAM_HAS_VOLUMETRIC_FOG = 6;
+	static constexpr int RT_PARAM_VOLUMETRIC_FOG_SKY_AFFECT = 7;
+	static constexpr int RT_PARAM_FOG_USE_LEGACY_BLENDING = 8;
+	// Indices 9-12 reserved for future use.
 	static constexpr int RT_PARAM_EMISSIVE_MESH_COUNT = 13;
 	static constexpr int RT_PARAM_LIGHT_COUNT = 14;
 	static constexpr int RT_PARAM_FRAME_INDEX = 15;
@@ -483,6 +488,7 @@ private:
 	void _build_pipeline_worker(PipelineBuildTask *p_task);
 	static void _build_pipeline_worker_static(void *p_userdata);
 	void _finalize_pipeline_build(PipelineBuildTask *p_task);
+	void _free_task_owned_outputs(PipelineBuildTask *p_task);
 	void _drain_lane_inline_main_thread();
 	void _join_lane_for_shutdown();
 	PipelineBuildTask *_make_pipeline_build_task(uint32_t p_rt_flags, PipelineBundle &p_bundle);

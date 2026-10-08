@@ -83,6 +83,17 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   are ShaderRD templates: `version_build_variant_stage_sources()` gives the
   expanded source, then placeholders are replaced and it is compiled with
   `shader_compile_spirv_from_source()`. Compute can't use `gl_PrimitiveID`.
+- Path traced volumetric fog reuses Godot's camera-space integrated froxel
+  `VolumetricFog::fog_map`, so sample it only for primary rays. Before updating
+  volumetric fog in the PT render path, run voxel GI setup so
+  `rbgi->voxel_gi_textures[]` contains default textures; otherwise binding 13
+  in `volumetric_fog_process.glsl` is empty and fog compute dispatch fails.
+  Sky misses must also apply `volumetric_fog_sky_affect` with the same legacy /
+  non-legacy blend formula as `shaders/environment/sky.glsl`.
+- Async RT pipeline build tasks own newly compiled per-hit-group shader RIDs
+  until finalized into a `PipelineBundle`. If shutdown abandons a finished task,
+  free those task-owned shaders as well as the new pipeline, or exit reports
+  leaked `Shader` RIDs.
 - A BLAS dies with the buffers it was built from. Check
   `RenderingDevice::acceleration_structure_is_valid()` before freeing one from
   a cache. Don't bind buffers you free later through a linear-pool uniform

@@ -243,6 +243,27 @@ void apply_segment_fog(float segment_dist, inout vec3 radiance, inout vec3 throu
 		return;
 	}
 
+	PathState ps = path_unpack(payload);
+	if (get_rt_param(RT_PARAM_HAS_VOLUMETRIC_FOG) > 0.5 && get_total_bounces(ps.packed_bounces_flags) == 0u) {
+		mat4 view_mat = transpose(mat4(
+				scene_data_block.data.view_matrix[0],
+				scene_data_block.data.view_matrix[1],
+				scene_data_block.data.view_matrix[2],
+				vec4(0.0, 0.0, 0.0, 1.0)));
+		vec3 world_hit = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * segment_dist;
+		vec3 vertex = (view_mat * vec4(world_hit, 1.0)).xyz;
+		if ((scene_data_block.data.flags & uint(SCENE_DATA_FLAGS_USE_FOG)) != 0u) {
+			vec4 fog = fog_process(scene_data_block.data, vertex);
+			radiance += throughput * fog.rgb * fog.a;
+			throughput *= (1.0 - fog.a);
+		}
+		float view_depth = -vertex.z;
+		vec4 volumetric_fog = sample_primary_volumetric_fog(view_depth);
+		radiance += throughput * volumetric_fog.rgb;
+		throughput *= volumetric_fog.a;
+		return;
+	}
+
 	// Build a view-space vertex along the ray direction at the hit distance.
 	// fog_process needs view-space position for distance and height calculations.
 	mat4 view_mat = transpose(mat4(

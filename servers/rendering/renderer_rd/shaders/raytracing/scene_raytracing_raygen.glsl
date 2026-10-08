@@ -207,7 +207,10 @@ void main() {
 	vec3 sky_color = radiance_octmap_sample(sky_uv, 0.0);
 	sky_color *= scene_data_block.data.IBL_exposure_normalization;
 
-	if ((RT_FLAGS & RT_FLAG_FOG_ENABLED) != 0u) {
+	uint total_bounces = get_total_bounces(ps.packed_bounces_flags);
+	bool is_primary_miss = total_bounces == 0u;
+
+	if ((RT_FLAGS & RT_FLAG_FOG_ENABLED) != 0u && (scene_data_block.data.flags & uint(SCENE_DATA_FLAGS_USE_FOG)) != 0u) {
 		vec3 fog_color = scene_data_block.data.fog_light_color;
 
 		if (scene_data_block.data.fog_aerial_perspective > 0.0) {
@@ -219,9 +222,19 @@ void main() {
 		sky_color = mix(sky_color, fog_color, scene_data_block.data.fog_sky_affect);
 	}
 
+	if (get_rt_param(RT_PARAM_HAS_VOLUMETRIC_FOG) > 0.5 && is_primary_miss) {
+		vec4 volumetric_fog = sample_primary_volumetric_fog(scene_data_block.data.z_far);
+		float sky_affect = get_rt_param(RT_PARAM_VOLUMETRIC_FOG_SKY_AFFECT);
+		if (get_rt_param(RT_PARAM_FOG_USE_LEGACY_BLENDING) > 0.5) {
+			sky_color = mix(sky_color, volumetric_fog.rgb, (1.0 - volumetric_fog.a) * sky_affect);
+		} else {
+			vec3 fogged_sky = sky_color * volumetric_fog.a + volumetric_fog.rgb;
+			sky_color = mix(sky_color, fogged_sky, sky_affect);
+		}
+	}
+
 #ifdef DLSS_RR_ENABLED
 	{
-		uint total_bounces = get_total_bounces(ps.packed_bounces_flags);
 		if (total_bounces == 0u && is_sample_zero(ps.packed_bounces_flags)) {
 			ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
 			imageStore(dlss_rr_diffuse_albedo, pixel, vec4(DLSSRR_encodeDiffuseAlbedo(sky_color), 1.0));

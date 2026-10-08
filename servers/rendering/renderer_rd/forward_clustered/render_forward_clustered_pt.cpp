@@ -82,6 +82,7 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 
 	current_cluster_builder = rb_data->cluster_builder;
 	p_render_data->voxel_gi_count = 0;
+	gi.setup_voxel_gi_instances(p_render_data, p_render_data->render_buffers, p_render_data->scene_data->cam_transform, *p_render_data->voxel_gi_instances, p_render_data->voxel_gi_count);
 
 	ERR_FAIL_NULL(current_cluster_builder);
 
@@ -136,6 +137,7 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 	RD::get_singleton()->draw_command_begin_label("Render Setup");
 
 	_setup_lightmaps(p_render_data, *p_render_data->lightmaps, p_render_data->scene_data->cam_transform);
+	_setup_voxelgis(*p_render_data->voxel_gi_instances);
 
 	p_render_data->scene_data->directional_light_count = _count_directional_lights(p_render_data);
 
@@ -143,6 +145,16 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 
 	// May have changed due to the above (light buffer enlarged, as an example).
 	_update_render_base_uniform_set();
+
+	uint32_t pt_directional_light_count = 0;
+	uint32_t pt_positional_light_count = 0;
+	_setup_lights_cluster_decals(p_render_data, pt_directional_light_count, pt_positional_light_count);
+
+	if (rb_data.is_valid()) {
+		RENDER_TIMESTAMP("Update Volumetric Fog");
+		bool directional_shadows = RendererRD::LightStorage::get_singleton()->has_directional_shadows(pt_directional_light_count);
+		_update_volumetric_fog(rb, p_render_data->environment, p_render_data->scene_data->cam_projection, p_render_data->scene_data->cam_transform, p_render_data->scene_data->prev_cam_transform.affine_inverse(), p_render_data->shadow_atlas, pt_directional_light_count, directional_shadows, pt_positional_light_count, p_render_data->voxel_gi_count, *p_render_data->fog_volumes);
+	}
 
 	_age_out_motion_vectors(p_render_data);
 
@@ -169,7 +181,7 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 	if (rb_data.is_valid() && raytracing && raytracing->get_shader()) {
 		RENDER_TIMESTAMP("Build Acceleration Structures");
 		RID rt_environment = p_render_data->environment.is_valid() ? p_render_data->environment : RID();
-		const bool fog_enabled = rt_environment.is_valid() && environment_get_fog_enabled(rt_environment);
+		const bool fog_enabled = rt_environment.is_valid() && (environment_get_fog_enabled(rt_environment) || rb->has_custom_data(RB_SCOPE_FOG));
 		rt_flags = SceneShaderRaytracing::compute_rt_flags(rt_environment, fog_enabled);
 
 		const bool dlss_rr_enabled = (rt_flags & SceneShaderRaytracing::RT_FLAG_DLSS_RR_ENABLED) != 0;
@@ -311,13 +323,8 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 	}
 
 	// The path tracer produces the opaque color, but transparents are still
-	// rasterized on top, which needs the reflection-probe / light / decal buffers
-	// and the cluster grid to be valid for the current frame.
-	{
-		uint32_t pt_directional_light_count = 0;
-		uint32_t pt_positional_light_count = 0;
-		_setup_lights_cluster_decals(p_render_data, pt_directional_light_count, pt_positional_light_count);
-	}
+	// rasterized on top. Reflection-probe / light / decal buffers and the current
+	// cluster grid were built before TLAS so volumetric fog could use them too.
 
 	// Execute raytracing (replaces the opaque + motion vector pass).
 	if (rb_data.is_valid() && raytracing && raytracing->get_shader()) {

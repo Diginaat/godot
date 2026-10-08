@@ -30,6 +30,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/math/math_funcs.h"
+#include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/environment/sky.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_raytracing.h"
@@ -2835,6 +2836,9 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 					em.center[1] = center.y;
 					em.center[2] = center.z;
 					em.radius = size.length() * 0.5f;
+					em.half_extents[0] = size.x * 0.5f;
+					em.half_extents[1] = size.y * 0.5f;
+					em.half_extents[2] = size.z * 0.5f;
 					em.geometry_idx = geometry_data.size() - 1;
 					em.primitive_count = triangle_count;
 					em.power = emission_luminance * area_estimate;
@@ -3341,9 +3345,23 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 			rt_ubo.params[SceneShaderRaytracing::RT_PARAM_DENOISER] = (float)(int)env_storage->environment_get_pathtracing_denoiser(env);
 		}
 
+		if (rb && rb->has_custom_data(RB_SCOPE_FOG)) {
+			Ref<RendererRD::Fog::VolumetricFog> fog = rb->get_custom_data(RB_SCOPE_FOG);
+			if (fog.is_valid()) {
+				rt_ubo.params[SceneShaderRaytracing::RT_PARAM_VOLUMETRIC_FOG_INV_LENGTH] = fog->length > 0.0f ? 1.0f / fog->length : 1.0f;
+				rt_ubo.params[SceneShaderRaytracing::RT_PARAM_VOLUMETRIC_FOG_DETAIL_SPREAD] = fog->spread > 0.0f ? 1.0f / fog->spread : 1.0f;
+				rt_ubo.params[SceneShaderRaytracing::RT_PARAM_HAS_VOLUMETRIC_FOG] = 1.0f;
+				if (p_render_data && p_render_data->environment.is_valid()) {
+					RendererEnvironmentStorage *env_storage = RendererEnvironmentStorage::get_singleton();
+					rt_ubo.params[SceneShaderRaytracing::RT_PARAM_VOLUMETRIC_FOG_SKY_AFFECT] = env_storage->environment_get_volumetric_fog_sky_affect(p_render_data->environment);
+				}
+			}
+		}
+		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_FOG_USE_LEGACY_BLENDING] = owner->fog_use_legacy_blending_get() ? 1.0f : 0.0f;
+
 		// rt_params layout (see RaytracingParamIndex enum):
 		// [0] = VIS_MODE, [1] = SAMPLE_COUNT, [2] = MAX_BOUNCES,
-		// [3] = DLSS_RR_ENABLED, [14] = LIGHT_COUNT, [15] = FRAME_INDEX
+		// [3] = DLSS_RR_ENABLED, [4-8] = FOG, [14] = LIGHT_COUNT, [15] = FRAME_INDEX
 		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_FRAME_INDEX] = float(p_state->frame_counter++);
 
 		// Unjittered VP for motion vectors (matches raster convention).
@@ -3515,6 +3533,26 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		u.binding = 28;
 		u.uniform_type = RD::UNIFORM_TYPE_IMAGE;
 		u.append_id(rb->get_velocity_buffer(false));
+		uniforms.push_back(u);
+	}
+
+	// Binding 29: Integrated volumetric fog froxel map (rgb = in-scatter, a = transmittance).
+	{
+		RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+		RID fog_texture = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_3D_BLACK);
+		if (rb && rb->has_custom_data(RB_SCOPE_FOG)) {
+			Ref<RendererRD::Fog::VolumetricFog> fog = rb->get_custom_data(RB_SCOPE_FOG);
+			if (fog.is_valid() && fog->fog_map.is_valid()) {
+				fog_texture = fog->fog_map;
+			}
+		}
+
+		RD::Uniform u;
+		u.binding = 29;
+		u.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		u.append_id(RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(
+				RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
+		u.append_id(fog_texture);
 		uniforms.push_back(u);
 	}
 

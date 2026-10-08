@@ -85,8 +85,8 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | 5 | Black pixels in directly lit areas (B3): find the cause, fix it | Done |
 | 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | Done |
 | 7 | Custom `vertex()` displacement in the path tracer (B4) | Done |
-| 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | Next |
-| 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | |
+| 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | Done |
+| 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | Next |
 | 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | |
 
 ## Known bugs
@@ -101,7 +101,7 @@ both modes.
 | B2 | glass, pbr | **Fixed in step 4.** Alpha scissor sphere with threshold 0.3 and alpha 0.4 is **missing** (no surface, no shadow). | Any-hit HG0 uses a hard-coded `alpha < 0.5`; the material's `alpha_scissor_threshold` isn't passed. |
 | B3 | lighting, all | **Fixed in step 5.** Pure black pixels scattered over surfaces that the sun or a lamp lights directly. With light sampling, direct light on a flat diffuse floor should be nearly noise-free. | Unknown. Some paths return zero radiance. Debug mode 22 (BRDF rejection) shows rejection noise on every surface. Check NEE shadow rays, `offset_ray_origin`, and BRDF sample rejection. |
 | B4 | shaders | **Fixed in step 7** (no textures in `vertex()` yet). `vertex()` displacement was ignored: the wave renders flat and casts a flat shadow. | The BLAS is built from the original mesh. Needs the vertex shader applied before the BLAS build (a compute pass or the raster pipeline's transform feedback). |
-| B5 | fog | Volumetric fog, FogVolume and the spot light shaft are **not rendered at all**. Only distance/height fog works. | Not implemented. Needs ray marching through Godot's froxel fog volume, or a path traced participating medium. |
+| B5 | fog | **Fixed in step 8.** Volumetric fog, FogVolume and the spot light shaft were **not rendered at all**. Only distance/height fog worked. | The path tracer did not update or sample Godot's integrated volumetric fog froxel map. |
 | B6 | glass | Alpha blend and refraction materials are drawn by the raster transparent pass on top of the path traced image. No shadows or reflections, and refraction smears the noisy screen texture into horizontal streaks. | Transparent geometry is skipped by the path tracer (`transmissivness = 0.0`). |
 
 Works as expected (path traced is equal to or better than raster): the PBR
@@ -120,6 +120,47 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-10-08: Fixed the dark specks on the emissive room's roof (step 7
+  follow-up). Cause: `lights_mesh_selection_weight()` bounded each emitter
+  with a sphere. The wide ceiling panel's sphere pokes through the roof
+  plane, so roof points picked the panel and got a blocked shadow ray. Now
+  `RT_EmissiveMeshData` also carries the world AABB half extents (96 bytes),
+  and the weight is 0 when every box corner is behind the shading plane.
+  That test is exact, so no bias. Verified: overview roof is clean, emissive
+  view unchanged. All seven views render with no `ERROR:` or `WARNING:` in
+  both modes.
+- 2026-10-08: Follow-up for step 8: fixed volumetric fog `Sky Affect` in the
+  path tracer. Cause: raster applies `Environment.volumetric_fog_sky_affect`
+  in `sky.glsl`, but the PT miss shader composited the froxel fog over sky at
+  full strength. RT params now carry `volumetric_fog_sky_affect` and the global
+  fog legacy-blending flag; miss shader uses the same sky-compose formulas as
+  raster. Test harness accepts `--vfog_sky_affect=`. Verified PT screenshots at
+  `--vfog_sky_affect=0` and `1` (`fog_pt_sky_affect_0.png`,
+  `fog_pt_sky_affect_1.png`) and raster counterparts show matching direction:
+  sky unaffected at 0, fully affected at 1. Build passed.
+- 2026-10-08: Follow-up for step 8: fixed the `4 RIDs of type "Shader" were
+  leaked` warning on PT exit. Cause: async RT pipeline build tasks can finish
+  during shutdown before `drain_completed_compiles()` installs them; the shutdown
+  path freed the task's new pipeline but not task-owned per-hit-group shader
+  RIDs. Added `_free_task_owned_outputs()` and use it for abandoned current /
+  queued tasks. Verified `--view=fog --pt=1 --frames=180` exits with no shader
+  RID leak warning.
+- 2026-10-08: Step 8 done. Path traced fog view now renders volumetric fog,
+  FogVolume and the spot light shaft. Forward+ path tracing now performs the
+  normal voxel GI setup before volumetric fog so `rbgi->voxel_gi_textures[]`
+  contains default textures even when the scene has no VoxelGI; without this,
+  the volumetric fog process uniform set failed at binding 13. It updates
+  `RB_SCOPE_FOG` before TLAS/uniform setup, sets `RT_FLAG_FOG_ENABLED` when a
+  volumetric fog map exists, binds `VolumetricFog::fog_map` at RT binding 29,
+  and passes inverse fog length/detail-spread plus a has-volumetric-fog flag in
+  RT params 4-6. The RT shader samples the integrated froxel map on primary
+  hits/misses and composites it as raster does (`rgb` in-scatter, `a`
+  transmittance). Secondary rays keep the existing per-segment distance/height
+  fog instead of sampling the camera-space froxel map. Verified with
+  `--view=fog --pt=1 --frames=180` against raster (`fog_pt_b5_final.png`,
+  `fog_raster_b5_fix.png`). Build passed. Smoke passed: PhysX GPU normal
+  and editor runs printed `PhysX 5.10.0 initialized [GPU]` with no `ERROR:`;
+  path traced fog screenshot exited cleanly with no `ERROR:`.
 - 2026-10-08: Step 7 done. Custom `vertex()` displacement now shows in the
   path tracer. `_preprocess_shader()` marks shaders that write `VERTEX`
   (`write_flag_pointers`). `raytracing_vertex_displace.glsl` is a ShaderRD
@@ -139,8 +180,9 @@ Newest first. Note the date, the commit, the view and what you saw or changed.
   `RenderingDevice::acceleration_structure_is_valid()` and use it in the
   cache cleanup) and the old `4 RIDs of type "Shader" were leaked` warning no
   longer shows. Verified: wave and its shadow match raster.
-  Follow-up: the emissive room's roof shows dark specks, because light
-  selection doesn't know the emitters inside are hidden from the roof.
+  Follow-up (fixed later): the emissive room's roof showed dark specks,
+  because light selection didn't know the emitters inside are hidden from
+  the roof.
 - 2026-10-08: Step 6 done. Emissive StandardMaterial3D surfaces are mesh
   lights now. Host (`render_raytracing.cpp`, TLAS loop): each emissive HG0
   surface becomes an `RT_EmissiveMeshData` (transform incl. compression AABB,
