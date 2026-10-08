@@ -20,6 +20,26 @@ NVIDIA's RTX team, and the PhysX module's author. This fork merges them,
 fixes the conflicts between them, and keeps them building against the latest
 Godot `master`.
 
+## PhysX module by Wild Ox Studios
+
+<p>
+  <a href="https://www.youtube.com/@WildOxStudios">
+    <img src="https://yt3.googleusercontent.com/ytc/AIdro_mRiIqNDV8Cx8l-2ze-wKUb9tczLXpsajPuE37jikCundo=s160-c-k-c0x00ffffff-no-rj" width="80" height="80" align="left" alt="Wild Ox Studios logo">
+  </a>
+</p>
+
+The PhysX 5 module (`modules/godot_physx`) is made by **Wild Ox Studios**
+([uno1982](https://github.com/uno1982) on GitHub). This fork only vendors and
+adapts it; all the PhysX work is theirs.
+
+- **YouTube:** [Wild Ox Studios](https://www.youtube.com/@WildOxStudios), for
+  videos of the module in action.
+- **Module source:** [uno1982/godot](https://github.com/uno1982/godot/tree/feature/physx5-module) (`feature/physx5-module`)
+- **Example project:** [uno1982/godot-physx-example](https://github.com/uno1982/godot-physx-example),
+  demo scenes and benchmarks for the module. See [Try the PhysX example project](#try-the-physx-example-project).
+
+<br clear="left">
+
 ## Downloads
 
 Prebuilt Windows editors (standard and .NET) are on the
@@ -87,6 +107,29 @@ standard 3D physics node keeps working. On top of that:
 
 The module's full documentation is in
 [`modules/godot_physx/README.md`](modules/godot_physx/README.md).
+
+#### Try the PhysX example project
+
+The module's author, [Wild Ox Studios](https://www.youtube.com/@WildOxStudios),
+publishes a demo and benchmark project:
+**[uno1982/godot-physx-example](https://github.com/uno1982/godot-physx-example)**.
+It only works with an editor that includes the PhysX module, such as this one.
+
+1. Download or clone it:
+   ```
+   git clone https://github.com/uno1982/godot-physx-example.git
+   ```
+2. Open its `project.godot` with this editor. PhysX is already selected as the
+   physics engine.
+3. Pick a scene by what it needs:
+   - `cpu/`: rigid bodies, joints, characters, areas, queries. Works everywhere.
+   - `gpu/`: GPU particle fluids. Needs an NVIDIA GPU with CUDA; the release
+     editors are built with `physx_gpu=yes`.
+   - `flow/`: NVIDIA Flow smoke, fire and dust. Needs an editor built with
+     `flow_sdk=...`, which the release editors aren't yet. The scenes still
+     open, with the Flow nodes as placeholders.
+
+The log shows `PhysX 5.10.0 initialized [GPU]` when GPU dynamics are active.
 
 ### Changes in this fork
 
@@ -225,7 +268,8 @@ adds them for your own machines only; don't publish that zip (see
   ```
 - **PhysX:** Project Settings > Physics > 3D > Physics Engine = PhysX. GPU
   dynamics start automatically on a CUDA-capable GPU; the log shows
-  `PhysX ... initialized [GPU]`.
+  `PhysX ... initialized [GPU]`. For ready-made scenes, open the
+  [PhysX example project](#try-the-physx-example-project).
 
 ## Keeping it up to date
 
