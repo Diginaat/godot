@@ -77,16 +77,46 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | --- | --- | --- |
 | 1 | Audit what the path tracer supports (table above) | Done |
 | 2 | Build the test project with all test areas and a screenshot harness | Done |
-| 3 | Baseline: screenshots of every view, path traced and raster; list every visible difference in the findings log | Next |
-| 4 | Fix PBR and lighting differences found in step 3 | |
-| 5 | Emission: light sampling toward emissive meshes so emitters light the scene without heavy noise | |
-| 6 | Custom shaders: fix what step 3 shows (vertex displacement, TIME, alpha) | |
-| 7 | Volumetric fog in the path tracer (Environment volumetric fog, then FogVolume) | |
-| 8 | Glass: alpha blend, refraction and transmission | |
-| 9 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | |
+| 3 | Baseline: screenshots of every view, path traced and raster; list every visible difference in the findings log | Done |
+| 4 | Quick bugs: StandardMaterial emission without a texture (B1), StandardMaterial alpha scissor threshold (B2) | Next |
+| 5 | Black pixels in directly lit areas (B3): find the cause, fix it | |
+| 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | |
+| 7 | Custom `vertex()` displacement in the path tracer (B4) | |
+| 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | |
+| 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | |
+| 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | |
+
+## Known bugs
+
+Found in the step 3 baseline (2026-10-08, commit `a6a531899a`, 4 spp, 3
+bounces, no denoiser). Screenshots were taken with `--shot` for every view in
+both modes.
+
+| ID | View | Bug | Cause / lead |
+| --- | --- | --- | --- |
+| B1 | emissive | StandardMaterial3D emission renders **black**. Debug mode 21 (Emissive) is 0 on every emitter. Emission from a custom ShaderMaterial works (shaders view, orange stripes). | `scene_raytracing_raygen.glsl` closest hit HG0 only adds emission when `mat.flags & 2` (`RT_MAT_FLAG_HAS_EMISSION_TEX`) is set, which `render_raytracing.cpp` sets only when an emission texture exists. Color and energy alone are ignored. |
+| B2 | glass, pbr | Alpha scissor sphere with threshold 0.3 and alpha 0.4 is **missing** (no surface, no shadow). | Any-hit HG0 uses a hard-coded `alpha < 0.5`; the material's `alpha_scissor_threshold` isn't passed. |
+| B3 | lighting, all | Pure black pixels scattered over surfaces that the sun or a lamp lights directly. With light sampling, direct light on a flat diffuse floor should be nearly noise-free. | Unknown. Some paths return zero radiance. Debug mode 22 (BRDF rejection) shows rejection noise on every surface. Check NEE shadow rays, `offset_ray_origin`, and BRDF sample rejection. |
+| B4 | shaders | `vertex()` displacement is ignored: the wave renders flat and casts a flat shadow. | The BLAS is built from the original mesh. Needs the vertex shader applied before the BLAS build (a compute pass or the raster pipeline's transform feedback). |
+| B5 | fog | Volumetric fog, FogVolume and the spot light shaft are **not rendered at all**. Only distance/height fog works. | Not implemented. Needs ray marching through Godot's froxel fog volume, or a path traced participating medium. |
+| B6 | glass | Alpha blend and refraction materials are drawn by the raster transparent pass on top of the path traced image. No shadows or reflections, and refraction smears the noisy screen texture into horizontal streaks. | Transparent geometry is skipped by the path tracer (`transmissivness = 0.0`). |
+
+Works as expected (path traced is equal to or better than raster): the PBR
+sphere grid (reflections of the real scene instead of a darker sky probe),
+normal and albedo textures, the Cornell box (mirror sphere, color bleeding, soft
+shadows from omni and spot), custom shader albedo, roughness, emission, `TIME`,
+`NORMAL_MAP` and `ALPHA_SCISSOR_THRESHOLD`.
+
+Other notes:
+- Noise at 4 spp without a denoiser is expected; use `--denoiser=1` with the
+  Streamline DLLs for the final look.
+- Exit prints `WARNING: 4 RIDs of type "Shader" were leaked` with path tracing
+  on. Probably the custom hit group shaders. Low priority.
 
 ## Findings log
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-10-08: Step 3 done. Six bugs found (table above). B1 has a confirmed
+  root cause. Next is step 4 (B1 and B2).
 - 2026-10-08: Steps 1 and 2 done. No fixes yet.
