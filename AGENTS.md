@@ -11,5 +11,10 @@ Path tracer work (test scene, supported features, step plan, findings) is tracke
 [PATHTRACER_TESTING.md](PATHTRACER_TESTING.md). Read it before touching the path
 tracer, and update its step table and findings log as you go.
 
+The native path tracer denoiser (cross-vendor ray reconstruction) is tracked
+in [docs/renderer/native_ray_reconstruction.md](docs/renderer/native_ray_reconstruction.md).
+Read it before touching the denoiser, and update its step table and findings
+log as you go.
+
 Shared lessons and working rules for agents are in [AGENT_MEMORY.md](AGENT_MEMORY.md).
 Keep it current and public-safe (no personal names, paths or private projects).
