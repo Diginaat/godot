@@ -1767,6 +1767,25 @@ RTMaterialData *RenderRaytracing::process_material(RID p_material_rid, uint16_t 
 	}
 	mat.flags = (mat.flags & ~RT_MAT_ALPHA_THRESHOLD_MASK) | (uint32_t(alpha_threshold * 255.0f + 0.5f) << RT_MAT_ALPHA_THRESHOLD_SHIFT);
 
+	// Alpha blending and refraction are traced (see
+	// ShaderData::rt_traces_transparency()). Godot's refraction is a screen
+	// space offset with no IOR, so the scale maps to one: the default 0.05
+	// gives 1.5 (glass), 0 gives no bending.
+	mat.flags &= ~(RT_MAT_FLAG_ALPHA_BLEND | RT_MAT_FLAG_REFRACTION | RT_MAT_IOR_MASK);
+	const SceneShaderForwardClustered::ShaderData *forward_shader = static_cast<const SceneShaderForwardClustered::ShaderData *>(shader_data);
+	if (!mat_data->is_custom_shader && forward_shader && forward_shader->rt_traces_transparency()) {
+		if (shader_declares("refraction")) {
+			float ior = 1.5f;
+			Variant refraction_var = material_storage->material_get_param(p_material_rid, "refraction");
+			if (refraction_var.get_type() == Variant::FLOAT) {
+				ior = CLAMP(1.0f + 10.0f * (float)refraction_var, 1.0f, 2.5f);
+			}
+			mat.flags |= RT_MAT_FLAG_REFRACTION | (uint32_t((ior - 1.0f) / 1.5f * 255.0f + 0.5f) << RT_MAT_IOR_SHIFT);
+		} else {
+			mat.flags |= RT_MAT_FLAG_ALPHA_BLEND;
+		}
+	}
+
 	// UV1 scale and offset (vec3 in Godot, we only use xy).
 	Variant uv1_scale_var = material_storage->material_get_param(p_material_rid, "uv1_scale");
 	if (uv1_scale_var.get_type() == Variant::VECTOR3) {
@@ -2653,6 +2672,10 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 				} else {
 					inst_flags |= RD::ACCELERATION_STRUCTURE_INSTANCE_TRIANGLE_FLIP_FACING_BIT;
 				}
+				if (mat_data->data.flags & RT_MAT_FLAG_REFRACTION) {
+					// Rays leave refractive material through its back faces.
+					inst_flags |= RD::ACCELERATION_STRUCTURE_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT;
+				}
 				if (mat_data->rt_sbt_offset > 0) {
 					const SceneShaderRaytracing::CustomShaderEntry *cse =
 							rt_shader_singleton->get_custom_shader_entry(mat_data->rt_sbt_offset);
@@ -2864,6 +2887,10 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 				}
 			} else {
 				inst_flags |= RD::ACCELERATION_STRUCTURE_INSTANCE_TRIANGLE_FLIP_FACING_BIT;
+			}
+			if (mat_data->data.flags & RT_MAT_FLAG_REFRACTION) {
+				// Rays leave refractive material through its back faces.
+				inst_flags |= RD::ACCELERATION_STRUCTURE_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT;
 			}
 
 			if (mat_data->rt_sbt_offset > 0) {

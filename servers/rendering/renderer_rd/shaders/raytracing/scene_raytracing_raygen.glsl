@@ -468,6 +468,17 @@ void main() {
 		}
 	}
 #endif // RT_DEBUG_ENABLED
+	// Refraction: the alpha part of the surface is shaded as usual, the rest is
+	// a dielectric interface (alpha blend alone is decided in any-hit).
+	if ((mat.flags & MAT_FLAG_REFRACTION) != 0u) {
+		PathState rs = path_unpack(payload);
+		bool opaque_part = rand(rs.rng_state) < m.alpha;
+		payload.rng_state = rs.rng_state;
+		if (!opaque_part) {
+			refract_and_bounce(h, m, material_ior(mat.flags));
+			return;
+		}
+	}
 	shade_and_bounce(h, m);
 #endif
 }
@@ -571,13 +582,20 @@ void main() {
 	}
 #else
 	// HG0: Standard material alpha test.
-	vec2 uv = fetch_uv(geom, i0, i1, i2, bary);
 	MaterialData mat = materials[geometry_idx];
+	if ((mat.flags & MAT_FLAG_REFRACTION) != 0u) {
+		return; // Always hit; the closest hit refracts or reflects.
+	}
+	vec2 uv = fetch_uv(geom, i0, i1, i2, bary);
 	uv = uv * mat.uv1_scale + mat.uv1_offset;
 	float alpha = texture(sampler2D(bindless_textures[nonuniformEXT(mat.albedo_texture_idx)], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).a;
 	alpha *= mat.albedo_color.a;
 
-	if (alpha < material_alpha_threshold(mat.flags)) {
+	if ((mat.flags & MAT_FLAG_ALPHA_BLEND) != 0u) {
+		if (!material_alpha_blend_hit(alpha, payload.rng_state, geometry_idx, gl_PrimitiveID)) {
+			ignoreIntersectionEXT;
+		}
+	} else if (alpha < material_alpha_threshold(mat.flags)) {
 		ignoreIntersectionEXT;
 	}
 #endif

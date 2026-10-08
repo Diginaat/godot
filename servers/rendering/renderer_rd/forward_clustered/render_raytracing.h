@@ -175,9 +175,16 @@ enum {
 	RT_MAT_FLAG_HAS_NORMAL_MAP = 1u,
 	RT_MAT_FLAG_HAS_EMISSION_TEX = 2u,
 	RT_MAT_FLAG_POINT_FILTER = 4u,
+	// Alpha blended BaseMaterial3D: hit with probability alpha (any-hit).
+	RT_MAT_FLAG_ALPHA_BLEND = 8u,
+	// BaseMaterial3D refraction: dielectric interface with the IOR in bits 24-31.
+	RT_MAT_FLAG_REFRACTION = 16u,
 	// Bits 16-23 hold the alpha scissor threshold (0-255 maps to 0.0-1.0).
 	RT_MAT_ALPHA_THRESHOLD_SHIFT = 16u,
 	RT_MAT_ALPHA_THRESHOLD_MASK = 0xFFu << 16u,
+	// Bits 24-31 hold the refraction IOR (0-255 maps to 1.0-2.5).
+	RT_MAT_IOR_SHIFT = 24u,
+	RT_MAT_IOR_MASK = 0xFFu << 24u,
 };
 
 // Index format for RT geometry (matches GLSL fetch_indices).

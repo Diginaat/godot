@@ -95,7 +95,7 @@ struct MaterialData {
 	float metallic;
 	float roughness;
 	float ao_strength;
-	uint flags; // Bit 0: has_normal_map, bit 1: has_emission_texture, bit 2: point_filter, bits 16-23: alpha scissor threshold
+	uint flags; // Bit 0: has_normal_map, bit 1: has_emission_texture, bit 2: point_filter, bit 3: alpha_blend, bit 4: refraction, bits 16-23: alpha scissor threshold, bits 24-31: IOR
 
 	vec2 uv1_scale; // UV1 scale (default 1,1)
 	vec2 uv1_offset; // UV1 offset (default 0,0)
@@ -108,4 +108,23 @@ struct MaterialData {
 // Alpha below this is cut out (StandardMaterial3D alpha scissor). 0 means never.
 float material_alpha_threshold(uint p_flags) {
 	return float((p_flags >> 16u) & 0xFFu) / 255.0;
+}
+
+// StandardMaterial3D alpha blending: the surface is hit with probability alpha.
+const uint MAT_FLAG_ALPHA_BLEND = 8u;
+// StandardMaterial3D refraction: a dielectric interface (see material_ior()).
+const uint MAT_FLAG_REFRACTION = 16u;
+
+// Index of refraction for MAT_FLAG_REFRACTION, 1.0 to 2.5.
+float material_ior(uint p_flags) {
+	return 1.0 + float(p_flags >> 24u) / 255.0 * 1.5;
+}
+
+// Stochastic opacity for alpha blended surfaces: true when the ray stops at
+// this surface. The decision is a hash of the ray's random state and the hit
+// triangle, so a repeated any-hit call for the same triangle agrees with the
+// first one.
+bool material_alpha_blend_hit(float p_alpha, uint p_rng_state, uint p_instance, uint p_primitive) {
+	uint h = pcg_hash(p_rng_state ^ pcg_hash(p_instance * 9781u + pcg_hash(p_primitive)));
+	return float(h) / 4294967296.0 < p_alpha;
 }

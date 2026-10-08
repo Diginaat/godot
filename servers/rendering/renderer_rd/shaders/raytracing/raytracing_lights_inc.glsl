@@ -187,9 +187,14 @@ float lights_get_specular_multiplier(float specular_amount, float roughness) {
 // Inline Alpha Test (shared by all ray query proceed loops)
 // ============================================================================
 
-/// Inline alpha test for ray query candidates. Returns true if the hit is opaque (alpha >= 0.5).
-/// Mirrors the any-hit shader logic for use with inline ray queries.
-bool ray_query_alpha_test(uint geometry_idx, uint primitive_id, vec2 candidate_bary) {
+/// Inline alpha test for ray query candidates. Returns true if the hit is opaque.
+/// Mirrors the any-hit shader logic for use with inline ray queries;
+/// p_rng_state seeds the stochastic opacity of alpha blended surfaces.
+bool ray_query_alpha_test(uint geometry_idx, uint primitive_id, vec2 candidate_bary, uint p_rng_state) {
+	MaterialData mat = materials[geometry_idx];
+	if ((mat.flags & MAT_FLAG_REFRACTION) != 0u) {
+		return true;
+	}
 	vec3 bary = vec3(1.0 - candidate_bary.x - candidate_bary.y, candidate_bary.x, candidate_bary.y);
 
 	GeometryData geom = geometries[geometry_idx];
@@ -197,11 +202,13 @@ bool ray_query_alpha_test(uint geometry_idx, uint primitive_id, vec2 candidate_b
 	get_triangle_indices_ex(geom, primitive_id, i0, i1, i2);
 	vec2 uv = fetch_uv(geom, i0, i1, i2, bary);
 
-	MaterialData mat = materials[geometry_idx];
 	uv = uv * mat.uv1_scale + mat.uv1_offset;
 	float alpha = texture(sampler2D(bindless_textures[nonuniformEXT(mat.albedo_texture_idx)], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).a;
 	alpha *= mat.albedo_color.a;
 
+	if ((mat.flags & MAT_FLAG_ALPHA_BLEND) != 0u) {
+		return material_alpha_blend_hit(alpha, p_rng_state, geometry_idx, primitive_id);
+	}
 	return alpha >= material_alpha_threshold(mat.flags);
 }
 
@@ -227,7 +234,8 @@ bool lights_trace_shadow_ray(vec3 origin, vec3 direction, float max_dist, inout 
 			if (ray_query_alpha_test(
 						rayQueryGetIntersectionInstanceCustomIndexEXT(shadow_rq, false),
 						rayQueryGetIntersectionPrimitiveIndexEXT(shadow_rq, false),
-						rayQueryGetIntersectionBarycentricsEXT(shadow_rq, false))) {
+						rayQueryGetIntersectionBarycentricsEXT(shadow_rq, false),
+						rng_state)) {
 				rayQueryConfirmIntersectionEXT(shadow_rq);
 			}
 		}
@@ -252,7 +260,7 @@ bool lights_trace_shadow_ray(vec3 origin, vec3 direction, float max_dist, inout 
 	shadow_ps.radiance = vec3(0.0);
 	shadow_ps.throughput = vec3(0.0);
 	shadow_ps.packed_bounces_flags = set_shadow_ray(0u);
-	shadow_ps.rng_state = 0u;
+	shadow_ps.rng_state = rng_state; // Seeds the any-hit stochastic opacity.
 	shadow_ps.hit_t = 0.0;
 	shadow_ps.offset_normal = vec3(0.0, 0.0, 1.0);
 	shadow_ps.next_ray_dir = vec3(0.0, 0.0, 1.0);
