@@ -20,7 +20,9 @@ repository** and the **editor builds on the Releases page**.
 | --- | --- | --- | --- |
 | Godot Engine | Whole source tree, editor executables | MIT | [`LICENSE.txt`](LICENSE.txt) |
 | Godot's bundled third-party libraries | `thirdparty/` | Various (mostly MIT, BSD, zlib, Apache-2.0) | [`COPYRIGHT.txt`](COPYRIGHT.txt) |
-| NVIDIA PhysX 5 SDK and NVIDIA Blast | Linked into the editor; `PhysXGpu_64.dll` in releases | BSD-3-Clause | [`modules/godot_physx/PHYSX-LICENSE.md`](modules/godot_physx/PHYSX-LICENSE.md) |
+| NVIDIA PhysX 5 SDK and NVIDIA Blast | Linked into the editor; `PhysXGpu_64.dll` and `NvBlast*.dll` in releases | BSD-3-Clause | [`modules/godot_physx/PHYSX-LICENSE.md`](modules/godot_physx/PHYSX-LICENSE.md), [`misc/dist/licenses/`](misc/dist/licenses/) |
+| NVIDIA Flow | `nvflow.dll`, `nvflowext.dll` in releases (loaded at run time) | BSD-3-Clause | [`misc/dist/licenses/NVIDIA-FLOW-LICENSE.md`](misc/dist/licenses/NVIDIA-FLOW-LICENSE.md) |
+| Boost and V-HACD (inside `NvBlastExtAuthoring.dll`) | Release zips only | Boost Software License 1.0, BSD-3-Clause | [`misc/dist/licenses/`](misc/dist/licenses/) |
 | PhysX 5 Godot module (`modules/godot_physx`) | Source | MIT | [`LICENSE.txt`](LICENSE.txt) (see the file headers) |
 | NVIDIA Streamline SDK headers | `thirdparty/streamline/include` | MIT | [`thirdparty/streamline/LICENSE.txt`](thirdparty/streamline/LICENSE.txt) |
 | NVIDIA DLSS / NGX, Reflex, Streamline runtime DLLs | **Not included**, download from NVIDIA | NVIDIA RTX SDKs License, NVIDIA SDK License, MIT (Streamline core) | Shipped inside the Streamline SDK download |
@@ -47,6 +49,12 @@ static libraries are linked into the editor executable, and
 are under BSD-3-Clause; the full text is in
 [`modules/godot_physx/PHYSX-LICENSE.md`](modules/godot_physx/PHYSX-LICENSE.md),
 which is also included in every release zip.
+
+Blast (`NvBlast*.dll`) and Flow (`nvflow.dll`, `nvflowext.dll`) come from the
+same NVIDIA repository and ship as DLLs in every release, also under
+BSD-3-Clause. Their license texts, plus Boost and V-HACD (used by Blast's
+authoring library), are in [`misc/dist/licenses/`](misc/dist/licenses/) and
+in every release zip.
 
 ### NVIDIA Streamline SDK headers: MIT
 
