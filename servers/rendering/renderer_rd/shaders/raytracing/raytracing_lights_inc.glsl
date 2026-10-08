@@ -253,8 +253,47 @@ bool lights_trace_shadow_ray(vec3 origin, vec3 direction, float max_dist, inout 
 // Next Event Estimation (NEE) - Direct Light Sampling
 // ============================================================================
 
+// Estimated unshadowed contribution of a light at a surface, used only to
+// choose which light to sample. It must be > 0 wherever the light can add
+// light, or the estimate becomes biased; it doesn't have to be exact.
+float lights_selection_weight(RTLightData light, vec3 hit_pos, vec3 N) {
+	float power = luminance(light.emission);
+	if (power <= 0.0) {
+		return 0.0;
+	}
+
+	if (light.type == RT_LIGHT_TYPE_DIRECTIONAL) {
+		// A sun disk of angular radius r still reaches N while cos > -sin(r).
+		float cos_l = dot(N, -normalize(light.position));
+		return power * max(cos_l + sin(light.radius), 0.0);
+	}
+
+	vec3 to_light = light.position - hit_pos;
+	float dist_sq = dot(to_light, to_light);
+	if (light.max_range_squared != 0.0 && dist_sq > light.max_range_squared) {
+		return 0.0;
+	}
+	float inv_dist = inversesqrt(max(dist_sq, 1e-10));
+	vec3 L = to_light * inv_dist;
+
+	LightSample ls_atten;
+	ls_atten.distance_sq = dist_sq;
+	float atten = lights_get_attenuation(ls_atten, light.inv_max_range, light.attenuation);
+
+	// A sphere light of angular radius a still reaches N while cos > -sin(a).
+	float sin_a = clamp(light.radius * inv_dist, 0.0, 1.0);
+	float w = power * atten * max(dot(N, L) + sin_a, 0.0);
+
+	if (light.type == RT_LIGHT_TYPE_SPOT && dot(-L, light.spot_direction) <= light.cos_spot_angle) {
+		// Center outside the cone. Part of a large light can still be inside, so
+		// keep a small weight instead of zero.
+		w *= 0.01;
+	}
+	return w;
+}
+
 // Evaluate direct lighting using NEE with stochastic light selection.
-// Uses mini-batch reservoir sampling for importance-weighted light selection.
+// Selects one light by resampled importance sampling (lights_selection_weight).
 vec3 lights_evaluate_direct_lighting(
 		vec3 hit_pos,
 		vec3 N,
@@ -267,39 +306,38 @@ vec3 lights_evaluate_direct_lighting(
 		return vec3(0.0);
 	}
 
-	// Mini-batch reservoir sampling: sample k lights, pick the best valid one.
-	const uint k = uint(min(RT_LIGHT_RESERVOIR_SIZE, int(light_count)));
-	uint valid_found = 0u;
+	// Pick one light with probability proportional to its estimated unshadowed
+	// contribution (resampled importance sampling). With few lights every light
+	// is a candidate; with many, RT_LIGHT_RESERVOIR_SIZE random candidates.
+	// Uniform selection used to pick a far spot light as often as the sun, which
+	// left directly lit pixels black when the sun was never picked.
+	const bool enumerate_all = light_count <= uint(RT_LIGHT_RESERVOIR_SIZE);
+	const uint candidate_count = enumerate_all ? light_count : uint(RT_LIGHT_RESERVOIR_SIZE);
+	float weight_sum = 0.0;
+	float selected_weight = 0.0;
 	uint selected_idx = 0u;
 
-	for (uint i = 0u; i < k; i++) {
-		uint idx = min(uint(rand(rng_state) * float(light_count)), light_count - 1u);
-		RTLightData test_light = rt_lights[idx];
-
-		// Range check for positional lights.
-		bool is_positional = (test_light.type == RT_LIGHT_TYPE_OMNI || test_light.type == RT_LIGHT_TYPE_SPOT);
-		bool is_valid = !is_positional;
-		if (!is_valid) {
-			vec3 to_l = test_light.position - hit_pos;
-			float d2 = dot(to_l, to_l);
-			is_valid = (test_light.max_range_squared == 0.0 || d2 <= test_light.max_range_squared);
+	for (uint i = 0u; i < candidate_count; i++) {
+		uint idx = enumerate_all ? i : min(uint(rand(rng_state) * float(light_count)), light_count - 1u);
+		float w = lights_selection_weight(rt_lights[idx], hit_pos, N);
+		if (w <= 0.0) {
+			continue;
 		}
-
-		if (is_valid) {
-			valid_found++;
-			if (rand(rng_state) < 1.0 / float(valid_found)) {
-				selected_idx = idx;
-			}
+		weight_sum += w;
+		if (rand(rng_state) * weight_sum < w) {
+			selected_idx = idx;
+			selected_weight = w;
 		}
 	}
 
-	if (valid_found == 0u) {
+	if (weight_sum <= 0.0) {
 		return vec3(0.0);
 	}
 
-	// Estimate valid count from sample ratio, PDF = 1/validCount.
-	float valid_count_estimate = float(light_count) * (float(valid_found) / float(k));
-	float light_select_pdf = 1.0 / max(valid_count_estimate, 1.0);
+	// RIS with uniformly drawn candidates: the effective selection PDF is
+	// w / (light_count / candidate_count * weight_sum). With enumerate_all this
+	// is exactly w / weight_sum.
+	float light_select_pdf = selected_weight * float(candidate_count) / (float(light_count) * weight_sum);
 
 	RTLightData light = rt_lights[selected_idx];
 	vec2 u = rand2(rng_state);

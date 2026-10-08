@@ -43,6 +43,12 @@ func _ready() -> void:
 	_build_glass(Vector3(16, 0, -14))
 	_build_fog(Vector3(-16, 0, -14))
 
+	if args.has("sun_only"):
+		# Keep only the sun: isolates direct-light sampling from light selection.
+		for light in find_children("*", "Light3D", true, false):
+			if not light is DirectionalLight3D:
+				light.free()
+
 	camera = Camera3D.new()
 	camera.fov = 55.0
 	add_child(camera)

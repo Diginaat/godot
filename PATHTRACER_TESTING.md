@@ -43,6 +43,7 @@ All user arguments (after `--`):
 | `--denoiser=` | `0` | `0` none, `1` DLSS Ray Reconstruction (needs the Streamline DLLs) |
 | `--volfog=` | view default | `1` forces volumetric fog on, `0` off |
 | `--frames=` | `90` | Frames to render before the screenshot |
+| `--sun_only` | off | Remove every light except the sun (isolates light selection) |
 | `--shot=` | none | Save a PNG and quit |
 
 ## What the path tracer supports today
@@ -79,8 +80,8 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | 2 | Build the test project with all test areas and a screenshot harness | Done |
 | 3 | Baseline: screenshots of every view, path traced and raster; list every visible difference in the findings log | Done |
 | 4 | Quick bugs: StandardMaterial emission without a texture (B1), StandardMaterial alpha scissor threshold (B2) | Done |
-| 5 | Black pixels in directly lit areas (B3): find the cause, fix it | Next |
-| 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | |
+| 5 | Black pixels in directly lit areas (B3): find the cause, fix it | Done |
+| 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | Next |
 | 7 | Custom `vertex()` displacement in the path tracer (B4) | |
 | 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | |
 | 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | |
@@ -96,7 +97,7 @@ both modes.
 | --- | --- | --- | --- |
 | B1 | emissive | **Fixed in step 4.** StandardMaterial3D emission rendered **black**. Debug mode 21 (Emissive) is 0 on every emitter. Emission from a custom ShaderMaterial works (shaders view, orange stripes). | `scene_raytracing_raygen.glsl` closest hit HG0 only adds emission when `mat.flags & 2` (`RT_MAT_FLAG_HAS_EMISSION_TEX`) is set, which `render_raytracing.cpp` sets only when an emission texture exists. Color and energy alone are ignored. |
 | B2 | glass, pbr | **Fixed in step 4.** Alpha scissor sphere with threshold 0.3 and alpha 0.4 is **missing** (no surface, no shadow). | Any-hit HG0 uses a hard-coded `alpha < 0.5`; the material's `alpha_scissor_threshold` isn't passed. |
-| B3 | lighting, all | Pure black pixels scattered over surfaces that the sun or a lamp lights directly. With light sampling, direct light on a flat diffuse floor should be nearly noise-free. | Unknown. Some paths return zero radiance. Debug mode 22 (BRDF rejection) shows rejection noise on every surface. Check NEE shadow rays, `offset_ray_origin`, and BRDF sample rejection. |
+| B3 | lighting, all | **Fixed in step 5.** Pure black pixels scattered over surfaces that the sun or a lamp lights directly. With light sampling, direct light on a flat diffuse floor should be nearly noise-free. | Unknown. Some paths return zero radiance. Debug mode 22 (BRDF rejection) shows rejection noise on every surface. Check NEE shadow rays, `offset_ray_origin`, and BRDF sample rejection. |
 | B4 | shaders | `vertex()` displacement is ignored: the wave renders flat and casts a flat shadow. | The BLAS is built from the original mesh. Needs the vertex shader applied before the BLAS build (a compute pass or the raster pipeline's transform feedback). |
 | B5 | fog | Volumetric fog, FogVolume and the spot light shaft are **not rendered at all**. Only distance/height fog works. | Not implemented. Needs ray marching through Godot's froxel fog volume, or a path traced participating medium. |
 | B6 | glass | Alpha blend and refraction materials are drawn by the raster transparent pass on top of the path traced image. No shadows or reflections, and refraction smears the noisy screen texture into horizontal streaks. | Transparent geometry is skipped by the path tracer (`transmissivness = 0.0`). |
@@ -117,6 +118,16 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-10-08: Step 5 done. B3 cause: `lights_evaluate_direct_lighting()`
+  picked one light per hit **uniformly** among the lights in range, so a
+  sunlit pixel sampled the sun only 1/3 to 1/4 of the time (the scene has a
+  sun, an omni and two spots) and ~30% of pixels at 4 spp never saw it.
+  Confirmed with `--sun_only` (sunlit floor became clean). Fix: resampled
+  importance sampling with `lights_selection_weight()` (emission luminance x
+  attenuation x conservative cosine, spot cone check with a small floor); with
+  at most `RT_LIGHT_RESERVOIR_SIZE` (16) lights every light is a candidate.
+  Weights are zero only where a light can't contribute, so it stays unbiased
+  (brightness matches the old images). Remaining grain is indirect light.
 - 2026-10-08: Step 4 done. B1: the closest hit now computes emission from
   color times energy and only multiplies by the texture when one is set. The
   host reads `emission`, `emission_energy` and `texture_emission` only when the
