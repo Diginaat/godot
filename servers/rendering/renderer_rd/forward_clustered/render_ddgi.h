@@ -151,6 +151,7 @@ public:
 		RID data_buffer;
 		RID probe_buffer;
 		RID update_list;
+		RID stats_buffer;
 		RID ray_data;
 		RID irradiance_atlas;
 		RID distance_atlas;

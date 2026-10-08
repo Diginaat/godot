@@ -140,9 +140,11 @@ Common problems:
 
 - The ray tracing cost is `rays_per_probe * probes_per_frame`; both come
   from the quality preset. Probes with no surface nearby (classification)
-  only trace the 32 fixed rays, and only every eighth turn.
+  only trace the fixed rays (a quarter of the rays, at most 32), and get an
+  eighth of the update rate.
 - Probes in view and probes whose light changes get more of the per-frame
-  budget; stable probes behind the camera get less.
+  budget; stable probes behind the camera get less. A feedback factor on
+  the GPU raises all rates until the per-frame budget is used.
 - Coarser cascades update half as often per level.
 - `gpu_time_budget_ms` adapts the probe budget to measured GPU time.
 - The apply pass runs once per pixel at internal resolution, so it scales
@@ -223,7 +225,7 @@ a jump larger than the grid resets the cascade.
 | 2 | Ray tracing infrastructure: DDGI bindings in the RT scene set, probe ray mode in the RT shaders | Done |
 | 3 | Basic DDGI: one fixed volume, trace, blend, sample | Done |
 | 4 | Forward+ integration: GI buffer, SDFGI/VoxelGI exclusion | Done |
-| 5 | Dynamic scenes: moving lights and objects, BLAS refit | Open |
+| 5 | Dynamic scenes: moving lights and objects, BLAS refit | Done |
 | 6 | Performance: scheduling, classification, relocation, GPU budget, benchmarks | Open |
 | 7 | Scrolling cascades | Open |
 | 8 | Editor: settings, debug views, documentation | Open |
@@ -268,6 +270,23 @@ averages over the measured frames, after warm-up.
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-08: Step 5 (dynamic scenes). Light switch test (`--switch`: all
+  lights and emitters off, a new emissive ceiling panel on) showed the probes
+  froze after their first update. Instrumented one probe: it was scheduled
+  every frame and its rays were fresh, but irradiance and variability never
+  changed. Cause: the blend passes used an indirect dispatch whose group
+  count came from the update list header written by the scheduler in the
+  same frame; the dispatch didn't see it. Now a direct dispatch over the
+  per-frame capacity (groups past the list count exit at once). Two more
+  fixes from the same measurements: (1) the "lighting changed" detection
+  per texel fired on ray noise, so hysteresis dropped all the time; it now
+  uses the change of the probe's tile average, and lowers hysteresis
+  smoothly (to at most 40% of the setting). (2) The scheduler used about
+  10% of the budget (inactive and stable probes have low rates); a
+  persistent `rate_scale` (DDGIStats buffer) now rises while the budget
+  isn't filled and falls when it overflows. Result: after the switch the
+  room's GI settles in about 20 frames (linear indirect, ±3% noise after).
 
 - 2026-10-08: Steps 3-4 working (RTX 3060, Vulkan). Room view: red and
   green bleed onto the boxes and floor, the orange and blue panels light the

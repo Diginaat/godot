@@ -251,6 +251,28 @@ func _run_capture() -> void:
 		var path: String = args["shot"]
 		var err := get_viewport().get_texture().get_image().save_png(path)
 		print("Screenshot %s: %s" % [path, error_string(err)])
+
+	# --switch: turn every light and emitter of the current view off, then
+	# save --shot with _N appended N frames later for each N in --after
+	# (default 1,5,10,20,40,80), to measure how fast the GI follows.
+	if args.has("switch") and args.has("shot"):
+		for light in find_children("*", "Light3D", true, false):
+			light.visible = false
+		for node in find_children("*", "MeshInstance3D", true, false):
+			var mat := (node as MeshInstance3D).material_override as StandardMaterial3D
+			if mat and mat.emission_enabled:
+				mat.emission_energy_multiplier = 0.0
+		# Something to light the room again: one white panel on the ceiling.
+		var panel := _box(self, Vector3(0, 3.95, 0), Vector3(1.5, 0.05, 1.5), _emissive(Color.WHITE, 8.0))
+		panel.name = "SwitchPanel"
+		var frame := 0
+		for n in String(args.get("after", "1,5,10,20,40,80")).split(","):
+			while frame < int(n):
+				await RenderingServer.frame_post_draw
+				frame += 1
+			var path: String = String(args["shot"]).get_basename() + "_%d.png" % frame
+			get_viewport().get_texture().get_image().save_png(path)
+			print("Screenshot %s" % path)
 	get_tree().quit()
 
 
