@@ -3385,6 +3385,8 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 			}
 		}
 		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_FOG_USE_LEGACY_BLENDING] = owner->fog_use_legacy_blending_get() ? 1.0f : 0.0f;
+		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_ADAPTIVE_THRESHOLD] = GLOBAL_GET("rendering/pathtracing/adaptive_sampling_threshold");
+		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_ADAPTIVE_DEBUG] = GLOBAL_GET("rendering/pathtracing/adaptive_sampling_debug") ? 1.0f : 0.0f;
 
 		// rt_params layout (see RaytracingParamIndex enum):
 		// [0] = VIS_MODE, [1] = SAMPLE_COUNT, [2] = MAX_BOUNCES,

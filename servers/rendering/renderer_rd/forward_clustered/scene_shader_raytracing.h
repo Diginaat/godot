@@ -80,6 +80,7 @@ public:
 		RT_FLAG_FOG_ENABLED = (1 << 2),
 		RT_FLAG_SER_ENABLED = (1 << 3),
 		RT_FLAG_RAY_QUERY_SHADOWS_ENABLED = (1 << 4),
+		RT_FLAG_ADAPTIVE_SAMPLING = (1 << 5),
 	};
 
 	constexpr static uint32_t RT_SAMPLE_COUNT_SHIFT = 21;
@@ -104,7 +105,9 @@ public:
 	static constexpr int RT_PARAM_HAS_VOLUMETRIC_FOG = 6;
 	static constexpr int RT_PARAM_VOLUMETRIC_FOG_SKY_AFFECT = 7;
 	static constexpr int RT_PARAM_FOG_USE_LEGACY_BLENDING = 8;
-	// Indices 9-12 reserved for future use.
+	static constexpr int RT_PARAM_ADAPTIVE_THRESHOLD = 9;
+	static constexpr int RT_PARAM_ADAPTIVE_DEBUG = 10;
+	// Indices 11-12 reserved for future use.
 	static constexpr int RT_PARAM_EMISSIVE_MESH_COUNT = 13;
 	static constexpr int RT_PARAM_LIGHT_COUNT = 14;
 	static constexpr int RT_PARAM_FRAME_INDEX = 15;

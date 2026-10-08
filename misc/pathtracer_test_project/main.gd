@@ -80,6 +80,12 @@ func _apply_args() -> void:
 	if args.has("ser"):
 		# Read by the path tracer every frame, so it can change at run time.
 		ProjectSettings.set_setting("rendering/pathtracing/use_shader_execution_reordering", args["ser"] == "1")
+	if args.has("adaptive"):
+		ProjectSettings.set_setting("rendering/pathtracing/adaptive_sampling", args["adaptive"] == "1")
+	if args.has("adaptive_threshold"):
+		ProjectSettings.set_setting("rendering/pathtracing/adaptive_sampling_threshold", float(args["adaptive_threshold"]))
+	if args.has("adaptive_debug"):
+		ProjectSettings.set_setting("rendering/pathtracing/adaptive_sampling_debug", args["adaptive_debug"] == "1")
 	if args.has("vfog_sky_affect"):
 		env.volumetric_fog_sky_affect = float(args["vfog_sky_affect"])
 	# Measurement mode: linear tonemap and a low exposure keep values from
@@ -158,9 +164,9 @@ func _benchmark() -> void:
 		gpu += RenderingServer.viewport_get_measured_render_time_gpu(vp)
 		cpu += RenderingServer.viewport_get_measured_render_time_cpu(vp)
 	var size := get_viewport().get_visible_rect().size
-	print("BENCH view=%s pt=%s spp=%d bounces=%d ser=%s res=%dx%d frames=%d gpu_ms=%.3f cpu_ms=%.3f" % [
+	print("BENCH view=%s pt=%s spp=%d bounces=%d ser=%s adaptive=%s@%s res=%dx%d frames=%d gpu_ms=%.3f cpu_ms=%.3f" % [
 		view, "1" if env.pathtracing_enabled else "0", env.pathtracing_samples_per_pixel,
-		env.pathtracing_max_bounces, args.get("ser", "default"), size.x, size.y, count,
+		env.pathtracing_max_bounces, args.get("ser", "default"), args.get("adaptive", "0"), args.get("adaptive_threshold", "0.02"), size.x, size.y, count,
 		gpu / count, cpu / count])
 	get_tree().quit()
 

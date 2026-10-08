@@ -20,6 +20,8 @@
 #define RT_PARAM_MAX_BOUNCES 2 // rt_params[0].z - Maximum ray bounces
 #define RT_PARAM_DENOISER 3 // rt_params[0].w - Denoiser selection (0=none, 1=DLSS RR)
 // Indices 4-12 reserved for future use
+#define RT_PARAM_ADAPTIVE_THRESHOLD 9 // rt_params[2].y - Adaptive sampling: max standard error of tonemapped luminance
+#define RT_PARAM_ADAPTIVE_DEBUG 10 // rt_params[2].z - Adaptive sampling: 1 = show samples used (blue few, red all)
 #define RT_PARAM_EMISSIVE_MESH_COUNT 13 // rt_params[3].y - Number of emissive meshes sampled as lights
 #define RT_PARAM_LIGHT_COUNT 14 // rt_params[3].z - Number of active lights in light buffer
 #define RT_PARAM_FRAME_INDEX 15 // rt_params[3].w - Frame counter for temporal variation
