@@ -10,3 +10,6 @@ After every sync, update the "Sync state log" table in `CUSTOM_BUILD.md`.
 Path tracer work (test scene, supported features, step plan, findings) is tracked in
 [PATHTRACER_TESTING.md](PATHTRACER_TESTING.md). Read it before touching the path
 tracer, and update its step table and findings log as you go.
+
+Shared lessons and working rules for agents are in [AGENT_MEMORY.md](AGENT_MEMORY.md).
+Keep it current and public-safe (no personal names, paths or private projects).
