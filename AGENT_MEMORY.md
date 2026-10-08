@@ -122,6 +122,10 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   look darker the noisier the image is, even when nothing is biased.
 - Test anything temporal with a moving camera too (`--orbit=0.1`): ReSTIR
   spatial reuse was unbiased with a static camera and blew up under motion.
+- Keep light buffer indices stable between frames (`gather_lights()` orders
+  the chosen lights by RID, emissive meshes by surface). Anything that
+  reuses light indices across frames (ReSTIR) breaks in subtle ways when
+  lights are re-sorted every frame, even with an index remap.
 - In the closest hit, keep one call site for shadow rays and other costly
   work shared between the primary hit and later bounces. Lanes of a warp
   drift to different samples/bounces, and code that only some of them run

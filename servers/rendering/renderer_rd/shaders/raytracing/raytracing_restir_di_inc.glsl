@@ -34,11 +34,13 @@
 #define RESTIR_TRIANGLE_MASK 0x3FFFFFu
 // History length cap: higher reuses more, but reacts slower to changes.
 #define RESTIR_MAX_M 20.0
-// Spatial reuse is off: with a moving camera it made the image brighter frame
-// after frame (5.7x after 120 frames at 0.1 degrees per frame in the lights
-// view), while a static camera and temporal reuse alone stayed unbiased. In
-// that view it also added almost nothing over temporal reuse (direct light
-// RMSE 0.057 vs 0.058). Cause not found yet; see PATHTRACER_TESTING.md.
+// Spatial reuse is off. It only went wrong when light indices changed between
+// frames (lights used to be re-sorted every frame) and reservoirs of other
+// pixels were reused: then the image brightened frame after frame, even with
+// a correct index remap and fresh data (both verified on the GPU). Lights are
+// now kept in a stable order, which stops that, but with a moving camera
+// spatial reuse still came out 9% dark and no less noisy than temporal reuse
+// alone. See PATHTRACER_TESTING.md.
 #define RESTIR_SPATIAL_SAMPLES 0u
 #define RESTIR_SPATIAL_RADIUS 24.0
 // This pixel's candidate plus the temporal and spatial reservoirs.

@@ -169,6 +169,36 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-10-08: Step 13 follow-up: ReSTIR spatial reuse investigated. Test:
+  lights view, 1 spp, direct light only, linear, temporary shader switches.
+  Findings, in order:
+  - With the light order fixed (sorted by RID), spatial reuse is unbiased
+    with a static camera (0.0188 vs 0.0190) and with a moving one (0.0181 vs
+    0.0181). With the old order (sorted by a camera-dependent score) it blew
+    up under motion. A static camera with the order rotated by one every
+    frame blew up the same way (x4.8 after 120 frames), so the trigger is
+    light indices changing between frames, not motion.
+  - Temporal reuse alone stays unbiased with a rotating order (0.0190), and
+    goes 65% dark without the index remap, so the remap is applied and works.
+  - Spatial reuse with radius 0 (three more reads of the pixel's own slot)
+    is unbiased with a rotating order; radius 24 is not. Reading other
+    pixels' reservoirs is what breaks.
+  - Not the cause (each checked on the GPU or by switching it off): stale
+    reservoir data (frame stamps were all last frame's), the remap (the
+    remapped light's position matched the stored one), cache coherence
+    (`coherent` images: identical output), the balance heuristic's weight
+    functions (one shared function: same result), the history cap (M <= 2:
+    same), only remapped lights (reusing only lights whose index didn't
+    change: still biased), the light buffer being a frame late (stamped:
+    always current), several updates per frame (one per engine frame).
+  - Root cause still unknown. Fix applied: `gather_lights()` keeps the best
+    lights by score but orders them by RID, and emissive meshes are ordered
+    by surface, so indices only change when a light enters or leaves the
+    set. That stops the blow-up; spatial plus temporal reuse under motion is
+    then 9% dark (0.0146 vs 0.0160) and no less noisy than temporal alone
+    (RMSE 0.064 vs 0.062), so spatial reuse stays off. Temporal-only results
+    are unchanged (0.0190 static, 0.0157 moving, emissive 0.0311 = ref).
+
 - 2026-10-08: Step 13 done (ReSTIR DI, temporal reuse). New Environment
   toggle `pathtracing_restir_di` (C++-only server call, like adaptive
   sampling), raygen variant `USE_RESTIR_DI` (`RT_FLAG_RESTIR_DI`), new test
