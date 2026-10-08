@@ -52,6 +52,7 @@ Update this table after every sync.
 | Date | upstream/master | origin (NVIDIA) | physx module commit | Merge commit |
 | --- | --- | --- | --- | --- |
 | 2026-10-07 | `e7b12e7492` | `135dff3887` | `2de7ea521f` (Flow builds pipelines on first use) | `2424aa594a` |
+| 2026-10-08 | `e7b12e7492` (no change) | `135dff3887` (no change) | `5681d7519a` (Flow on Linux, MIT license) | on `dev`, see log |
 
 ## Update procedure
 
@@ -110,19 +111,23 @@ Update this table after every sync.
 
 `scons` is not on PATH; use `python -m SCons`.
 
-PhysX SDK: built once with `modules/godot_physx/misc/build_physx.py --gpu`, pinned to
+PhysX SDK: built once with `modules/godot_physx/misc/build_physx.py --gpu --blast --flow`, pinned to
 `ovphysx-0.5.11`. It's installed at
-`C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX`. Rebuild it only
-when the module's `build_physx.py` pin or presets change.
+`C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX`. Blast and Flow
+come from the same checkout (`blast/` and `flow/`). Rebuild them only when the
+module's `build_physx.py` pin, patches or presets change.
 
 ```
-python -m SCons -k platform=windows target=editor physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes
+python -m SCons -k platform=windows target=editor physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes blast_sdk="C:\REPO\Godot\physx-sdk\blast\_build\windows-x86_64\release\blast-sdk" flow_sdk="C:\REPO\Godot\physx-sdk\flow"
 ```
 
-- Output: `bin\godot.windows.editor.x86_64.exe` and `.console.exe`. `PhysXGpu_64.dll`
-  is copied next to it automatically.
+- Output: `bin\godot.windows.editor.x86_64.exe` and `.console.exe`. `PhysXGpu_64.dll`,
+  the four `NvBlast*.dll` and `nvflow.dll`/`nvflowext.dll` are copied next to it
+  automatically.
+- Run SCons from PowerShell or cmd. From Git Bash it can't find the D3D12 and
+  AccessKit dependencies and stops at configure.
 - Close any running editor from `bin\` first, or the link fails with `Access is denied`.
-- Not built yet: Blast (`--blast` + `blast_sdk=`), and .NET/C#
+- Not built yet: .NET/C#
   (`module_mono_enabled=yes` + `modules/mono/build_scripts/build_assemblies.py`).
 
 ## Versioning
