@@ -231,7 +231,7 @@ a jump larger than the grid resets the cascade.
 | 5 | Dynamic scenes: moving lights and objects, BLAS refit | Done |
 | 6 | Performance: scheduling, classification, relocation, GPU budget, benchmarks | Open |
 | 7 | Scrolling cascades | Open |
-| 8 | Editor: settings, debug views, documentation | Open |
+| 8 | Editor: settings, debug views, documentation | Partial: `DDGIVolume` node |
 | 9 | Compatibility: DLSS, path tracer, D3D12 fallback | Open |
 | 10 | Validation: test scenes, benchmarks, this document | Open |
 
@@ -273,6 +273,30 @@ averages over the measured frames, after warm-up.
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-08: Added `DDGIVolume` as the editor-facing DDGI control. The node
+  owns enable, size, probe spacing/grid, cascade count, energy, bias,
+  hysteresis, relocation/classification, and debug mode. Its transform places
+  the volume center and its box gizmo resizes width/height/depth in the 3D
+  viewport. Environment DDGI properties stay available for compatibility but
+  are hidden from the Environment inspector; the node writes a fixed DDGI volume
+  into the active WorldEnvironment and disables camera-following for it.
+
+- 2026-10-08: Fixed black flicker while moving through scrolling DDGI volumes.
+  The scheduler used one unordered atomic list, so stable/old probes could take
+  the per-frame slots before newly uncovered scrolled probes. Those probes were
+  reset to `DDGI_PROBE_NEW`, so surfaces sampling them could fall back to black.
+  Scheduling now runs in two passes (new/full-reset/scrolled probes first, all
+  other due probes second), and scrolled probes keep their previous atlas texels
+  as a stale-lighting fallback until retraced. Full resets still start new.
+
+- 2026-10-08: Follow-up for black DDGI spots on moving camera / probe debug.
+  Inactive probes (no nearby surface) can still have black or stale irradiance
+  tiles, especially around single-sided level meshes and sparse geometry. The
+  surface sampler now ignores inactive probes the same way it already ignores
+  new and inside probes, so those tiles can't darken nearby meshes while active
+  neighbors provide the lighting. If no active neighbor covers the point, DDGI
+  returns zero coverage and the renderer keeps normal environment ambient.
 
 - 2026-10-08: Step 6 (performance), first pass. Measured with the bench
   harness on an RTX 3060 (the validation machine's GPU; the RTX 5070 named

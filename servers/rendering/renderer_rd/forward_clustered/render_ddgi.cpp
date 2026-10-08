@@ -285,22 +285,31 @@ uint32_t RenderDDGI::_setup_volumes(ViewportData *p_data, const RenderDataRD *p_
 		ViewportData::VolumeState &vs = p_data->volumes[c];
 		const float spacing = s.probe_spacing * float(1 << c);
 
-		// Center the grid on the camera, snapped to whole probes so the probes
-		// keep their world positions while the volume scrolls.
-		Vector3 cam_in_probes = cam_pos / spacing;
-		Vector3i center((int32_t)Math::floor(cam_in_probes.x + 0.5f), (int32_t)Math::floor(cam_in_probes.y + 0.5f), (int32_t)Math::floor(cam_in_probes.z + 0.5f));
-		Vector3i origin = center - grid / 2;
+		// Camera-following volumes snap to whole probes so their world positions
+		// stay stable while scrolling. A DDGIVolume node instead owns the center;
+		// moving or resizing it resets the probe data for that viewport.
+		Vector3i origin;
+		Vector3 node_center;
+		if (s.node_volume) {
+			node_center = s.volume_center;
+			origin = Vector3i();
+		} else {
+			Vector3 cam_in_probes = cam_pos / spacing;
+			Vector3i center((int32_t)Math::floor(cam_in_probes.x + 0.5f), (int32_t)Math::floor(cam_in_probes.y + 0.5f), (int32_t)Math::floor(cam_in_probes.z + 0.5f));
+			origin = center - grid / 2;
+		}
 
 		int32_t *reset = r_gpu.volume_reset[c];
 		reset[0] = reset[1] = reset[2] = reset[3] = 0;
 
-		if (!vs.valid || vs.spacing != spacing) {
+		if (!vs.valid || vs.spacing != spacing || (s.node_volume && vs.center != node_center)) {
 			vs.origin = origin;
 			vs.scroll = Vector3i();
+			vs.center = node_center;
 			vs.spacing = spacing;
 			vs.valid = true;
 			reset[3] = 1;
-		} else if (s.follow_camera && origin != vs.origin) {
+		} else if (!s.node_volume && s.follow_camera && origin != vs.origin) {
 			Vector3i delta = origin - vs.origin;
 			if (Math::abs(delta.x) >= grid.x || Math::abs(delta.y) >= grid.y || Math::abs(delta.z) >= grid.z) {
 				// Teleported: nothing of the old grid is reusable.
@@ -317,7 +326,7 @@ uint32_t RenderDDGI::_setup_volumes(ViewportData *p_data, const RenderDataRD *p_
 			vs.origin = origin;
 		}
 
-		Vector3 center_world = (Vector3(vs.origin) + (Vector3(grid) - Vector3(1, 1, 1)) * 0.5f) * spacing;
+		Vector3 center_world = s.node_volume ? s.volume_center : (Vector3(vs.origin) + (Vector3(grid) - Vector3(1, 1, 1)) * 0.5f) * spacing;
 		Transform3D local_to_world(Basis(), center_world);
 		Transform3D world_to_local = local_to_world.affine_inverse();
 
@@ -475,13 +484,21 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	UpdatePushConstant push = {};
 	push.total_probes = vd->total_probes;
 
-	// 1. Pick the probes to trace.
+	// 1. Pick the probes to trace. This is split into two passes so full-reset
+	// probes and scrolled-in probes get update slots before older probes spend
+	// the frame budget. Scrolled probes keep their old irradiance as a fallback
+	// until retraced, so fast camera movement shows stale GI instead of black.
 	{
 		_ddgi_timestamp("DDGI Schedule", use_budget);
 		RD::ComputeListID list = rd->compute_list_begin();
 		RID shader = update_shader.version_get_shader(update_shader_version, UPDATE_SCHEDULE);
 		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_SCHEDULE]);
 		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_stats), 0);
+		push.schedule_new_only = 1;
+		rd->compute_list_set_push_constant(list, &push, sizeof(push));
+		rd->compute_list_dispatch_threads(list, vd->total_probes, 1, 1);
+		rd->compute_list_add_barrier(list);
+		push.schedule_new_only = 0;
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		rd->compute_list_dispatch_threads(list, vd->total_probes, 1, 1);
 		rd->compute_list_end();

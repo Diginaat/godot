@@ -49,6 +49,9 @@ public:
 		bool probe_relocation = true;
 		bool probe_classification = true;
 		bool follow_camera = true;
+		bool node_volume = false;
+		Vector3 volume_center;
+		Vector3 volume_size = Vector3(24, 12, 24);
 		int debug_mode = 0;
 	};
 
@@ -361,6 +364,7 @@ public:
 
 	// DDGI
 	void environment_set_ddgi(RID p_env, bool p_enable, int p_cascades, float p_probe_spacing, const Vector3i &p_probe_grid, float p_energy, float p_normal_bias, float p_view_bias, float p_hysteresis, bool p_probe_relocation, bool p_probe_classification, bool p_follow_camera, int p_debug_mode);
+	void environment_set_ddgi_volume(RID p_env, bool p_node_volume, const Vector3 &p_center, const Vector3 &p_size);
 	bool environment_get_ddgi_enabled(RID p_env) const;
 	DDGISettings environment_get_ddgi(RID p_env) const;
 

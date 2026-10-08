@@ -618,6 +618,10 @@ void RendererSceneRender::environment_set_ddgi(RID p_env, bool p_enable, int p_c
 	environment_storage.environment_set_ddgi(p_env, p_enable, p_cascades, p_probe_spacing, p_probe_grid, p_energy, p_normal_bias, p_view_bias, p_hysteresis, p_probe_relocation, p_probe_classification, p_follow_camera, p_debug_mode);
 }
 
+void RendererSceneRender::environment_set_ddgi_volume(RID p_env, bool p_node_volume, const Vector3 &p_center, const Vector3 &p_size) {
+	environment_storage.environment_set_ddgi_volume(p_env, p_node_volume, p_center, p_size);
+}
+
 bool RendererSceneRender::environment_get_ddgi_enabled(RID p_env) const {
 	return environment_storage.environment_get_ddgi_enabled(p_env);
 }
