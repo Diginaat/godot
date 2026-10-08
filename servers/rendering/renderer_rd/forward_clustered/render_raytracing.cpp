@@ -30,6 +30,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/math/math_funcs.h"
+#include "core/templates/sort_array.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/environment/sky.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
@@ -2088,6 +2089,32 @@ void RenderRaytracing::finalize_buffers(RTViewportState *p_state) {
 			motion_indices.ptr(), motion_indices.size() * sizeof(int32_t));
 	update_or_grow(p_state->motion_transform_buffer, p_state->motion_transform_buffer_capacity,
 			motion_transforms.ptr(), motion_transforms.size() * sizeof(RT_InstanceMotionData));
+	// Emissive meshes in a stable order (by surface), like the lights in
+	// gather_lights(), so their indices stay put between frames.
+	{
+		LocalVector<uint32_t> order;
+		order.resize(emissive_meshes.size());
+		for (uint32_t i = 0; i < order.size(); i++) {
+			order[i] = i;
+		}
+		struct MeshKeyComparator {
+			const uint64_t *keys;
+			bool operator()(uint32_t a, uint32_t b) const {
+				return keys[a] < keys[b];
+			}
+		};
+		SortArray<uint32_t, MeshKeyComparator> sorter;
+		sorter.compare.keys = emissive_mesh_keys.ptr();
+		sorter.sort(order.ptr(), order.size());
+		LocalVector<RT_EmissiveMeshData> sorted_meshes;
+		LocalVector<uint64_t> sorted_keys;
+		for (uint32_t i : order) {
+			sorted_meshes.push_back(emissive_meshes[i]);
+			sorted_keys.push_back(emissive_mesh_keys[i]);
+		}
+		emissive_meshes = sorted_meshes;
+		emissive_mesh_keys = sorted_keys;
+	}
 	update_or_grow(p_state->emissive_mesh_buffer, p_state->emissive_mesh_buffer_capacity,
 			emissive_meshes.ptr(), emissive_meshes.size() * sizeof(RT_EmissiveMeshData));
 }
@@ -3222,6 +3249,20 @@ uint32_t RenderRaytracing::gather_lights(const RenderDataRD *p_render_data, RT_L
 		}
 	};
 	positional_lights.sort_custom<LightScoreComparator>();
+	// Keep the best-scoring lights that fit, then order them by identity, so a
+	// light keeps its buffer index from frame to frame while it stays in the
+	// set. ReSTIR DI reuses light indices across frames; re-sorting by the
+	// camera-dependent score every frame made its spatial reuse biased (see
+	// PATHTRACER_TESTING.md), even with the index remap.
+	if (positional_lights.size() > p_max_lights - rt_light_count) {
+		positional_lights.resize(p_max_lights - rt_light_count);
+	}
+	struct LightIdComparator {
+		bool operator()(const LightScore &a, const LightScore &b) const {
+			return a.light_instance.get_id() < b.light_instance.get_id();
+		}
+	};
+	positional_lights.sort_custom<LightIdComparator>();
 
 	// Fill remaining slots with top positional lights.
 	for (uint32_t i = 0; i < positional_lights.size() && rt_light_count < p_max_lights; i++) {
