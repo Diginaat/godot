@@ -45,7 +45,7 @@ adapts it; all the PhysX work is theirs.
 Prebuilt Windows editors (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
 Each release names the Godot version it's based on and this build's own
-version: `godot4.8-dev-nvidia-rt-dlss-physx-v0.2.0` is build 0.2.0, on Godot
+version: `godot4.8-dev-nvidia-rt-dlss-physx-v0.3.0` is build 0.3.0, on Godot
 4.8-dev.
 
 > [!IMPORTANT]
@@ -55,7 +55,7 @@ version: `godot4.8-dev-nvidia-rt-dlss-physx-v0.2.0` is build 0.2.0, on Godot
 > NVIDIA DLSS is not included in this repository or in the release downloads,
 > because NVIDIA's license doesn't allow redistributing the DLSS, Ray
 > Reconstruction, Frame Generation and Reflex runtime files this way.
-> The editor, the path tracer and PhysX GPU all work without them.
+> The editor, the path tracer, PhysX GPU, Blast and Flow all work without them.
 >
 > **Only if you want DLSS** (or Ray Reconstruction, Frame Generation or Reflex),
 > either:
@@ -83,6 +83,11 @@ CPU, rendering without DLSS).
   `Environment` (`pathtracing_enabled`, samples per pixel, max bounces, debug
   views). It uses hardware ray tracing pipelines, so it needs the **Vulkan**
   driver (Godot's D3D12 driver has no ray tracing).
+- Path tracer additions in this fork: StandardMaterial3D emission, alpha
+  scissor, alpha blending and refraction (glass) are traced; emissive meshes
+  light the scene as mesh lights; custom shader `vertex()` displacement and
+  volumetric fog / `FogVolume` show up. Details and limits:
+  [`PATHTRACER_TESTING.md`](PATHTRACER_TESTING.md).
 - **DLSS Ray Reconstruction** as the path tracer's denoiser
   (`Environment.pathtracing_denoiser = 1`).
 - **NVIDIA Reflex** low-latency modes (`rendering/streamline/reflex_mode`).
@@ -101,8 +106,11 @@ standard 3D physics node keeps working. On top of that:
 - `PhysXParticleFluid3D` (GPU fluid with surface meshing), `PhysXGranular3D`
   (sand and snow), `PhysXGas3D` (smoke and fire), `PhysXCloth3D`, GPU soft
   bodies for the stock `SoftBody3D`, `PhysXChunkEmitter3D` debris.
-- `PhysXDestructible3D`: runtime mesh fracture with NVIDIA Blast (optional
-  SDK), plus an in-editor fracture tool.
+- `PhysXDestructible3D`: runtime mesh fracture with NVIDIA Blast, plus an
+  in-editor fracture tool (right-click a MeshInstance3D or a mesh file, then
+  **Fracture with Blast...**).
+- `PhysXFlow3D` and `PhysXFlowEmitter3D`: NVIDIA Flow sparse-grid smoke, fire
+  and dust.
 - Vehicles (`PhysXVehicle3D`, `PhysXMotorcycle3D`, `PhysXTank3D`), water
   (`PhysXWaterSurface3D`, FFT ocean, caustics) and boats.
 
@@ -126,9 +134,8 @@ It only works with an editor that includes the PhysX module, such as this one.
    - `cpu/`: rigid bodies, joints, characters, areas, queries. Works everywhere.
    - `gpu/`: GPU particle fluids. Needs an NVIDIA GPU with CUDA; the release
      editors are built with `physx_gpu=yes`.
-   - `flow/`: NVIDIA Flow smoke, fire and dust. Needs an editor built with
-     `flow_sdk=...`, which the release editors aren't yet. The scenes still
-     open, with the Flow nodes as placeholders.
+   - `flow/`: NVIDIA Flow smoke, fire and dust. The release editors include
+     Flow (`nvflow.dll`, `nvflowext.dll`).
 
 The log shows `PhysX 5.10.0 initialized [GPU]` when GPU dynamics are active.
 
@@ -176,25 +183,29 @@ The PhysX SDK is not included. A script clones NVIDIA's PhysX repository at a
 pinned version, applies the Godot build preset and patches, and builds it:
 
 ```
-python modules/godot_physx/misc/build_physx.py --gpu
+python modules/godot_physx/misc/build_physx.py --gpu --blast --flow
 ```
 
-Leave out `--gpu` for a CPU-only build, and add `--blast` to also build the
-NVIDIA Blast SDK for destruction. The script prints the `physx_sdk=` (and
-`blast_sdk=`) path to use in the next step. It clones into a `physx-sdk`
-folder next to this repository.
+Leave out `--gpu` for a CPU-only build. `--blast` also builds the NVIDIA Blast
+SDK (destruction) and `--flow` NVIDIA Flow (smoke and fire); the release
+editors include both. The script prints the full SCons command for the next
+step, with the `physx_sdk=`, `blast_sdk=` and `flow_sdk=` paths. It clones
+into a `physx-sdk` folder next to this repository.
 
 ### 4. Build the editor
 
 ```
-python -m SCons platform=windows target=editor production=yes physx_sdk=<path from step 3> physx_gpu=yes
+python -m SCons platform=windows target=editor production=yes physx_sdk=<path from step 3> physx_gpu=yes blast_sdk=<path> flow_sdk=<path>
 ```
 
-- Add `blast_sdk=<path>` if you built Blast.
+- Run it from PowerShell or cmd, not Git Bash (SCons can't find the D3D12
+  dependencies there).
+- Leave out `blast_sdk` or `flow_sdk` to build without Blast or Flow.
 - Leave out `physx_gpu=yes` for a CPU-only PhysX build. Leave out `physx_sdk`
   completely to build without PhysX.
 - The editor lands in `bin\godot.windows.editor.x86_64.exe`.
-  `PhysXGpu_64.dll` is copied next to it automatically.
+  `PhysXGpu_64.dll` and the Blast and Flow DLLs are copied next to it
+  automatically.
 
 ### 5. Optional: add the NVIDIA Streamline DLLs (only for DLSS)
 
@@ -230,7 +241,7 @@ unavailable.
 ### 6. Optional: C# (.NET) editor
 
 ```
-python -m SCons platform=windows target=editor production=yes module_mono_enabled=yes physx_sdk=<path> physx_gpu=yes
+python -m SCons platform=windows target=editor production=yes module_mono_enabled=yes physx_sdk=<path> physx_gpu=yes blast_sdk=<path> flow_sdk=<path>
 bin\godot.windows.editor.x86_64.mono.console.exe --headless --generate-mono-glue modules\mono\glue
 python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=windows
 ```
@@ -245,7 +256,8 @@ powershell -File misc/scripts/package_editor_win64.ps1          # standard edito
 powershell -File misc/scripts/package_editor_win64.ps1 -Mono    # .NET editor
 ```
 
-The zip goes to `dist\`. It contains the editor, `PhysXGpu_64.dll`, the D3D12
+The zip goes to `dist\`. It contains the editor, `PhysXGpu_64.dll`, the Blast
+DLLs (`NvBlast*.dll`), the Flow DLLs (`nvflow.dll`, `nvflowext.dll`), the D3D12
 Agility SDK DLLs, all license files, a notice explaining where to get NVIDIA
 DLSS and, for .NET, the `GodotSharp` folder. It does **not** include NVIDIA's
 Streamline/DLSS runtime files, so it's safe to share. `-WithNvidiaRuntime`
@@ -285,8 +297,10 @@ All components and their licenses are listed in
 
 - Godot Engine and this fork's changes: MIT, see [`LICENSE.txt`](LICENSE.txt)
   and [`COPYRIGHT.txt`](COPYRIGHT.txt).
-- NVIDIA PhysX and Blast: BSD-3-Clause, see
-  [`modules/godot_physx/PHYSX-LICENSE.md`](modules/godot_physx/PHYSX-LICENSE.md).
+- NVIDIA PhysX, Blast and Flow: BSD-3-Clause, see
+  [`modules/godot_physx/PHYSX-LICENSE.md`](modules/godot_physx/PHYSX-LICENSE.md)
+  and [`misc/dist/licenses/`](misc/dist/licenses/) (Blast also uses Boost and
+  V-HACD, licenses there too).
 - NVIDIA Streamline SDK headers: MIT, see
   [`thirdparty/streamline/LICENSE.txt`](thirdparty/streamline/LICENSE.txt).
 - NVIDIA DLSS, Reflex and the Streamline runtime DLLs: **not included**.
