@@ -119,6 +119,38 @@ python -m SCons -k platform=windows target=editor physx_sdk="C:\REPO\Godot\physx
 - Not built yet: Blast (`--blast` + `blast_sdk=`), and .NET/C#
   (`module_mono_enabled=yes` + `modules/mono/build_scripts/build_assemblies.py`).
 
+## Versioning
+
+This build has its own version, separate from Godot's. It lives in
+`CUSTOM_VERSION` at the repository root (`MAJOR.MINOR.PATCH`). Godot's own
+`version.py` is never edited, so upstream merges stay clean.
+
+- **MAJOR:** a change that breaks existing projects or removes a feature of
+  this build.
+- **MINOR:** a new feature of this build (for example, the in-editor DLSS
+  installer), or moving to a new Godot minor version (4.8 to 4.9).
+- **PATCH:** fixes, and syncs with upstream, NVIDIA or PhysX that add no
+  feature of this build.
+
+Bump `CUSTOM_VERSION` in the commit that prepares a release, not before. A
+version number is never reused.
+
+Releases on GitHub use the own version first, then the Godot base:
+
+| What | Format | Example |
+| --- | --- | --- |
+| Git tag | `v<own>-godot<major>.<minor>-<status>` | `v0.2.0-godot4.8-dev` |
+| Release title | `Godot NVIDIA + PhysX <own> (Godot <major>.<minor>-<status>)` | `Godot NVIDIA + PhysX 0.2.0 (Godot 4.8-dev)` |
+| Zip | `godot-nvidia-physx_<tag>_editor_win64_<standard or mono>.zip` | `godot-nvidia-physx_v0.2.0-godot4.8-dev_editor_win64_standard.zip` |
+
+`package_editor_win64.ps1` builds the zip name from `CUSTOM_VERSION` and
+`version.py`, and prints the tag and title to use.
+
+| Own version | Godot base | Tag | Notes |
+| --- | --- | --- | --- |
+| 0.1.0 | 4.8-dev | `v4.8-dev-2026.10.08` | First release, published before this scheme |
+| 0.2.0 | 4.8-dev | `v0.2.0-godot4.8-dev` | In-editor DLSS installer (not released yet) |
+
 ## Release packages (Windows)
 
 Both editors use `production=yes`. With MSVC that means the static CRT and no
