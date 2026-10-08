@@ -694,7 +694,9 @@ RTSurfaceData *RenderRaytracing::process_surface(
 	} else if (entry->ptr->blas.is_valid()) {
 		if (entry->cached_rid_version == mesh_version) {
 			// Same mesh, surface data changed: BLAS is still live, free explicitly.
-			RD::get_singleton()->free_rid(entry->ptr->blas);
+			if (RD::get_singleton()->acceleration_structure_is_valid(entry->ptr->blas)) {
+				RD::get_singleton()->free_rid(entry->ptr->blas);
+			}
 		}
 		// Version mismatch: old mesh was deleted, BLAS already cascade-freed by RD.
 		entry->ptr->blas = RID();
@@ -776,7 +778,9 @@ RTSurfaceData *RenderRaytracing::process_deformed_surface(
 	// Reallocate owned storage if the surface grew.
 	if (entry.owned_vb_full_capacity < full_size) {
 		if (entry.ptr && entry.ptr->blas.is_valid()) {
-			rd->free_rid(entry.ptr->blas);
+			if (rd->acceleration_structure_is_valid(entry.ptr->blas)) {
+				rd->free_rid(entry.ptr->blas);
+			}
 			entry.ptr->blas = RID();
 			entry.blas_built_once = false;
 		}
@@ -823,7 +827,9 @@ RTSurfaceData *RenderRaytracing::process_deformed_surface(
 			entry.ptr = memnew(RTSurfaceData);
 		}
 		if (entry.ptr->blas.is_valid()) {
-			rd->free_rid(entry.ptr->blas);
+			if (rd->acceleration_structure_is_valid(entry.ptr->blas)) {
+				rd->free_rid(entry.ptr->blas);
+			}
 			entry.ptr->blas = RID();
 		}
 		_populate_surface_blas(p_mesh_surface, entry.owned_vb_full, true, true, true,
@@ -1376,7 +1382,9 @@ void RenderRaytracing::update_procedural_blas(RTProceduralState *p_state, LocalV
 	// Grow-only: only recreate the buffer when capacity is exceeded or count changed.
 	if (required_bytes > p_state->gpu_buffer_capacity || aabb_count != p_state->aabb_count) {
 		if (p_state->blas.is_valid()) {
-			RD::get_singleton()->free_rid(p_state->blas);
+			if (RD::get_singleton()->acceleration_structure_is_valid(p_state->blas)) {
+				RD::get_singleton()->free_rid(p_state->blas);
+			}
 			p_state->blas = RID();
 		}
 		if (p_state->gpu_buffer.is_valid()) {
@@ -2132,7 +2140,7 @@ bool RenderRaytracing::_build_merged_mm_blas(
 				h = RID();
 				continue;
 			}
-			if (old->blas.is_valid()) {
+			if (old->blas.is_valid() && rd_local->acceleration_structure_is_valid(old->blas)) {
 				rd_local->free_rid(old->blas);
 			}
 			if (old->merged_vtx_buffer.is_valid()) {
@@ -2179,7 +2187,9 @@ bool RenderRaytracing::_build_merged_mm_blas(
 	if (structure_changed) {
 		RD *rd = RD::get_singleton();
 		if (entry.blas.is_valid()) {
-			rd->free_rid(entry.blas);
+			if (rd->acceleration_structure_is_valid(entry.blas)) {
+				rd->free_rid(entry.blas);
+			}
 			entry.blas = RID();
 		}
 		entry.blas_built_once = false;
