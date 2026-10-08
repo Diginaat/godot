@@ -330,6 +330,26 @@ public:
 			return has_alpha || has_read_screen_alpha || no_depth_draw || no_depth_test;
 		}
 
+		// The path tracer traces alpha blending and refraction of BaseMaterial3D
+		// (StandardMaterial3D, ORMMaterial3D) itself, so those surfaces go into
+		// the TLAS instead of the raster transparent pass. Anything else that
+		// needs the alpha pass (custom shaders, add/sub/mul blending, billboards,
+		// proximity fade, stencil, no depth test) stays raster.
+		bool rt_traces_transparency() const {
+			if (rt || !uses_alpha || uses_alpha_clip || uses_blend_alpha || unshaded || stencil_enabled) {
+				return false;
+			}
+			if (depth_test != DEPTH_TEST_ENABLED || uses_normal_texture || writes_modelview_or_projection || uses_particle_trails) {
+				return false;
+			}
+			// BaseMaterial3D always declares "albedo" and starts with this note.
+			if (!uniforms.has("albedo") || !code.begins_with("// NOTE: Shader automatically converted from")) {
+				return false;
+			}
+			// Refraction reads the depth texture too; proximity fade needs it for real.
+			return !uses_depth_texture || (uniforms.has("refraction") && !uniforms.has("proximity_fade_distance"));
+		}
+
 		_FORCE_INLINE_ bool rt_uses_depth_in_alpha_pass() const {
 			if (!rt) {
 				return uses_depth_in_alpha_pass();

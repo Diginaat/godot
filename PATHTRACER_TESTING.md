@@ -64,11 +64,13 @@ Audited on 2026-10-08 at commit `ca52415e30`. Shader sources are in
 | Area lights | Not available (Godot has none); emissive meshes are the substitute | |
 | Sky | Supported through the radiance octmap | miss shader |
 | Depth and height fog | Supported per ray segment | `apply_segment_fog()` |
-| Volumetric fog, FogVolume | **Not supported** | no reference in the RT code |
+| Volumetric fog, FogVolume | Supported on primary rays (Godot's froxel fog) | `sample_primary_volumetric_fog()` |
 | Custom ShaderMaterial `fragment()` | Supported through custom hit groups | `scene_shader_raytracing.cpp`, `raytracing_custom_fragment_inc.glsl` |
 | Custom `vertex()` displacement | Supported when `vertex()` writes `VERTEX` and samples no textures (compute pass, then deformed BLAS) | `raytracing_vertex_displace.glsl`, `process_displaced_surface()` |
 | Alpha scissor | Supported (StandardMaterial uses a fixed 0.5 threshold) | any hit |
-| Alpha blend, refraction, transmission | **Not supported** (`transmissivness = 0.0`) | `shade_and_bounce()` |
+| Alpha blend (StandardMaterial3D) | Supported: stochastic opacity in any hit; shadows let (1 - alpha) through | `material_alpha_blend_hit()` |
+| Refraction (StandardMaterial3D) | Supported: dielectric with Fresnel, IOR = 1 + 10 x `refraction_scale` (0.05 gives 1.5), albedo tints, roughness scatters. Casts opaque shadows (as raster) | `refract_and_bounce()` |
+| Custom shader alpha blend, add/sub/mul blending, billboards, proximity fade | Raster overlay on top of the path traced image | `ShaderData::rt_traces_transparency()` |
 | Debug views | 22 modes in `Environment.pathtracing_debug_mode` | `debug_visualize()` |
 
 ## Steps
@@ -86,8 +88,8 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | Done |
 | 7 | Custom `vertex()` displacement in the path tracer (B4) | Done |
 | 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | Done |
-| 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | Next |
-| 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | |
+| 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | Done |
+| 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | Next |
 
 ## Known bugs
 
@@ -102,7 +104,7 @@ both modes.
 | B3 | lighting, all | **Fixed in step 5.** Pure black pixels scattered over surfaces that the sun or a lamp lights directly. With light sampling, direct light on a flat diffuse floor should be nearly noise-free. | Unknown. Some paths return zero radiance. Debug mode 22 (BRDF rejection) shows rejection noise on every surface. Check NEE shadow rays, `offset_ray_origin`, and BRDF sample rejection. |
 | B4 | shaders | **Fixed in step 7** (no textures in `vertex()` yet). `vertex()` displacement was ignored: the wave renders flat and casts a flat shadow. | The BLAS is built from the original mesh. Needs the vertex shader applied before the BLAS build (a compute pass or the raster pipeline's transform feedback). |
 | B5 | fog | **Fixed in step 8.** Volumetric fog, FogVolume and the spot light shaft were **not rendered at all**. Only distance/height fog worked. | The path tracer did not update or sample Godot's integrated volumetric fog froxel map. |
-| B6 | glass | Alpha blend and refraction materials are drawn by the raster transparent pass on top of the path traced image. No shadows or reflections, and refraction smears the noisy screen texture into horizontal streaks. | Transparent geometry is skipped by the path tracer (`transmissivness = 0.0`). |
+| B6 | glass | **Fixed in step 9** (StandardMaterial3D only). Alpha blend and refraction materials were drawn by the raster transparent pass on top of the path traced image. No shadows or reflections, and refraction smears the noisy screen texture into horizontal streaks. | Transparent geometry is skipped by the path tracer (`transmissivness = 0.0`). |
 
 Works as expected (path traced is equal to or better than raster): the PBR
 sphere grid (reflections of the real scene instead of a darker sky probe),
@@ -113,12 +115,30 @@ shadows from omni and spot), custom shader albedo, roughness, emission, `TIME`,
 Other notes:
 - Noise at 4 spp without a denoiser is expected; use `--denoiser=1` with the
   Streamline DLLs for the final look.
-- Exit prints `WARNING: 4 RIDs of type "Shader" were leaked` with path tracing
-  on. Probably the custom hit group shaders. Low priority.
+- Glass needs more bounces than opaque scenes: each interface uses one. At
+  the default 3, some paths inside a glass sphere end black.
 
 ## Findings log
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
+
+- 2026-10-08: Step 9 done. Alpha blended and refractive StandardMaterial3D
+  surfaces are path traced instead of drawn by the raster overlay.
+  `ShaderData::rt_traces_transparency()` picks them (BaseMaterial3D code,
+  mix blending, depth test on, no billboard, proximity fade or stencil) and
+  gives them opaque `rt_pass_flags`, so they enter the TLAS. Material flags:
+  bit 3 alpha blend, bit 4 refraction, bits 24-31 the IOR. Alpha blend: the
+  HG0 any hit (and `ray_query_alpha_test()`) keeps the hit with probability
+  alpha, from a hash of the ray's random state and the triangle, so repeated
+  any-hit calls agree and a pass-through costs no bounce. Shadow rays get the
+  same test, seeded per light sample. Refraction: the closest hit shades the
+  alpha part as usual and sends the rest to `refract_and_bounce()` (exact
+  dielectric Fresnel, GGX microfacet for rough glass, albedo tint, total
+  internal reflection). Refractive instances disable face culling, so rays
+  leave through back faces. Verified: glass view shows the alpha sphere with a
+  partial shadow and the refraction sphere with an inverted, bent view of the
+  pillars. At 3 bounces some paths inside the glass end black; 6 bounces
+  clean that up. All views render with no `ERROR:` or `WARNING:`.
 
 - 2026-10-08: Fixed the dark specks on the emissive room's roof (step 7
   follow-up). Cause: `lights_mesh_selection_weight()` bounded each emitter

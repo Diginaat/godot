@@ -97,6 +97,11 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   until finalized into a `PipelineBundle`. If shutdown abandons a finished task,
   free those task-owned shaders as well as the new pipeline, or exit reports
   leaked `Shader` RIDs.
+- Alpha blended and refractive StandardMaterial3D surfaces are traced
+  (`ShaderData::rt_traces_transparency()`); everything else in the alpha
+  pass stays a raster overlay. Stochastic opacity is decided in any hit from
+  a hash of the payload's `rng_state` and the triangle, never by advancing
+  the RNG there: any hit can run more than once per triangle.
 - A BLAS dies with the buffers it was built from. Check
   `RenderingDevice::acceleration_structure_is_valid()` before freeing one from
   a cache. Don't bind buffers you free later through a linear-pool uniform

@@ -4461,7 +4461,7 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 	// RT-side pass classification; mirrors `flags` unless the shader has
 	// `#if defined(RT)` divergence.
 	uint32_t rt_pass_flags = 0;
-	if (p_material->shader_data->rt_uses_alpha_pass()) {
+	if (p_material->shader_data->rt_uses_alpha_pass() && !p_material->shader_data->rt_traces_transparency()) {
 		rt_pass_flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA;
 		if (p_material->shader_data->rt_uses_depth_in_alpha_pass()) {
 			rt_pass_flags |= GeometryInstanceSurfaceDataCache::FLAG_PASS_DEPTH;

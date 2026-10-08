@@ -534,7 +534,8 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 					if (ray_query_alpha_test(
 								rayQueryGetIntersectionInstanceCustomIndexEXT(spec_rq, false),
 								rayQueryGetIntersectionPrimitiveIndexEXT(spec_rq, false),
-								rayQueryGetIntersectionBarycentricsEXT(spec_rq, false))) {
+								rayQueryGetIntersectionBarycentricsEXT(spec_rq, false),
+								ps.rng_state)) {
 						rayQueryConfirmIntersectionEXT(spec_rq);
 					}
 				}
@@ -619,6 +620,95 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 	// the raygen loop continues with the reconstructed origin and next_ray_dir.
 	ps.hit_t = gl_HitTEXT;
 	ps.offset_normal = h.geometry_normal;
+	ps.next_ray_dir = next_dir;
+	path_pack(payload, ps);
+}
+
+// ============================================================================
+// REFRACT AND BOUNCE (StandardMaterial3D refraction)
+// ============================================================================
+
+/// Dielectric interface: reflects with the Fresnel probability, otherwise
+/// refracts into (or out of) the surface, tinted by the albedo. Rough
+/// surfaces scatter both around a GGX microfacet normal. Direct light isn't
+/// sampled here: shadow rays treat refractive surfaces as opaque, so light
+/// behind them arrives along the refracted path instead.
+void refract_and_bounce(HitData h, MaterialResult m, float ior) {
+	PathState ps = path_unpack(payload);
+	vec3 V = -gl_WorldRayDirectionEXT;
+	uint total_bounces = get_total_bounces(ps.packed_bounces_flags);
+
+	apply_segment_fog(gl_HitTEXT, ps.radiance, ps.throughput);
+	bool emission_sampled_by_nee = is_emissive_sampled(ps.packed_bounces_flags) &&
+			(geometries[h.geometry_idx].flags & FLAG_EMISSIVE_LIGHT) != 0u;
+	if (!emission_sampled_by_nee) {
+		ps.radiance += ps.throughput * m.emissive;
+	}
+	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, false);
+
+#ifdef DLSS_RR_ENABLED
+	if (total_bounces == 0u && is_sample_zero(ps.packed_bounces_flags)) {
+		// Nothing to demodulate: the radiance comes from behind the surface.
+		ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
+		imageStore(dlss_rr_diffuse_albedo, pixel, vec4(DLSSRR_encodeDiffuseAlbedo(vec3(1.0)), 1.0));
+		imageStore(dlss_rr_specular_albedo, pixel, vec4(0.04, 0.04, 0.04, 1.0));
+		imageStore(dlss_rr_normal_roughness, pixel, vec4(m.normal, m.roughness));
+		imageStore(dlss_rr_specular_hit_dist, pixel, vec4(-1.0));
+	}
+#endif
+
+	if (total_bounces >= RT_GET_MAX_BOUNCES()) {
+		ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
+		path_pack(payload, ps);
+		return;
+	}
+
+	// m.normal faces the incoming ray (back-face hits are flipped), so the ray
+	// enters the material on a front face and leaves it on a back face.
+	vec3 N = m.normal;
+	if (dot(N, V) <= 0.0) {
+		N = h.geometry_normal;
+	}
+	vec3 H = N;
+	if (m.roughness > 0.02) {
+		float alpha = m.roughness * m.roughness;
+		vec4 q = getRotationToZAxis(N);
+		vec3 h_local = sampleGGXVNDF(rotatePoint(q, V), vec2(alpha, alpha), rand2(ps.rng_state));
+		H = normalize(rotatePoint(invertRotation(q), h_local));
+	}
+	float eta = h.is_front_face ? 1.0 / ior : ior;
+	float VdotH = clamp(dot(V, H), 0.0, 1.0);
+
+	// Exact dielectric Fresnel; total internal reflection when sin_t >= 1.
+	float sin_t2 = eta * eta * (1.0 - VdotH * VdotH);
+	float fresnel = 1.0;
+	if (sin_t2 < 1.0) {
+		float cos_t = sqrt(1.0 - sin_t2);
+		float rs = (eta * VdotH - cos_t) / (eta * VdotH + cos_t);
+		float rp = (VdotH - eta * cos_t) / (VdotH + eta * cos_t);
+		fresnel = 0.5 * (rs * rs + rp * rp);
+	}
+
+	vec3 next_dir;
+	vec3 offset_normal;
+	if (rand(ps.rng_state) < fresnel) {
+		next_dir = reflect(-V, H);
+		offset_normal = h.geometry_normal;
+	} else {
+		next_dir = refract(-V, H, eta);
+		offset_normal = -h.geometry_normal;
+		ps.throughput *= m.albedo;
+	}
+	// A rough microfacet can send the ray to the wrong side of the surface.
+	if (dot(next_dir, offset_normal) <= 0.0 || luminance(ps.throughput) == 0.0) {
+		ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
+		path_pack(payload, ps);
+		return;
+	}
+
+	ps.packed_bounces_flags = inc_total_bounce(ps.packed_bounces_flags);
+	ps.hit_t = gl_HitTEXT;
+	ps.offset_normal = offset_normal;
 	ps.next_ray_dir = next_dir;
 	path_pack(payload, ps);
 }
