@@ -141,12 +141,12 @@ This build has its own version, separate from Godot's. It lives in
 Bump `CUSTOM_VERSION` in the commit that prepares a release, not before. A
 version number is never reused.
 
-Releases on GitHub use the own version first, then the Godot base:
+Releases on GitHub name the Godot base and the own version:
 
 | What | Format | Example |
 | --- | --- | --- |
-| Git tag | `v<own>-godot<major>.<minor>-<status>` | `v0.2.0-godot4.8-dev` |
-| Release title | `Godot NVIDIA + PhysX <own> (Godot <major>.<minor>-<status>)` | `Godot NVIDIA + PhysX 0.2.0 (Godot 4.8-dev)` |
+| Git tag | `godot<major>.<minor>-<status>-nvidia-rt-dlss-physx-v<own>` | `godot4.8-dev-nvidia-rt-dlss-physx-v0.2.0` |
+| Release title | `Godot NVIDIA + PhysX (Godot <major>.<minor>-<status>) v<own>` | `Godot NVIDIA + PhysX (Godot 4.8-dev) v0.2.0` |
 | Zip | `godot_<major>.<minor>-nvidia-rt-dlss-physx_v<own>-editor_windows_amd64[_mono].zip` | `godot_4.8-nvidia-rt-dlss-physx_v0.2.0-editor_windows_amd64.zip` (.NET: `..._amd64_mono.zip`) |
 
 `package_editor_win64.ps1` builds the zip name from `CUSTOM_VERSION` and
@@ -154,8 +154,8 @@ Releases on GitHub use the own version first, then the Godot base:
 
 | Own version | Godot base | Tag | Notes |
 | --- | --- | --- | --- |
-| 0.1.0 | 4.8-dev | `v4.8-dev-2026.10.08` | First release, published before this scheme |
-| 0.2.0 | 4.8-dev | `v0.2.0-godot4.8-dev` | In-editor DLSS installer (not released yet) |
+| 0.1.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.1.0` | First release (originally tagged `v4.8-dev-2026.10.08`) |
+| 0.2.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.2.0` | In-editor DLSS installer |
 
 ## Release packages (Windows)
 
