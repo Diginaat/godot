@@ -3321,7 +3321,7 @@
 			[b]Note:[/b] Requires a restart to take effect.
 		</member>
 		<member name="rendering/pathtracing/use_shader_execution_reordering" type="bool" setter="" getter="" default="true">
-			If [code]true[/code], enables NVIDIA Shader Execution Reordering in the path tracer. SET reorders ray tracing shader invocations at runtime to improve GPU occupancy and reduce divergence between threads executing different materials. This can significantly improve path tracing performance on NVIDIA Ada Lovelace and later GPUs. Has no effect on hardware that does not support SET.
+			If [code]true[/code], enables NVIDIA Shader Execution Reordering (SER) in the path tracer. SER reorders ray tracing shader invocations at runtime to improve GPU occupancy and reduce divergence between threads executing different materials. This can significantly improve path tracing performance on NVIDIA Ada Lovelace and later GPUs. Ignored on GPUs that do not reorder in hardware (including NVIDIA Turing and Ampere), where it would only add overhead.
 		</member>
 		<member name="rendering/pathtracing/use_simple_shadows" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], shadow rays use Ray Queries instead of fully traced rays. Ray Queries are significantly cheaper but rely on a quick alpha texture fetch, which can produce incorrect shadows on materials with generated/animated alpha textures. Fully traced shadow rays are more accurate but incur a higher GPU cost.

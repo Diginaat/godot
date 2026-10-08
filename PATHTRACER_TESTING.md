@@ -48,6 +48,8 @@ All user arguments (after `--`):
 | `--panel_only` | off | Only the emissive room's ceiling panel emits |
 | `--linear` | off | Linear tonemap with `--exposure=` (default 0.25), for brightness measurements |
 | `--shot=` | none | Save a PNG and quit |
+| `--bench=` | none | Print the mean GPU and CPU render time over N frames (after `--frames=` warm-up, default 300), vsync off, and quit |
+| `--ser=` | project setting | `1`/`0` turns `rendering/pathtracing/use_shader_execution_reordering` on or off at run time |
 
 ## What the path tracer supports today
 
@@ -92,6 +94,42 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | Done |
 | 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | Done (release 0.3.0) |
 
+### Performance roadmap
+
+Second round: make the tracer cheaper per useful sample. Same rules, one
+phase at a time on `dev-pt`, each one measured with `--bench` against the
+baseline below. For ReSTIR, study [NVIDIA RTXDI](https://github.com/NVIDIA-RTX/RTXDI);
+its reservoir logic may be reusable.
+
+| # | Phase | Goal | Impact / difficulty | Status |
+| --- | --- | --- | --- | --- |
+| 11 | Profile the tracer, verify SER | Baseline numbers | | Done |
+| 12 | Adaptive sampling: more rays for noisy pixels, fewer for stable ones | Less wasted work | Scene-dependent / medium | Next |
+| 13 | ReSTIR DI: reuse light samples across pixels and frames | Direct light with many lights | High / high | |
+| 14 | ReSTIR GI: reuse indirect paths | Multi-bounce at low spp | High / very high | |
+| 15 | Path guiding experiments | Better ray directions | Unknown | |
+
+### Baseline (step 11)
+
+2026-10-08, commit after `902466eb50`, RTX 3060 (Ampere), driver 616.92,
+1280x720, 4 spp, 3 bounces, no denoiser, mean GPU ms over 150 frames, two runs
+each:
+
+| View | Raster | PT, SER on | PT, SER off |
+| --- | --- | --- | --- |
+| overview | 0.67 | 7.8 | 7.4 |
+| pbr | 0.70 | 11.3 | 9.4 |
+| lighting | 0.94 | 16.6 | 16.6 |
+| emissive | 0.53 | 25.7 | 21.4 |
+| shaders | 0.40 | 16.9 | 15.5 |
+| glass | 0.64 | 15.9 | 12.4 |
+| fog | 0.53 | 7.5 | 6.8 |
+
+Scaling, emissive view, SER off: 1 spp 4.3 ms, 4 spp 21.4, 8 spp 45.8 (about
+5.5 ms per extra sample); 1 bounce 6.5 ms, 3 bounces 21.4, 6 bounces 22.3
+(most paths end by bounce 3). CPU time stays at 0.2-0.4 ms; the cost is all
+GPU. Raster is 0.4-0.9 ms, so the path tracer is 10-50x raster.
+
 ## Known bugs
 
 Found in the step 3 baseline (2026-10-08, commit `a6a531899a`, 4 spp, 3
@@ -122,6 +160,19 @@ Other notes:
 ## Findings log
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
+
+- 2026-10-08: Step 11 done (profile, SER). Added `--bench` and `--ser` to the
+  test harness; numbers above. Finding: SER was turned on by the project
+  setting alone (default on), without checking the GPU. The RTX 3060 exposes
+  `VK_EXT_ray_tracing_invocation_reorder` but reports reordering hint `NONE`
+  (Ampere accepts the calls and doesn't reorder), so SER only added 0-28%
+  GPU time (emissive +20%, glass +28%). Fix: new internal feature
+  `RD::SUPPORTS_RAYTRACING_INVOCATION_REORDER` (Vulkan: extension enabled and
+  hint `REORDER`); the path tracer uses SER only when it's true. The verbose
+  log prints `invocation reorder (SER): ...`. Verified: with the setting on,
+  the 3060 now runs at the SER-off times; all seven views render the same on
+  the non-SER path, with no `ERROR:` or `WARNING:`. On Ada and newer SER stays
+  on; not measured here (no such GPU).
 
 - 2026-10-08: Step 9 done. Alpha blended and refractive StandardMaterial3D
   surfaces are path traced instead of drawn by the raster overlay.

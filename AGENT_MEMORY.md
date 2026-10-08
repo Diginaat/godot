@@ -105,6 +105,13 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   pass stays a raster overlay. Stochastic opacity is decided in any hit from
   a hash of the payload's `rng_state` and the triangle, never by advancing
   the RNG there: any hit can run more than once per triangle.
+- Measure performance with the test harness: `--bench=150` prints mean GPU
+  ms (vsync off, after warm-up). Compare against the baseline table in
+  PATHTRACER_TESTING.md, two runs each; the noise is about 5%.
+- SER (`USE_SER`) is used only when the GPU reorders in hardware
+  (`RD::SUPPORTS_RAYTRACING_INVOCATION_REORDER`). Turing and Ampere expose the
+  extension with hint `NONE`, so test the non-SER shader path there, and keep
+  both paths (`hitObject*` and `traceRayEXT`) in sync.
 - A BLAS dies with the buffers it was built from. Check
   `RenderingDevice::acceleration_structure_is_valid()` before freeing one from
   a cache. Don't bind buffers you free later through a linear-pool uniform

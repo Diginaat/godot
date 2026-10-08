@@ -1040,6 +1040,10 @@ public:
 		SUPPORTS_HDR_OUTPUT,
 		SUPPORTS_RASTERIZATION_RATE_MAP,
 		SUPPORTS_GPU_MAPPABLE_BUFFER,
+		// Ray tracing shader execution reordering that actually reorders
+		// (Vulkan EXT_ray_tracing_invocation_reorder with a REORDER hint).
+		// Devices that only accept the calls (hint NONE) report false.
+		SUPPORTS_RAYTRACING_INVOCATION_REORDER,
 	};
 
 	enum SubgroupOperations {

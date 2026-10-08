@@ -1164,6 +1164,7 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 		VkPhysicalDeviceSubgroupSizeControlProperties subgroup_size_control_properties = {};
 		VkPhysicalDeviceAccelerationStructurePropertiesKHR acceleration_structure_properties = {};
 		VkPhysicalDeviceRayTracingPipelinePropertiesKHR raytracing_properties = {};
+		VkPhysicalDeviceRayTracingInvocationReorderPropertiesEXT invocation_reorder_properties = {};
 		VkPhysicalDeviceProperties2 physical_device_properties_2 = {};
 
 		const bool use_1_1_properties = physical_device_properties.apiVersion >= VK_API_VERSION_1_1;
@@ -1214,6 +1215,12 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 			raytracing_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
 			raytracing_properties.pNext = next_properties;
 			next_properties = &raytracing_properties;
+
+			if (enabled_device_extension_names.has(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME)) {
+				invocation_reorder_properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_INVOCATION_REORDER_PROPERTIES_EXT;
+				invocation_reorder_properties.pNext = next_properties;
+				next_properties = &invocation_reorder_properties;
+			}
 		}
 
 		physical_device_properties_2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
@@ -1336,6 +1343,12 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 			print_verbose("  shader group handle alignment: " + itos(raytracing_capabilities.shader_group_handle_alignment));
 			print_verbose("  shader group handle size aligned: " + itos(raytracing_capabilities.shader_group_handle_size_aligned));
 			print_verbose("  shader group base alignment: " + itos(raytracing_capabilities.shader_group_base_alignment));
+
+			// Devices without hardware reordering accept the SER calls but
+			// report hint NONE; for them SER only adds overhead.
+			raytracing_capabilities.invocation_reorder = enabled_device_extension_names.has(VK_EXT_RAY_TRACING_INVOCATION_REORDER_EXTENSION_NAME) &&
+					invocation_reorder_properties.rayTracingInvocationReorderReorderingHint == VK_RAY_TRACING_INVOCATION_REORDER_MODE_REORDER_EXT;
+			print_verbose(String("  invocation reorder (SER): ") + (raytracing_capabilities.invocation_reorder ? "reorders" : "no hardware reordering"));
 		} else {
 			print_verbose("- Vulkan Raytracing not supported");
 		}
@@ -7728,6 +7741,8 @@ bool RenderingDeviceDriverVulkan::has_feature(Features p_feature) {
 #endif // defined(WINDOWS_ENABLED)
 		case SUPPORTS_GPU_MAPPABLE_BUFFER:
 			return device_local_host_visible_host_coherent_memory_support;
+		case SUPPORTS_RAYTRACING_INVOCATION_REORDER:
+			return raytracing_capabilities.raytracing_pipeline_support && raytracing_capabilities.invocation_reorder;
 		default:
 			return false;
 	}
