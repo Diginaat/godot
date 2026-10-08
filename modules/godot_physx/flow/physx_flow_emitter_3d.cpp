@@ -111,9 +111,9 @@ PackedStringArray PhysXFlowEmitter3D::get_configuration_warnings() const {
 }
 
 void PhysXFlowEmitter3D::_validate_property(PropertyInfo &p_property) const {
-	if (p_property.name == "radius" && shape != PS3DE::SHAPE_SPHERE) {
+	if (p_property.name == "radius" && shape != SHAPE_SPHERE) {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
-	} else if (p_property.name == "size" && shape != PS3DE::SHAPE_BOX) {
+	} else if (p_property.name == "size" && shape != SHAPE_BOX) {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 	} else if (collision && (p_property.name == "velocity" || p_property.name == "temperature" || p_property.name == "fuel" || p_property.name == "burn" || p_property.name == "smoke" || p_property.name == "divergence" || p_property.name == "couple_rate")) {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
@@ -165,6 +165,6 @@ void PhysXFlowEmitter3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "divergence", PROPERTY_HINT_RANGE, "-10,10,0.01"), "set_divergence", "get_divergence");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "couple_rate", PROPERTY_HINT_RANGE, "0,20,0.01,or_greater"), "set_couple_rate", "get_couple_rate");
 
-	BIND_ENUM_CONSTANT(PS3DE::SHAPE_SPHERE);
-	BIND_ENUM_CONSTANT(PS3DE::SHAPE_BOX);
+	BIND_ENUM_CONSTANT(SHAPE_SPHERE);
+	BIND_ENUM_CONSTANT(SHAPE_BOX);
 }
