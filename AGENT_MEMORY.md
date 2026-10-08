@@ -61,6 +61,11 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   `render_raytracing.cpp`); custom ShaderMaterials get their own hit groups.
   BaseMaterial3D stores every parameter but declares a uniform only when its
   feature is on, so check `ShaderData::uniforms` before trusting a parameter.
+- Direct light (NEE) samples one light per hit, chosen by
+  `lights_selection_weight()` (RIS). Any change to that weight must stay > 0
+  wherever the light can contribute, or the image gets biased (too dark).
+- To isolate a lighting bug, cut the scene down first (the test project's
+  `--sun_only`, a single view) before reading shader code.
 
 ## In-editor DLSS installer
 
