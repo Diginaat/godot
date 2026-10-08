@@ -322,6 +322,8 @@ public:
 	virtual void environment_set_pathtracing(RID p_env, bool p_enable, int p_debug_mode, int p_samples_per_pixel, int p_max_bounces, RSE::PathtracingDenoiser p_denoiser) = 0;
 
 	virtual bool environment_get_pathtracing_enabled(RID p_env) const = 0;
+	virtual void environment_set_ddgi(RID p_env, bool p_enable, int p_cascades, float p_probe_spacing, const Vector3i &p_probe_grid, float p_energy, float p_normal_bias, float p_view_bias, float p_hysteresis, bool p_probe_relocation, bool p_probe_classification, bool p_follow_camera, int p_debug_mode) = 0;
+	virtual bool environment_get_ddgi_enabled(RID p_env) const = 0;
 	virtual int environment_get_pathtracing_debug_mode(RID p_env) const = 0;
 	virtual int environment_get_pathtracing_samples_per_pixel(RID p_env) const = 0;
 	virtual int environment_get_pathtracing_max_bounces(RID p_env) const = 0;

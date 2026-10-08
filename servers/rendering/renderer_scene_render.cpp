@@ -612,6 +612,16 @@ RSE::PathtracingDenoiser RendererSceneRender::environment_get_pathtracing_denois
 	return environment_storage.environment_get_pathtracing_denoiser(p_env);
 }
 
+// DDGI
+
+void RendererSceneRender::environment_set_ddgi(RID p_env, bool p_enable, int p_cascades, float p_probe_spacing, const Vector3i &p_probe_grid, float p_energy, float p_normal_bias, float p_view_bias, float p_hysteresis, bool p_probe_relocation, bool p_probe_classification, bool p_follow_camera, int p_debug_mode) {
+	environment_storage.environment_set_ddgi(p_env, p_enable, p_cascades, p_probe_spacing, p_probe_grid, p_energy, p_normal_bias, p_view_bias, p_hysteresis, p_probe_relocation, p_probe_classification, p_follow_camera, p_debug_mode);
+}
+
+bool RendererSceneRender::environment_get_ddgi_enabled(RID p_env) const {
+	return environment_storage.environment_get_ddgi_enabled(p_env);
+}
+
 void RendererSceneRender::environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction) {
 	environment_storage.environment_set_adjustment(p_env, p_enable, p_brightness, p_contrast, p_saturation, p_use_1d_color_correction, p_color_correction);
 }

@@ -56,6 +56,7 @@ namespace RendererSceneRenderImplementation {
 
 class RenderForwardClustered;
 class SceneShaderRaytracing;
+struct RTDDGIBindings;
 
 // Must match GLSL GeometryData (std430, 128 bytes).
 struct alignas(16) RT_GeometryData {
@@ -203,6 +204,8 @@ enum {
 	RT_GEOM_FLAG_EMISSIVE_LIGHT = 8u,
 	// Positions come from the material's vertex() (process_displaced_surface).
 	RT_GEOM_FLAG_VERTEX_DISPLACED = 16u,
+	// The instance has face culling disabled (both faces are real surfaces).
+	RT_GEOM_FLAG_DOUBLE_SIDED = 32u,
 };
 
 /// Per-instance state for procedural RT geometry. Heap-allocated, only exists for procedural instances.
@@ -410,6 +413,16 @@ class RenderRaytracing {
 	RTDeformedCacheEntry *_access_deformed_slot(RID &r_handle);
 	RTMergedMMEntry *_access_merged_mm_slot(RID &r_handle);
 
+	// Stand-ins for set 0 resources a dispatch doesn't use: DDGI (34-39) when
+	// DDGI is off, and the path tracer outputs (0, 15, 28) for probe tracing.
+	struct DefaultResources {
+		RID ddgi_uniform_buffer;
+		RID image_rgba16f;
+		RID image_r32f;
+		RID image_rg16f;
+	} defaults;
+	void _ensure_default_resources();
+
 	LocalVector<uint32_t> material_free_slots;
 	uint32_t next_material_slot = 0;
 	uint64_t vram_used = 0;
@@ -510,7 +523,10 @@ public:
 
 	RTViewportState *build_tlas(const RenderDataRD *p_render_data, uint32_t p_rt_flags);
 	uint32_t gather_lights(const RenderDataRD *p_render_data, RT_LightData *r_light_data, uint32_t p_max_lights);
-	RID update_uniform_set(RTViewportState *p_state, const RenderDataRD *p_render_data, uint32_t p_rt_flags);
+	/// Scene set (set 0) for a trace dispatch. With p_ddgi, DDGI resources are
+	/// bound; if p_ddgi->trace, the dispatch traces DDGI probe rays and the
+	/// camera outputs are small stand-ins.
+	RID update_uniform_set(RTViewportState *p_state, const RenderDataRD *p_render_data, uint32_t p_rt_flags, const RTDDGIBindings *p_ddgi = nullptr);
 
 	void copy_output_texture(const RenderDataRD *p_render_data);
 	void free_viewport_state(RenderSceneBuffersRD *p_render_buffers);

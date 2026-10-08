@@ -876,6 +876,16 @@ protected:
 	void _render_3d_upscaling(const RenderDataRD *p_render_data, Scale3DMode p_scale_type, bool p_using_taa, double p_time_step, const DLSSRRGuideBuffers &p_dlss_rr);
 	virtual void _free_rt_viewport_state(RenderSceneBuffersRD *p_render_buffers);
 
+	// Ray traced diffuse GI (DDGI), implemented by RenderForwardClusteredPT.
+	// _ddgi_begin_frame() returns true when DDGI provides the indirect light
+	// of this view (SDFGI and VoxelGI are then skipped, so it isn't counted
+	// twice). _ddgi_process() updates the probes and fills the GI ambient
+	// buffer after the depth prepass. _ddgi_debug_draw() runs before upscaling.
+	virtual bool _ddgi_begin_frame(RenderDataRD *p_render_data) { return false; }
+	virtual void _ddgi_process(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) {}
+	virtual void _ddgi_debug_draw(RenderDataRD *p_render_data) {}
+	bool ddgi_active_this_frame = false;
+
 	virtual void _render_material(const Transform3D &p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region, float p_exposure_normalization) override;
 	virtual void _render_uv2(const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region) override;
 	virtual void _render_sdfgi(Ref<RenderSceneBuffersRD> p_render_buffers, const Vector3i &p_from, const Vector3i &p_size, const AABB &p_bounds, const PagedArray<RenderGeometryInstance *> &p_instances, const RID &p_albedo_texture, const RID &p_emission_texture, const RID &p_emission_aniso_texture, const RID &p_geom_facing_texture, float p_exposure_normalization) override;

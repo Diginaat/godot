@@ -30,11 +30,28 @@
 
 #pragma once
 
+#include "core/math/vector3i.h"
 #include "core/templates/rid_owner.h"
 #include "servers/rendering/rendering_server_enums.h"
 
 class RendererEnvironmentStorage {
 public:
+	// Dynamic diffuse global illumination (ray traced irradiance probes).
+	struct DDGISettings {
+		bool enabled = false;
+		int cascades = 3;
+		float probe_spacing = 1.0; // Meters between probes in the finest cascade.
+		Vector3i probe_grid = Vector3i(24, 12, 24); // Probes per axis, per cascade.
+		float energy = 1.0;
+		float normal_bias = 0.1; // Fraction of the probe spacing.
+		float view_bias = 0.3; // Fraction of the probe spacing.
+		float hysteresis = 0.95;
+		bool probe_relocation = true;
+		bool probe_classification = true;
+		bool follow_camera = true;
+		int debug_mode = 0;
+	};
+
 	union TonemapParameters {
 		// Shader vec4:
 		float tonemapper_params[4];
@@ -178,6 +195,9 @@ private:
 		int pathtracing_samples_per_pixel = 1;
 		int pathtracing_max_bounces = 3;
 		RSE::PathtracingDenoiser pathtracing_denoiser = RSE::PT_DENOISER_NONE;
+
+		// DDGI
+		DDGISettings ddgi;
 
 		// Adjustments
 		bool adjustments_enabled = false;
@@ -338,6 +358,11 @@ public:
 	int environment_get_pathtracing_samples_per_pixel(RID p_env) const;
 	int environment_get_pathtracing_max_bounces(RID p_env) const;
 	RSE::PathtracingDenoiser environment_get_pathtracing_denoiser(RID p_env) const;
+
+	// DDGI
+	void environment_set_ddgi(RID p_env, bool p_enable, int p_cascades, float p_probe_spacing, const Vector3i &p_probe_grid, float p_energy, float p_normal_bias, float p_view_bias, float p_hysteresis, bool p_probe_relocation, bool p_probe_classification, bool p_follow_camera, int p_debug_mode);
+	bool environment_get_ddgi_enabled(RID p_env) const;
+	DDGISettings environment_get_ddgi(RID p_env) const;
 
 	// Adjustment
 	void environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction);

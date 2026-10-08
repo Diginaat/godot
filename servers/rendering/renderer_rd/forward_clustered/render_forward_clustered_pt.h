@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "servers/rendering/renderer_rd/forward_clustered/render_ddgi.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
 
@@ -43,6 +44,7 @@ class RenderForwardClusteredPT : public RenderForwardClustered {
 	/* Raytracing */
 
 	RenderRaytracing *raytracing = nullptr;
+	RenderDDGI *ddgi = nullptr;
 
 	bool _setup_rt();
 	void _age_out_motion_vectors(const RenderDataRD *p_render_data);
@@ -51,6 +53,10 @@ protected:
 	virtual void _render_scene(RenderDataRD *p_render_data, const Color &p_default_bg_color) override;
 	virtual void _render_buffers_debug_draw(const RenderDataRD *p_render_data) override;
 	virtual void _free_rt_viewport_state(RenderSceneBuffersRD *p_render_buffers) override;
+
+	virtual bool _ddgi_begin_frame(RenderDataRD *p_render_data) override;
+	virtual void _ddgi_process(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) override;
+	virtual void _ddgi_debug_draw(RenderDataRD *p_render_data) override;
 
 public:
 	RenderForwardClusteredPT();

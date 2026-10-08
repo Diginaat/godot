@@ -26,7 +26,76 @@ layout(set = 0, binding = 1) uniform accelerationStructureEXT tlas;
 
 layout(location = 0) rayPayloadEXT PathPayload payload;
 
+#include "raytracing_ddgi_inc.glsl"
+
+// DDGI probe ray dispatch: x = ray, y = slot in the update list.
+// Writes rgb = radiance arriving at the probe, a = signed distance of the
+// first hit (negative for back faces, DDGI_MISS_DISTANCE for misses).
+void ddgi_trace_probe_rays() {
+	uint ray = gl_LaunchIDEXT.x;
+	uint slot = gl_LaunchIDEXT.y;
+	if (slot >= ddgi_update_count || ray >= ddgi.counts.y) {
+		return;
+	}
+	uint probe = ddgi_update_probes[slot];
+	DDGIProbe pd = ddgi_probes[probe];
+
+	// Probes classified as inactive only trace the fixed rays, which is
+	// enough to notice when geometry moves close to them.
+	if ((pd.state == DDGI_PROBE_INACTIVE || pd.state == DDGI_PROBE_INSIDE) && ray >= ddgi.counts.z) {
+		return;
+	}
+
+	uint volume = 0u;
+	for (uint v = 0u; v < ddgi.counts.x; v++) {
+		ivec4 grid = ddgi.volumes[v].grid;
+		if (int(probe) >= grid.w && int(probe) < grid.w + grid.x * grid.y * grid.z) {
+			volume = v;
+			break;
+		}
+	}
+	DDGIVolume vol = ddgi.volumes[volume];
+	vec3 ray_origin = ddgi_probe_world_position(vol, ddgi_probe_logical(vol, probe), pd.offset);
+	vec3 ray_dir = ddgi_probe_ray_direction(ray);
+
+	PathState ps;
+	ps.radiance = vec3(0.0);
+	ps.throughput = vec3(1.0);
+	// Counted as an indirect bounce: lights use their indirect energy and the
+	// camera-only effects (depth, motion vectors, volumetric fog) are skipped.
+	ps.packed_bounces_flags = set_ddgi_probe_ray(pack_bounces(1u, 1u));
+	ps.rng_state = init_rng(uvec2(ray, probe), ddgi.atlas.w, 7u);
+	ps.hit_t = DDGI_MISS_DISTANCE;
+	ps.offset_normal = vec3(0.0, 0.0, 1.0);
+	ps.next_ray_dir = ray_dir;
+
+	float first_hit = DDGI_MISS_DISTANCE;
+	// A few iterations let probe rays pass through refractive surfaces.
+	[[dont_unroll]] for (uint i = 0u; i < 4u; i++) {
+		path_pack(payload, ps);
+		// No face culling: back face hits tell that the probe is inside geometry.
+		traceRayEXT(tlas, gl_RayFlagsNoneEXT, 0xFF, 0, 0, 0, ray_origin, 0.0, ray_dir, 10000.0, 0);
+		ps = path_unpack(payload);
+		if (i == 0u) {
+			first_hit = ps.hit_t;
+		}
+		if (is_path_terminated(ps.packed_bounces_flags)) {
+			break;
+		}
+		vec3 hit_pos = ray_origin + ray_dir * ps.hit_t;
+		ray_origin = offset_ray_origin(hit_pos, ps.offset_normal);
+		ray_dir = ps.next_ray_dir;
+	}
+
+	imageStore(ddgi_ray_data, ivec2(ray, slot), vec4(ps.radiance, first_hit));
+}
+
 void main() {
+	if (get_rt_param(RT_PARAM_DDGI_TRACE) > 0.5) {
+		ddgi_trace_probe_rays();
+		return;
+	}
+
 	uvec2 pixel = gl_LaunchIDEXT.xy;
 	const vec2 pixel_center = vec2(pixel) + vec2(0.5);
 	const vec2 in_uv = pixel_center / vec2(gl_LaunchSizeEXT.xy);
@@ -151,6 +220,8 @@ vec3 radiance_octmap_sample(vec2 p_oct_uv, float p_roughness) {
 
 #endif // USE_RADIANCE_OCTMAP_ARRAY
 
+#include "raytracing_ddgi_inc.glsl"
+
 void main() {
 	PathState ps = path_unpack(payload);
 
@@ -162,6 +233,21 @@ void main() {
 		return;
 	}
 #endif
+
+	// DDGI probe rays see the sky, or the environment's ambient color when
+	// the background isn't a sky. No fog: it is a camera effect.
+	if (is_ddgi_probe_ray(ps.packed_bounces_flags)) {
+		ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
+		vec3 miss_radiance = ddgi.miss_color.rgb;
+		if (ddgi.miss_color.w > 0.5) {
+			mat3 probe_world_to_sky = scene_data_block.data.radiance_inverse_xform * mat3(scene_data_block.data.inv_view_matrix);
+			vec2 probe_border = vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0);
+			miss_radiance = radiance_octmap_sample(vec3_to_oct_with_border(probe_world_to_sky * gl_WorldRayDirectionEXT, probe_border), 0.0) * scene_data_block.data.IBL_exposure_normalization;
+		}
+		ps.radiance += ps.throughput * miss_radiance;
+		path_pack(payload, ps);
+		return;
+	}
 
 	// Miss always ends the path.
 	ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
@@ -352,6 +438,9 @@ vec3 radiance_octmap_sample(vec2 p_oct_uv, float p_roughness) {
 }
 
 #endif // USE_RADIANCE_OCTMAP_ARRAY
+
+#define DDGI_SAMPLING
+#include "raytracing_ddgi_inc.glsl"
 
 // clang-format off
 #include "raytracing_material_eval_inc.glsl"
