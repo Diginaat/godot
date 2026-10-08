@@ -170,21 +170,24 @@ help with MSVC), so an incremental build is quick.
 
 ```
 # Standard editor
-python -m SCons platform=windows target=editor production=yes physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes
+python -m SCons platform=windows target=editor production=yes physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes blast_sdk="C:\REPO\Godot\physx-sdk\blast\_build\windows-x86_64\release\blast-sdk" flow_sdk="C:\REPO\Godot\physx-sdk\flow"
 powershell -File misc/scripts/package_editor_win64.ps1
 
 # .NET (mono) editor; needs the .NET SDK
-python -m SCons platform=windows target=editor production=yes module_mono_enabled=yes physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes
+python -m SCons platform=windows target=editor production=yes module_mono_enabled=yes physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes blast_sdk="C:\REPO\Godot\physx-sdk\blast\_build\windows-x86_64\release\blast-sdk" flow_sdk="C:\REPO\Godot\physx-sdk\flow"
 bin\godot.windows.editor.x86_64.mono.console.exe --headless --generate-mono-glue modules\mono\glue
 python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=windows
 powershell -File misc/scripts/package_editor_win64.ps1 -Mono
 ```
 
-The zips land in `dist/` (gitignored). The script bundles the editor exes plus
-the NVIDIA Streamline release DLLs from `bin/` (`sl.*.dll`, `nvngx_*.dll`,
-`NvLowLatencyVk.dll` and their licenses; never `bin/development/`, which holds
-the debug variants), `PhysXGpu_64.dll`, the D3D12 Agility SDK DLLs, the
-license files and, for mono, `bin/GodotSharp/`.
+The zips land in `dist/` (gitignored). The script bundles the editor exes,
+`PhysXGpu_64.dll`, the Blast DLLs (`NvBlast.dll`, `NvBlastGlobals.dll`,
+`NvBlastExtAuthoring.dll`, `NvBlastExtShaders.dll`), the Flow DLLs
+(`nvflow.dll`, `nvflowext.dll`), the D3D12 Agility SDK DLLs, the license
+files and, for mono, `bin/GodotSharp/`. Blast and Flow are always included:
+the script fails if any of their DLLs is missing from `bin/`. NVIDIA
+Streamline DLLs are bundled only with `-WithNvidiaRuntime` (private use; never
+`bin/development/`, which holds the debug variants).
 
 ## Test
 

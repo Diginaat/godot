@@ -1,7 +1,7 @@
 # Packages a built Windows editor from bin/ into a zip in dist/.
 #
-# Default (public release): the editor, PhysX GPU, the D3D12 Agility SDK
-# DLLs, all license files and a notice explaining where to get NVIDIA DLSS.
+# Default (public release): the editor, PhysX GPU, Blast and Flow, the D3D12
+# Agility SDK DLLs, all license files and a notice explaining where to get NVIDIA DLSS.
 # NVIDIA Streamline / DLSS / Reflex runtime files are NOT included: their
 # licenses don't allow redistributing them in a public open-source download
 # (see THIRD_PARTY_LICENSES.md).
@@ -49,7 +49,10 @@ function Copy-Required($source, $destination) {
 	Copy-Item $source $destination
 }
 
-foreach ($file in @($exe, $console, "PhysXGpu_64.dll", "D3D12Core.dll", "d3d12SDKLayers.dll")) {
+# Blast and Flow are always part of a release: build with blast_sdk= and
+# flow_sdk= (see CUSTOM_BUILD.md), which copies their DLLs into bin/.
+$physx = @("PhysXGpu_64.dll", "NvBlast.dll", "NvBlastGlobals.dll", "NvBlastExtAuthoring.dll", "NvBlastExtShaders.dll", "nvflow.dll", "nvflowext.dll")
+foreach ($file in @($exe, $console, "D3D12Core.dll", "d3d12SDKLayers.dll") + $physx) {
 	Copy-Required (Join-Path $bin $file) $stage
 }
 

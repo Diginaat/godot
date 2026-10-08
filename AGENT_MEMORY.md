@@ -43,7 +43,10 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 ## Releases
 
 - Public zips must **not** contain NVIDIA Streamline/DLSS/Reflex runtime DLLs
-  (NVIDIA's license). `PhysXGpu_64.dll` and the D3D12 Agility SDK DLLs are fine.
+  (NVIDIA's license). `PhysXGpu_64.dll`, the Blast and Flow DLLs and the D3D12
+  Agility SDK DLLs are fine.
+- Every release includes Blast and Flow: build with `blast_sdk=` and
+  `flow_sdk=`. The packaging script refuses to run without their DLLs.
   The packaging script's default is the public package.
 - Naming (details in CUSTOM_BUILD.md, "Versioning"): own version in
   `CUSTOM_VERSION`; tag `godot<base>-nvidia-rt-dlss-physx-v<own>`; title
