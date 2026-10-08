@@ -78,8 +78,8 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | 1 | Audit what the path tracer supports (table above) | Done |
 | 2 | Build the test project with all test areas and a screenshot harness | Done |
 | 3 | Baseline: screenshots of every view, path traced and raster; list every visible difference in the findings log | Done |
-| 4 | Quick bugs: StandardMaterial emission without a texture (B1), StandardMaterial alpha scissor threshold (B2) | Next |
-| 5 | Black pixels in directly lit areas (B3): find the cause, fix it | |
+| 4 | Quick bugs: StandardMaterial emission without a texture (B1), StandardMaterial alpha scissor threshold (B2) | Done |
+| 5 | Black pixels in directly lit areas (B3): find the cause, fix it | Next |
 | 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | |
 | 7 | Custom `vertex()` displacement in the path tracer (B4) | |
 | 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | |
@@ -94,8 +94,8 @@ both modes.
 
 | ID | View | Bug | Cause / lead |
 | --- | --- | --- | --- |
-| B1 | emissive | StandardMaterial3D emission renders **black**. Debug mode 21 (Emissive) is 0 on every emitter. Emission from a custom ShaderMaterial works (shaders view, orange stripes). | `scene_raytracing_raygen.glsl` closest hit HG0 only adds emission when `mat.flags & 2` (`RT_MAT_FLAG_HAS_EMISSION_TEX`) is set, which `render_raytracing.cpp` sets only when an emission texture exists. Color and energy alone are ignored. |
-| B2 | glass, pbr | Alpha scissor sphere with threshold 0.3 and alpha 0.4 is **missing** (no surface, no shadow). | Any-hit HG0 uses a hard-coded `alpha < 0.5`; the material's `alpha_scissor_threshold` isn't passed. |
+| B1 | emissive | **Fixed in step 4.** StandardMaterial3D emission rendered **black**. Debug mode 21 (Emissive) is 0 on every emitter. Emission from a custom ShaderMaterial works (shaders view, orange stripes). | `scene_raytracing_raygen.glsl` closest hit HG0 only adds emission when `mat.flags & 2` (`RT_MAT_FLAG_HAS_EMISSION_TEX`) is set, which `render_raytracing.cpp` sets only when an emission texture exists. Color and energy alone are ignored. |
+| B2 | glass, pbr | **Fixed in step 4.** Alpha scissor sphere with threshold 0.3 and alpha 0.4 is **missing** (no surface, no shadow). | Any-hit HG0 uses a hard-coded `alpha < 0.5`; the material's `alpha_scissor_threshold` isn't passed. |
 | B3 | lighting, all | Pure black pixels scattered over surfaces that the sun or a lamp lights directly. With light sampling, direct light on a flat diffuse floor should be nearly noise-free. | Unknown. Some paths return zero radiance. Debug mode 22 (BRDF rejection) shows rejection noise on every surface. Check NEE shadow rays, `offset_ray_origin`, and BRDF sample rejection. |
 | B4 | shaders | `vertex()` displacement is ignored: the wave renders flat and casts a flat shadow. | The BLAS is built from the original mesh. Needs the vertex shader applied before the BLAS build (a compute pass or the raster pipeline's transform feedback). |
 | B5 | fog | Volumetric fog, FogVolume and the spot light shaft are **not rendered at all**. Only distance/height fog works. | Not implemented. Needs ray marching through Godot's froxel fog volume, or a path traced participating medium. |
@@ -117,6 +117,17 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-10-08: Step 4 done. B1: the closest hit now computes emission from
+  color times energy and only multiplies by the texture when one is set. The
+  host reads `emission`, `emission_energy` and `texture_emission` only when the
+  material's shader declares `emission` (BaseMaterial3D stores every parameter
+  but declares the uniform only with emission enabled), so a disabled emission
+  never glows. B2: the host packs `alpha_scissor_threshold` into bits 16-23 of
+  `MaterialData.flags` (`RT_MAT_ALPHA_THRESHOLD_SHIFT`, read in GLSL with
+  `material_alpha_threshold()`); any hit and the ray query shadow test use it.
+  Materials without alpha scissor keep the old 0.5 cutoff. Verified: emitters
+  glow and light the emissive room (noisy, step 6), the 0.3 scissor sphere and
+  its shadow appear. Smoke tests pass.
 - 2026-10-08: Step 3 done. Six bugs found (table above). B1 has a confirmed
   root cause. Next is step 4 (B1 and B2).
 - 2026-10-08: Steps 1 and 2 done. No fixes yet.
