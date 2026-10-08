@@ -136,6 +136,9 @@ void RenderRaytracing::_free_viewport_state_internal(RTViewportState *p_state) {
 	if (p_state->light_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(p_state->light_buffer);
 	}
+	if (p_state->emissive_mesh_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(p_state->emissive_mesh_buffer);
+	}
 	if (p_state->params_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(p_state->params_buffer);
 	}
@@ -523,6 +526,7 @@ void RenderRaytracing::prepare_frame() {
 	material_data.clear();
 	motion_indices.clear();
 	motion_transforms.clear();
+	emissive_meshes.clear();
 	deformed_active_this_frame.clear();
 	merged_mm_active_this_frame.clear();
 
@@ -1842,6 +1846,8 @@ void RenderRaytracing::finalize_buffers(RTViewportState *p_state) {
 			motion_indices.ptr(), motion_indices.size() * sizeof(int32_t));
 	update_or_grow(p_state->motion_transform_buffer, p_state->motion_transform_buffer_capacity,
 			motion_transforms.ptr(), motion_transforms.size() * sizeof(RT_InstanceMotionData));
+	update_or_grow(p_state->emissive_mesh_buffer, p_state->emissive_mesh_buffer_capacity,
+			emissive_meshes.ptr(), emissive_meshes.size() * sizeof(RT_EmissiveMeshData));
 }
 
 // ---------------------------------------------------------------------------
@@ -2604,6 +2610,32 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 			sbt_offsets.push_back(mat_data->rt_sbt_offset);
 			material_data.push_back(mat_data->data);
 
+			// Emissive StandardMaterial3D surfaces become mesh lights, so direct-light
+			// sampling can aim at them instead of waiting for a bounce to hit them.
+			// Custom shaders compute emission in the shader, so the host can't see it.
+			if (!mat_data->is_custom_shader && emissive_meshes.size() < RT_EMISSIVE_MESHES_MAX) {
+				const RT_MaterialData &md = mat_data->data;
+				const float emission_luminance = (md.emission_color[0] * 0.2126f + md.emission_color[1] * 0.7152f + md.emission_color[2] * 0.0722f) * md.emission_strength;
+				const uint32_t triangle_count = surf_data->geometry.primitive_count;
+				if (emission_luminance > 0.0f && triangle_count > 0 && surf_data->geometry.index_format != RT_INDEX_FORMAT_NONE) {
+					const AABB &bounds = inst->transformed_aabb;
+					const Vector3 size = bounds.size;
+					const float area_estimate = MAX(2.0f * (size.x * size.y + size.y * size.z + size.z * size.x), 1e-4f);
+					RT_EmissiveMeshData em = {};
+					RendererRD::MaterialStorage::store_transform_transposed_3x4(final_transform, em.object_to_world);
+					const Vector3 center = bounds.get_center();
+					em.center[0] = center.x;
+					em.center[1] = center.y;
+					em.center[2] = center.z;
+					em.radius = size.length() * 0.5f;
+					em.geometry_idx = geometry_data.size() - 1;
+					em.primitive_count = triangle_count;
+					em.power = emission_luminance * area_estimate;
+					emissive_meshes.push_back(em);
+					geometry_data[geometry_data.size() - 1].flags |= RT_GEOM_FLAG_EMISSIVE_LIGHT;
+				}
+			}
+
 			// Determine per-instance TLAS flags from material properties.
 			uint32_t inst_flags = 0;
 			if (surf->shader) {
@@ -3057,6 +3089,19 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		uniforms.push_back(u);
 	}
 
+	// Binding 33: Emissive meshes sampled as lights (RT_EmissiveMeshData).
+	{
+		RD::Uniform u;
+		u.binding = 33;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		if (p_state->emissive_mesh_buffer.is_valid()) {
+			u.append_id(p_state->emissive_mesh_buffer);
+		} else {
+			u.append_id(RendererRD::MeshStorage::get_singleton()->get_default_rd_storage_buffer());
+		}
+		uniforms.push_back(u);
+	}
+
 	// Binding 5: Material buffer.
 	{
 		RD::Uniform u;
@@ -3113,6 +3158,7 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		rt_light_count = gather_lights(p_render_data, rt_light_data, RT_LIGHTS_MAX);
 
 		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_LIGHT_COUNT] = float(rt_light_count);
+		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_EMISSIVE_MESH_COUNT] = float(emissive_meshes.size());
 
 		// Upload light buffer.
 		{

@@ -44,6 +44,8 @@ All user arguments (after `--`):
 | `--volfog=` | view default | `1` forces volumetric fog on, `0` off |
 | `--frames=` | `90` | Frames to render before the screenshot |
 | `--sun_only` | off | Remove every light except the sun (isolates light selection) |
+| `--panel_only` | off | Only the emissive room's ceiling panel emits |
+| `--linear` | off | Linear tonemap with `--exposure=` (default 0.25), for brightness measurements |
 | `--shot=` | none | Save a PNG and quit |
 
 ## What the path tracer supports today
@@ -57,7 +59,7 @@ Audited on 2026-10-08 at commit `ca52415e30`. Shader sources are in
 | --- | --- | --- |
 | StandardMaterial3D albedo, roughness, metallic, specular, ORM texture | Supported | `scene_raytracing_raygen.glsl`, closest hit HG0 |
 | Normal maps | Supported | `apply_normal_map()` |
-| Emission (color, energy, texture) | Supported on hit only. No light sampling (NEE) toward emissive meshes, so small emitters are noisy | `shade_and_bounce()` |
+| Emission (color, energy, texture) | Supported. StandardMaterial3D emitters are also sampled as mesh lights (NEE) on rough surfaces. Custom shader emission is counted on hit only | `lights_sample_emissive_mesh()` |
 | Omni, spot, directional lights | Supported, with soft shadows from light size | `raytracing_lights_inc.glsl` |
 | Area lights | Not available (Godot has none); emissive meshes are the substitute | |
 | Sky | Supported through the radiance octmap | miss shader |
@@ -81,8 +83,8 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | 3 | Baseline: screenshots of every view, path traced and raster; list every visible difference in the findings log | Done |
 | 4 | Quick bugs: StandardMaterial emission without a texture (B1), StandardMaterial alpha scissor threshold (B2) | Done |
 | 5 | Black pixels in directly lit areas (B3): find the cause, fix it | Done |
-| 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | Next |
-| 7 | Custom `vertex()` displacement in the path tracer (B4) | |
+| 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | Done |
+| 7 | Custom `vertex()` displacement in the path tracer (B4) | Next |
 | 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | |
 | 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | |
 | 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | |
@@ -118,6 +120,22 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-10-08: Step 6 done. Emissive StandardMaterial3D surfaces are mesh
+  lights now. Host (`render_raytracing.cpp`, TLAS loop): each emissive HG0
+  surface becomes an `RT_EmissiveMeshData` (transform incl. compression AABB,
+  bounds, geometry index, triangle count, power), uploaded at binding 33, count
+  in `RT_PARAM_EMISSIVE_MESH_COUNT` (13), up to 256; its geometry gets
+  `FLAG_EMISSIVE_LIGHT`. Shader: mesh lights join the RIS candidates
+  (`lights_mesh_selection_weight()`), sampling picks a uniform triangle and a
+  uniform point (`lights_sample_emissive_mesh()`), emission read from the
+  material incl. texture. Double counting is avoided without MIS: at a vertex
+  with roughness >= 0.3 NEE samples mesh lights and sets payload bit 27
+  (`EMISSIVE_SAMPLED_FLAG`); the next hit then skips emission from flagged
+  geometry. Glossy vertices leave emitters to the BRDF ray (sharp reflections).
+  Verified unbiased: `--panel_only --sun_only --linear --spp=16`, mean linear
+  brightness vs a build with mesh NEE disabled matches within 1-2% in the room
+  and 0.1% on the sunlit floor (`png_mean`-style sRGB-decoded means; compare
+  in linear space, tonemapped means are skewed by noise and clipping).
 - 2026-10-08: Step 5 done. B3 cause: `lights_evaluate_direct_lighting()`
   picked one light per hit **uniformly** among the lights in range, so a
   sunlit pixel sampled the sun only 1/3 to 1/4 of the time (the scene has a

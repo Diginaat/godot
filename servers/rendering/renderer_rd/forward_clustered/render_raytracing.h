@@ -94,6 +94,19 @@ struct RT_InstanceMotionData {
 };
 static_assert(sizeof(RT_InstanceMotionData) == 48, "RT_InstanceMotionData must be 48 bytes");
 
+/// An emissive StandardMaterial3D surface that direct-light sampling (NEE) can
+/// target (matches GLSL EmissiveMeshData, std430, 80 bytes).
+struct RT_EmissiveMeshData {
+	float object_to_world[12]; // Current object-to-world (transposed 3x4), includes the compression AABB.
+	float center[3]; // World-space bounds center.
+	float radius; // World-space bounds radius.
+	uint32_t geometry_idx; // Index into geometries[] and materials[].
+	uint32_t primitive_count; // Triangle count.
+	float power; // Selection weight: emission luminance times surface area estimate.
+	float _pad;
+};
+static_assert(sizeof(RT_EmissiveMeshData) == 80, "RT_EmissiveMeshData must be 80 bytes");
+
 // Must match GLSL MaterialData (std430, 96 bytes).
 struct alignas(16) RT_MaterialData {
 	uint32_t albedo_texture_idx;
@@ -143,6 +156,7 @@ static_assert(sizeof(RT_LightData) == 80, "RT_LightData must be 80 bytes for std
 
 enum {
 	RT_LIGHTS_MAX = 64,
+	RT_EMISSIVE_MESHES_MAX = 256,
 	RT_LIGHTS_FRUSTUM_BUDGET = 48,
 	RT_LIGHTS_INDIRECT_BUDGET = RT_LIGHTS_MAX - RT_LIGHTS_FRUSTUM_BUDGET,
 };
@@ -176,6 +190,8 @@ enum {
 	RT_GEOM_FLAG_PROCEDURAL = 2u,
 	// Set when the BLAS uses a per-frame-deformed vertex buffer.
 	RT_GEOM_FLAG_DEFORMED = 4u,
+	// Emission from this geometry is sampled as a mesh light (see RT_EmissiveMeshData).
+	RT_GEOM_FLAG_EMISSIVE_LIGHT = 8u,
 };
 
 /// Per-instance state for procedural RT geometry. Heap-allocated, only exists for procedural instances.
@@ -318,6 +334,8 @@ struct RTViewportState {
 	uint32_t motion_transform_buffer_capacity = 0;
 
 	RID light_buffer;
+	RID emissive_mesh_buffer;
+	uint32_t emissive_mesh_buffer_capacity = 0;
 	RID params_buffer;
 	RID scene_uniform_set;
 
@@ -385,6 +403,7 @@ class RenderRaytracing {
 	LocalVector<RT_MaterialData> material_data;
 	LocalVector<int32_t> motion_indices; ///< Per-instance: index into motion_transforms[], or -1.
 	LocalVector<RT_InstanceMotionData> motion_transforms; ///< Compact: only moving instances.
+	LocalVector<RT_EmissiveMeshData> emissive_meshes; ///< Emissive surfaces sampled as mesh lights.
 	LocalVector<RID> blass;
 	LocalVector<Transform3D> blas_transforms;
 	LocalVector<uint32_t> instance_flags;

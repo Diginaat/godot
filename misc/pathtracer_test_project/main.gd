@@ -74,6 +74,17 @@ func _apply_args() -> void:
 	env.pathtracing_max_bounces = int(args.get("bounces", "3"))
 	env.pathtracing_debug_mode = int(args.get("debug", "0"))
 	env.pathtracing_denoiser = int(args.get("denoiser", "0"))
+	# Measurement mode: linear tonemap and a low exposure keep values from
+	# clipping, so mean brightness can be compared between builds.
+	if args.has("linear"):
+		env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+		env.tonemap_exposure = float(args.get("exposure", "0.25"))
+	if args.has("panel_only"):
+		# Only the emissive room's ceiling panel emits (a large, easy emitter).
+		for node in find_children("*", "MeshInstance3D", true, false):
+			var mat := (node as MeshInstance3D).material_override as StandardMaterial3D
+			if mat and mat.emission_enabled and node.name != "CeilingPanel":
+				mat.emission_energy_multiplier = 0.0
 	_set_view(args.get("view", "overview"))
 
 
