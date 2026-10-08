@@ -146,7 +146,11 @@ Common problems:
   budget; stable probes behind the camera get less. A feedback factor on
   the GPU raises all rates until the per-frame budget is used.
 - Coarser cascades update half as often per level.
-- `gpu_time_budget_ms` adapts the probe budget to measured GPU time.
+- `gpu_time_budget_ms` adapts the probe budget to measured GPU time. It
+  never goes below an eighth of the quality's probes per frame, so a budget
+  below that floor's cost isn't reached (Ultra in the stress view: about
+  0.45 ms on an RTX 3060). Above the floor it settles within about 10% of
+  the target; timing noise only pushes it upward near the floor.
 - The apply pass runs once per pixel at internal resolution, so it scales
   with the 3D resolution scale (and DLSS / FSR render scale). With
   `rendering/global_illumination/gi/use_half_resolution` (the setting SDFGI
@@ -229,7 +233,7 @@ a jump larger than the grid resets the cascade.
 | 3 | Basic DDGI: one fixed volume, trace, blend, sample | Done |
 | 4 | Forward+ integration: GI buffer, SDFGI/VoxelGI exclusion | Done |
 | 5 | Dynamic scenes: moving lights and objects, BLAS refit | Done |
-| 6 | Performance: scheduling, classification, relocation, GPU budget, benchmarks | Open |
+| 6 | Performance: scheduling, classification, relocation, GPU budget, benchmarks | Done |
 | 7 | Scrolling cascades | Open |
 | 8 | Editor: settings, debug views, documentation | Partial: `DDGIVolume` node |
 | 9 | Compatibility: DLSS, path tracer, D3D12 fallback | Open |
@@ -257,7 +261,8 @@ Arguments (after `--`): `--view=`, `--gi=none|sdfgi|ddgi`, `--quality=0..4`,
 `--debug=0..6`, `--anim=0|1`, `--tod=0|1` (sun cycle), `--move=1`,
 `--speed=`, `--pt=1`, `--scale3d=6 --scale=0.67` (DLSS), `--res=WxH`,
 `--frames=N` (warm-up), `--shot=path`, `--bench=N`, `--instances=`, `--lights=`,
-`--linear --exposure=`.
+`--linear --exposure=`, `--budget=ms` (GPU time budget), `--half=1` (half
+resolution apply).
 
 Keys: `1`-`3` views, `G` GI mode, `U` quality, `Tab` debug mode, `L`
 animation, `M` camera path, `P` path tracing; fly camera with the right mouse
@@ -268,11 +273,77 @@ button and WASD/QE.
 Measured with the benchmark harness above. GPU: see each run. Times are
 averages over the measured frames, after warm-up.
 
-(Filled in as measured, see the findings log.)
+RTX 3060, driver 616.92, Vulkan, 1920x1080 native, 300 warm-up + 300
+measured frames, `--gpu-profile`, commit `835a780893`. Default volumes (3
+cascades of 24 x 12 x 24, 1 m spacing). "Frame" is the whole frame's GPU
+time; "DDGI" is the sum of the DDGI passes. All times in ms.
+
+| View | GI | Frame | DDGI | AS | Trace | Blend | Apply |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| room | none | 1.28 | | | | | |
+| room | Low | 2.30 | 0.95 | 0.11 | 0.12 | 0.08 | 0.63 |
+| room | Medium | 2.61 | 1.26 | 0.11 | 0.30 | 0.20 | 0.63 |
+| room | High | 3.06 | 1.72 | 0.10 | 0.57 | 0.42 | 0.61 |
+| room | Ultra | 4.10 | 2.76 | 0.10 | 1.13 | 0.89 | 0.62 |
+| outdoor | none | 0.86 | | | | | |
+| outdoor | Low | 2.01 | 1.07 | 0.10 | 0.26 | 0.10 | 0.60 |
+| outdoor | Medium | 2.74 | 1.79 | 0.10 | 0.81 | 0.27 | 0.59 |
+| outdoor | High | 4.50 | 3.53 | 0.10 | 2.06 | 0.75 | 0.59 |
+| outdoor | Ultra | 8.21 | 7.26 | 0.10 | 4.70 | 1.75 | 0.68 |
+| stress | none | 1.50 | | | | | |
+| stress | Low | 2.34 | 0.77 | 0.10 | 0.12 | 0.07 | 0.46 |
+| stress | Medium | 2.72 | 1.12 | 0.11 | 0.34 | 0.18 | 0.47 |
+| stress | High | 3.25 | 1.70 | 0.10 | 0.71 | 0.41 | 0.46 |
+| stress | Ultra | 4.49 | 2.96 | 0.10 | 1.48 | 0.89 | 0.46 |
+
+Variants (Medium unless noted):
+
+| Run | Frame | DDGI | Trace | Blend | Apply |
+| --- | --- | --- | --- | --- | --- |
+| outdoor, camera moving (scrolling) | 2.75 | 1.84 | 0.86 | 0.28 | 0.58 |
+| stress, camera orbiting | 2.69 | 1.15 | 0.38 | 0.22 | 0.44 |
+| room, half resolution apply | 2.10 | 0.77 | 0.28 | 0.20 | 0.17 |
+| stress, half resolution apply | 2.34 | 0.77 | 0.33 | 0.19 | 0.13 |
+| outdoor, 1 cascade | 2.02 | 1.08 | 0.47 | 0.27 | 0.23 |
+| stress Ultra, budget 0.25 ms | 2.59 | 1.03 | 0.28 | 0.15 | 0.48 |
+| stress Ultra, budget 0.5 ms | 2.73 | 1.17 | 0.38 | 0.20 | 0.47 |
+| stress Ultra, budget 1.0 ms | 3.21 | 1.67 | 0.70 | 0.38 | 0.47 |
+| stress Ultra, budget 2.0 ms | 4.12 | 2.57 | 1.24 | 0.74 | 0.47 |
+
+Schedule (0.01-0.02 ms) and relocate/classify (0.01 ms) are left out of
+the tables. Without `--gpu-profile`, the stress Ultra frame is 4.60 ms
+unbudgeted and 2.70 ms with a 0.5 ms budget, so the budget also works
+when the profiler is off.
+
+How to read them:
+- Apply is a fixed cost per pixel (about 0.6 ms at 1080p with every pixel
+  covered; less where the sky shows). Half resolution apply cuts it to
+  about a quarter. That is the cheapest saving at Low and Medium.
+- Trace and blend scale with rays x probes, but only for active probes.
+  Inside probes skip the blend, and inactive probes trace only the 32
+  fixed rays. The open street has far more active probes than the closed
+  room, so its trace and blend cost twice as much at the same quality.
+- Scrolling (moving camera) costs about 3% more than a still camera.
+- Acceleration structure upkeep (refit and TLAS) is about 0.1 ms in every
+  view; it is shared with the path tracer.
 
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-08: Step 6 done. Rechecked the code: scheduling (two passes,
+  credit, in-view and variability weights, `rate_scale` feedback),
+  classification, relocation, the GPU time budget and the blend/apply
+  optimizations are all in place. Filled the benchmark tables (RTX 3060,
+  commit `835a780893`) and added `--budget=` and `--half=1` to the harness.
+  Budget check: targets 0.5 / 1.0 / 2.0 ms gave 0.60 / 1.10 / 2.00 ms of
+  update work; 0.25 ms stops at the floor (an eighth of the probes, 0.45
+  ms). Outdoor experiment: with 1 cascade instead of 3, trace drops from
+  0.81 to 0.47 ms and apply from 0.59 to 0.23 ms. Fewer probes are active,
+  and fewer probe hits and pixels fall inside a volume. Possible later
+  savings, not done because they change the image: no visibility test in
+  the multi-bounce lookup of probe hits, and a blend that bins rays per
+  texel instead of looping over all of them.
 
 - 2026-10-08: Added `DDGIVolume` as the editor-facing DDGI control. The node
   owns enable, size, probe spacing/grid, cascade count, energy, bias,
