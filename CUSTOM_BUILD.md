@@ -16,6 +16,12 @@ Working branch: `nvidia-pt-dlss` (local). Published to the public fork
 **https://github.com/Diginaat/godot**, branch `nvidia-dlss-physx` (the fork's
 default branch), via the `fork` remote. Never push to `origin` (NVIDIA-RTX).
 
+New work goes on the `dev` branch first (also pushed to the fork as `dev`).
+Merge it into `nvidia-pt-dlss` only after the build and smoke tests pass, so
+the published branch always works. After publishing, fast-forward `dev` to
+`nvidia-pt-dlss` and push both:
+`git push fork nvidia-pt-dlss:nvidia-dlss-physx dev:dev`.
+
 If a remote is missing:
 
 ```
