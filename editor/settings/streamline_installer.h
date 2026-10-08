@@ -28,7 +28,6 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-
 #pragma once
 
 #include "scene/gui/dialogs.h"
@@ -37,8 +36,10 @@ class Button;
 class CheckBox;
 class HTTPRequest;
 class Label;
+class PanelContainer;
 class ProgressBar;
 class RichTextLabel;
+class TextureRect;
 class VBoxContainer;
 
 // Downloads the NVIDIA Streamline SDK release from GitHub and installs its
@@ -62,18 +63,53 @@ class StreamlineInstaller : public AcceptDialog {
 	int installed_count = 0;
 	uint64_t download_start_msec = 0;
 
+	// A titled panel with a colored left edge. Colors and icons come from the
+	// editor theme, so they're applied in _update_theme().
+	struct Card {
+		PanelContainer *panel = nullptr;
+		TextureRect *icon = nullptr;
+		Label *title = nullptr;
+		StringName icon_name;
+		StringName color_name;
+	};
+	Vector<Card> cards;
+	Vector<RichTextLabel *> texts;
+
+	PanelContainer *status_panel = nullptr;
+	TextureRect *status_icon = nullptr;
 	Label *status_label = nullptr;
+	RichTextLabel *why_text = nullptr;
+	RichTextLabel *steps_text = nullptr;
+	RichTextLabel *files_text = nullptr;
+	RichTextLabel *safety_text = nullptr;
+	RichTextLabel *manual_text = nullptr;
+	RichTextLabel *license_text = nullptr;
+	PanelContainer *accept_panel = nullptr;
 	CheckBox *accept_check = nullptr;
+	Button *open_folder_button = nullptr;
+
+	PanelContainer *action_panel = nullptr;
 	Button *install_button = nullptr;
 	Button *cancel_button = nullptr;
 	Button *restart_button = nullptr;
 	ProgressBar *progress_bar = nullptr;
 	Label *progress_label = nullptr;
+	PanelContainer *log_panel = nullptr;
 	RichTextLabel *log = nullptr;
 	HTTPRequest *downloader = nullptr;
+	ConfirmationDialog *download_confirm = nullptr;
+	RichTextLabel *download_confirm_text = nullptr;
+	ConfirmationDialog *link_confirm = nullptr;
+	String pending_url;
 
-	VBoxContainer *_add_block(VBoxContainer *p_parent, const String &p_title);
-	void _add_link(VBoxContainer *p_parent, const String &p_text, const String &p_url);
+	VBoxContainer *_add_card(VBoxContainer *p_parent, const String &p_title, const StringName &p_icon, const StringName &p_color);
+	RichTextLabel *_add_text(VBoxContainer *p_parent);
+	Ref<StyleBox> _make_card_style(const Color &p_edge, float p_tint) const;
+	String _code(const String &p_text) const;
+	String _link(const String &p_label, const String &p_url) const;
+	void _update_theme();
+	void _meta_clicked(const Variant &p_meta);
+	void _open_pending_link();
 
 	String _get_install_dir() const;
 	String _get_download_path() const;
@@ -85,6 +121,7 @@ class StreamlineInstaller : public AcceptDialog {
 
 	void _accept_toggled(bool p_pressed);
 	void _install_pressed();
+	void _start_install();
 	void _cancel_pressed();
 	void _restart_pressed();
 	void _open_folder_pressed();
