@@ -323,9 +323,16 @@ func _ddgi_pass_times() -> Dictionary:
 		# GPU times are in nanoseconds.
 		var ms := (rd.get_captured_timestamp_gpu_time(i + 1) - rd.get_captured_timestamp_gpu_time(i)) / 1000000.0
 		var key := ""
-		if name == "DDGI Build Acceleration Structures":
+		if name == "DDGI Build Acceleration Structures" or name == "Build Acceleration Structures":
 			in_as = true
 			key = "as"
+		elif name == "Pathtracer":
+			in_as = false
+			key = "pt"
+		elif name.begins_with("RR "):
+			# Native ray reconstruction passes (pathtracing_denoiser = 2).
+			in_as = false
+			key = "rr_" + name.trim_prefix("RR ").to_snake_case()
 		elif in_as and (name == "BLAS Build" or name == "TLAS Build"):
 			key = "as"
 		elif name == "DDGI Done":
