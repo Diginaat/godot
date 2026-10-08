@@ -109,7 +109,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 
 void RenderDDGI::ViewportData::free_data() {
 	RD *rd = RD::get_singleton();
-	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &ray_data, &irradiance_atlas, &distance_atlas };
+	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &ray_data, &irradiance_atlas, &distance_atlas };
 	for (RID *r : rids) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
@@ -234,8 +234,13 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 		Vector<uint8_t> init;
 		init.resize(16 + p_data->capacity * 4);
 		init.fill(0);
-		p_data->update_list = rd->storage_buffer_create(init.size(), init, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		p_data->update_list = rd->storage_buffer_create(init.size(), init);
 		rd->set_resource_name(p_data->update_list, "DDGI Update List");
+	}
+	{
+		float stats[4] = { 1.0f, 0, 0, 0 }; // rate_scale starts at 1.
+		p_data->stats_buffer = rd->storage_buffer_create(sizeof(stats), Span<uint8_t>((uint8_t *)stats, sizeof(stats)));
+		rd->set_resource_name(p_data->stats_buffer, "DDGI Stats");
 	}
 
 	RD::TextureFormat tf;
@@ -244,14 +249,14 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	tf.width = p_quality.rays_per_probe;
 	tf.height = p_data->capacity;
-	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT;
+	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 	p_data->ray_data = rd->texture_create(tf, RD::TextureView());
 	rd->set_resource_name(p_data->ray_data, "DDGI Ray Data");
 
 	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	tf.width = p_data->irradiance_size.x;
 	tf.height = p_data->irradiance_size.y;
-	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 	p_data->irradiance_atlas = rd->texture_create(tf, RD::TextureView());
 	rd->set_resource_name(p_data->irradiance_atlas, "DDGI Irradiance Atlas");
 	rd->texture_clear(p_data->irradiance_atlas, Color(0, 0, 0, 0), 0, 1, 0, 1);
@@ -448,8 +453,8 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 
 	rd->buffer_update(vd->data_buffer, 0, sizeof(DDGIDataGPU), &gpu);
 	{
-		// Empty list; y and z are the group counts of the indirect blend dispatches.
-		uint32_t header[4] = { 0, 1, 1, 0 };
+		// Empty list.
+		uint32_t header[4] = { 0, 0, 0, 0 };
 		rd->buffer_update(vd->update_list, 0, sizeof(header), header);
 	}
 
@@ -458,6 +463,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	RD::Uniform u_probes(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, vd->probe_buffer);
 	RD::Uniform u_list(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, vd->update_list);
 	RD::Uniform u_rays(RD::UNIFORM_TYPE_IMAGE, 3, vd->ray_data);
+	RD::Uniform u_stats(RD::UNIFORM_TYPE_STORAGE_BUFFER, 5, vd->stats_buffer);
 	RD::Uniform u_irradiance(RD::UNIFORM_TYPE_IMAGE, 4, vd->irradiance_atlas);
 	RD::Uniform u_distance(RD::UNIFORM_TYPE_IMAGE, 4, vd->distance_atlas);
 
@@ -470,7 +476,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		RD::ComputeListID list = rd->compute_list_begin();
 		RID shader = update_shader.version_get_shader(update_shader_version, UPDATE_SCHEDULE);
 		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_SCHEDULE]);
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays), 0);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_stats), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		rd->compute_list_dispatch_threads(list, vd->total_probes, 1, 1);
 		rd->compute_list_end();
@@ -511,15 +517,18 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 
 		RID shader = update_shader.version_get_shader(update_shader_version, UPDATE_BLEND_IRRADIANCE);
 		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_BLEND_IRRADIANCE]);
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_irradiance), 0);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_irradiance, u_stats), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
-		rd->compute_list_dispatch_indirect(list, vd->update_list, 0);
+		// One group per list slot; groups past the list count exit at once.
+		// (An indirect dispatch from the list count didn't see this frame's
+		// count reliably, so the probes stopped updating.)
+		rd->compute_list_dispatch(list, capacity, 1, 1);
 
 		shader = update_shader.version_get_shader(update_shader_version, UPDATE_BLEND_DISTANCE);
 		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_BLEND_DISTANCE]);
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_distance), 0);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_distance, u_stats), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
-		rd->compute_list_dispatch_indirect(list, vd->update_list, 0);
+		rd->compute_list_dispatch(list, capacity, 1, 1);
 
 		rd->compute_list_end();
 
@@ -529,7 +538,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		list = rd->compute_list_begin();
 		shader = update_shader.version_get_shader(update_shader_version, UPDATE_RELOCATE_CLASSIFY);
 		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_RELOCATE_CLASSIFY]);
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays), 0);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_stats), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		rd->compute_list_dispatch_threads(list, capacity, 1, 1);
 

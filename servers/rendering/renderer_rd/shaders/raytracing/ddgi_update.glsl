@@ -33,14 +33,25 @@ layout(set = 0, binding = 1, std430) restrict buffer DDGIProbes {
 };
 
 layout(set = 0, binding = 2, std430) restrict buffer DDGIUpdateList {
-	uint ddgi_update_count; // Also the x group count of the blend dispatches.
-	uint ddgi_update_groups_y;
-	uint ddgi_update_groups_z;
-	uint ddgi_update_pad;
+	uint ddgi_update_count;
+	uint ddgi_update_pad0;
+	uint ddgi_update_pad1;
+	uint ddgi_update_pad2;
 	uint ddgi_update_probes[];
 };
 
 layout(set = 0, binding = 3, rgba16f) uniform restrict readonly image2D ddgi_ray_data;
+
+// Persistent across frames. The scheduler multiplies every update rate by
+// rate_scale; the relocate pass raises it while the per-frame budget isn't
+// filled and lowers it when the budget overflows, so the budget gets used.
+layout(set = 0, binding = 5, std430) restrict buffer DDGIStats {
+	float rate_scale;
+	uint traced_last_frame;
+	uint stats_pad0;
+	uint stats_pad1;
+}
+ddgi_stats;
 
 #ifdef MODE_BLEND_IRRADIANCE
 layout(set = 0, binding = 4, rgba16f) uniform restrict coherent image2D ddgi_atlas;
@@ -105,7 +116,7 @@ void main() {
 
 	// Update rate: the base rate spreads the per-frame budget over all
 	// probes; each probe then gets more or less of it.
-	float rate = ddgi.schedule.x * vol.params.z;
+	float rate = ddgi.schedule.x * vol.params.z * ddgi_stats.rate_scale;
 	if (pd.state == DDGI_PROBE_NEW) {
 		rate = 1000.0; // As soon as there is room.
 	} else if (pd.state == DDGI_PROBE_INACTIVE || pd.state == DDGI_PROBE_INSIDE) {
@@ -143,7 +154,12 @@ void main() {
 
 #ifdef MODE_BLEND_IRRADIANCE
 #define TILE_TEXELS ddgi.atlas.x
-shared float shared_change[64];
+// Up to 16x16 texels per tile.
+shared vec3 shared_result[256];
+shared vec3 shared_previous[256];
+shared vec3 shared_sum_result[64];
+shared vec3 shared_sum_previous[64];
+shared float shared_hysteresis;
 #else
 #define TILE_TEXELS ddgi.atlas.y
 #endif
@@ -172,7 +188,10 @@ void main() {
 	float max_distance = vol.spacing.w;
 
 	uint local_index = gl_LocalInvocationIndex;
-	float change_sum = 0.0;
+#ifdef MODE_BLEND_IRRADIANCE
+	vec3 sum_result = vec3(0.0);
+	vec3 sum_previous = vec3(0.0);
+#endif
 
 	for (int ty = int(gl_LocalInvocationID.y); ty < texels; ty += 8) {
 		for (int tx = int(gl_LocalInvocationID.x); tx < texels; tx += 8) {
@@ -202,24 +221,15 @@ void main() {
 				sum += radiance * w;
 				weight_sum += w;
 			}
-			vec4 previous = imageLoad(ddgi_atlas, origin + texel);
-			if (any(isnan(previous.rgb))) {
-				previous.rgb = vec3(0.0);
+			vec3 previous = imageLoad(ddgi_atlas, origin + texel).rgb;
+			if (any(isnan(previous))) {
+				previous = vec3(0.0);
 			}
-			vec3 result = weight_sum > 0.0 ? sum / weight_sum : previous.rgb;
-
-			// Adapt faster when the lighting changed a lot (lights switched,
-			// doors opened), so the GI doesn't lag behind.
-			float change = length(result - previous.rgb) / max(length(previous.rgb), 0.05);
-			float h = hysteresis;
-			if (change > 0.5) {
-				h *= 0.7;
-			}
-			if (pd.state == DDGI_PROBE_NEW) {
-				change = 1.0;
-			}
-			change_sum += min(change, 4.0);
-			imageStore(ddgi_atlas, origin + texel, vec4(mix(result, previous.rgb, h), 1.0));
+			vec3 result = weight_sum > 0.0 ? sum / weight_sum : previous;
+			shared_result[ty * texels + tx] = result;
+			shared_previous[ty * texels + tx] = previous;
+			sum_result += result;
+			sum_previous += previous;
 #else
 			vec2 sum = vec2(0.0);
 			float weight_sum = 0.0;
@@ -245,7 +255,36 @@ void main() {
 	}
 
 #ifdef MODE_BLEND_IRRADIANCE
-	shared_change[local_index] = change_sum;
+	shared_sum_result[local_index] = sum_result;
+	shared_sum_previous[local_index] = sum_previous;
+	barrier();
+
+	// How much the whole probe changed: the tile average is far less noisy
+	// than single texels, so noise doesn't count as a lighting change.
+	if (local_index == 0u) {
+		vec3 total_result = vec3(0.0);
+		vec3 total_previous = vec3(0.0);
+		for (uint i = 0u; i < 64u; i++) {
+			total_result += shared_sum_result[i];
+			total_previous += shared_sum_previous[i];
+		}
+		float change = length(total_result - total_previous) / max(length(total_previous), 0.02 * float(texels * texels));
+		// Adapt faster when the light changed a lot (lights switched, doors
+		// opened), so the GI doesn't lag behind.
+		float h = hysteresis * clamp(1.0 - (change - 0.15) * 1.5, 0.4, 1.0);
+		shared_hysteresis = pd.state == DDGI_PROBE_NEW ? 0.0 : h;
+		// Moving average of how much this probe's light changes per update.
+		ddgi_probes[probe].variability = pd.state == DDGI_PROBE_NEW ? 1.0 : mix(pd.variability, min(change, 4.0), 0.3);
+	}
+	barrier();
+
+	float h = shared_hysteresis;
+	for (int ty = int(gl_LocalInvocationID.y); ty < texels; ty += 8) {
+		for (int tx = int(gl_LocalInvocationID.x); tx < texels; tx += 8) {
+			int i = ty * texels + tx;
+			imageStore(ddgi_atlas, origin + ivec2(tx, ty), vec4(mix(shared_result[i], shared_previous[i], h), 1.0));
+		}
+	}
 #endif
 
 	memoryBarrierImage();
@@ -272,18 +311,6 @@ void main() {
 		imageStore(ddgi_atlas, origin + b, imageLoad(ddgi_atlas, origin + src));
 	}
 
-#ifdef MODE_BLEND_IRRADIANCE
-	if (local_index == 0u) {
-		float total = 0.0;
-		for (uint i = 0u; i < 64u; i++) {
-			total += shared_change[i];
-		}
-		float mean_change = total / float(texels * texels);
-		// Moving average of how much this probe's light changes per update.
-		pd.variability = pd.state == DDGI_PROBE_NEW ? 1.0 : mix(pd.variability, mean_change, 0.3);
-		ddgi_probes[probe].variability = pd.variability;
-	}
-#endif
 }
 
 #endif // MODE_BLEND_IRRADIANCE || MODE_BLEND_DISTANCE
@@ -292,6 +319,18 @@ void main() {
 
 void main() {
 	uint slot = gl_GlobalInvocationID.x;
+	if (slot == 0u) {
+		// Budget feedback for the next frame's scheduler.
+		uint traced = ddgi_traced_count();
+		float scale = ddgi_stats.rate_scale;
+		if (traced >= ddgi.counts.w) {
+			scale *= 0.9;
+		} else if (float(traced) < 0.9 * float(ddgi.counts.w)) {
+			scale *= 1.15;
+		}
+		ddgi_stats.rate_scale = clamp(scale, 1.0, 64.0);
+		ddgi_stats.traced_last_frame = traced;
+	}
 	if (slot >= ddgi_traced_count()) {
 		return;
 	}
