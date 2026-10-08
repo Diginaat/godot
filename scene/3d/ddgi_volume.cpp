@@ -1,11 +1,39 @@
 /**************************************************************************/
-/*  ddgi_volume.cpp                                                        */
+/*  ddgi_volume.cpp                                                       */
+/**************************************************************************/
+/*                         This file is part of:                          */
+/*                             GODOT ENGINE                               */
+/*                        https://godotengine.org                         */
+/**************************************************************************/
+/* Copyright (c) 2014-present Godot Engine contributors (see AUTHORS.md). */
+/* Copyright (c) 2007-2014 Juan Linietsky, Ariel Manzur.                  */
+/*                                                                        */
+/* Permission is hereby granted, free of charge, to any person obtaining  */
+/* a copy of this software and associated documentation files (the        */
+/* "Software"), to deal in the Software without restriction, including    */
+/* without limitation the rights to use, copy, modify, merge, publish,    */
+/* distribute, sublicense, and/or sell copies of the Software, and to     */
+/* permit persons to whom the Software is furnished to do so, subject to  */
+/* the following conditions:                                              */
+/*                                                                        */
+/* The above copyright notice and this permission notice shall be         */
+/* included in all copies or substantial portions of the Software.        */
+/*                                                                        */
+/* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,        */
+/* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF     */
+/* MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. */
+/* IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY   */
+/* CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,   */
+/* TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE      */
+/* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
 #include "ddgi_volume.h"
 
 #include "core/object/class_db.h"
+#include "core/os/os.h"
 #include "scene/resources/3d/world_3d.h"
+#include "servers/rendering/rendering_device.h"
 #include "servers/rendering/rendering_server.h"
 
 Vector3i DDGIVolume::_grid_from_size() const {
@@ -43,14 +71,15 @@ void DDGIVolume::_apply_to_environment() {
 	env->set_ddgi_hysteresis(hysteresis);
 	env->set_ddgi_probe_relocation(probe_relocation);
 	env->set_ddgi_probe_classification(probe_classification);
-	env->set_ddgi_follow_camera(false);
+	// Following the camera, the size only sets the probe grid; the cascades
+	// scroll with the camera instead of staying in this box.
+	env->set_ddgi_follow_camera(follow_camera);
 	env->set_ddgi_debug_mode(debug_mode);
-	env->set_ddgi_volume(enabled, get_global_position(), size);
+	env->set_ddgi_volume(enabled && !follow_camera, get_global_position(), size);
 	update_configuration_warnings();
 }
 
 void DDGIVolume::_notification(int p_what) {
-	VisualInstance3D::_notification(p_what);
 	switch (p_what) {
 		case NOTIFICATION_ENTER_WORLD:
 		case NOTIFICATION_TRANSFORM_CHANGED: {
@@ -58,6 +87,8 @@ void DDGIVolume::_notification(int p_what) {
 		} break;
 		case NOTIFICATION_EXIT_WORLD: {
 			if (applied_environment.is_valid()) {
+				// The node is the editor's DDGI switch: without it, DDGI is off.
+				applied_environment->set_ddgi_enabled(false);
 				applied_environment->set_ddgi_volume(false, Vector3(), Vector3(1, 1, 1));
 				applied_environment.unref();
 			}
@@ -156,6 +187,15 @@ bool DDGIVolume::is_probe_classification_enabled() const {
 	return probe_classification;
 }
 
+void DDGIVolume::set_follow_camera(bool p_enabled) {
+	follow_camera = p_enabled;
+	_apply_to_environment();
+}
+
+bool DDGIVolume::is_following_camera() const {
+	return follow_camera;
+}
+
 void DDGIVolume::set_debug_mode(Environment::DDGIDebugMode p_mode) {
 	debug_mode = p_mode;
 	_apply_to_environment();
@@ -176,6 +216,16 @@ PackedStringArray DDGIVolume::get_configuration_warnings() const {
 	}
 	if (RenderingServer::get_singleton()->get_current_rendering_method() != "forward_plus") {
 		warnings.push_back(RTR("DDGI needs the Forward+ renderer."));
+	} else if (OS::get_singleton()->get_current_rendering_driver_name() == "d3d12") {
+		warnings.push_back(RTR("DDGI needs hardware ray tracing, which the D3D12 driver doesn't implement. Use the Vulkan driver."));
+	} else {
+		RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+		if (rd && !rd->has_feature(RD::SUPPORTS_RAYTRACING_PIPELINE)) {
+			warnings.push_back(RTR("DDGI needs a GPU and driver with Vulkan ray tracing pipelines; this one has none, so DDGI does nothing."));
+		}
+	}
+	if (!follow_camera && is_inside_tree() && !get_global_basis().orthonormalized().is_equal_approx(Basis())) {
+		warnings.push_back(RTR("DDGIVolume ignores rotation: the probe grid is always aligned with the world axes."));
 	}
 	return warnings;
 }
@@ -201,6 +251,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_probe_relocation_enabled"), &DDGIVolume::is_probe_relocation_enabled);
 	ClassDB::bind_method(D_METHOD("set_probe_classification", "enabled"), &DDGIVolume::set_probe_classification);
 	ClassDB::bind_method(D_METHOD("is_probe_classification_enabled"), &DDGIVolume::is_probe_classification_enabled);
+	ClassDB::bind_method(D_METHOD("set_follow_camera", "enabled"), &DDGIVolume::set_follow_camera);
+	ClassDB::bind_method(D_METHOD("is_following_camera"), &DDGIVolume::is_following_camera);
 	ClassDB::bind_method(D_METHOD("set_debug_mode", "mode"), &DDGIVolume::set_debug_mode);
 	ClassDB::bind_method(D_METHOD("get_debug_mode"), &DDGIVolume::get_debug_mode);
 
@@ -214,6 +266,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hysteresis", PROPERTY_HINT_RANGE, "0,0.999,0.001"), "set_hysteresis", "get_hysteresis");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_relocation"), "set_probe_relocation", "is_probe_relocation_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_classification"), "set_probe_classification", "is_probe_classification_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "follow_camera"), "set_follow_camera", "is_following_camera");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades"), "set_debug_mode", "get_debug_mode");
 }
 

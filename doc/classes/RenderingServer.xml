@@ -1381,6 +1381,16 @@
 				Configures dynamic diffuse global illumination (DDGI) for the environment. See [member Environment.ddgi_enabled] and the other [code]ddgi_*[/code] properties of [Environment] for details.
 			</description>
 		</method>
+		<method name="environment_set_ddgi_volume">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="node_volume" type="bool" />
+			<param index="2" name="center" type="Vector3" />
+			<param index="3" name="size" type="Vector3" />
+			<description>
+				Places the environment's DDGI probes in a fixed box instead of around the camera. If [param node_volume] is [code]true[/code], the finest cascade is centered at [param center] (world space); moving the center resets the probes. [param size] is informative: the probe grid comes from [method environment_set_ddgi]. Used by [DDGIVolume].
+			</description>
+		</method>
 		<method name="environment_set_fog">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

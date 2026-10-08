@@ -57,12 +57,34 @@ RTXGI 2.x (NRC, SHaRC) is a different technique and isn't used.
 
 1. Forward+ renderer, Vulkan driver (the default for new projects in this
    fork), a GPU with ray tracing.
-2. `WorldEnvironment > Environment > DDGI > Enabled`.
-3. Pick the workload in `Project Settings > Rendering > Global Illumination >
+2. A `WorldEnvironment` with an `Environment`, and a `DDGIVolume` node in
+   the same scene (Add Node > `DDGIVolume`).
+3. Place and size the volume with its box gizmo, or turn on
+   `follow_camera` to let the probes follow the camera (any area).
+4. Pick the workload in `Project Settings > Rendering > Global Illumination >
    DDGI > Quality` (Low, Medium, High, Ultra or Custom). It can be changed at
    runtime with `ProjectSettings.set_setting()`.
 
-Environment properties (`ddgi_*`):
+`DDGIVolume` properties:
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | on | DDGI on/off |
+| `size` | 24 x 12 x 24 m | Box filled with probes, centered on the node; probes per axis = size / spacing + 1 (at most 64) |
+| `probe_spacing` | 1.0 m | Spacing of the finest grid |
+| `cascades` | 3 | Probe grids; each one has twice the spacing of the previous |
+| `follow_camera` | off | Grids follow the camera and scroll; `size` then only sets the probe count |
+| `energy`, `normal_bias`, `view_bias`, `hysteresis`, `probe_relocation`, `probe_classification`, `debug_mode` | | As the Environment properties below |
+
+The node writes these into the `Environment` of its world and turns DDGI
+off when it leaves the scene. Its rotation and scale are ignored (the grid
+is aligned with the world axes; a configuration warning says so). Its
+configuration warnings also tell when the renderer, driver or GPU can't
+run DDGI. Use one `DDGIVolume` per scene.
+
+Environment properties (`ddgi_*`). The editor hides them from the
+Environment inspector (the `DDGIVolume` node sets them); scripts can still
+set them directly:
 
 | Property | Default | Meaning |
 | --- | --- | --- |
@@ -240,7 +262,7 @@ those texels instead of blending with them.
 | 5 | Dynamic scenes: moving lights and objects, BLAS refit | Done |
 | 6 | Performance: scheduling, classification, relocation, GPU budget, benchmarks | Done |
 | 7 | Scrolling cascades | Done |
-| 8 | Editor: settings, debug views, documentation | Partial: `DDGIVolume` node |
+| 8 | Editor: settings, debug views, documentation | Done |
 | 9 | Compatibility: DLSS, path tracer, D3D12 fallback | Open |
 | 10 | Validation: test scenes, benchmarks, this document | Open |
 
@@ -337,6 +359,22 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-09: Step 8 (editor) done. Reviewed the `DDGIVolume` node and
+  fixed: removing the node left DDGI on in the Environment (fixed in place
+  at the first camera position), now it turns DDGI off; camera-following
+  DDGI couldn't be enabled in the editor (the Environment properties are
+  hidden), now `DDGIVolume.follow_camera`; the defaults were tuned to one
+  scene (60.264 x 5.774 x 62.86 m, 2 m spacing, relocation and
+  classification off), now 24 x 12 x 24 m, 1 m, both on (scenes that
+  relied on the old defaults must set them); the base class notification
+  ran twice. Added configuration warnings for D3D12, GPUs without ray
+  tracing pipelines and a rotated node, the class reference
+  (`doc/classes/DDGIVolume.xml`, plus `environment_set_ddgi_volume` in
+  `RenderingServer.xml`), an editor icon and the full license header.
+  Checked with a headless script: defaults, enable/disable, grid from
+  size, follow camera, removal, and a scene where the volume enters before
+  the WorldEnvironment; all pass, no leaks.
 
 - 2026-10-09: Step 7 (scrolling cascades) done. Scrolling itself was in
   place (toroidal addressing per cascade, slab reset, two-pass scheduler,
