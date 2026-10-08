@@ -45,7 +45,7 @@ adapts it; all the PhysX work is theirs.
 Prebuilt Windows editors (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
 Each release names the Godot version it's based on and this build's own
-version: `godot4.8-dev-nvidia-rt-dlss-physx-v0.3.0` is build 0.3.0, on Godot
+version: `godot4.8-dev-nvidia-rt-dlss-physx-v0.4.0` is build 0.4.0, on Godot
 4.8-dev.
 
 > [!IMPORTANT]
