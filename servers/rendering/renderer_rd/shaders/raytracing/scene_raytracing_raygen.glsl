@@ -116,6 +116,15 @@ void main() {
 
 	// Accumulate multiple samples per pixel
 	vec3 total_radiance = vec3(0.0);
+#ifdef NATIVE_RR_ENABLED
+	// Native ray reconstruction: total_radiance keeps only the clean part
+	// (emission, fog, sky); the noisy rest goes to diffuse or specular, by the
+	// lobe the primary hit sampled.
+	vec3 rr_diffuse_sum = vec3(0.0);
+	vec3 rr_specular_sum = vec3(0.0);
+	float rr_hit_dist_sum = 0.0;
+	uint rr_hit_dist_count = 0u;
+#endif
 
 	const uint max_bounces = RT_GET_MAX_BOUNCES();
 
@@ -131,8 +140,19 @@ void main() {
 
 		vec3 ray_origin = origin.xyz;
 		vec3 ray_dir = direction.xyz;
+#ifdef NATIVE_RR_ENABLED
+		bool rr_split = false;
+		bool rr_diffuse_lobe = false;
+		vec3 rr_primary_radiance = vec3(0.0);
+		vec3 rr_base = vec3(0.0);
+		vec3 rr_direct_specular = vec3(0.0);
+#endif
 
 		[[dont_unroll]] for (uint bounce = 0u; bounce <= max_bounces; bounce++) {
+#ifdef NATIVE_RR_ENABLED
+			// A miss leaves hit_t alone, so this reads as "far away" then.
+			ps.hit_t = RR_MISS_DISTANCE;
+#endif
 			path_pack(payload, ps);
 
 #ifdef USE_SER
@@ -153,6 +173,21 @@ void main() {
 #endif
 
 			ps = path_unpack(payload);
+#ifdef NATIVE_RR_ENABLED
+			if (bounce == 0u && is_rr_primary_split(ps.packed_bounces_flags)) {
+				rr_split = true;
+				rr_diffuse_lobe = get_diffuse_bounces(ps.packed_bounces_flags) > 0u;
+				rr_primary_radiance = ps.radiance;
+				vec2 p0 = unpackHalf2x16(payload.rr_primary[0]);
+				vec2 p1 = unpackHalf2x16(payload.rr_primary[1]);
+				vec2 p2 = unpackHalf2x16(payload.rr_primary[2]);
+				rr_base = vec3(p0, p1.x);
+				rr_direct_specular = vec3(p1.y, p2);
+			} else if (bounce == 1u && rr_split && !rr_diffuse_lobe) {
+				rr_hit_dist_sum += ps.hit_t;
+				rr_hit_dist_count++;
+			}
+#endif
 			if (is_path_terminated(ps.packed_bounces_flags)) {
 				break;
 			}
@@ -162,12 +197,29 @@ void main() {
 			ray_dir = ps.next_ray_dir;
 		}
 
+#ifdef NATIVE_RR_ENABLED
+		if (rr_split) {
+			// fp16 payload values: keep the parts non-negative.
+			vec3 direct_diffuse = max(rr_primary_radiance - rr_base - rr_direct_specular, vec3(0.0));
+			vec3 indirect = max(ps.radiance - rr_primary_radiance, vec3(0.0));
+			total_radiance += rr_base;
+			rr_diffuse_sum += direct_diffuse + (rr_diffuse_lobe ? indirect : vec3(0.0));
+			rr_specular_sum += rr_direct_specular + (rr_diffuse_lobe ? vec3(0.0) : indirect);
+			continue;
+		}
+#endif
 		total_radiance += ps.radiance;
 	}
 
-	vec3 final_radiance = total_radiance / float(samples_per_pixel);
+	const float inv_samples = 1.0 / float(samples_per_pixel);
+	vec3 final_radiance = total_radiance * inv_samples;
 
 	imageStore(image, ivec2(pixel), vec4(final_radiance, 1.0));
+#ifdef NATIVE_RR_ENABLED
+	float rr_hit_dist = rr_hit_dist_count > 0u ? rr_hit_dist_sum / float(rr_hit_dist_count) : -1.0;
+	imageStore(rr_diffuse, ivec2(pixel), vec4(rr_diffuse_sum * inv_samples, 0.0));
+	imageStore(rr_specular, ivec2(pixel), vec4(rr_specular_sum * inv_samples, rr_hit_dist));
+#endif
 }
 
 #[miss]
@@ -279,6 +331,9 @@ void main() {
 				vec2 prev_uv = project_uv(far_world, prev_vp_unjittered);
 				imageStore(rt_velocity_image, pixel, vec4(prev_uv - curr_uv, 0.0, 0.0));
 			}
+#ifdef NATIVE_RR_ENABLED
+			imageStore(rr_guide, pixel, uvec4(0u));
+#endif
 		}
 	}
 

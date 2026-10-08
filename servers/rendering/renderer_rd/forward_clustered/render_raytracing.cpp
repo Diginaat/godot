@@ -255,6 +255,26 @@ RID RenderRaytracing::dlss_rr_get_specular_hit_dist(RenderSceneBuffersRD *p_rend
 	return p_render_buffers->get_texture(RB_SCOPE_DLSS_RR, RB_TEX_DLSS_RR_SPECULAR_HIT_DIST);
 }
 
+void RenderRaytracing::native_rr_ensure_buffers(RenderSceneBuffersRD *p_render_buffers) {
+	ERR_FAIL_NULL(p_render_buffers);
+	if (p_render_buffers->has_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE)) {
+		return;
+	}
+	const uint32_t usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1);
+	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SPECULAR, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1);
+	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GUIDE, RD::DATA_FORMAT_R32G32B32A32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1);
+}
+
+void RenderRaytracing::native_rr_free_buffers(RenderSceneBuffersRD *p_render_buffers) {
+	ERR_FAIL_NULL(p_render_buffers);
+	p_render_buffers->clear_context(RB_SCOPE_NATIVE_RR);
+}
+
+bool RenderRaytracing::native_rr_has_buffers(RenderSceneBuffersRD *p_render_buffers) const {
+	return p_render_buffers && p_render_buffers->has_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE);
+}
+
 // ---------------------------------------------------------------------------
 // Material UBO sub-allocation pool
 //
@@ -3645,6 +3665,14 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 				RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
 		u.append_id(fog_texture);
 		uniforms.push_back(u);
+	}
+
+	// Bindings 40-42: native ray reconstruction inputs (only in that shader variant).
+	if (!ddgi_trace && (p_rt_flags & SceneShaderRaytracing::RT_FLAG_NATIVE_RR_ENABLED)) {
+		native_rr_ensure_buffers(rb);
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 40, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE)));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 41, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SPECULAR)));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 42, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GUIDE)));
 	}
 
 	// Bindings 34-39: DDGI (raytracing_ddgi_inc.glsl).

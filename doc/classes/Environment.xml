@@ -245,7 +245,7 @@
 			[b]Note:[/b] Only has an effect when [member pathtracing_enabled] is [code]true[/code].
 		</member>
 		<member name="pathtracing_denoiser" type="int" setter="set_pathtracing_denoiser" getter="get_pathtracing_denoiser" enum="RenderingServer.PathtracingDenoiser" default="1">
-			The denoiser used to reduce noise in the path-traced image. [constant RenderingServer.PT_DENOISER_DLSS_RAY_RECONSTRUCTION] uses NVIDIA DLSS Ray Reconstruction for high-quality temporal denoising and requires an NVIDIA RTX GPU. Use [constant RenderingServer.PT_DENOISER_NONE] to disable denoising.
+			The denoiser used to reduce noise in the path-traced image. [constant RenderingServer.PT_DENOISER_DLSS_RAY_RECONSTRUCTION] uses NVIDIA DLSS Ray Reconstruction for high-quality temporal denoising and requires an NVIDIA RTX GPU. [constant RenderingServer.PT_DENOISER_NATIVE] uses the engine's own denoiser, which works on every GPU that can path trace. Use [constant RenderingServer.PT_DENOISER_NONE] to disable denoising.
 			[b]Note:[/b] Only has an effect when [member pathtracing_enabled] is [code]true[/code].
 		</member>
 		<member name="pathtracing_enabled" type="bool" setter="set_pathtracing_enabled" getter="is_pathtracing_enabled" default="false">

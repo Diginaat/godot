@@ -6060,6 +6060,9 @@
 		<constant name="PT_DENOISER_DLSS_RAY_RECONSTRUCTION" value="1" enum="PathtracingDenoiser">
 			Uses NVIDIA DLSS Ray Reconstruction to denoise the path-traced image. DLSS Ray Reconstruction is a neural temporal denoiser that accumulates information across frames to produce a clean, high-quality result at low sample counts. Requires an NVIDIA RTX GPU and the Streamline plugin to be active.
 		</constant>
+		<constant name="PT_DENOISER_NATIVE" value="2" enum="PathtracingDenoiser">
+			Uses the engine's own spatiotemporal denoiser (native ray reconstruction). It runs on compute shaders, so it works on every GPU that can path trace, and needs no external libraries. It filters diffuse and specular light separately and keeps texture detail sharp.
+		</constant>
 		<constant name="SUB_SURFACE_SCATTERING_QUALITY_DISABLED" value="0" enum="SubSurfaceScatteringQuality">
 			Disables subsurface scattering entirely, even on materials that have [member BaseMaterial3D.subsurf_scatter_enabled] set to [code]true[/code]. This has the lowest GPU requirements.
 		</constant>

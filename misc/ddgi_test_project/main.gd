@@ -110,6 +110,8 @@ func _apply_args() -> void:
 	env.pathtracing_enabled = args.get("pt", "0") == "1"
 	env.pathtracing_samples_per_pixel = int(args.get("spp", "2"))
 	env.pathtracing_denoiser = int(args.get("denoiser", "0"))
+	if args.has("rr_debug"):
+		ProjectSettings.set_setting("rendering/ray_reconstruction/debug_mode", int(args["rr_debug"]))
 	if args.has("scale3d"):
 		# 0 bilinear, 1 FSR1, 2 FSR2, 6 DLSS (see Viewport.Scaling3DMode).
 		vp.scaling_3d_mode = int(args["scale3d"])
@@ -329,7 +331,7 @@ func _ddgi_pass_times() -> Dictionary:
 		elif name == "Pathtracer":
 			in_as = false
 			key = "pt"
-		elif name.begins_with("RR "):
+		elif name.begins_with("RR ") and name != "RR Done":
 			# Native ray reconstruction passes (pathtracing_denoiser = 2).
 			in_as = false
 			key = "rr_" + name.trim_prefix("RR ").to_snake_case()

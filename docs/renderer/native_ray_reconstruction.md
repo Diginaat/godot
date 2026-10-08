@@ -175,7 +175,7 @@ traceRays (1 spp)                     compute, internal resolution
 | # | Step | Status |
 | --- | --- | --- |
 | 1 | Audit: signals, render graph, motion vectors, jitter, history, capabilities; baseline timings and images | Done |
-| 2 | Path tracer signal split: demodulated diffuse and specular radiance, clean primary emission/sky/fog, guide buffers for the native denoiser; pass-through compose must match today's image | Open |
+| 2 | Path tracer signal split: diffuse and specular radiance, clean primary emission/sky/fog, guide buffers for the native denoiser; pass-through compose must match today's image | Done |
 | 3 | Core SVGF: `PT_DENOISER_NATIVE`, history resources, reprojection with depth/normal tests, moments, variance, a-trous, compose, timestamps | Open |
 | 4 | Specular reconstruction: roughness-aware history and kernel, hit distance, virtual-hit reprojection for glossy surfaces | Open |
 | 5 | Anti-ghosting: history clipping, confidence, firefly clamp, NaN guards, disocclusion fallback | Open |
@@ -187,9 +187,50 @@ traceRays (1 spp)                     compute, internal resolution
 | 11 | Optional, later: ray traced shadows/reflections for raster mode with their own denoisers | Not planned yet |
 | 12 | Documentation, cleanup, merge into `dev` | Open |
 
+## Signal split (step 2)
+
+`Environment.pathtracing_denoiser = Native` (`RenderingServer.PT_DENOISER_NATIVE`,
+value 2) sets `RT_FLAG_NATIVE_RR_ENABLED`, which compiles the path tracer with
+`NATIVE_RR_ENABLED`:
+
+| Output | Binding | Format | Contents |
+| --- | --- | --- | --- |
+| `image` | 0 | rgba16f | Clean part: primary emission, fog in-scatter, sky (not denoised) |
+| `rr_diffuse` | 40 | rgba16f | Diffuse radiance: diffuse part of direct light at the primary hit, plus everything a diffuse primary bounce brought back |
+| `rr_specular` | 41 | rgba16f | Specular radiance (specular direct light, specular bounce, refraction); a = hit distance of the specular bounce (10000 on a miss, -1 when no sample took it) |
+| `rr_guide` | 42 | rgba32ui | x diffuse albedo, y specular albedo (unorm8), z octahedral normal (unorm16 x2), w roughness (unorm16) and flags (bit 16: transmissive) |
+
+How the split works: the primary hit (`shade_and_bounce()`,
+`refract_and_bounce()`) stores its clean part and the specular part of its
+direct light (`lights_direct_specular`, set by
+`lights_evaluate_direct_lighting()`) in a payload extension
+(`PathPayload.rr_primary`, only in the native variant) and sets payload bit 29.
+Raygen then sorts each sample: clean part, diffuse direct light (the rest of
+the primary hit's radiance), and the indirect light by the lobe the primary
+hit sampled (diffuse bounce counter). Refraction counts as specular.
+The parts add up to exactly the old radiance; no random numbers are used
+differently, so the image without denoising is unchanged.
+
+Demodulation (dividing by the albedos) is left to the denoiser, which reads
+the albedos from the guide. The guides are written by sample 0 only.
+
+Debug views (`rendering/ray_reconstruction/debug_mode`): 1 clean part, 2
+diffuse signal, 3 specular signal.
+
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-09: Step 2 (signal split) done. Verified on the room view (1 spp,
+  1280x720, linear tonemap, animation off): the pass-through compose
+  (`--denoiser=2`) against no denoiser differs by at most 1/255 (mean
+  0.00004), the clean part shows only the emissive panels, the specular part
+  the highlights and the shadow shapes of direct light. Smoke tests: PhysX
+  GPU (game and editor) print `PhysX 5.10.0 initialized [GPU]`. Two
+  problems that are **not** from this change: the glass view exits with
+  `ERROR: Attempted to free invalid ID` with denoiser 0 as well, and one of
+  two editor smoke runs exited with 0xC0000005 at shutdown (the second run
+  was clean).
 
 - 2026-10-09: Step 1 (audit) done, see above. Harness: the DDGI test
   project's `--bench` now also reports the path tracer pass (`pt`) and

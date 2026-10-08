@@ -506,6 +506,21 @@ void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout Pat
 	ps.radiance = (any(isnan(radiance)) || any(isinf(radiance))) ? vec3(0.0) : radiance;
 }
 
+#ifdef NATIVE_RR_ENABLED
+/// Primary hit only: hand raygen the clean part (emission, fog in-scatter) and
+/// the specular part of direct light, so it can split the path for the
+/// native denoiser. Everything else of the hit's radiance is diffuse.
+void rr_store_primary(vec3 p_base, vec3 p_specular, inout uint r_flags) {
+	const vec3 FP16_MAX = vec3(65504.0);
+	vec3 b = clamp(p_base, vec3(0.0), FP16_MAX);
+	vec3 sp = clamp(p_specular, vec3(0.0), FP16_MAX);
+	payload.rr_primary[0] = packHalf2x16(b.rg);
+	payload.rr_primary[1] = packHalf2x16(vec2(b.b, sp.r));
+	payload.rr_primary[2] = packHalf2x16(sp.gb);
+	r_flags |= RR_PRIMARY_SPLIT_FLAG;
+}
+#endif
+
 // ============================================================================
 // SHADE AND BOUNCE
 // ============================================================================
@@ -541,6 +556,9 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 		ps.radiance += ps.throughput * m.emissive;
 	}
 	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, false);
+#ifdef NATIVE_RR_ENABLED
+	const vec3 rr_base = ps.radiance;
+#endif
 
 	// Bounce limit check.
 	if (total_bounces >= RT_GET_MAX_BOUNCES() || diffuse_bounces >= MAX_DIFFUSE_BOUNCES) {
@@ -605,6 +623,14 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 	}
 #endif
 
+#ifdef NATIVE_RR_ENABLED
+	if (total_bounces == 0u && is_sample_zero(ps.packed_bounces_flags)) {
+		rr_write_guide(DLSSRR_computeDiffuseAlbedo(m.albedo, m.metalness),
+				DLSSRR_computeSpecularAlbedo(m.albedo, m.metalness, brdf_mat.dielectricF0, m.roughness, NdotV),
+				N, m.roughness, 0u);
+	}
+#endif
+
 	// =================================================================
 	// NEE: Next Event Estimation (direct light sampling)
 	// =================================================================
@@ -622,6 +648,12 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 		ps.radiance += ps.throughput * direct_light;
 	}
 	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, rt_mesh_count > 0u);
+#ifdef NATIVE_RR_ENABLED
+	if (total_bounces == 0u) {
+		vec3 rr_direct_specular = (rt_light_count + rt_mesh_count > 0u) ? ps.throughput * lights_direct_specular : vec3(0.0);
+		rr_store_primary(rr_base, rr_direct_specular, ps.packed_bounces_flags);
+	}
+#endif
 
 	// =================================================================
 	// BRDF importance sampling for next bounce
@@ -711,6 +743,16 @@ void refract_and_bounce(HitData h, MaterialResult m, float ior) {
 		imageStore(dlss_rr_specular_albedo, pixel, vec4(0.04, 0.04, 0.04, 1.0));
 		imageStore(dlss_rr_normal_roughness, pixel, vec4(m.normal, m.roughness));
 		imageStore(dlss_rr_specular_hit_dist, pixel, vec4(-1.0));
+	}
+#endif
+#ifdef NATIVE_RR_ENABLED
+	// Light seen through the surface goes to the specular signal, with a
+	// specular albedo of 1 (nothing to demodulate).
+	if (total_bounces == 0u) {
+		rr_store_primary(ps.radiance, vec3(0.0), ps.packed_bounces_flags);
+		if (is_sample_zero(ps.packed_bounces_flags)) {
+			rr_write_guide(vec3(0.0), vec3(1.0), m.normal, m.roughness, RR_GUIDE_FLAG_TRANSMISSIVE);
+		}
 	}
 #endif
 

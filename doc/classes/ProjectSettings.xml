@@ -3347,6 +3347,9 @@
 		<member name="rendering/pathtracing/use_shader_execution_reordering" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], enables NVIDIA Shader Execution Reordering in the path tracer. SET reorders ray tracing shader invocations at runtime to improve GPU occupancy and reduce divergence between threads executing different materials. This can significantly improve path tracing performance on NVIDIA Ada Lovelace and later GPUs. Has no effect on hardware that does not support SET.
 		</member>
+		<member name="rendering/ray_reconstruction/debug_mode" type="int" setter="" getter="" default="0">
+			Debug view of the native path tracer denoiser ([constant RenderingServer.PT_DENOISER_NATIVE]). [code]Clean Part[/code] shows the emission, fog and sky that aren't denoised, [code]Diffuse Signal[/code] and [code]Specular Signal[/code] the two lighting signals the denoiser filters.
+		</member>
 		<member name="rendering/pathtracing/use_simple_shadows" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], shadow rays use Ray Queries instead of fully traced rays. Ray Queries are significantly cheaper but rely on a quick alpha texture fetch, which can produce incorrect shadows on materials with generated/animated alpha textures. Fully traced shadow rays are more accurate but incur a higher GPU cost.
 			[b]Note:[/b] Only has an effect when path tracing is enabled on the active [Environment].
