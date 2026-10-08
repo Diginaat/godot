@@ -85,7 +85,14 @@ in this download, so they are not included.
 Without them the editor works normally (including the path tracer and PhysX),
 only DLSS, Ray Reconstruction, Frame Generation and Reflex are unavailable.
 
-To enable them (optional, only for DLSS):
+To enable them (optional, only for DLSS), pick one:
+
+A. From the editor: click "Get NVIDIA DLSS..." in the menu bar, after Help.
+   It explains every step, asks you to accept NVIDIA's license terms and to
+   confirm the download from GitHub, then installs the files and offers to
+   restart the editor.
+
+B. By hand:
 
 1. Download NVIDIA Streamline SDK 2.10.0:
    https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0
