@@ -3852,7 +3852,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/pathtracing/deformed_mesh_cache_ttl_frames", PROPERTY_HINT_RANGE, "1,3600,1"), 60);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/pathtracing/multimesh_blas_cache_ttl_frames", PROPERTY_HINT_RANGE, "1,18000,1"), 3600);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/pathtracing/multimesh_merged_blas_max_triangles", PROPERTY_HINT_RANGE, "256,1048576,1"), 65536);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/ray_reconstruction/debug_mode", PROPERTY_HINT_ENUM, "Disabled,Clean Part,Diffuse Signal,Specular Signal"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/ray_reconstruction/debug_mode", PROPERTY_HINT_ENUM, "Disabled,Clean Part,Diffuse,Specular,No Denoising,History Length,Variance,Split (Left Not Denoised)"), 0);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/quality", PROPERTY_HINT_ENUM, "Low (Fastest),Medium,High,Ultra (Slowest),Custom"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_rays_per_probe", PROPERTY_HINT_RANGE, "32,512,32"), 128);

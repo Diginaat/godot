@@ -176,7 +176,7 @@ traceRays (1 spp)                     compute, internal resolution
 | --- | --- | --- |
 | 1 | Audit: signals, render graph, motion vectors, jitter, history, capabilities; baseline timings and images | Done |
 | 2 | Path tracer signal split: diffuse and specular radiance, clean primary emission/sky/fog, guide buffers for the native denoiser; pass-through compose must match today's image | Done |
-| 3 | Core SVGF: `PT_DENOISER_NATIVE`, history resources, reprojection with depth/normal tests, moments, variance, a-trous, compose, timestamps | Open |
+| 3 | Core SVGF: `PT_DENOISER_NATIVE`, history resources, reprojection with depth/normal tests, moments, variance, a-trous, compose, timestamps | Done |
 | 4 | Specular reconstruction: roughness-aware history and kernel, hit distance, virtual-hit reprojection for glossy surfaces | Open |
 | 5 | Anti-ghosting: history clipping, confidence, firefly clamp, NaN guards, disocclusion fallback | Open |
 | 6 | Test harness: accumulated reference, metrics (error vs reference, temporal flicker, ghost trails, edge sharpness), moving scenes, thin geometry, mirrors, moving emitters | Open |
@@ -217,9 +217,76 @@ the albedos from the guide. The guides are written by sample 0 only.
 Debug views (`rendering/ray_reconstruction/debug_mode`): 1 clean part, 2
 diffuse signal, 3 specular signal.
 
+## Core filter (step 3)
+
+`RendererRD::RayReconstruction` (`servers/rendering/renderer_rd/effects/ray_reconstruction.*`,
+shader `shaders/effects/ray_reconstruction.glsl`) runs after the trace, at
+internal resolution, and writes the internal color texture in place of the
+plain copy. Passes (timestamps in brackets):
+
+1. **Temporal** (`RR Temporal`): demodulates (diffuse / diffuse albedo,
+   specular / specular albedo, albedos clamped to 1/255 so it's exactly
+   invertible), reprojects with the motion vector, checks the four bilinear
+   taps of last frame's surface (linear depth within 3% of where the camera
+   motion puts the point, normals within about 25 degrees), and blends with
+   1 / history length. History caps: 32 frames diffuse, 24 specular (2 for
+   mirror-like surfaces until step 4), 8 for the luminance moments. Writes
+   this frame's surface record (linear depth, normal, roughness) for the next
+   frame.
+2. **Variance** (`RR Variance`): luminance variance from the temporal
+   moments, or from a 5x5 neighborhood (same geometry only) while the history
+   is shorter than 4 frames. Divided by the history length: the filter works
+   on the accumulated mean, so converged pixels keep their detail.
+3. **A-trous** (`RR Filter 0`-`4`): five 3x3 iterations with steps 1, 2, 4,
+   8, 16. Weights: distance to the center's tangent plane (relative to the
+   pixel footprint), normal similarity (power 128), luminance difference
+   relative to 4 standard deviations. Specular uses the same weights plus
+   roughness similarity, and isn't filtered at all where it is mirror-like
+   (iteration i filters only roughness above 0.02 * 2^i). Iteration 0 writes
+   back into the history (as in SVGF); iteration 4 remodulates and adds the
+   clean part.
+
+History lives in render-buffer scope `native_rr_history` (two copies, swapped
+every frame); it is dropped with the render buffers (resize) and when the
+denoiser or path tracing is turned off.
+
+Debug views (`rendering/ray_reconstruction/debug_mode`): 1 clean part, 2
+diffuse (denoised, with albedo), 3 specular, 4 no denoising, 5 history length
+(heatmap, blue = new, red = full), 6 variance (red diffuse, green specular),
+7 split screen (left not denoised).
+
+Measured (RTX 3060, room view, 1 spp, native resolution, ms):
+
+| Resolution | Path tracer, no denoiser | Path tracer, native variant | Temporal | Variance | Filter (5 it.) | Denoiser total |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1920x1080 | 15.4 | 16.7-17.3 | 0.52 | 0.29 | 3.3 | 4.1 |
+| 2560x1440 | 26.5 | 32.4 | 0.97 | 0.51 | 6.5 | 8.0 |
+| 3840x2160 | 59.5 | 69.1 | 1.89 | 1.06 | 11.9 | 14.8 |
+
+VRAM at 1080p: +270 MB (inputs 66 MB, history and filter textures 199 MB).
+Both too high; step 10 has the work: each a-trous iteration costs about 0.65
+ms at 1080p even where it skips its neighbors, which points at bandwidth
+(about 40 bytes read and written per pixel per pass), and the native path
+tracer variant costs 8-13% more than the plain one (bigger payload).
+
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-10: Step 3 (core SVGF) done. Room view at 1 spp: a still camera
+  converges to a clean image within about 30 frames; a moving camera keeps
+  surfaces clean, with short history only where something was uncovered
+  (screen edges, wall corners sweeping across, the moving ball). PBR view:
+  rough spheres and the floor are cleaner than the 16 spp reference without
+  denoising; mirror-like and glass spheres still sparkle (history 2, no
+  spatial filter: step 4). Objects with custom shaders were missing in one
+  denoised PBR shot after 200 frames, probably still compiling their hit
+  groups for the new shader variant (check in step 4). Tried skipping
+  a-trous neighbors where the noise is below 2% of the signal: no measurable
+  gain, the passes are bandwidth bound. Known limits so far: moving objects
+  that change depth fail the depth test (the expected depth only accounts
+  for camera motion) and restart their history; orthographic cameras aren't
+  handled by the position reconstruction.
 
 - 2026-10-09: Step 2 (signal split) done. Verified on the room view (1 spp,
   1280x720, linear tonemap, animation off): the pass-through compose

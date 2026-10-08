@@ -269,6 +269,8 @@ void RenderRaytracing::native_rr_ensure_buffers(RenderSceneBuffersRD *p_render_b
 void RenderRaytracing::native_rr_free_buffers(RenderSceneBuffersRD *p_render_buffers) {
 	ERR_FAIL_NULL(p_render_buffers);
 	p_render_buffers->clear_context(RB_SCOPE_NATIVE_RR);
+	// The denoiser's history (RendererRD::RayReconstruction) goes with it.
+	p_render_buffers->clear_context(SNAME("native_rr_history"));
 }
 
 bool RenderRaytracing::native_rr_has_buffers(RenderSceneBuffersRD *p_render_buffers) const {

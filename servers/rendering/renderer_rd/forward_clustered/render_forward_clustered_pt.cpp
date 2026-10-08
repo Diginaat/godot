@@ -67,6 +67,9 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 			}
 			if (raytracing && raytracing->native_rr_has_buffers(rb.ptr())) {
 				raytracing->native_rr_free_buffers(rb.ptr());
+				if (ray_reconstruction) {
+					ray_reconstruction->free_viewport(rb.ptr());
+				}
 			}
 			rb->set_depth_reconstruct_requested(false);
 		}
@@ -197,6 +200,9 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 		}
 		if (!(rt_flags & SceneShaderRaytracing::RT_FLAG_NATIVE_RR_ENABLED) && raytracing->native_rr_has_buffers(rb.ptr())) {
 			raytracing->native_rr_free_buffers(rb.ptr());
+			if (ray_reconstruction) {
+				ray_reconstruction->free_viewport(rb.ptr());
+			}
 		}
 
 		RTViewportState *rt_state = raytracing->build_tlas(p_render_data, rt_flags);
@@ -391,9 +397,14 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 			rr_inputs.depth = raytracing->rt_get_depth_texture(rb.ptr());
 			rr_inputs.velocity = rb->get_velocity_buffer(false);
 			rr_inputs.size = rb->get_internal_size();
-			for (uint32_t v = 0; v < rb->get_view_count(); v++) {
-				rr_inputs.output = rb->get_internal_texture(v);
-				ray_reconstruction->process(rb, rr_inputs);
+			rr_inputs.projection = p_render_data->scene_data->get_cam_projection();
+			rr_inputs.cam_transform = p_render_data->scene_data->cam_transform;
+			rr_inputs.prev_cam_transform = p_render_data->scene_data->prev_cam_transform;
+			// The path tracer traces one view; other views get a copy.
+			rr_inputs.output = rb->get_internal_texture(0);
+			ray_reconstruction->process(rb, rr_inputs);
+			for (uint32_t v = 1; v < rb->get_view_count(); v++) {
+				copy_effects->copy_to_rect(rb->get_internal_texture(0), rb->get_internal_texture(v), Rect2i(Point2i(), rr_inputs.size), false, false, false, false, false, true);
 			}
 		} else {
 			raytracing->copy_output_texture(p_render_data);
@@ -634,6 +645,10 @@ void RenderForwardClusteredPT::_free_rt_viewport_state(RenderSceneBuffersRD *p_r
 	ERR_FAIL_NULL(p_render_buffers);
 	p_render_buffers->clear_context(RB_SCOPE_DLSS_RR);
 	p_render_buffers->clear_context(RB_SCOPE_NATIVE_RR);
+	p_render_buffers->clear_context(SNAME("native_rr_history"));
+	if (ray_reconstruction) {
+		ray_reconstruction->free_viewport(p_render_buffers);
+	}
 	if (raytracing) {
 		raytracing->free_viewport_state(p_render_buffers);
 	}
