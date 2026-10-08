@@ -148,7 +148,10 @@ Common problems:
 - Coarser cascades update half as often per level.
 - `gpu_time_budget_ms` adapts the probe budget to measured GPU time.
 - The apply pass runs once per pixel at internal resolution, so it scales
-  with the 3D resolution scale (and DLSS / FSR render scale).
+  with the 3D resolution scale (and DLSS / FSR render scale). With
+  `rendering/global_illumination/gi/use_half_resolution` (the setting SDFGI
+  and VoxelGI use) it runs at half resolution: about a quarter of the cost,
+  softer indirect light at object edges.
 
 ## Architecture
 
@@ -270,6 +273,17 @@ averages over the measured frames, after warm-up.
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-08: Step 6 (performance), first pass. Measured with the bench
+  harness on an RTX 3060 (the validation machine's GPU; the RTX 5070 named
+  in the request wasn't available), room scene, 1920x1080, Medium. Blend
+  passes re-read every ray per texel: rays now go to shared memory once
+  per workgroup (0.52 -> 0.21 ms). The apply pass did dozens of integer
+  divisions per pixel (probe index wrap, atlas tile address): the scroll
+  wrap is a conditional subtraction now and the atlas row length a power of
+  two (1.04 -> 0.62 ms). DDGI total 2.0 -> 1.27 ms per frame. Timestamps
+  now end with `DDGI Done`, so the apply time no longer includes the light
+  cluster setup that follows it.
 
 - 2026-10-08: Step 5 (dynamic scenes). Light switch test (`--switch`: all
   lights and emitters off, a new emissive ceiling panel on) showed the probes
