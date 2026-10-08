@@ -65,6 +65,7 @@ static constexpr RaygenShaderOption RAYGEN_SHADER_OPTIONS[] = {
 	{ SceneShaderRaytracing::RT_FLAG_DLSS_RR_ENABLED, "#define DLSS_RR_ENABLED\n" },
 	{ SceneShaderRaytracing::RT_FLAG_SER_ENABLED, "#define USE_SER\n" },
 	{ SceneShaderRaytracing::RT_FLAG_RAY_QUERY_SHADOWS_ENABLED, "#define USE_RAY_QUERY_SHADOWS\n" },
+	{ SceneShaderRaytracing::RT_FLAG_ADAPTIVE_SAMPLING, "#define USE_ADAPTIVE_SAMPLING\n" },
 
 };
 
@@ -760,10 +761,21 @@ uint32_t SceneShaderRaytracing::compute_rt_flags(RID p_environment, bool p_fog_e
 		flags |= RT_FLAG_FOG_ENABLED;
 	}
 
+	// Adaptive sampling needs two samples for a variance, and subgroup votes
+	// in raygen so a warp stops only when all its pixels have converged.
+	static const bool raygen_subgroup_vote = (RD::get_singleton()->limit_get(RD::LIMIT_SUBGROUP_IN_SHADERS) & RD::SHADER_STAGE_RAYGEN_BIT) &&
+			(RD::get_singleton()->limit_get(RD::LIMIT_SUBGROUP_OPERATIONS) & RD::SUBGROUP_VOTE_BIT);
+	const bool adaptive = raygen_subgroup_vote && sample_count >= 2 && GLOBAL_GET("rendering/pathtracing/adaptive_sampling");
+	if (adaptive) {
+		flags |= RT_FLAG_ADAPTIVE_SAMPLING;
+	}
+
 	// SER only pays off on GPUs that reorder in hardware (Ada and newer);
 	// elsewhere the calls are accepted but cost up to ~30% (RTX 3060).
+	// Adaptive sampling turns it off: its subgroup vote after reordering
+	// crashed the NVIDIA driver, and stopping each pixel alone is biased.
 	static const bool ser_reorders = RD::get_singleton()->has_feature(RD::SUPPORTS_RAYTRACING_INVOCATION_REORDER);
-	if (ser_reorders && GLOBAL_GET("rendering/pathtracing/use_shader_execution_reordering")) {
+	if (ser_reorders && !adaptive && GLOBAL_GET("rendering/pathtracing/use_shader_execution_reordering")) {
 		flags |= RT_FLAG_SER_ENABLED;
 	}
 

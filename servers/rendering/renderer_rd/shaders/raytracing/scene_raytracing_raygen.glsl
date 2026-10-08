@@ -16,6 +16,9 @@
 #ifdef USE_SER
 #extension GL_EXT_shader_invocation_reorder : enable
 #endif
+#ifdef USE_ADAPTIVE_SAMPLING
+#extension GL_KHR_shader_subgroup_vote : enable
+#endif
 
 #define GLSL 1
 #define RT_STAGE_RAYGEN 1
@@ -47,6 +50,17 @@ void main() {
 
 	// Accumulate multiple samples per pixel
 	vec3 total_radiance = vec3(0.0);
+	uint samples_taken = 0u;
+#ifdef USE_ADAPTIVE_SAMPLING
+	// Welford running variance of the tonemapped luminance L / (1 + L), so a
+	// threshold means the same in dark and bright areas.
+	const float adaptive_threshold = get_rt_param(RT_PARAM_ADAPTIVE_THRESHOLD);
+	// Two samples that agree by chance (both shadowed, say) would look
+	// converged, so trust the variance only after a quarter of the budget.
+	const uint adaptive_min_samples = max(2u, samples_per_pixel / 4u);
+	float lum_mean = 0.0;
+	float lum_m2 = 0.0;
+#endif
 
 	const uint max_bounces = RT_GET_MAX_BOUNCES();
 
@@ -94,9 +108,35 @@ void main() {
 		}
 
 		total_radiance += ps.radiance;
+		samples_taken++;
+
+#ifdef USE_ADAPTIVE_SAMPLING
+		float lum = max(dot(ps.radiance, vec3(0.2126, 0.7152, 0.0722)), 0.0);
+		lum = lum / (1.0 + lum);
+		float delta = lum - lum_mean;
+		lum_mean += delta / float(samples_taken);
+		lum_m2 += delta * (lum - lum_mean);
+		// Squared standard error of the mean: variance / n.
+		bool converged = samples_taken >= adaptive_min_samples &&
+				lum_m2 / float(samples_taken * (samples_taken - 1u)) <= adaptive_threshold * adaptive_threshold;
+		// Stop only when the whole subgroup has converged: until then the warp
+		// runs anyway, and the extra samples cost nothing. Stopping each pixel
+		// on its own was measured worse: pixels whose first samples agree by
+		// chance stop early, which biases dark. Never combined with USE_SER
+		// (see SceneShaderRaytracing::compute_rt_flags()).
+		if (subgroupAll(converged)) {
+			break;
+		}
+#endif
 	}
 
-	vec3 final_radiance = total_radiance / float(samples_per_pixel);
+	vec3 final_radiance = total_radiance / float(samples_taken);
+#ifdef USE_ADAPTIVE_SAMPLING
+	if (get_rt_param(RT_PARAM_ADAPTIVE_DEBUG) > 0.5) {
+		float used = float(samples_taken) / float(samples_per_pixel);
+		final_radiance = mix(vec3(0.0, 0.1, 1.0), vec3(1.0, 0.1, 0.0), used);
+	}
+#endif
 
 	imageStore(image, ivec2(pixel), vec4(final_radiance, 1.0));
 }

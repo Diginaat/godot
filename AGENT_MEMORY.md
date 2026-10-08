@@ -112,6 +112,11 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   (`RD::SUPPORTS_RAYTRACING_INVOCATION_REORDER`). Turing and Ampere expose the
   extension with hint `NONE`, so test the non-SER shader path there, and keep
   both paths (`hitObject*` and `traceRayEXT`) in sync.
+- Judge a sampling change at equal GPU time: compare RMSE and mean against a
+  64 spp reference (`--spp=64 --shot=`), not just ms. Adaptive stopping rules
+  that look at a pixel's own samples bias dark; vote per subgroup instead.
+- Never use subgroup operations in raygen together with SER
+  (`hitObject*`/`reorderThreadEXT`): it crashed the NVIDIA driver.
 - A BLAS dies with the buffers it was built from. Check
   `RenderingDevice::acceleration_structure_is_valid()` before freeing one from
   a cache. Don't bind buffers you free later through a linear-pool uniform

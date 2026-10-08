@@ -50,6 +50,9 @@ All user arguments (after `--`):
 | `--shot=` | none | Save a PNG and quit |
 | `--bench=` | none | Print the mean GPU and CPU render time over N frames (after `--frames=` warm-up, default 300), vsync off, and quit |
 | `--ser=` | project setting | `1`/`0` turns `rendering/pathtracing/use_shader_execution_reordering` on or off at run time |
+| `--adaptive=` | project setting | `1`/`0` turns `rendering/pathtracing/adaptive_sampling` on or off |
+| `--adaptive_threshold=` | `0.02` | Adaptive sampling threshold (standard error of tonemapped luminance) |
+| `--adaptive_debug=1` | off | Show samples used per pixel instead of the image (blue few, red all) |
 
 ## What the path tracer supports today
 
@@ -75,6 +78,7 @@ Audited on 2026-10-08 at commit `ca52415e30`. Shader sources are in
 | Refraction (StandardMaterial3D) | Supported: dielectric with Fresnel, IOR = 1 + 10 x `refraction_scale` (0.05 gives 1.5), albedo tints, roughness scatters. Casts opaque shadows (as raster) | `refract_and_bounce()` |
 | Custom shader alpha blend, add/sub/mul blending, billboards, proximity fade | Raster overlay on top of the path traced image | `ShaderData::rt_traces_transparency()` |
 | Debug views | 22 modes in `Environment.pathtracing_debug_mode` | `debug_visualize()` |
+| Adaptive sampling | Opt-in (`rendering/pathtracing/adaptive_sampling`); samples per pixel becomes the maximum. Disables SER while on | raygen sample loop |
 
 ## Steps
 
@@ -104,8 +108,8 @@ its reservoir logic may be reusable.
 | # | Phase | Goal | Impact / difficulty | Status |
 | --- | --- | --- | --- | --- |
 | 11 | Profile the tracer, verify SER | Baseline numbers | | Done |
-| 12 | Adaptive sampling: more rays for noisy pixels, fewer for stable ones | Less wasted work | Scene-dependent / medium | Next |
-| 13 | ReSTIR DI: reuse light samples across pixels and frames | Direct light with many lights | High / high | |
+| 12 | Adaptive sampling: more rays for noisy pixels, fewer for stable ones | Less wasted work | Scene-dependent / medium | Done |
+| 13 | ReSTIR DI: reuse light samples across pixels and frames | Direct light with many lights | High / high | Next |
 | 14 | ReSTIR GI: reuse indirect paths | Multi-bounce at low spp | High / very high | |
 | 15 | Path guiding experiments | Better ray directions | Unknown | |
 
@@ -160,6 +164,28 @@ Other notes:
 ## Findings log
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
+
+- 2026-10-08: Step 12 done (adaptive sampling). New project settings
+  `rendering/pathtracing/adaptive_sampling` (off by default),
+  `adaptive_sampling_threshold` (0.02) and `adaptive_sampling_debug`; raygen
+  variant `USE_ADAPTIVE_SAMPLING` (`RT_FLAG_ADAPTIVE_SAMPLING`, params 9-10).
+  The raygen sample loop keeps a Welford variance of the tonemapped luminance
+  L/(1+L) and stops once the squared standard error is below threshold^2,
+  after at least max(2, spp/4) samples, and only when `subgroupAll()` agrees:
+  a warp runs until its slowest pixel is done anyway, so converged pixels keep
+  sampling for free and time is saved only where whole warps converge. Needs
+  subgroup vote in raygen (checked via `LIMIT_SUBGROUP_IN_SHADERS`).
+  Measured (GPU ms, 16 spp max): overview 30.5 -> 18.5, pbr 38.8 -> 26.0,
+  glass 48.2 -> 32.8, emissive 91.3 -> 87.7 (noisy everywhere, little to
+  save). At 4 spp it saves 0-20%. Equal-time quality against a 64 spp
+  reference: overview RMSE 0.0181 (fixed 10 spp, 19.2 ms) vs 0.0148 (adaptive,
+  18.5 ms), glass 0.0276 vs 0.0223; means match, no visible bias or block
+  artifacts. Rejected: a minimum of 2 samples (pixels whose two samples agree
+  by chance stop, dark specks); stopping each pixel on its own (RMSE worse
+  than fixed spp and biased dark, mean 0.565 vs 0.570); `subgroupAll()` after
+  SER reordering (driver crash, 0xC0000005). So adaptive sampling turns SER
+  off while enabled. Not made the default yet: it changes how many samples a
+  scene gets.
 
 - 2026-10-08: Step 11 done (profile, SER). Added `--bench` and `--ser` to the
   test harness; numbers above. Finding: SER was turned on by the project
