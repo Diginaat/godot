@@ -364,17 +364,20 @@ vec3 lights_mesh_to_world(EmissiveMeshData em, vec3 p) {
 	return vec3(dot(em.object_to_world[0], p4), dot(em.object_to_world[1], p4), dot(em.object_to_world[2], p4));
 }
 
-// Direct light from one emissive mesh: picks a triangle uniformly and a point
-// uniformly on it. Returns the contribution before dividing by the light
-// selection PDF.
-vec3 lights_sample_emissive_mesh(uint mesh_idx, vec3 hit_pos, vec3 N, vec3 V, MaterialProperties material, inout uint rng_state) {
+// Unshadowed direct light from one triangle of an emissive mesh, at the point
+// given by p_u (uniform on the triangle). The result already divides by the
+// uniform triangle choice (times primitive_count), so it is the light's
+// estimator for that triangle and point. Returns 0 when the point can't add
+// light; r_L and r_dist give the shadow ray.
+vec3 lights_eval_emissive_mesh(uint mesh_idx, uint triangle, vec2 p_u, vec3 hit_pos, vec3 N, vec3 V, MaterialProperties material, out vec3 r_L, out float r_dist) {
+	r_L = vec3(0.0, 0.0, 1.0);
+	r_dist = 0.0;
 	EmissiveMeshData em = rt_emissive_meshes[mesh_idx];
 	GeometryData geom = geometries[em.geometry_idx];
-	if (geom.vertex_address == 0ul || em.primitive_count == 0u) {
+	if (geom.vertex_address == 0ul || em.primitive_count == 0u || triangle >= em.primitive_count) {
 		return vec3(0.0);
 	}
 
-	uint triangle = min(uint(rand(rng_state) * float(em.primitive_count)), em.primitive_count - 1u);
 	uint i0, i1, i2;
 	get_triangle_indices_ex(geom, triangle, i0, i1, i2);
 	vec3 p0 = lights_mesh_to_world(em, lights_fetch_object_position(geom, i0));
@@ -388,9 +391,8 @@ vec3 lights_sample_emissive_mesh(uint mesh_idx, vec3 hit_pos, vec3 N, vec3 V, Ma
 	}
 
 	// Uniform point on the triangle.
-	vec2 u = rand2(rng_state);
-	float su = sqrt(u.x);
-	vec3 bary = vec3(1.0 - su, su * (1.0 - u.y), su * u.y);
+	float su = sqrt(p_u.x);
+	vec3 bary = vec3(1.0 - su, su * (1.0 - p_u.y), su * p_u.y);
 	vec3 P = p0 * bary.x + p1 * bary.y + p2 * bary.z;
 
 	vec3 to_light = P - hit_pos;
@@ -421,78 +423,26 @@ vec3 lights_sample_emissive_mesh(uint mesh_idx, vec3 hit_pos, vec3 N, vec3 V, Ma
 		return vec3(0.0);
 	}
 
-	// Stop the shadow ray just short of the emitter so it doesn't hit itself.
-	if (!lights_trace_shadow_ray(hit_pos, L, dist * 0.999, rng_state)) {
-		return vec3(0.0);
-	}
-
 	vec3 brdf_diffuse, brdf_specular;
 	evalCombinedBRDFSeparate(N, L, V, material, brdf_diffuse, brdf_specular);
 
+	r_L = L;
+	// Stop the shadow ray just short of the emitter so it doesn't hit itself.
+	r_dist = dist * 0.999;
 	// Area PDF is 1 / (triangle_count * area); converting to solid angle
 	// multiplies by dist^2 / cos_light.
 	float area = 0.5 * twice_area;
 	return (brdf_diffuse + brdf_specular) * Le * (cos_light * float(em.primitive_count) * area / dist_sq);
 }
 
-// Evaluate direct lighting using NEE with stochastic light selection.
-// Selects one light by resampled importance sampling (lights_selection_weight).
-vec3 lights_evaluate_direct_lighting(
-		vec3 hit_pos,
-		vec3 N,
-		vec3 V,
-		MaterialProperties material,
-		inout uint rng_state,
-		bool is_indirect_bounce,
-		uint light_count,
-		uint mesh_count) {
-	// Candidates 0..light_count-1 are analytic lights, the rest emissive meshes.
-	const uint total_count = light_count + mesh_count;
-	if (total_count == 0u) {
-		return vec3(0.0);
-	}
-
-	// Pick one light with probability proportional to its estimated unshadowed
-	// contribution (resampled importance sampling). With few lights every light
-	// is a candidate; with many, RT_LIGHT_RESERVOIR_SIZE random candidates.
-	// Uniform selection used to pick a far spot light as often as the sun, which
-	// left directly lit pixels black when the sun was never picked.
-	const bool enumerate_all = total_count <= uint(RT_LIGHT_RESERVOIR_SIZE);
-	const uint candidate_count = enumerate_all ? total_count : uint(RT_LIGHT_RESERVOIR_SIZE);
-	float weight_sum = 0.0;
-	float selected_weight = 0.0;
-	uint selected_idx = 0u;
-
-	for (uint i = 0u; i < candidate_count; i++) {
-		uint idx = enumerate_all ? i : min(uint(rand(rng_state) * float(total_count)), total_count - 1u);
-		float w = (idx < light_count)
-				? lights_selection_weight(rt_lights[idx], hit_pos, N)
-				: lights_mesh_selection_weight(rt_emissive_meshes[idx - light_count], hit_pos, N);
-		if (w <= 0.0) {
-			continue;
-		}
-		weight_sum += w;
-		if (rand(rng_state) * weight_sum < w) {
-			selected_idx = idx;
-			selected_weight = w;
-		}
-	}
-
-	if (weight_sum <= 0.0) {
-		return vec3(0.0);
-	}
-
-	// RIS with uniformly drawn candidates: the effective selection PDF is
-	// w / (total_count / candidate_count * weight_sum). With enumerate_all this
-	// is exactly w / weight_sum.
-	float light_select_pdf = selected_weight * float(candidate_count) / (float(total_count) * weight_sum);
-
-	if (selected_idx >= light_count) {
-		return lights_sample_emissive_mesh(selected_idx - light_count, hit_pos, N, V, material, rng_state) / max(light_select_pdf, 1e-10);
-	}
-
-	RTLightData light = rt_lights[selected_idx];
-	vec2 u = rand2(rng_state);
+// Unshadowed direct light from one analytic light, with p_u choosing the point
+// on a sphere or sun disk (ignored for point lights). Returns 0 when it can't
+// add light; r_L and r_dist give the shadow ray.
+vec3 lights_eval_light(uint light_idx, vec2 p_u, vec3 hit_pos, vec3 N, vec3 V, MaterialProperties material, bool is_indirect_bounce, out vec3 r_L, out float r_dist) {
+	r_L = vec3(0.0, 0.0, 1.0);
+	r_dist = 0.0;
+	RTLightData light = rt_lights[light_idx];
+	float indirect_mul = is_indirect_bounce ? light.indirect_energy : 1.0;
 
 	// === POSITIONAL LIGHT PATH (omni + spot) ===
 	if (light.type == RT_LIGHT_TYPE_OMNI || light.type == RT_LIGHT_TYPE_SPOT) {
@@ -516,7 +466,7 @@ vec3 lights_evaluate_direct_lighting(
 			// Sphere light: cone sampling for soft shadows.
 			LightSample ls = lights_prepare_sample(hit_pos, light);
 			float light_pdf;
-			L = lights_sample_cone(ls, u, light_pdf);
+			L = lights_sample_cone(ls, p_u, light_pdf);
 			float t_center = dot(to_light, L);
 			vec3 perp = to_light - t_center * L;
 			float perp_sq = dot(perp, perp);
@@ -535,10 +485,6 @@ vec3 lights_evaluate_direct_lighting(
 			spot_atten = 1.0 - pow(spot_rim, light.inv_spot_attenuation);
 		}
 
-		if (!lights_trace_shadow_ray(hit_pos, L, shadow_dist, rng_state)) {
-			return vec3(0.0);
-		}
-
 		// Evaluate BRDF (diffuse + specular separately for specular_amount control).
 		vec3 brdf_diffuse, brdf_specular;
 		evalCombinedBRDFSeparate(N, L, V, material, brdf_diffuse, brdf_specular);
@@ -551,35 +497,102 @@ vec3 lights_evaluate_direct_lighting(
 		float spec_mul = lights_get_specular_multiplier(light.specular_amount, material.roughness);
 		vec3 brdf_value = brdf_diffuse + brdf_specular * spec_mul;
 
-		float indirect_mul = is_indirect_bounce ? light.indirect_energy : 1.0;
-
+		r_L = L;
+		r_dist = shadow_dist;
 		// NdotL is already included in brdf_value (evalLambertian/evalMicrofacet bake it in).
-		vec3 contribution = brdf_value * light.emission * atten * indirect_mul;
-		return contribution / max(light_select_pdf, 1e-10);
+		return brdf_value * light.emission * atten * indirect_mul;
 	}
+
 	// === CONE LIGHT PATH (directional) ===
-	else {
-		LightSample ls = lights_prepare_sample(hit_pos, light);
-		float light_pdf;
-		vec3 L = lights_sample_cone(ls, u, light_pdf);
+	LightSample ls = lights_prepare_sample(hit_pos, light);
+	float light_pdf;
+	vec3 L = lights_sample_cone(ls, p_u, light_pdf);
 
-		float NdotL = dot(N, L);
-		if (NdotL <= 0.0) {
-			return vec3(0.0);
-		}
-
-		if (!lights_trace_shadow_ray(hit_pos, L, ls.max_distance, rng_state)) {
-			return vec3(0.0);
-		}
-
-		vec3 brdf_diffuse, brdf_specular;
-		evalCombinedBRDFSeparate(N, L, V, material, brdf_diffuse, brdf_specular);
-
-		float spec_mul = lights_get_specular_multiplier(light.specular_amount, material.roughness);
-		vec3 brdf_value = brdf_diffuse + brdf_specular * spec_mul;
-
-		float indirect_mul = is_indirect_bounce ? light.indirect_energy : 1.0;
-
-		return brdf_value * light.emission * indirect_mul / max(light_select_pdf, 1e-10);
+	if (dot(N, L) <= 0.0) {
+		return vec3(0.0);
 	}
+
+	vec3 brdf_diffuse, brdf_specular;
+	evalCombinedBRDFSeparate(N, L, V, material, brdf_diffuse, brdf_specular);
+
+	float spec_mul = lights_get_specular_multiplier(light.specular_amount, material.roughness);
+	vec3 brdf_value = brdf_diffuse + brdf_specular * spec_mul;
+
+	r_L = L;
+	r_dist = ls.max_distance;
+	return brdf_value * light.emission * indirect_mul;
+}
+
+// Picks one light by resampled importance sampling (lights_selection_weight()).
+// Candidates 0..light_count-1 are analytic lights, the rest emissive meshes.
+// Returns false when no light can contribute; r_select_pdf is the probability
+// of the pick.
+bool lights_select(vec3 hit_pos, vec3 N, inout uint rng_state, uint light_count, uint mesh_count, out uint r_idx, out float r_select_pdf) {
+	r_idx = 0u;
+	r_select_pdf = 0.0;
+	const uint total_count = light_count + mesh_count;
+	if (total_count == 0u) {
+		return false;
+	}
+
+	// Pick one light with probability proportional to its estimated unshadowed
+	// contribution (resampled importance sampling). With few lights every light
+	// is a candidate; with many, RT_LIGHT_RESERVOIR_SIZE random candidates.
+	// Uniform selection used to pick a far spot light as often as the sun, which
+	// left directly lit pixels black when the sun was never picked.
+	const bool enumerate_all = total_count <= uint(RT_LIGHT_RESERVOIR_SIZE);
+	const uint candidate_count = enumerate_all ? total_count : uint(RT_LIGHT_RESERVOIR_SIZE);
+	float weight_sum = 0.0;
+	float selected_weight = 0.0;
+
+	for (uint i = 0u; i < candidate_count; i++) {
+		uint idx = enumerate_all ? i : min(uint(rand(rng_state) * float(total_count)), total_count - 1u);
+		float w = (idx < light_count)
+				? lights_selection_weight(rt_lights[idx], hit_pos, N)
+				: lights_mesh_selection_weight(rt_emissive_meshes[idx - light_count], hit_pos, N);
+		if (w <= 0.0) {
+			continue;
+		}
+		weight_sum += w;
+		if (rand(rng_state) * weight_sum < w) {
+			r_idx = idx;
+			selected_weight = w;
+		}
+	}
+
+	if (weight_sum <= 0.0) {
+		return false;
+	}
+
+	// RIS with uniformly drawn candidates: the effective selection PDF is
+	// w / (total_count / candidate_count * weight_sum). With enumerate_all this
+	// is exactly w / weight_sum.
+	r_select_pdf = selected_weight * float(candidate_count) / (float(total_count) * weight_sum);
+	return true;
+}
+
+// One NEE candidate: a light chosen by lights_select() plus the random numbers
+// that pick the point on it. r_pick < light_count is an analytic light, the
+// rest are emissive meshes (r_pick - light_count) with r_triangle chosen
+// uniformly. Returns false when no light can contribute.
+bool lights_pick(vec3 hit_pos, vec3 N, inout uint rng_state, uint light_count, uint mesh_count, out uint r_pick, out uint r_triangle, out vec2 r_u, out float r_pdf) {
+	r_triangle = 0u;
+	r_u = vec2(0.0);
+	if (!lights_select(hit_pos, N, rng_state, light_count, mesh_count, r_pick, r_pdf)) {
+		return false;
+	}
+	if (r_pick >= light_count) {
+		EmissiveMeshData em = rt_emissive_meshes[r_pick - light_count];
+		r_triangle = min(uint(rand(rng_state) * float(em.primitive_count)), max(em.primitive_count, 1u) - 1u);
+	}
+	r_u = rand2(rng_state);
+	return true;
+}
+
+// Unshadowed estimator of a lights_pick() candidate (not divided by its PDF).
+vec3 lights_eval_pick(uint pick, uint triangle, vec2 u, vec3 hit_pos, vec3 N, vec3 V, MaterialProperties material, bool is_indirect_bounce, uint light_count, out vec3 r_L, out float r_dist) {
+	if (pick >= light_count) {
+		return lights_eval_emissive_mesh(pick - light_count, triangle, u, hit_pos, N, V, material, r_L, r_dist);
+	}
+	return lights_eval_light(pick, u, hit_pos, N, V, material, is_indirect_bounce, r_L, r_dist);
 }

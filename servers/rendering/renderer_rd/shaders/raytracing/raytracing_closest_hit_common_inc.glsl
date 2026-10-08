@@ -9,6 +9,8 @@
 //   SAMPLER_* (12 material samplers), rt_params, rt_depth_image,
 //   DLSS-RR images (ifdef DLSS_RR_ENABLED)
 
+#include "raytracing_restir_di_inc.glsl"
+
 // ============================================================================
 // HIT DATA
 // ============================================================================
@@ -560,10 +562,60 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 	if (rt_light_count + rt_mesh_count > 0u) {
 		vec3 hit_pos_offset = offset_ray_origin(h.hit_pos, h.geometry_normal);
 		bool is_indirect = (diffuse_bounces > 0u);
-		vec3 direct_light = lights_evaluate_direct_lighting(
-				hit_pos_offset, N, V, brdf_mat, ps.rng_state, is_indirect, rt_light_count, rt_mesh_count);
-		ps.radiance += ps.throughput * direct_light;
+		uint pick;
+		uint triangle;
+		vec2 u;
+		float pick_pdf;
+		bool picked = lights_pick(hit_pos_offset, N, ps.rng_state, rt_light_count, rt_mesh_count, pick, triangle, u, pick_pdf);
+		vec3 L = vec3(0.0, 0.0, 1.0);
+		float shadow_dist = 0.0;
+		vec3 contribution = vec3(0.0);
+		if (picked) {
+			contribution = lights_eval_pick(pick, triangle, u, hit_pos_offset, N, V, brdf_mat, is_indirect, rt_light_count, L, shadow_dist);
+		}
+#ifdef USE_RESTIR_DI
+		bool use_restir = total_bounces == 0u;
+		bool restir_reuse = use_restir && !is_sample_zero(ps.packed_bounces_flags);
+		RestirReservoir restir;
+		float restir_W = 0.0;
+		if (restir_reuse) {
+			// Samples 1+ hit the same primary surface as sample 0 (no per-sample
+			// jitter): reuse the reservoir it just stored. A negative W means the
+			// light was shadowed, so no shadow ray either.
+			uvec4 stored = restir_load_sample(ivec2(gl_LaunchIDEXT.xy), false);
+			float stored_W = uintBitsToFloat(stored.z);
+			contribution = stored_W > 0.0 ? restir_eval(stored.x, unpackUnorm2x16(stored.y), hit_pos_offset, N, V, brdf_mat, rt_mesh_count > 0u, L, shadow_dist) * stored_W : vec3(0.0);
+		} else if (use_restir) {
+			uint key = pick < rt_light_count ? pick : (RESTIR_MESH_BIT | ((pick - rt_light_count) << RESTIR_MESH_SHIFT) | min(triangle, RESTIR_TRIANGLE_MASK));
+			contribution = restir_di_resample(picked, key, u, pick_pdf, contribution, hit_pos_offset, N, V, brdf_mat, ps.rng_state, rt_mesh_count > 0u, gl_HitTEXT, restir, restir_W, L, shadow_dist);
+		} else
+#endif
+		{
+			contribution /= max(pick_pdf, 1e-10);
+		}
+		bool visible = max(contribution.r, max(contribution.g, contribution.b)) > 0.0;
+#ifdef USE_RESTIR_DI
+		visible = visible && (restir_reuse || lights_trace_shadow_ray(hit_pos_offset, L, shadow_dist, ps.rng_state));
+#else
+		visible = visible && lights_trace_shadow_ray(hit_pos_offset, L, shadow_dist, ps.rng_state);
+#endif
+#ifdef USE_RESTIR_DI
+		if (use_restir && !restir_reuse) {
+			// Visibility reuse: a shadowed winner is stored with W = 0.
+			// W keeps its weight for reuse; its sign records the shadow for this
+			// pixel's later samples.
+			restir_store(restir.key, restir.u, visible ? restir_W : -restir_W, min(restir.M, RESTIR_MAX_M), hit_pos_offset, N);
+		}
+#endif
+		if (visible) {
+			ps.radiance += ps.throughput * contribution;
+		}
 	}
+#ifdef USE_RESTIR_DI
+	else {
+		restir_clear_pixel(ps.packed_bounces_flags);
+	}
+#endif
 	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, rt_mesh_count > 0u);
 
 	// =================================================================
@@ -645,6 +697,9 @@ void refract_and_bounce(HitData h, MaterialResult m, float ior) {
 		ps.radiance += ps.throughput * m.emissive;
 	}
 	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, false);
+#ifdef USE_RESTIR_DI
+	restir_clear_pixel(ps.packed_bounces_flags);
+#endif
 
 #ifdef DLSS_RR_ENABLED
 	if (total_bounces == 0u && is_sample_zero(ps.packed_bounces_flags)) {

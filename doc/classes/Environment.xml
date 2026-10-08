@@ -221,6 +221,12 @@
 			Maximum number of times a ray is allowed to bounce off surfaces before it is terminated. Higher values produce more accurate indirect lighting and inter-reflections at the cost of GPU performance. A value of [code]0[/code] produces direct illumination only.
 			[b]Note:[/b] Only has an effect when [member pathtracing_enabled] is [code]true[/code].
 		</member>
+		<member name="pathtracing_restir_di" type="bool" setter="set_pathtracing_restir_di" getter="is_pathtracing_restir_di_enabled" default="false">
+			If [code]true[/code], direct lighting reuses good light samples from the previous frame (ReSTIR DI). Scenes with many lights get much less noise in their direct lighting, for almost no extra cost at 1 sample per pixel.
+			[b]Note:[/b] Works best with [member pathtracing_samples_per_pixel] at 1, typically with a denoiser. With more samples per pixel, all samples of a pixel share one direct light estimate, so the extra samples only reduce the noise of bounced light.
+			[b]Note:[/b] Applies to the surfaces the camera sees directly; reflections and bounced light still sample lights the usual way. Reuse can briefly trail behind fast motion or lights that switch on and off.
+			[b]Note:[/b] Only has an effect when [member pathtracing_enabled] is [code]true[/code].
+		</member>
 		<member name="pathtracing_samples_per_pixel" type="int" setter="set_pathtracing_samples_per_pixel" getter="get_pathtracing_samples_per_pixel" default="1">
 			Number of ray samples cast per pixel per frame. Higher values reduce noise but increase GPU cost proportionally. When using a temporal denoiser such as DLSS Ray Reconstruction, a low sample count (1-2) is typically sufficient since the denoiser accumulates information across frames.
 			[b]Note:[/b] Only has an effect when [member pathtracing_enabled] is [code]true[/code].

@@ -197,6 +197,7 @@ private:
 	int pathtracing_max_bounces = 3;
 	RSE::PathtracingDenoiser pathtracing_denoiser = RSE::PT_DENOISER_DLSS_RAY_RECONSTRUCTION;
 	bool pathtracing_adaptive_sampling = false;
+	bool pathtracing_restir_di = false;
 	void _update_pathtracing();
 
 	// Glow
@@ -399,6 +400,8 @@ public:
 	RSE::PathtracingDenoiser get_pathtracing_denoiser() const;
 	void set_pathtracing_adaptive_sampling(bool p_enabled);
 	bool is_pathtracing_adaptive_sampling_enabled() const;
+	void set_pathtracing_restir_di(bool p_enabled);
+	bool is_pathtracing_restir_di_enabled() const;
 
 	// Glow
 	void set_glow_enabled(bool p_enabled);

@@ -43,6 +43,12 @@
 #define RB_TEX_RAYTRACING SNAME("raytracing")
 #define RB_TEX_RT_DEPTH SNAME("rt_depth")
 
+#define RB_SCOPE_RESTIR_DI SNAME("restir_di")
+#define RB_TEX_RESTIR_SAMPLE_0 SNAME("sample_0")
+#define RB_TEX_RESTIR_SAMPLE_1 SNAME("sample_1")
+#define RB_TEX_RESTIR_SURFACE_0 SNAME("surface_0")
+#define RB_TEX_RESTIR_SURFACE_1 SNAME("surface_1")
+
 #define RB_SCOPE_DLSS_RR SNAME("dlss_rr")
 #define RB_TEX_DLSS_RR_DIFFUSE_ALBEDO SNAME("diffuse_albedo")
 #define RB_TEX_DLSS_RR_SPECULAR_ALBEDO SNAME("specular_albedo")
@@ -357,6 +363,12 @@ struct RTViewportState {
 	RID params_buffer;
 	RID scene_uniform_set;
 
+	// ReSTIR DI: last frame's light identities, to map reservoir light indices
+	// from the previous frame's light order to this frame's.
+	LocalVector<RID> prev_light_keys;
+	LocalVector<uint64_t> prev_mesh_keys;
+	RID restir_remap_buffer;
+
 	uint32_t frame_counter = 0;
 };
 
@@ -422,6 +434,7 @@ class RenderRaytracing {
 	LocalVector<int32_t> motion_indices; ///< Per-instance: index into motion_transforms[], or -1.
 	LocalVector<RT_InstanceMotionData> motion_transforms; ///< Compact: only moving instances.
 	LocalVector<RT_EmissiveMeshData> emissive_meshes; ///< Emissive surfaces sampled as mesh lights.
+	LocalVector<uint64_t> emissive_mesh_keys; ///< Stable identity of each emissive_meshes entry (its surface cache).
 	LocalVector<RID> blass;
 	LocalVector<Transform3D> blas_transforms;
 	LocalVector<uint32_t> instance_flags;
@@ -509,7 +522,7 @@ public:
 	void cleanup_caches();
 
 	RTViewportState *build_tlas(const RenderDataRD *p_render_data, uint32_t p_rt_flags);
-	uint32_t gather_lights(const RenderDataRD *p_render_data, RT_LightData *r_light_data, uint32_t p_max_lights);
+	uint32_t gather_lights(const RenderDataRD *p_render_data, RT_LightData *r_light_data, uint32_t p_max_lights, RID *r_light_keys = nullptr);
 	RID update_uniform_set(RTViewportState *p_state, const RenderDataRD *p_render_data, uint32_t p_rt_flags);
 
 	void copy_output_texture(const RenderDataRD *p_render_data);
@@ -525,6 +538,12 @@ public:
 	// DLSS Ray Reconstruction guide buffers (stored on the render buffers).
 	void dlss_rr_ensure_buffers(RenderSceneBuffersRD *p_render_buffers);
 	void dlss_rr_free_buffers(RenderSceneBuffersRD *p_render_buffers);
+
+	// ReSTIR DI reservoirs: two frames (current and previous) of sample and
+	// surface images. Created only while the RT_FLAG_RESTIR_DI variant runs.
+	void restir_di_ensure_buffers(RenderSceneBuffersRD *p_render_buffers);
+	void restir_di_free_buffers(RenderSceneBuffersRD *p_render_buffers);
+	bool restir_di_has_buffers(RenderSceneBuffersRD *p_render_buffers) const;
 	bool dlss_rr_has_buffers(RenderSceneBuffersRD *p_render_buffers) const;
 	RID dlss_rr_get_diffuse_albedo(RenderSceneBuffersRD *p_render_buffers) const;
 	RID dlss_rr_get_specular_albedo(RenderSceneBuffersRD *p_render_buffers) const;

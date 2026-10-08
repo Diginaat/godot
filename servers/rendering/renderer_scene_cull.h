@@ -1388,6 +1388,7 @@ public:
 	// Pathtracing
 	PASS6(environment_set_pathtracing, RID, bool, int, int, int, RSE::PathtracingDenoiser)
 	PASS2(environment_set_pathtracing_adaptive_sampling, RID, bool)
+	PASS2(environment_set_pathtracing_restir_di, RID, bool)
 
 	PASS1RC(bool, environment_get_pathtracing_enabled, RID)
 	PASS1RC(int, environment_get_pathtracing_debug_mode, RID)
@@ -1395,6 +1396,7 @@ public:
 	PASS1RC(int, environment_get_pathtracing_max_bounces, RID)
 	PASS1RC(RSE::PathtracingDenoiser, environment_get_pathtracing_denoiser, RID)
 	PASS1RC(bool, environment_get_pathtracing_adaptive_sampling, RID)
+	PASS1RC(bool, environment_get_pathtracing_restir_di, RID)
 
 	// Adjustment
 	PASS7(environment_set_adjustment, RID, bool, float, float, float, bool, RID)

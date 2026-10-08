@@ -66,6 +66,7 @@ static constexpr RaygenShaderOption RAYGEN_SHADER_OPTIONS[] = {
 	{ SceneShaderRaytracing::RT_FLAG_SER_ENABLED, "#define USE_SER\n" },
 	{ SceneShaderRaytracing::RT_FLAG_RAY_QUERY_SHADOWS_ENABLED, "#define USE_RAY_QUERY_SHADOWS\n" },
 	{ SceneShaderRaytracing::RT_FLAG_ADAPTIVE_SAMPLING, "#define USE_ADAPTIVE_SAMPLING\n" },
+	{ SceneShaderRaytracing::RT_FLAG_RESTIR_DI, "#define USE_RESTIR_DI\n" },
 
 };
 
@@ -769,6 +770,10 @@ uint32_t SceneShaderRaytracing::compute_rt_flags(RID p_environment, bool p_fog_e
 			RendererEnvironmentStorage::get_singleton()->environment_get_pathtracing_adaptive_sampling(p_environment);
 	if (adaptive) {
 		flags |= RT_FLAG_ADAPTIVE_SAMPLING;
+	}
+
+	if (p_environment.is_valid() && RendererEnvironmentStorage::get_singleton()->environment_get_pathtracing_restir_di(p_environment)) {
+		flags |= RT_FLAG_RESTIR_DI;
 	}
 
 	// SER only pays off on GPUs that reorder in hardware (Ada and newer);

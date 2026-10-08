@@ -61,6 +61,36 @@ layout(set = 0, binding = 11, rgba16f) uniform image2D dlss_rr_normal_roughness;
 layout(set = 0, binding = 12, r16f) uniform image2D dlss_rr_specular_hit_dist;
 #endif
 
+#ifdef USE_RESTIR_DI
+// ReSTIR DI (see raytracing_restir_di_inc.glsl). Entries [0, RESTIR_LIGHTS_MAX)
+// map last frame's analytic light indices to this frame's, the rest emissive
+// meshes; 0xFFFFFFFF where the light is gone. Reservoirs ping-pong between _0
+// and _1 by frame parity. shadercallcoherent: samples 1+ of a pixel read the
+// reservoir its sample 0 stored earlier in the same launch.
+#define RESTIR_LIGHTS_MAX 64u
+layout(set = 0, binding = 34, std430) readonly buffer RestirLightRemap {
+	uint restir_light_remap[];
+};
+layout(set = 0, binding = 35, rgba32ui) shadercallcoherent uniform uimage2D restir_sample_0;
+layout(set = 0, binding = 36, rgba32ui) shadercallcoherent uniform uimage2D restir_sample_1;
+layout(set = 0, binding = 37, rgba32f) shadercallcoherent uniform image2D restir_surface_0;
+layout(set = 0, binding = 38, rgba32f) shadercallcoherent uniform image2D restir_surface_1;
+
+// Marks this pixel as having no reservoir this frame (for pixels that never
+// reach shade_and_bounce(): sky, glass). Primary ray, sample 0 only.
+void restir_clear_pixel(uint p_packed_bounces_flags) {
+	if (get_total_bounces(p_packed_bounces_flags) != 0u || !is_sample_zero(p_packed_bounces_flags)) {
+		return;
+	}
+	ivec2 p = ivec2(gl_LaunchIDEXT.xy);
+	if ((uint(get_rt_param(RT_PARAM_FRAME_INDEX)) & 1u) != 0u) {
+		imageStore(restir_sample_1, p, uvec4(0xFFFFFFFFu, 0u, 0u, 0u));
+	} else {
+		imageStore(restir_sample_0, p, uvec4(0xFFFFFFFFu, 0u, 0u, 0u));
+	}
+}
+#endif
+
 // Binding 14 is reserved for GlobalShaderUniformData (declared above).
 // Samplers occupy 16-27 (see raytracing_samplers_inc.glsl); velocity sits at
 // the first free slot past them so we do not collide with either.
