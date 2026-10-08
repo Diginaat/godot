@@ -36,9 +36,15 @@ based on second: `v0.2.0-godot4.8-dev` is build 0.2.0, on Godot 4.8-dev.
 > Reconstruction, Frame Generation and Reflex runtime files this way.
 > The editor, the path tracer and PhysX GPU all work without them.
 >
-> **Only if you want DLSS** (or Ray Reconstruction, Frame Generation or Reflex):
-> download the [NVIDIA Streamline SDK 2.10.0](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0)
-> and copy its DLLs next to the editor ([step 5 below](#5-optional-add-the-nvidia-streamline-dlls-only-for-dlss)).
+> **Only if you want DLSS** (or Ray Reconstruction, Frame Generation or Reflex),
+> either:
+>
+> - click **Get NVIDIA DLSS...** in the editor's menu bar (after Help). It
+>   explains each step, asks you to accept NVIDIA's license terms and to confirm
+>   the download from GitHub, checks the file's SHA-256, installs the DLLs next
+>   to the editor and offers to restart; or
+> - download the [NVIDIA Streamline SDK 2.10.0](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0)
+>   yourself and copy its DLLs next to the editor ([step 5 below](#5-optional-add-the-nvidia-streamline-dlls-only-for-dlss)).
 
 **Platform:** Windows 10/11 x64 with an NVIDIA RTX GPU. DLSS, Ray
 Reconstruction and the path tracer need an RTX card. PhysX GPU dynamics need an
@@ -154,6 +160,9 @@ Reflex.** Everything else works without it.
 Streamline's runtime DLLs are not in this repository; NVIDIA distributes them
 in the Streamline SDK. This source is built against **Streamline SDK 2.10.0**
 (see `thirdparty/streamline/include/sl_version.h`).
+
+The easy way: in the editor, click **Get NVIDIA DLSS...** in the menu bar and
+follow the dialog. It does the steps below for you. To do them by hand:
 
 1. Download **Streamline SDK 2.10.0** from NVIDIA:
    [github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0](https://github.com/NVIDIA-RTX/Streamline/releases/tag/v2.10.0).
