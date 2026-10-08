@@ -760,7 +760,10 @@ uint32_t SceneShaderRaytracing::compute_rt_flags(RID p_environment, bool p_fog_e
 		flags |= RT_FLAG_FOG_ENABLED;
 	}
 
-	if (GLOBAL_GET("rendering/pathtracing/use_shader_execution_reordering")) {
+	// SER only pays off on GPUs that reorder in hardware (Ada and newer);
+	// elsewhere the calls are accepted but cost up to ~30% (RTX 3060).
+	static const bool ser_reorders = RD::get_singleton()->has_feature(RD::SUPPORTS_RAYTRACING_INVOCATION_REORDER);
+	if (ser_reorders && GLOBAL_GET("rendering/pathtracing/use_shader_execution_reordering")) {
 		flags |= RT_FLAG_SER_ENABLED;
 	}
 

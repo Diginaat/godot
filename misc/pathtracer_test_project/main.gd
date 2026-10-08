@@ -66,6 +66,9 @@ func _ready() -> void:
 	if args.has("shot"):
 		hud.visible = false
 		_take_screenshot()
+	elif args.has("bench"):
+		hud.visible = false
+		_benchmark()
 
 
 func _apply_args() -> void:
@@ -74,6 +77,9 @@ func _apply_args() -> void:
 	env.pathtracing_max_bounces = int(args.get("bounces", "3"))
 	env.pathtracing_debug_mode = int(args.get("debug", "0"))
 	env.pathtracing_denoiser = int(args.get("denoiser", "0"))
+	if args.has("ser"):
+		# Read by the path tracer every frame, so it can change at run time.
+		ProjectSettings.set_setting("rendering/pathtracing/use_shader_execution_reordering", args["ser"] == "1")
 	if args.has("vfog_sky_affect"):
 		env.volumetric_fog_sky_affect = float(args["vfog_sky_affect"])
 	# Measurement mode: linear tonemap and a low exposure keep values from
@@ -134,6 +140,29 @@ func _take_screenshot() -> void:
 	var err := get_viewport().get_texture().get_image().save_png(path)
 	print("Screenshot %s: %s" % [path, error_string(err)])
 	get_tree().quit(0 if err == OK else 1)
+
+
+# Prints the mean GPU and CPU render time over --bench=N frames, after
+# --frames=M warm-up frames (custom hit groups compile in the background).
+func _benchmark() -> void:
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	var vp := get_viewport().get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp, true)
+	for i in int(args.get("frames", "300")):
+		await RenderingServer.frame_post_draw
+	var count := int(args["bench"])
+	var gpu := 0.0
+	var cpu := 0.0
+	for i in count:
+		await RenderingServer.frame_post_draw
+		gpu += RenderingServer.viewport_get_measured_render_time_gpu(vp)
+		cpu += RenderingServer.viewport_get_measured_render_time_cpu(vp)
+	var size := get_viewport().get_visible_rect().size
+	print("BENCH view=%s pt=%s spp=%d bounces=%d ser=%s res=%dx%d frames=%d gpu_ms=%.3f cpu_ms=%.3f" % [
+		view, "1" if env.pathtracing_enabled else "0", env.pathtracing_samples_per_pixel,
+		env.pathtracing_max_bounces, args.get("ser", "default"), size.x, size.y, count,
+		gpu / count, cpu / count])
+	get_tree().quit()
 
 
 # --- Building blocks --------------------------------------------------------
