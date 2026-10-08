@@ -141,7 +141,7 @@ Releases on GitHub use the own version first, then the Godot base:
 | --- | --- | --- |
 | Git tag | `v<own>-godot<major>.<minor>-<status>` | `v0.2.0-godot4.8-dev` |
 | Release title | `Godot NVIDIA + PhysX <own> (Godot <major>.<minor>-<status>)` | `Godot NVIDIA + PhysX 0.2.0 (Godot 4.8-dev)` |
-| Zip | `godot-nvidia-physx_<tag>_editor_win64_<standard or mono>.zip` | `godot-nvidia-physx_v0.2.0-godot4.8-dev_editor_win64_standard.zip` |
+| Zip | `godot_<major>.<minor>-nvidia-rt-dlss-physx_v<own>-editor_windows_amd64[_mono].zip` | `godot_4.8-nvidia-rt-dlss-physx_v0.2.0-editor_windows_amd64.zip` (.NET: `..._amd64_mono.zip`) |
 
 `package_editor_win64.ps1` builds the zip name from `CUSTOM_VERSION` and
 `version.py`, and prints the tag and title to use.

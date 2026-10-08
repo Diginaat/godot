@@ -35,9 +35,9 @@ $godotMajor = [regex]::Match($versionPy, '(?m)^major = (\d+)').Groups[1].Value
 $godotMinor = [regex]::Match($versionPy, '(?m)^minor = (\d+)').Groups[1].Value
 $godotStatus = [regex]::Match($versionPy, '(?m)^status = "(\w+)"').Groups[1].Value
 $tag = "v$custom-godot$godotMajor.$godotMinor-$godotStatus"
-$flavor = if ($Mono) { "mono" } else { "standard" }
 $variant = if ($WithNvidiaRuntime) { "_with-nvidia-runtime_PRIVATE" } else { "" }
-$name = "godot-nvidia-physx_$($tag)_editor_win64_$flavor$variant"
+$flavorSuffix = if ($Mono) { "_mono" } else { "" }
+$name = "godot_$godotMajor.$godotMinor-nvidia-rt-dlss-physx_v$custom-editor_windows_amd64$flavorSuffix$variant"
 $dist = Join-Path $root "dist"
 $stage = Join-Path $dist $name
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
