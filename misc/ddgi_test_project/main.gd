@@ -274,6 +274,17 @@ func _run_capture() -> void:
 		var err := vp.get_texture().get_image().save_png(path)
 		print("Screenshot %s: %s" % [path, error_string(err)])
 
+	# --settle=N: stop the camera after --shot, wait N frames for the probes to
+	# converge and save --shot with _settled appended. The difference between
+	# the two images is the error that scrolling leaves while moving.
+	if args.has("settle") and args.has("shot"):
+		move_camera = false
+		for i in int(args["settle"]):
+			await RenderingServer.frame_post_draw
+		var path: String = String(args["shot"]).get_basename() + "_settled.png"
+		vp.get_texture().get_image().save_png(path)
+		print("Screenshot %s" % path)
+
 	# --switch: turn every light and emitter of the current view off, then
 	# save --shot with _N appended N frames later for each N in --after
 	# (default 1,5,10,20,40,80), to measure how fast the GI follows.

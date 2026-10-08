@@ -20,6 +20,10 @@
 #define DDGI_PROBE_ACTIVE 1u
 #define DDGI_PROBE_INACTIVE 2u // No surface nearby: traced with the fixed rays only.
 #define DDGI_PROBE_INSIDE 3u // Inside geometry: never sampled.
+// Brought into the volume by scrolling, not traced yet. Sampled with the
+// atlas texels left by the probe that scrolled out (stale, but better than
+// nothing); the first update replaces them instead of blending with them.
+#define DDGI_PROBE_SCROLLED 4u
 
 #define DDGI_VOLUME_FLAG_RELOCATION 1
 #define DDGI_VOLUME_FLAG_CLASSIFICATION 2

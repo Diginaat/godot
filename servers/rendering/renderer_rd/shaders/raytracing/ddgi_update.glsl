@@ -114,11 +114,12 @@ void main() {
 		pd.last_update_frame = 0u;
 		pd.luminance = 0.0;
 	} else if (scroll_reset) {
-		// Keep the atlas texels as a one-frame fallback. They belong to the old
-		// toroidal slot, so they may be stale, but stale lighting is less visible
-		// than sampling no probe at all (black flicker) while the camera moves.
+		// Keep the atlas texels as a fallback until the first trace. They belong
+		// to the probe that scrolled out at the far side, so they are stale, but
+		// stale lighting is less visible than sampling no probe at all (black
+		// flicker) while the camera moves.
 		pd.offset = vec3(0.0);
-		pd.state = DDGI_PROBE_ACTIVE;
+		pd.state = DDGI_PROBE_SCROLLED;
 		pd.urgency = max(pd.urgency, 1.0);
 		pd.variability = 1.0;
 		pd.last_update_frame = 0u;
@@ -214,7 +215,9 @@ void main() {
 
 	int texels = int(TILE_TEXELS);
 	ivec2 origin = ddgi_tile_origin(probe, uint(texels), ddgi.atlas.z);
-	float hysteresis = pd.state == DDGI_PROBE_NEW ? 0.0 : vol.params.y;
+	// New and scrolled-in probes have no data of their own yet: replace it.
+	bool first_update = pd.state == DDGI_PROBE_NEW || pd.state == DDGI_PROBE_SCROLLED;
+	float hysteresis = first_update ? 0.0 : vol.params.y;
 	float max_distance = vol.spacing.w;
 
 	uint local_index = gl_LocalInvocationIndex;
@@ -316,9 +319,9 @@ void main() {
 		// Adapt faster when the light changed a lot (lights switched, doors
 		// opened), so the GI doesn't lag behind.
 		float h = hysteresis * clamp(1.0 - (change - 0.15) * 1.5, 0.4, 1.0);
-		shared_hysteresis = pd.state == DDGI_PROBE_NEW ? 0.0 : h;
+		shared_hysteresis = first_update ? 0.0 : h;
 		// Moving average of how much this probe's light changes per update.
-		ddgi_probes[probe].variability = pd.state == DDGI_PROBE_NEW ? 1.0 : mix(pd.variability, min(change, 4.0), 0.3);
+		ddgi_probes[probe].variability = first_update ? 1.0 : mix(pd.variability, min(change, 4.0), 0.3);
 	}
 	barrier();
 
