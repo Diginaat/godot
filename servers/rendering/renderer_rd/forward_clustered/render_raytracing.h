@@ -159,6 +159,9 @@ enum {
 	RT_MAT_FLAG_HAS_NORMAL_MAP = 1u,
 	RT_MAT_FLAG_HAS_EMISSION_TEX = 2u,
 	RT_MAT_FLAG_POINT_FILTER = 4u,
+	// Bits 16-23 hold the alpha scissor threshold (0-255 maps to 0.0-1.0).
+	RT_MAT_ALPHA_THRESHOLD_SHIFT = 16u,
+	RT_MAT_ALPHA_THRESHOLD_MASK = 0xFFu << 16u,
 };
 
 // Index format for RT geometry (matches GLSL fetch_indices).

@@ -1508,8 +1508,16 @@ RTMaterialData *RenderRaytracing::process_material(RID p_material_rid, uint16_t 
 		}
 	}
 
+	// BaseMaterial3D stores every parameter, but declares a uniform only when its
+	// feature is on. Read a parameter only if the shader actually uses it.
+	RendererRD::MaterialStorage::ShaderData *shader_data = material_storage->material_get_shader_data(p_material_rid);
+	auto shader_declares = [&](const StringName &p_param) -> bool {
+		return shader_data && shader_data->uniforms.has(p_param);
+	};
+	const bool emission_enabled = shader_declares("emission");
+
 	// Emission is a color texture - needs sRGB->linear conversion
-	RID emission_rd = get_material_texture("texture_emission", true);
+	RID emission_rd = emission_enabled ? get_material_texture("texture_emission", true) : RID();
 	if (emission_rd.is_valid()) {
 		mat.emission_texture_idx = bindless_block->add_texture(emission_rd);
 		mat.flags |= RT_MAT_FLAG_HAS_EMISSION_TEX;
@@ -1700,7 +1708,7 @@ RTMaterialData *RenderRaytracing::process_material(RID p_material_rid, uint16_t 
 		mat.specular = specular_var;
 	}
 
-	Variant emission_var = material_storage->material_get_param(p_material_rid, "emission");
+	Variant emission_var = emission_enabled ? material_storage->material_get_param(p_material_rid, "emission") : Variant();
 	if (emission_var.get_type() == Variant::COLOR) {
 		Color c = ((Color)emission_var).srgb_to_linear();
 		mat.emission_color[0] = c.r;
@@ -1708,10 +1716,21 @@ RTMaterialData *RenderRaytracing::process_material(RID p_material_rid, uint16_t 
 		mat.emission_color[2] = c.b;
 	}
 
-	Variant emission_energy_var = material_storage->material_get_param(p_material_rid, "emission_energy");
+	Variant emission_energy_var = emission_enabled ? material_storage->material_get_param(p_material_rid, "emission_energy") : Variant();
 	if (emission_energy_var.get_type() == Variant::FLOAT) {
 		mat.emission_strength = emission_energy_var;
 	}
+
+	// Alpha scissor threshold, packed into the flags. Materials without alpha
+	// scissor keep the previous fixed 0.5 cutoff.
+	float alpha_threshold = 0.5f;
+	if (shader_declares("alpha_scissor_threshold")) {
+		Variant threshold_var = material_storage->material_get_param(p_material_rid, "alpha_scissor_threshold");
+		if (threshold_var.get_type() == Variant::FLOAT) {
+			alpha_threshold = CLAMP((float)threshold_var, 0.0f, 1.0f);
+		}
+	}
+	mat.flags = (mat.flags & ~RT_MAT_ALPHA_THRESHOLD_MASK) | (uint32_t(alpha_threshold * 255.0f + 0.5f) << RT_MAT_ALPHA_THRESHOLD_SHIFT);
 
 	// UV1 scale and offset (vec3 in Godot, we only use xy).
 	Variant uv1_scale_var = material_storage->material_get_param(p_material_rid, "uv1_scale");

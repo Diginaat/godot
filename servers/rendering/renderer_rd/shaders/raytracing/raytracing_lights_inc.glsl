@@ -178,7 +178,7 @@ bool ray_query_alpha_test(uint geometry_idx, uint primitive_id, vec2 candidate_b
 	float alpha = texture(sampler2D(bindless_textures[nonuniformEXT(mat.albedo_texture_idx)], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).a;
 	alpha *= mat.albedo_color.a;
 
-	return alpha >= 0.5;
+	return alpha >= material_alpha_threshold(mat.flags);
 }
 
 // ============================================================================

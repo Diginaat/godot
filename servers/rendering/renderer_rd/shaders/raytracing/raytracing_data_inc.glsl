@@ -95,7 +95,7 @@ struct MaterialData {
 	float metallic;
 	float roughness;
 	float ao_strength;
-	uint flags; // Bit 0: has_normal_map, Bit 1: has_emission
+	uint flags; // Bit 0: has_normal_map, bit 1: has_emission_texture, bit 2: point_filter, bits 16-23: alpha scissor threshold
 
 	vec2 uv1_scale; // UV1 scale (default 1,1)
 	vec2 uv1_offset; // UV1 offset (default 0,0)
@@ -104,3 +104,8 @@ struct MaterialData {
 	float specular; // Dielectric specular [0..1], default 0.5 -> F0 = 0.04.
 	uint64_t uniform_address; // BDA for custom shader uniform buffer (0 = none)
 };
+
+// Alpha below this is cut out (StandardMaterial3D alpha scissor). 0 means never.
+float material_alpha_threshold(uint p_flags) {
+	return float((p_flags >> 16u) & 0xFFu) / 255.0;
+}

@@ -426,11 +426,12 @@ void main() {
 	float roughness = saturate(orm.g * mat.roughness);
 	float metalness = saturate(orm.b * mat.metallic);
 
-	vec3 emissive = vec3(0.0);
+	// Emission color and energy work on their own; the texture only modulates them.
+	vec3 emissive = mat.emission_color * mat.emission_strength;
 	if ((mat.flags & 2u) != 0u) {
-		emissive = sample_material_texture(mat.emission_texture_idx, uv, mat.flags).rgb * mat.emission_color * mat.emission_strength;
-		emissive *= scene_data_block.data.emissive_exposure_normalization;
+		emissive *= sample_material_texture(mat.emission_texture_idx, uv, mat.flags).rgb;
 	}
+	emissive *= scene_data_block.data.emissive_exposure_normalization;
 
 	// Build MaterialResult.
 	MaterialResult m;
@@ -563,7 +564,7 @@ void main() {
 	float alpha = texture(sampler2D(bindless_textures[nonuniformEXT(mat.albedo_texture_idx)], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).a;
 	alpha *= mat.albedo_color.a;
 
-	if (alpha < 0.5) {
+	if (alpha < material_alpha_threshold(mat.flags)) {
 		ignoreIntersectionEXT;
 	}
 #endif
