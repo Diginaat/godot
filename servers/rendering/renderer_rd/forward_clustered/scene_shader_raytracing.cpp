@@ -765,7 +765,8 @@ uint32_t SceneShaderRaytracing::compute_rt_flags(RID p_environment, bool p_fog_e
 	// in raygen so a warp stops only when all its pixels have converged.
 	static const bool raygen_subgroup_vote = (RD::get_singleton()->limit_get(RD::LIMIT_SUBGROUP_IN_SHADERS) & RD::SHADER_STAGE_RAYGEN_BIT) &&
 			(RD::get_singleton()->limit_get(RD::LIMIT_SUBGROUP_OPERATIONS) & RD::SUBGROUP_VOTE_BIT);
-	const bool adaptive = raygen_subgroup_vote && sample_count >= 2 && GLOBAL_GET("rendering/pathtracing/adaptive_sampling");
+	const bool adaptive = raygen_subgroup_vote && sample_count >= 2 && p_environment.is_valid() &&
+			RendererEnvironmentStorage::get_singleton()->environment_get_pathtracing_adaptive_sampling(p_environment);
 	if (adaptive) {
 		flags |= RT_FLAG_ADAPTIVE_SAMPLING;
 	}

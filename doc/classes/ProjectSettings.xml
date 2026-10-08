@@ -3299,14 +3299,11 @@
 			[b]Note:[/b] Enabling occlusion culling has a cost on the CPU. Only enable occlusion culling if you actually plan to use it. Large open scenes with few or no objects blocking the view will generally not benefit much from occlusion culling. Large open scenes generally benefit more from mesh LOD and visibility ranges ([member GeometryInstance3D.visibility_range_begin] and [member GeometryInstance3D.visibility_range_end]) compared to occlusion culling.
 			[b]Note:[/b] Due to memory constraints, occlusion culling is not supported by default in Web export templates. It can be enabled by compiling custom Web export templates with [code]module_raycast_enabled=yes[/code].
 		</member>
-		<member name="rendering/pathtracing/adaptive_sampling" type="bool" setter="" getter="" default="false">
-			If [code]true[/code], the path tracer stops sampling a pixel early once its result is stable enough (see [member rendering/pathtracing/adaptive_sampling_threshold]). [member Environment.pathtracing_samples_per_pixel] becomes the maximum; every pixel takes at least 2 samples. Time is saved only where a whole group of neighboring pixels (a GPU warp) has converged, such as sky or flat, evenly lit areas. Needs at least 2 samples per pixel. Pays off from about 8 samples per pixel; at 4 it saves little. Turns off [member rendering/pathtracing/use_shader_execution_reordering] while enabled.
-		</member>
 		<member name="rendering/pathtracing/adaptive_sampling_debug" type="bool" setter="" getter="" default="false">
-			If [code]true[/code] and [member rendering/pathtracing/adaptive_sampling] is enabled, the path tracer shows how many samples each pixel used instead of the image: blue for few, red for the maximum.
+			If [code]true[/code] and [member Environment.pathtracing_adaptive_sampling] is enabled, the path tracer shows how many samples each pixel used instead of the image: blue for few, red for the maximum.
 		</member>
 		<member name="rendering/pathtracing/adaptive_sampling_threshold" type="float" setter="" getter="" default="0.02">
-			The noise level at which [member rendering/pathtracing/adaptive_sampling] stops sampling a pixel: the standard error of the pixel's tonemapped luminance, from 0 (black) to 1 (white). Lower values take more samples and look cleaner.
+			The noise level at which [member Environment.pathtracing_adaptive_sampling] stops sampling a pixel: the standard error of the pixel's tonemapped luminance, from 0 (black) to 1 (white). Lower values take more samples and look cleaner.
 		</member>
 		<member name="rendering/pathtracing/async_shader_compilation" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], path tracing ray hit shaders are compiled asynchronously in the background. This avoids frame stalls when new shader variants are first encountered during rendering. While a shader is compiling, a fallback shader may be used, which can cause temporary visual artifacts. Disable this if you require fully deterministic rendering from the first frame at the cost of potential stalls on shader warm-up.
