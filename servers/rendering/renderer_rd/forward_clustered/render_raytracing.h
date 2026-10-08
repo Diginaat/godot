@@ -49,6 +49,12 @@
 #define RB_TEX_DLSS_RR_NORMAL_ROUGHNESS SNAME("normal_roughness")
 #define RB_TEX_DLSS_RR_SPECULAR_HIT_DIST SNAME("specular_hit_dist")
 
+// Native ray reconstruction inputs written by the path tracer (bindings 40-42).
+#define RB_SCOPE_NATIVE_RR SNAME("native_rr")
+#define RB_TEX_NATIVE_RR_DIFFUSE SNAME("diffuse")
+#define RB_TEX_NATIVE_RR_SPECULAR SNAME("specular")
+#define RB_TEX_NATIVE_RR_GUIDE SNAME("guide")
+
 class RenderDataRD;
 class RenderSceneBuffersRD;
 
@@ -546,6 +552,11 @@ public:
 	RID dlss_rr_get_specular_albedo(RenderSceneBuffersRD *p_render_buffers) const;
 	RID dlss_rr_get_normal_roughness(RenderSceneBuffersRD *p_render_buffers) const;
 	RID dlss_rr_get_specular_hit_dist(RenderSceneBuffersRD *p_render_buffers) const;
+
+	// Native ray reconstruction inputs (stored on the render buffers).
+	void native_rr_ensure_buffers(RenderSceneBuffersRD *p_render_buffers);
+	void native_rr_free_buffers(RenderSceneBuffersRD *p_render_buffers);
+	bool native_rr_has_buffers(RenderSceneBuffersRD *p_render_buffers) const;
 
 	void register_raytracing_buffer_dependencies(RD::RaytracingListID p_list);
 

@@ -45,6 +45,13 @@ struct PathPayload {
 	float hit_t; //  4 bytes - ray distance, used by raygen to rebuild origin
 	uint oct_offset_nrm; //  4 bytes - packUnorm2x16(vec3_to_oct(offset normal))
 	uint oct_next_dir; //  4 bytes - packUnorm2x16(vec3_to_oct(next direction))
+#ifdef NATIVE_RR_ENABLED
+	// Native ray reconstruction: what the primary hit added, so raygen can
+	// split the path into clean, diffuse and specular parts. fp16 pairs:
+	// [0] = base.rg, [1] = base.b + spec.r, [2] = spec.gb. Base is the
+	// emission and fog in-scatter, spec the specular part of direct light.
+	uint rr_primary[3];
+#endif
 };
 
 /// Unpacked fp32 working copy of the payload.
@@ -154,6 +161,13 @@ uint set_ddgi_probe_ray(uint packed) {
 }
 bool is_ddgi_probe_ray(uint packed) {
 	return (packed & DDGI_PROBE_RAY_FLAG) != 0u;
+}
+
+// Set by the primary hit (bit 29) when payload.rr_primary is valid (native
+// ray reconstruction only).
+const uint RR_PRIMARY_SPLIT_FLAG = (1u << 29);
+bool is_rr_primary_split(uint packed) {
+	return (packed & RR_PRIMARY_SPLIT_FLAG) != 0u;
 }
 
 // Bounce limits

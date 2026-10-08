@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  render_forward_clustered_pt.h                                         */
+/*  ray_reconstruction.h                                                  */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,42 +30,49 @@
 
 #pragma once
 
-#include "servers/rendering/renderer_rd/forward_clustered/render_ddgi.h"
-#include "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
-#include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
+#include "servers/rendering/renderer_rd/shaders/effects/ray_reconstruction.glsl.gen.h"
+#include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 
 namespace RendererRD {
-class RayReconstruction;
-}
 
-namespace RendererSceneRenderImplementation {
-
-// Path-tracing / DLSS variant of the clustered renderer. Inherits all of the
-// raster setup and resource management from RenderForwardClustered and overrides
-// only the scene render entry points to add the raytraced opaque path, DLSS Ray
-// Reconstruction, and the associated debug visualizations.
-class RenderForwardClusteredPT : public RenderForwardClustered {
-	/* Raytracing */
-
-	RenderRaytracing *raytracing = nullptr;
-	RenderDDGI *ddgi = nullptr;
-	RendererRD::RayReconstruction *ray_reconstruction = nullptr;
-
-	bool _setup_rt();
-	void _age_out_motion_vectors(const RenderDataRD *p_render_data);
-
-protected:
-	virtual void _render_scene(RenderDataRD *p_render_data, const Color &p_default_bg_color) override;
-	virtual void _render_buffers_debug_draw(const RenderDataRD *p_render_data) override;
-	virtual void _free_rt_viewport_state(RenderSceneBuffersRD *p_render_buffers) override;
-
-	virtual bool _ddgi_begin_frame(RenderDataRD *p_render_data) override;
-	virtual void _ddgi_process(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) override;
-	virtual void _ddgi_debug_draw(RenderDataRD *p_render_data) override;
-
+// Native ray reconstruction: a spatiotemporal denoiser for the path tracer,
+// built only on compute shaders (no vendor libraries). See
+// docs/renderer/native_ray_reconstruction.md.
+class RayReconstruction {
 public:
-	RenderForwardClusteredPT();
-	~RenderForwardClusteredPT();
+	struct Inputs {
+		RID base; // Clean part: emission, fog, sky (rgba16f).
+		RID diffuse; // Diffuse radiance (rgba16f).
+		RID specular; // Specular radiance, a = hit distance (rgba16f).
+		RID guide; // Albedos, normal, roughness (rgba32ui).
+		RID depth; // NDC depth, 0 for sky (r32f).
+		RID velocity; // prev_uv - curr_uv (rg16f).
+		RID output; // Internal color texture (rgba16f).
+		Size2i size;
+	};
+
+	RayReconstruction();
+	~RayReconstruction();
+
+	void process(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs);
+
+private:
+	enum Mode {
+		MODE_COMPOSE,
+		MODE_MAX,
+	};
+
+	struct PushConstant {
+		int32_t size[2];
+		uint32_t debug_mode;
+		uint32_t pad;
+	};
+
+	RayReconstructionShaderRD shader;
+	RID shader_version;
+	RID pipelines[MODE_MAX];
+
+	RID _get_shader(Mode p_mode);
 };
 
-} // namespace RendererSceneRenderImplementation
+} // namespace RendererRD

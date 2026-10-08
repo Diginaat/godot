@@ -31,6 +31,7 @@
 #include "render_forward_clustered_pt.h"
 
 #include "core/os/os.h"
+#include "servers/rendering/renderer_rd/effects/ray_reconstruction.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_raytracing.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
@@ -63,6 +64,9 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 		if (rb_data.is_valid()) {
 			if (raytracing && raytracing->dlss_rr_has_buffers(rb.ptr())) {
 				raytracing->dlss_rr_free_buffers(rb.ptr());
+			}
+			if (raytracing && raytracing->native_rr_has_buffers(rb.ptr())) {
+				raytracing->native_rr_free_buffers(rb.ptr());
 			}
 			rb->set_depth_reconstruct_requested(false);
 		}
@@ -190,6 +194,9 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 			using_depth_reconstruct = true;
 		} else if (raytracing->dlss_rr_has_buffers(rb.ptr())) {
 			raytracing->dlss_rr_free_buffers(rb.ptr());
+		}
+		if (!(rt_flags & SceneShaderRaytracing::RT_FLAG_NATIVE_RR_ENABLED) && raytracing->native_rr_has_buffers(rb.ptr())) {
+			raytracing->native_rr_free_buffers(rb.ptr());
 		}
 
 		RTViewportState *rt_state = raytracing->build_tlas(p_render_data, rt_flags);
@@ -371,7 +378,26 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 			RD::get_singleton()->draw_command_end_label();
 		}
 
-		raytracing->copy_output_texture(p_render_data);
+		if ((rt_flags & SceneShaderRaytracing::RT_FLAG_NATIVE_RR_ENABLED) && raytracing->native_rr_has_buffers(rb.ptr())) {
+			// Native ray reconstruction writes the internal color texture.
+			if (!ray_reconstruction) {
+				ray_reconstruction = memnew(RendererRD::RayReconstruction);
+			}
+			RendererRD::RayReconstruction::Inputs rr_inputs;
+			rr_inputs.base = raytracing->rt_get_texture(rb.ptr());
+			rr_inputs.diffuse = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE);
+			rr_inputs.specular = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SPECULAR);
+			rr_inputs.guide = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GUIDE);
+			rr_inputs.depth = raytracing->rt_get_depth_texture(rb.ptr());
+			rr_inputs.velocity = rb->get_velocity_buffer(false);
+			rr_inputs.size = rb->get_internal_size();
+			for (uint32_t v = 0; v < rb->get_view_count(); v++) {
+				rr_inputs.output = rb->get_internal_texture(v);
+				ray_reconstruction->process(rb, rr_inputs);
+			}
+		} else {
+			raytracing->copy_output_texture(p_render_data);
+		}
 	}
 
 	{
@@ -586,7 +612,7 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 	// Probe rays never write the camera outputs, so no debug views or DLSS RR
 	// guide buffers; fog is a camera effect and stays off too.
 	uint32_t rt_flags = SceneShaderRaytracing::compute_rt_flags(p_render_data->environment, false);
-	rt_flags &= ~uint32_t(SceneShaderRaytracing::RT_FLAG_DEBUG_VIS_ENABLED | SceneShaderRaytracing::RT_FLAG_DLSS_RR_ENABLED);
+	rt_flags &= ~uint32_t(SceneShaderRaytracing::RT_FLAG_DEBUG_VIS_ENABLED | SceneShaderRaytracing::RT_FLAG_DLSS_RR_ENABLED | SceneShaderRaytracing::RT_FLAG_NATIVE_RR_ENABLED);
 
 	RD::get_singleton()->draw_command_begin_label("DDGI");
 	RENDER_TIMESTAMP("DDGI Build Acceleration Structures");
@@ -607,6 +633,7 @@ void RenderForwardClusteredPT::_ddgi_debug_draw(RenderDataRD *p_render_data) {
 void RenderForwardClusteredPT::_free_rt_viewport_state(RenderSceneBuffersRD *p_render_buffers) {
 	ERR_FAIL_NULL(p_render_buffers);
 	p_render_buffers->clear_context(RB_SCOPE_DLSS_RR);
+	p_render_buffers->clear_context(RB_SCOPE_NATIVE_RR);
 	if (raytracing) {
 		raytracing->free_viewport_state(p_render_buffers);
 	}
@@ -665,6 +692,9 @@ RenderForwardClusteredPT::RenderForwardClusteredPT() {
 }
 
 RenderForwardClusteredPT::~RenderForwardClusteredPT() {
+	if (ray_reconstruction) {
+		memdelete(ray_reconstruction);
+	}
 	if (ddgi) {
 		memdelete(ddgi);
 	}

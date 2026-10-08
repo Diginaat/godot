@@ -7,6 +7,7 @@ layout(constant_id = 0) const uint RT_FLAGS = 0u;
 
 #define RT_FLAG_DLSS_RR_ENABLED (1u << 1)
 #define RT_FLAG_FOG_ENABLED (1u << 2)
+#define RT_FLAG_NATIVE_RR_ENABLED (1u << 5)
 
 #define RT_SAMPLE_COUNT_SHIFT 21u
 #define RT_SAMPLE_COUNT_MASK 0xFFu
@@ -59,6 +60,31 @@ layout(set = 0, binding = 9, rgba16f) uniform image2D dlss_rr_diffuse_albedo;
 layout(set = 0, binding = 10, rgba16f) uniform image2D dlss_rr_specular_albedo;
 layout(set = 0, binding = 11, rgba16f) uniform image2D dlss_rr_normal_roughness;
 layout(set = 0, binding = 12, r16f) uniform image2D dlss_rr_specular_hit_dist;
+#endif
+
+#ifdef NATIVE_RR_ENABLED
+// Native ray reconstruction inputs (written by raygen and the primary hit).
+// rr_diffuse: diffuse radiance (rgb), not demodulated.
+// rr_specular: specular radiance (rgb, includes refraction), a = hit distance
+// of the specular ray after the primary hit (RR_MISS_DISTANCE on a miss, -1 when
+// no sample took the specular lobe).
+// rr_guide: x = diffuse albedo (unorm8 rgb), y = specular albedo (unorm8 rgb),
+// z = octahedral normal (unorm16 x2, vec3_to_oct), w = roughness (unorm16) | flags << 16.
+layout(set = 0, binding = 40, rgba16f) uniform image2D rr_diffuse;
+layout(set = 0, binding = 41, rgba16f) uniform image2D rr_specular;
+layout(set = 0, binding = 42, rgba32ui) uniform uimage2D rr_guide;
+
+#define RR_MISS_DISTANCE 10000.0
+#define RR_GUIDE_FLAG_TRANSMISSIVE 1u
+
+void rr_write_guide(vec3 p_diffuse_albedo, vec3 p_specular_albedo, vec3 p_normal, float p_roughness, uint p_flags) {
+	uvec4 g;
+	g.x = packUnorm4x8(vec4(p_diffuse_albedo, 0.0));
+	g.y = packUnorm4x8(vec4(p_specular_albedo, 0.0));
+	g.z = packUnorm2x16(vec3_to_oct(normalize(p_normal)));
+	g.w = (uint(clamp(p_roughness, 0.0, 1.0) * 65535.0 + 0.5) & 0xFFFFu) | (p_flags << 16u);
+	imageStore(rr_guide, ivec2(gl_LaunchIDEXT.xy), g);
+}
 #endif
 
 // Binding 14 is reserved for GlobalShaderUniformData (declared above).

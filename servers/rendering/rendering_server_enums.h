@@ -768,6 +768,7 @@ enum EnvironmentFogMode {
 enum PathtracingDenoiser {
 	PT_DENOISER_NONE = 0,
 	PT_DENOISER_DLSS_RAY_RECONSTRUCTION = 1,
+	PT_DENOISER_NATIVE = 2,
 };
 
 enum SubSurfaceScatteringQuality {

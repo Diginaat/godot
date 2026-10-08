@@ -80,6 +80,8 @@ public:
 		RT_FLAG_FOG_ENABLED = (1 << 2),
 		RT_FLAG_SER_ENABLED = (1 << 3),
 		RT_FLAG_RAY_QUERY_SHADOWS_ENABLED = (1 << 4),
+		// Native ray reconstruction: split radiance and guide buffers (bindings 40-42).
+		RT_FLAG_NATIVE_RR_ENABLED = (1 << 5),
 	};
 
 	constexpr static uint32_t RT_SAMPLE_COUNT_SHIFT = 21;

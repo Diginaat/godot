@@ -364,6 +364,11 @@ vec3 lights_mesh_to_world(EmissiveMeshData em, vec3 p) {
 	return vec3(dot(em.object_to_world[0], p4), dot(em.object_to_world[1], p4), dot(em.object_to_world[2], p4));
 }
 
+// Specular part of the last lights_evaluate_direct_lighting() result (same
+// scale: already divided by the selection PDF). Native ray reconstruction
+// uses it to split direct light at the primary hit into diffuse and specular.
+vec3 lights_direct_specular = vec3(0.0);
+
 // Direct light from one emissive mesh: picks a triangle uniformly and a point
 // uniformly on it. Returns the contribution before dividing by the light
 // selection PDF.
@@ -432,7 +437,9 @@ vec3 lights_sample_emissive_mesh(uint mesh_idx, vec3 hit_pos, vec3 N, vec3 V, Ma
 	// Area PDF is 1 / (triangle_count * area); converting to solid angle
 	// multiplies by dist^2 / cos_light.
 	float area = 0.5 * twice_area;
-	return (brdf_diffuse + brdf_specular) * Le * (cos_light * float(em.primitive_count) * area / dist_sq);
+	vec3 scale = Le * (cos_light * float(em.primitive_count) * area / dist_sq);
+	lights_direct_specular = brdf_specular * scale;
+	return (brdf_diffuse + brdf_specular) * scale;
 }
 
 // Evaluate direct lighting using NEE with stochastic light selection.
@@ -448,6 +455,7 @@ vec3 lights_evaluate_direct_lighting(
 		uint mesh_count) {
 	// Candidates 0..light_count-1 are analytic lights, the rest emissive meshes.
 	const uint total_count = light_count + mesh_count;
+	lights_direct_specular = vec3(0.0);
 	if (total_count == 0u) {
 		return vec3(0.0);
 	}
@@ -488,7 +496,9 @@ vec3 lights_evaluate_direct_lighting(
 	float light_select_pdf = selected_weight * float(candidate_count) / (float(total_count) * weight_sum);
 
 	if (selected_idx >= light_count) {
-		return lights_sample_emissive_mesh(selected_idx - light_count, hit_pos, N, V, material, rng_state) / max(light_select_pdf, 1e-10);
+		vec3 mesh_light = lights_sample_emissive_mesh(selected_idx - light_count, hit_pos, N, V, material, rng_state) / max(light_select_pdf, 1e-10);
+		lights_direct_specular /= max(light_select_pdf, 1e-10);
+		return mesh_light;
 	}
 
 	RTLightData light = rt_lights[selected_idx];
@@ -554,8 +564,9 @@ vec3 lights_evaluate_direct_lighting(
 		float indirect_mul = is_indirect_bounce ? light.indirect_energy : 1.0;
 
 		// NdotL is already included in brdf_value (evalLambertian/evalMicrofacet bake it in).
-		vec3 contribution = brdf_value * light.emission * atten * indirect_mul;
-		return contribution / max(light_select_pdf, 1e-10);
+		vec3 scale = light.emission * atten * indirect_mul / max(light_select_pdf, 1e-10);
+		lights_direct_specular = brdf_specular * spec_mul * scale;
+		return brdf_value * scale;
 	}
 	// === CONE LIGHT PATH (directional) ===
 	else {
@@ -580,6 +591,8 @@ vec3 lights_evaluate_direct_lighting(
 
 		float indirect_mul = is_indirect_bounce ? light.indirect_energy : 1.0;
 
-		return brdf_value * light.emission * indirect_mul / max(light_select_pdf, 1e-10);
+		vec3 scale = light.emission * indirect_mul / max(light_select_pdf, 1e-10);
+		lights_direct_specular = brdf_specular * spec_mul * scale;
+		return brdf_value * scale;
 	}
 }
