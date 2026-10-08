@@ -6,8 +6,8 @@ This script clones NVIDIA's PhysX repository at a pinned revision, drops in a
 build preset tuned to match Godot, runs PhysX's own project generation and
 CMake build, and prints the path to pass to scons as physx_sdk=.
 
-    python modules/godot_physx/misc/build_physx.py [--gpu] [--blast]
-    scons platform=windows target=editor physx_sdk=<printed path> [physx_gpu=yes] [blast_sdk=<printed path>]
+    python modules/godot_physx/misc/build_physx.py [--gpu] [--blast] [--flow]
+    scons platform=windows target=editor physx_sdk=<printed path> [physx_gpu=yes] [blast_sdk=<printed path>] [flow_sdk=<printed path>]
 
 The GPU build additionally needs the CUDA Toolkit installed (CUDA_PATH set).
 PhysXGpu_64.dll must sit next to the Godot binary at runtime -- on Windows,
@@ -45,9 +45,9 @@ PRESET_DIR = os.path.join(HERE, "physx_presets")
 PATCH_DIR = os.path.join(HERE, "physx_patches")
 
 
-def run(cmd, cwd):
+def run(cmd, cwd, env=None):
     print("+ " + " ".join(cmd) + "  (in %s)" % cwd)
-    subprocess.check_call(cmd, cwd=cwd)
+    subprocess.check_call(cmd, cwd=cwd, env=env)
 
 
 def main():
@@ -57,6 +57,11 @@ def main():
         "--blast",
         action="store_true",
         help="also build the Blast SDK (NvBlast + extensions) from this same checkout's blast/ subdirectory",
+    )
+    ap.add_argument(
+        "--flow",
+        action="store_true",
+        help="also build NVIDIA Flow (smoke/fire) from this same checkout's flow/ subdirectory",
     )
     ap.add_argument(
         "--platform",
@@ -215,6 +220,42 @@ def main():
             for name in ("NvBlast", "NvBlastGlobals", "NvBlastExtAuthoring", "NvBlastExtShaders"):
                 runtime = os.path.join(blast_bin, name + ".so")
                 print("    cp %s bin/" % runtime)
+
+    if args.flow:
+        flow_sdk = os.path.join(src, "flow")
+        flow_script = os.path.join(flow_sdk, "build.bat" if is_windows else "build.sh")
+        if not os.path.isfile(flow_script):
+            sys.exit("no Flow build script at " + flow_script)
+        flow_env = os.environ.copy()
+        if is_windows:
+            # Flow intentionally uses floating-point overflow for infinity.
+            # Newer MSVC diagnoses it as C4756, promoted to an error by /WX.
+            flow_env["CL"] = (flow_env.get("CL", "") + " /wd4756").strip()
+        run([flow_script] if is_windows else ["bash", flow_script], cwd=flow_sdk, env=flow_env)
+        flow_platform = "windows-x86_64" if is_windows else "linux-x86_64"
+        flow_bin = os.path.join(flow_sdk, "_build", flow_platform, "release")
+        for name in ("nvflow", "nvflowext"):
+            runtime = os.path.join(flow_bin, name + (".dll" if is_windows else ".so"))
+            if not os.path.isfile(runtime):
+                sys.exit("Flow build finished but no runtime at " + runtime)
+        print("Flow SDK ready: " + flow_sdk)
+        if is_windows:
+            print("SCsub copies nvflow.dll and nvflowext.dll next to the Godot binary automatically.")
+        else:
+            print("Copy Flow's runtime libraries next to the binary manually (Linux is unverified).")
+
+    print("\nBuild all requested SDKs into the module with:")
+    command = 'python -m SCons platform=%s target=editor physx_sdk="%s"' % (
+        args.platform,
+        sdk.replace("\\", "/"),
+    )
+    if args.gpu:
+        command += " physx_gpu=yes"
+    if args.blast:
+        command += ' blast_sdk="%s"' % blast_sdk.replace("\\", "/")
+    if args.flow:
+        command += ' flow_sdk="%s"' % flow_sdk.replace("\\", "/")
+    print("    " + command)
 
 
 if __name__ == "__main__":

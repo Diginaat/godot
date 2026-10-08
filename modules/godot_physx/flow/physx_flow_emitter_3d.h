@@ -44,15 +44,15 @@ class PhysXFlowEmitter3D : public Node3D {
 
 public:
 	enum Shape {
-		PS3DE::SHAPE_SPHERE,
-		PS3DE::SHAPE_BOX,
+		SHAPE_SPHERE,
+		SHAPE_BOX,
 	};
 
 	static constexpr const char *GROUP = "physx_flow_emitters";
 
 private:
 	bool enabled = true;
-	Shape shape = PS3DE::SHAPE_SPHERE;
+	Shape shape = SHAPE_SPHERE;
 	float radius = 0.5f;
 	Vector3 size = Vector3(1, 1, 1);
 	Vector3 velocity = Vector3(0, 2, 0);
