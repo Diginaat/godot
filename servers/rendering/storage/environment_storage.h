@@ -178,6 +178,7 @@ private:
 		int pathtracing_samples_per_pixel = 1;
 		int pathtracing_max_bounces = 3;
 		RSE::PathtracingDenoiser pathtracing_denoiser = RSE::PT_DENOISER_NONE;
+		bool pathtracing_adaptive_sampling = false;
 
 		// Adjustments
 		bool adjustments_enabled = false;
@@ -338,6 +339,8 @@ public:
 	int environment_get_pathtracing_samples_per_pixel(RID p_env) const;
 	int environment_get_pathtracing_max_bounces(RID p_env) const;
 	RSE::PathtracingDenoiser environment_get_pathtracing_denoiser(RID p_env) const;
+	void environment_set_pathtracing_adaptive_sampling(RID p_env, bool p_enable);
+	bool environment_get_pathtracing_adaptive_sampling(RID p_env) const;
 
 	// Adjustment
 	void environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction);

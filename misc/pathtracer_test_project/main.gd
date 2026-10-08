@@ -80,8 +80,7 @@ func _apply_args() -> void:
 	if args.has("ser"):
 		# Read by the path tracer every frame, so it can change at run time.
 		ProjectSettings.set_setting("rendering/pathtracing/use_shader_execution_reordering", args["ser"] == "1")
-	if args.has("adaptive"):
-		ProjectSettings.set_setting("rendering/pathtracing/adaptive_sampling", args["adaptive"] == "1")
+	env.pathtracing_adaptive_sampling = args.get("adaptive", "0") == "1"
 	if args.has("adaptive_threshold"):
 		ProjectSettings.set_setting("rendering/pathtracing/adaptive_sampling_threshold", float(args["adaptive_threshold"]))
 	if args.has("adaptive_debug"):

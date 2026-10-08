@@ -50,7 +50,7 @@ All user arguments (after `--`):
 | `--shot=` | none | Save a PNG and quit |
 | `--bench=` | none | Print the mean GPU and CPU render time over N frames (after `--frames=` warm-up, default 300), vsync off, and quit |
 | `--ser=` | project setting | `1`/`0` turns `rendering/pathtracing/use_shader_execution_reordering` on or off at run time |
-| `--adaptive=` | project setting | `1`/`0` turns `rendering/pathtracing/adaptive_sampling` on or off |
+| `--adaptive=` | `0` | `1` turns on `Environment.pathtracing_adaptive_sampling` |
 | `--adaptive_threshold=` | `0.02` | Adaptive sampling threshold (standard error of tonemapped luminance) |
 | `--adaptive_debug=1` | off | Show samples used per pixel instead of the image (blue few, red all) |
 
@@ -78,7 +78,7 @@ Audited on 2026-10-08 at commit `ca52415e30`. Shader sources are in
 | Refraction (StandardMaterial3D) | Supported: dielectric with Fresnel, IOR = 1 + 10 x `refraction_scale` (0.05 gives 1.5), albedo tints, roughness scatters. Casts opaque shadows (as raster) | `refract_and_bounce()` |
 | Custom shader alpha blend, add/sub/mul blending, billboards, proximity fade | Raster overlay on top of the path traced image | `ShaderData::rt_traces_transparency()` |
 | Debug views | 22 modes in `Environment.pathtracing_debug_mode` | `debug_visualize()` |
-| Adaptive sampling | Opt-in (`rendering/pathtracing/adaptive_sampling`); samples per pixel becomes the maximum. Disables SER while on | raygen sample loop |
+| Adaptive sampling | Opt-in toggle in the Environment's Pathtracing section (`pathtracing_adaptive_sampling`), needs 2+ samples per pixel; samples per pixel becomes the maximum. Disables SER while on | raygen sample loop |
 
 ## Steps
 
@@ -165,6 +165,14 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-10-08: Step 12 follow-up: the on/off switch moved from the project
+  setting to `Environment.pathtracing_adaptive_sampling` (Pathtracing section
+  of the Environment inspector; the tooltip says it needs 2+ samples per
+  pixel). New C++-only server call
+  `environment_set_pathtracing_adaptive_sampling()`; the bound
+  `environment_set_pathtracing()` is unchanged. Threshold and debug stay
+  project settings. Verified: overview 16 spp 30.9 -> 18.3 ms with the toggle,
+  all views clean, smoke tests pass.
 - 2026-10-08: Step 12 done (adaptive sampling). New project settings
   `rendering/pathtracing/adaptive_sampling` (off by default),
   `adaptive_sampling_threshold` (0.02) and `adaptive_sampling_debug`; raygen

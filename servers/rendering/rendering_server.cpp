@@ -3845,7 +3845,6 @@ void RenderingServer::init() {
 
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/limits/cluster_builder/max_clustered_elements", PROPERTY_HINT_RANGE, "32,8192,1"), 512);
 	GLOBAL_DEF("rendering/pathtracing/use_shader_execution_reordering", true);
-	GLOBAL_DEF("rendering/pathtracing/adaptive_sampling", false);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/pathtracing/adaptive_sampling_threshold", PROPERTY_HINT_RANGE, "0.001,0.2,0.001"), 0.02);
 	GLOBAL_DEF("rendering/pathtracing/adaptive_sampling_debug", false);
 	GLOBAL_DEF("rendering/pathtracing/async_shader_compilation", true);

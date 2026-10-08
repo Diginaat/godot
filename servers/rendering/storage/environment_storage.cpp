@@ -938,6 +938,18 @@ RSE::PathtracingDenoiser RendererEnvironmentStorage::environment_get_pathtracing
 	return env->pathtracing_denoiser;
 }
 
+void RendererEnvironmentStorage::environment_set_pathtracing_adaptive_sampling(RID p_env, bool p_enable) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->pathtracing_adaptive_sampling = p_enable;
+}
+
+bool RendererEnvironmentStorage::environment_get_pathtracing_adaptive_sampling(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->pathtracing_adaptive_sampling;
+}
+
 // Adjustments
 
 void RendererEnvironmentStorage::environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction) {
