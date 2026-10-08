@@ -42,13 +42,15 @@
 #include "editor/themes/editor_scale.h"
 #include "scene/gui/box_container.h"
 #include "scene/gui/check_box.h"
-#include "scene/gui/link_button.h"
+#include "scene/gui/margin_container.h"
 #include "scene/gui/panel_container.h"
 #include "scene/gui/progress_bar.h"
 #include "scene/gui/rich_text_label.h"
 #include "scene/gui/scroll_container.h"
 #include "scene/gui/separator.h"
+#include "scene/gui/texture_rect.h"
 #include "scene/main/http_request.h"
+#include "scene/resources/style_box_flat.h"
 
 // The SDK version this source is built against (see thirdparty/streamline/include/sl_version.h).
 // When it changes, update the URLs, size and SHA-256 together.
@@ -90,27 +92,223 @@ static const char *SL_FILES[] = {
 };
 static const int SL_FILE_COUNT = std_size(SL_FILES);
 
-VBoxContainer *StreamlineInstaller::_add_block(VBoxContainer *p_parent, const String &p_title) {
-	PanelContainer *panel = memnew(PanelContainer);
-	panel->set_theme_type_variation("PanelForeground");
-	p_parent->add_child(panel);
+VBoxContainer *StreamlineInstaller::_add_card(VBoxContainer *p_parent, const String &p_title, const StringName &p_icon, const StringName &p_color) {
+	Card card;
+	card.icon_name = p_icon;
+	card.color_name = p_color;
+
+	card.panel = memnew(PanelContainer);
+	p_parent->add_child(card.panel);
 
 	VBoxContainer *vb = memnew(VBoxContainer);
-	panel->add_child(vb);
+	vb->add_theme_constant_override("separation", 8 * EDSCALE);
+	card.panel->add_child(vb);
 
-	Label *title_label = memnew(Label(p_title));
-	title_label->set_theme_type_variation("HeaderSmall");
-	vb->add_child(title_label);
+	HBoxContainer *header = memnew(HBoxContainer);
+	header->add_theme_constant_override("separation", 8 * EDSCALE);
+	vb->add_child(header);
+	card.icon = memnew(TextureRect);
+	card.icon->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
+	header->add_child(card.icon);
+	card.title = memnew(Label(p_title));
+	card.title->set_theme_type_variation("HeaderSmall");
+	header->add_child(card.title);
+
+	cards.push_back(card);
 	return vb;
 }
 
-void StreamlineInstaller::_add_link(VBoxContainer *p_parent, const String &p_text, const String &p_url) {
-	LinkButton *link = memnew(LinkButton);
-	link->set_text(p_text);
-	link->set_uri(p_url);
-	link->set_tooltip_text(p_url);
-	link->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
-	p_parent->add_child(link);
+RichTextLabel *StreamlineInstaller::_add_text(VBoxContainer *p_parent) {
+	RichTextLabel *rtl = memnew(RichTextLabel);
+	rtl->set_use_bbcode(true);
+	rtl->set_fit_content(true);
+	rtl->set_scroll_active(false);
+	rtl->set_selection_enabled(true);
+	rtl->set_context_menu_enabled(true);
+	rtl->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	rtl->connect("meta_clicked", callable_mp(this, &StreamlineInstaller::_meta_clicked));
+	p_parent->add_child(rtl);
+	texts.push_back(rtl);
+	return rtl;
+}
+
+Ref<StyleBox> StreamlineInstaller::_make_card_style(const Color &p_edge, float p_tint) const {
+	const Color base = get_theme_color(SNAME("base_color"), EditorStringName(Editor));
+	Ref<StyleBoxFlat> style;
+	style.instantiate();
+	style->set_bg_color(base.lerp(p_edge, p_tint));
+	style->set_border_color(p_edge);
+	style->set_border_width(SIDE_LEFT, MAX(1, int(4 * EDSCALE)));
+	style->set_corner_radius_all(6 * EDSCALE);
+	style->set_content_margin(SIDE_LEFT, 16 * EDSCALE);
+	style->set_content_margin(SIDE_RIGHT, 14 * EDSCALE);
+	style->set_content_margin(SIDE_TOP, 12 * EDSCALE);
+	style->set_content_margin(SIDE_BOTTOM, 12 * EDSCALE);
+	return style;
+}
+
+String StreamlineInstaller::_code(const String &p_text) const {
+	const Color base = get_theme_color(SNAME("base_color"), EditorStringName(Editor));
+	const Color font = get_theme_color(SceneStringName(font_color), SNAME("Label"));
+	return "[bgcolor=" + base.lerp(font, 0.12).to_html(false) + "][code] " + p_text.replace("[", "[lb]") + " [/code][/bgcolor]";
+}
+
+String StreamlineInstaller::_link(const String &p_label, const String &p_url) const {
+	const Color font = get_theme_color(SceneStringName(font_color), SNAME("Label"));
+	const Color base = get_theme_color(SNAME("base_color"), EditorStringName(Editor));
+	// Show the real address under each link, so nobody clicks blind.
+	return "[url=" + p_url + "][b]" + p_label + "[/b][/url]\n[color=" + font.lerp(base, 0.4).to_html(false) + "][code]" + p_url.replace("[", "[lb]") + "[/code][/color]";
+}
+
+void StreamlineInstaller::_meta_clicked(const Variant &p_meta) {
+	// Never open the browser without asking: show the address first.
+	pending_url = p_meta;
+	link_confirm->set_text(vformat(TTR("Open this link in your web browser?\n\n%s\n\nThis leaves the editor and connects to that website."), pending_url));
+	link_confirm->popup_centered();
+}
+
+void StreamlineInstaller::_open_pending_link() {
+	_log(vformat(TTR("Opened %s in the web browser."), pending_url));
+	OS::get_singleton()->shell_open(pending_url);
+}
+
+void StreamlineInstaller::_update_theme() {
+	const Color base = get_theme_color(SNAME("base_color"), EditorStringName(Editor));
+	const Color font = get_theme_color(SceneStringName(font_color), SNAME("Label"));
+	const Color accent = get_theme_color(SNAME("accent_color"), EditorStringName(Editor));
+	const Color success = get_theme_color(SNAME("success_color"), EditorStringName(Editor));
+	const Color warning = get_theme_color(SNAME("warning_color"), EditorStringName(Editor));
+	const String dim = font.lerp(base, 0.3).to_html(false);
+	const String accent_html = accent.to_html(false);
+	const String success_html = success.to_html(false);
+	const String warning_html = warning.to_html(false);
+	const Ref<Font> mono = get_theme_font(SNAME("source"), EditorStringName(EditorFonts));
+	const Ref<Font> bold = get_theme_font(SNAME("bold"), EditorStringName(EditorFonts));
+	const int font_size = get_theme_font_size(SNAME("main_size"), EditorStringName(EditorFonts));
+
+	for (const Card &card : cards) {
+		const Color edge = get_theme_color(card.color_name, EditorStringName(Editor));
+		card.panel->add_theme_style_override(SceneStringName(panel), _make_card_style(edge, 0.07));
+		card.icon->set_texture(get_editor_theme_icon(card.icon_name));
+		card.icon->set_modulate(edge);
+		card.title->add_theme_color_override(SceneStringName(font_color), edge.lerp(font, 0.35));
+	}
+	for (RichTextLabel *rtl : texts) {
+		rtl->add_theme_font_override("mono_font", mono);
+		rtl->add_theme_font_size_override("mono_font_size", font_size);
+		rtl->add_theme_font_override("bold_font", bold);
+		rtl->add_theme_font_size_override("bold_font_size", font_size);
+		rtl->add_theme_constant_override("line_separation", 3 * EDSCALE);
+		rtl->add_theme_constant_override("paragraph_separation", 6 * EDSCALE);
+	}
+	log->add_theme_font_override("normal_font", mono);
+	log->add_theme_font_size_override("normal_font_size", font_size);
+	log->add_theme_constant_override("line_separation", 2 * EDSCALE);
+
+	Ref<StyleBoxFlat> log_style;
+	log_style.instantiate();
+	log_style->set_bg_color(get_theme_color(SNAME("dark_color_2"), EditorStringName(Editor)));
+	log_style->set_corner_radius_all(6 * EDSCALE);
+	log_style->set_content_margin_all(10 * EDSCALE);
+	log_panel->add_theme_style_override(SceneStringName(panel), log_style);
+
+	action_panel->add_theme_style_override(SceneStringName(panel), _make_card_style(accent, 0.05));
+	accept_panel->add_theme_style_override(SceneStringName(panel), _make_card_style(warning, 0.14));
+	install_button->set_button_icon(get_editor_theme_icon(SNAME("Load")));
+	cancel_button->set_button_icon(get_editor_theme_icon(SNAME("Stop")));
+	restart_button->set_button_icon(get_editor_theme_icon(SNAME("Reload")));
+	open_folder_button->set_button_icon(get_editor_theme_icon(SNAME("Folder")));
+	progress_bar->set_custom_minimum_size(Size2(0, 22 * EDSCALE));
+
+	why_text->set_text(TTR("[b]DLSS[/b] is NVIDIA's AI upscaler. It renders fewer pixels and reconstructs a sharp image, so games run faster on NVIDIA RTX cards.") + "\n" +
+			TTR("The files that make DLSS work come from NVIDIA. NVIDIA's license doesn't allow this editor's download to include them, so this window gets them for you from NVIDIA's own GitHub page: the same file you'd get by clicking the download link yourself.") + "\n" +
+			"[color=" + success_html + "]" + TTR("[b]Optional.[/b] The editor, the path tracer and PhysX all work without it.") + "[/color]\n" +
+			"[color=" + accent_html + "]" + TTR("[b]Nothing connects to the internet[/b] until you press \"Download and Install\" and confirm. Links ask before they open your browser.") + "[/color]");
+
+	// Step list: number, what happens, and why.
+	String steps = "[table=2]";
+	int step_number = 0;
+	auto add_step = [&](const String &p_title, const String &p_explain, const String &p_value) {
+		step_number++;
+		steps += "[cell padding=0,4,12,8][color=" + accent_html + "][b]" + itos(step_number) + "[/b][/color][/cell]";
+		steps += "[cell expand=1 padding=0,4,0,8][b]" + p_title + "[/b]\n[color=" + dim + "]" + p_explain + "[/color]";
+		if (!p_value.is_empty()) {
+			steps += "\n" + p_value;
+		}
+		steps += "[/cell]";
+	};
+	add_step(TTR("Check the editor folder"), TTR("Makes sure the files can be written there, before anything is downloaded."), _code(_get_install_dir()));
+	add_step(TTR("Ask you to confirm the download"), TTR("A popup shows exactly what will be downloaded and from where. Nothing happens if you say no."), "");
+	add_step(vformat(TTR("Download the Streamline SDK %s (%s)"), SL_SDK_VERSION, String::humanize_size(SL_DOWNLOAD_SIZE)), TTR("A normal HTTPS download from NVIDIA's official GitHub account, NVIDIA-RTX. GitHub serves the file from its own download server. Nothing about you or your project is sent."), _code(SL_DOWNLOAD_URL));
+	add_step(TTR("Keep it in the editor's cache folder for now"), TTR("A temporary copy, deleted at the end."), _code(_get_download_path()));
+	add_step(TTR("Check the file's SHA-256 fingerprint"), TTR("A fingerprint of every byte in the file. This build knows the fingerprint of NVIDIA's official release. If even one byte differs (a broken or tampered download), the file is deleted and nothing is installed."), _code(SL_DOWNLOAD_SHA256));
+	add_step(vformat(TTR("Copy %d files next to the editor"), SL_FILE_COUNT), vformat(TTR("Only the signed release files from the zip's \"%s\" folder (listed below). Documentation, source code and the \"development\" debug builds are skipped. A file that already exists is renamed to <name>.old, not deleted, so you can roll back."), SL_ZIP_DIR), "");
+	add_step(TTR("Delete the downloaded zip"), TTR("Frees the 203 MiB cache copy."), "");
+	add_step(TTR("Restart the editor"), TTR("Streamline is loaded when the editor starts. Then pick DLSS in Project Settings > Rendering > Scaling 3D > Mode."), "");
+	steps += "[/table]";
+	steps_text->set_text(steps);
+
+	// What each installed file does.
+	struct FileInfo {
+		const char *files;
+		String purpose;
+	};
+	const FileInfo file_info[] = {
+		{ "sl.interposer.dll", TTR("Streamline loader. The editor looks for this file at startup.") },
+		{ "sl.common.dll", TTR("Shared code used by all Streamline features.") },
+		{ "sl.dlss.dll, nvngx_dlss.dll", TTR("DLSS Super Resolution (AI upscaling).") },
+		{ "sl.dlss_d.dll, nvngx_dlssd.dll", TTR("DLSS Ray Reconstruction (AI denoiser for the path tracer).") },
+		{ "sl.dlss_g.dll, nvngx_dlssg.dll", TTR("DLSS Frame Generation.") },
+		{ "sl.reflex.dll, sl.pcl.dll, NvLowLatencyVk.dll", TTR("NVIDIA Reflex: lower input latency, plus latency statistics.") },
+		{ "sl.nis.dll", TTR("NVIDIA Image Scaling, a simple upscaler for any GPU.") },
+		{ "sl.deepdvc.dll, nvngx_deepdvc.dll", TTR("RTX Dynamic Vibrance (color enhancement).") },
+		{ "sl.directsr.dll", TTR("Microsoft DirectSR support (Direct3D 12).") },
+		{ "sl.nvperf.dll", TTR("Nsight Perf profiling support.") },
+		{ "*.license.txt", TTR("License texts for DLSS, Reflex and NIS.") },
+	};
+	String files = "[table=2]";
+	for (const FileInfo &info : file_info) {
+		files += "[cell padding=0,2,16,6][code]" + String(info.files) + "[/code][/cell]";
+		files += "[cell expand=1 padding=0,2,0,6][color=" + dim + "]" + info.purpose + "[/color][/cell]";
+	}
+	files += "[/table]";
+	files_text->set_text(files);
+
+	safety_text->set_text("[ul]" +
+			TTR("Doesn't need or ask for administrator rights.") + "\n" +
+			TTR("Doesn't run any installer or program. The files are only copied.") + "\n" +
+			TTR("Doesn't touch the registry, system folders, drivers or PATH.") + "\n" +
+			TTR("Doesn't change your projects.") + "\n" +
+			TTR("Doesn't install a background service or send telemetry.") + "\n" +
+			TTR("Doesn't connect anywhere except GitHub, and only after you confirm.") + "[/ul]\n" +
+			"[color=" + dim + "]" + TTR("To undo it, delete the files listed above from the editor folder.") + "[/color]");
+
+	manual_text->set_text(vformat(TTR("Download the zip yourself, open its \"%s\" folder, and copy the files listed above into the editor folder. Then restart the editor."), SL_ZIP_DIR) + "\n" +
+			_link(vformat(TTR("Streamline SDK %s release page (GitHub)"), SL_SDK_VERSION), SL_RELEASE_URL) + "\n" +
+			_link(TTR("Direct download of the zip"), SL_DOWNLOAD_URL) + "\n" +
+			_link(TTR("NVIDIA Streamline product page"), SL_PRODUCT_URL) + "\n" +
+			_link(TTR("Step-by-step instructions (README of this build)"), FORK_README_URL));
+
+	license_text->set_text(TTR("The downloaded files are [b]NVIDIA software under NVIDIA's licenses[/b], not under Godot's MIT license.") + "\n" +
+			"[ul]" + TTR("DLSS, Ray Reconstruction and Frame Generation: NVIDIA RTX SDKs License.") + "\n" +
+			TTR("Reflex, NIS and Nsight Perf: their own NVIDIA licenses. The texts are installed next to the editor.") + "\n" +
+			TTR("Among other things, they limit sharing the files with others and require you to be of legal age (or have a guardian's consent).") + "[/ul]\n" +
+			"[color=" + warning_html + "]" + TTR("Read them before you continue:") + "[/color]\n" +
+			_link(TTR("NVIDIA RTX SDKs License (DLSS)"), DLSS_LICENSE_URL) + "\n" +
+			_link(TTR("Streamline SDK license"), SL_LICENSE_URL) + "\n" +
+			_link(TTR("Streamline third-party licenses"), SL_THIRD_PARTY_URL));
+
+	download_confirm_text->set_text(TTR("You are about to [b]download a file from GitHub[/b].") + "\n\n" +
+			"[table=2]" +
+			"[cell padding=0,2,12,6][b]" + TTR("From") + "[/b][/cell][cell expand=1 padding=0,2,0,6]" + TTR("NVIDIA's official GitHub account [b]NVIDIA-RTX[/b], Streamline repository") + "[/cell]" +
+			"[cell padding=0,2,12,6][b]" + TTR("File") + "[/b][/cell][cell expand=1 padding=0,2,0,6]" + vformat("%s (%s)", SL_DOWNLOAD_FILE, String::humanize_size(SL_DOWNLOAD_SIZE)) + "[/cell]" +
+			"[cell padding=0,2,12,6][b]" + TTR("Address") + "[/b][/cell][cell expand=1 padding=0,2,0,6]" + _code(SL_DOWNLOAD_URL) + "[/cell]" +
+			"[cell padding=0,2,12,6][b]" + TTR("Saved to") + "[/b][/cell][cell expand=1 padding=0,2,0,6]" + _code(_get_download_path()) + "[/cell]" +
+			"[/table]\n" +
+			"[color=" + dim + "]" + TTR("GitHub serves the file from its download server (githubusercontent.com). Before anything is installed, the file is checked against the SHA-256 fingerprint of NVIDIA's official release.") + "[/color]\n\n" +
+			TTR("Do you want to connect to GitHub and download it?"));
+
+	_update_status();
 }
 
 String StreamlineInstaller::_get_install_dir() const {
@@ -126,12 +324,14 @@ bool StreamlineInstaller::_is_installed() const {
 }
 
 void StreamlineInstaller::_update_status() {
-	if (_is_installed()) {
-		status_label->set_text(vformat(TTR("Status: installed. sl.interposer.dll was found in %s. Running the installer again replaces the files with Streamline SDK %s."), _get_install_dir(), SL_SDK_VERSION));
-		status_label->add_theme_color_override(SceneStringName(font_color), get_theme_color(SNAME("success_color"), EditorStringName(Editor)));
+	const bool installed = _is_installed();
+	const Color color = get_theme_color(installed ? SNAME("success_color") : SNAME("warning_color"), EditorStringName(Editor));
+	status_panel->add_theme_style_override(SceneStringName(panel), _make_card_style(color, 0.16));
+	status_icon->set_texture(get_editor_theme_icon(installed ? SNAME("StatusSuccess") : SNAME("StatusWarning")));
+	if (installed) {
+		status_label->set_text(vformat(TTR("DLSS is installed. Its files are in %s. You can install again to replace them with Streamline SDK %s."), _get_install_dir(), SL_SDK_VERSION));
 	} else {
-		status_label->set_text(vformat(TTR("Status: not installed. sl.interposer.dll was not found in %s. DLSS, Ray Reconstruction, Frame Generation and Reflex are unavailable; everything else works."), _get_install_dir()));
-		status_label->add_theme_color_override(SceneStringName(font_color), get_theme_color(SNAME("warning_color"), EditorStringName(Editor)));
+		status_label->set_text(vformat(TTR("DLSS is not installed yet. Its files aren't in %s. DLSS, Ray Reconstruction, Frame Generation and Reflex are off until you add them; everything else works."), _get_install_dir()));
 	}
 }
 
@@ -178,6 +378,13 @@ void StreamlineInstaller::_accept_toggled(bool p_pressed) {
 
 void StreamlineInstaller::_install_pressed() {
 	ERR_FAIL_COND(!accept_check->is_pressed());
+	_log(TTR("Asking for confirmation before connecting to GitHub..."));
+	download_confirm->popup_centered(Size2(620, 0) * EDSCALE);
+}
+
+void StreamlineInstaller::_start_install() {
+	ERR_FAIL_COND(!accept_check->is_pressed());
+	_log(TTR("Download confirmed."));
 
 	extract_index = 0;
 	installed_count = 0;
@@ -374,6 +581,9 @@ void StreamlineInstaller::_notification(int p_what) {
 				_extract_next();
 			}
 		} break;
+		case NOTIFICATION_THEME_CHANGED: {
+			_update_theme();
+		} break;
 		case NOTIFICATION_VISIBILITY_CHANGED: {
 			if (is_visible()) {
 				_update_status();
@@ -384,13 +594,15 @@ void StreamlineInstaller::_notification(int p_what) {
 }
 
 void StreamlineInstaller::popup_installer() {
-	popup_centered_clamped(Size2(860, 800) * EDSCALE, 0.9);
+	popup_centered_clamped(Size2(940, 860) * EDSCALE, 0.9);
 }
 
 StreamlineInstaller::StreamlineInstaller() {
-	set_title(TTR("Install NVIDIA DLSS (Streamline SDK)"));
+	set_title(TTR("Get NVIDIA DLSS (Streamline SDK)"));
+	get_ok_button()->set_text(TTR("Close"));
 
 	VBoxContainer *main_vb = memnew(VBoxContainer);
+	main_vb->add_theme_constant_override("separation", 10 * EDSCALE);
 	add_child(main_vb);
 
 	ScrollContainer *scroll = memnew(ScrollContainer);
@@ -398,67 +610,70 @@ StreamlineInstaller::StreamlineInstaller() {
 	scroll->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	main_vb->add_child(scroll);
 
-	VBoxContainer *blocks = memnew(VBoxContainer);
-	blocks->set_h_size_flags(Control::SIZE_EXPAND_FILL);
-	scroll->add_child(blocks);
+	MarginContainer *scroll_margin = memnew(MarginContainer);
+	scroll_margin->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	scroll_margin->add_theme_constant_override("margin_right", 8 * EDSCALE);
+	scroll->add_child(scroll_margin);
 
-	PackedStringArray file_list;
-	for (const char *file : SL_FILES) {
-		file_list.push_back(file);
-	}
+	VBoxContainer *cards_vb = memnew(VBoxContainer);
+	cards_vb->add_theme_constant_override("separation", 12 * EDSCALE);
+	scroll_margin->add_child(cards_vb);
 
-	// Block 1: what and why.
-	VBoxContainer *vb = _add_block(blocks, TTR("Why this is a separate step"));
-	Label *text = memnew(Label);
-	text->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	text->set_text(TTR("DLSS, Ray Reconstruction, Frame Generation and Reflex need NVIDIA's Streamline runtime DLLs. NVIDIA's license doesn't allow shipping them with this editor, so you download them yourself, directly from NVIDIA. This is optional: the editor, the path tracer and PhysX work without it."));
-	vb->add_child(text);
+	// Status: installed or not, at a glance.
+	status_panel = memnew(PanelContainer);
+	cards_vb->add_child(status_panel);
+	HBoxContainer *status_hb = memnew(HBoxContainer);
+	status_hb->add_theme_constant_override("separation", 10 * EDSCALE);
+	status_panel->add_child(status_hb);
+	status_icon = memnew(TextureRect);
+	status_icon->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
+	status_hb->add_child(status_icon);
 	status_label = memnew(Label);
 	status_label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	vb->add_child(status_label);
+	status_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	status_hb->add_child(status_label);
 
-	// Block 2: exactly what the installer will do.
-	vb = _add_block(blocks, TTR("What \"Download and Install\" will do"));
-	text = memnew(Label);
-	text->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	text->set_text(vformat(TTR("1. Download the official Streamline SDK %s release (%s) from NVIDIA's GitHub:\n      %s\n2. Save it temporarily to:\n      %s\n3. Check its SHA-256 checksum. If it doesn't match, delete it and stop:\n      %s\n4. Copy only these %d files from the zip's \"%s\" folder (signed release builds, never the \"development\" debug builds):\n      %s\n5. Put them next to the editor executable, in:\n      %s\n      A file that already exists is first renamed to <name>.old.\n6. Delete the downloaded zip.\n\nNothing else is changed: no registry, no system folders, no project files. You can follow every step in the log below."),
-			SL_SDK_VERSION, String::humanize_size(SL_DOWNLOAD_SIZE), SL_DOWNLOAD_URL, _get_download_path(), SL_DOWNLOAD_SHA256, SL_FILE_COUNT, SL_ZIP_DIR, String(", ").join(file_list), _get_install_dir()));
-	vb->add_child(text);
+	VBoxContainer *vb = _add_card(cards_vb, TTR("What is this?"), SNAME("NodeInfo"), SNAME("accent_color"));
+	why_text = _add_text(vb);
 
-	// Block 3: manual install.
-	vb = _add_block(blocks, TTR("Prefer to do it yourself?"));
-	text = memnew(Label);
-	text->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	text->set_text(vformat(TTR("Download the Streamline SDK %s zip from NVIDIA below. Copy the files listed above from its \"%s\" folder into the editor folder, then restart the editor."), SL_SDK_VERSION, SL_ZIP_DIR));
-	vb->add_child(text);
-	_add_link(vb, vformat(TTR("Streamline SDK %s release page (GitHub)"), SL_SDK_VERSION), SL_RELEASE_URL);
-	_add_link(vb, TTR("Direct download of the zip"), SL_DOWNLOAD_URL);
-	_add_link(vb, TTR("NVIDIA Streamline product page"), SL_PRODUCT_URL);
-	_add_link(vb, TTR("Step-by-step instructions (README of this build)"), FORK_README_URL);
-	Button *open_folder = memnew(Button(TTR("Open Editor Folder")));
-	open_folder->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
-	open_folder->connect(SceneStringName(pressed), callable_mp(this, &StreamlineInstaller::_open_folder_pressed));
-	vb->add_child(open_folder);
+	vb = _add_card(cards_vb, TTR("What \"Download and Install\" does, step by step"), SNAME("Load"), SNAME("accent_color"));
+	steps_text = _add_text(vb);
 
-	// Block 4: license terms. Installing is disabled until the user accepts.
-	vb = _add_block(blocks, TTR("NVIDIA license terms"));
-	text = memnew(Label);
-	text->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-	text->set_text(TTR("The downloaded files are NVIDIA software under NVIDIA's licenses, not under Godot's MIT license. DLSS, Ray Reconstruction and Frame Generation are covered by the NVIDIA RTX SDKs License. Reflex, NIS and Nsight Perf have their own NVIDIA licenses; their texts are installed next to the editor. Among other things, these licenses restrict redistribution and require you to be of legal age (or have a guardian's consent). Read them before you continue:"));
-	vb->add_child(text);
-	_add_link(vb, TTR("NVIDIA RTX SDKs License (DLSS)"), DLSS_LICENSE_URL);
-	_add_link(vb, TTR("Streamline SDK license"), SL_LICENSE_URL);
-	_add_link(vb, TTR("Streamline third-party licenses"), SL_THIRD_PARTY_URL);
+	vb = _add_card(cards_vb, TTR("Files that get installed, and what they do"), SNAME("File"), SNAME("accent_color"));
+	files_text = _add_text(vb);
+
+	vb = _add_card(cards_vb, TTR("What this does NOT do"), SNAME("Lock"), SNAME("success_color"));
+	safety_text = _add_text(vb);
+
+	vb = _add_card(cards_vb, TTR("Prefer to do it yourself?"), SNAME("ExternalLink"), SNAME("accent_color"));
+	manual_text = _add_text(vb);
+	open_folder_button = memnew(Button(TTR("Open Editor Folder")));
+	open_folder_button->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
+	open_folder_button->connect(SceneStringName(pressed), callable_mp(this, &StreamlineInstaller::_open_folder_pressed));
+	vb->add_child(open_folder_button);
+
+	// License terms. Installing stays disabled until the user accepts.
+	vb = _add_card(cards_vb, TTR("NVIDIA license terms"), SNAME("StatusWarning"), SNAME("warning_color"));
+	license_text = _add_text(vb);
+	accept_panel = memnew(PanelContainer);
+	vb->add_child(accept_panel);
 	accept_check = memnew(CheckBox(TTR("I have read and accept NVIDIA's license terms for the Streamline SDK, DLSS, Reflex and NIS.")));
 	accept_check->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
 	accept_check->connect(SceneStringName(toggled), callable_mp(this, &StreamlineInstaller::_accept_toggled));
-	vb->add_child(accept_check);
+	accept_panel->add_child(accept_check);
 
-	// Controls, progress and log stay visible below the scrolled blocks.
-	main_vb->add_child(memnew(HSeparator));
+	// Controls, progress and log stay visible below the scrolled cards.
+	action_panel = memnew(PanelContainer);
+	main_vb->add_child(action_panel);
+	VBoxContainer *action_vb = memnew(VBoxContainer);
+	action_vb->add_theme_constant_override("separation", 8 * EDSCALE);
+	action_panel->add_child(action_vb);
+
 	HBoxContainer *hb = memnew(HBoxContainer);
-	main_vb->add_child(hb);
+	hb->add_theme_constant_override("separation", 8 * EDSCALE);
+	action_vb->add_child(hb);
 	install_button = memnew(Button);
+	install_button->set_custom_minimum_size(Size2(200, 0) * EDSCALE);
 	install_button->connect(SceneStringName(pressed), callable_mp(this, &StreamlineInstaller::_install_pressed));
 	hb->add_child(install_button);
 	cancel_button = memnew(Button(TTR("Cancel Download")));
@@ -473,14 +688,44 @@ StreamlineInstaller::StreamlineInstaller() {
 	hb->add_child(progress_label);
 
 	progress_bar = memnew(ProgressBar);
-	main_vb->add_child(progress_bar);
+	action_vb->add_child(progress_bar);
 
+	Label *log_title = memnew(Label(TTR("Activity log (every step is listed here)")));
+	log_title->set_theme_type_variation("HeaderSmall");
+	action_vb->add_child(log_title);
+	log_panel = memnew(PanelContainer);
+	action_vb->add_child(log_panel);
 	log = memnew(RichTextLabel);
-	log->set_custom_minimum_size(Size2(0, 160) * EDSCALE);
+	log->set_custom_minimum_size(Size2(0, 150) * EDSCALE);
 	log->set_scroll_follow(true);
 	log->set_selection_enabled(true);
 	log->set_context_menu_enabled(true);
-	main_vb->add_child(log);
+	log_panel->add_child(log);
+
+	// The only place a network connection can start: the user confirms this popup.
+	download_confirm = memnew(ConfirmationDialog);
+	download_confirm->set_title(TTR("Download from GitHub?"));
+	download_confirm->set_ok_button_text(TTR("Yes, download from GitHub"));
+	download_confirm->set_cancel_button_text(TTR("No, don't connect"));
+	download_confirm_text = memnew(RichTextLabel);
+	download_confirm_text->set_use_bbcode(true);
+	download_confirm_text->set_fit_content(true);
+	download_confirm_text->set_scroll_active(false);
+	download_confirm_text->set_selection_enabled(true);
+	download_confirm->add_child(download_confirm_text);
+	download_confirm->connect(SceneStringName(confirmed), callable_mp(this, &StreamlineInstaller::_start_install));
+	download_confirm->connect("canceled", callable_mp(this, &StreamlineInstaller::_log).bind(TTR("Download declined. Nothing was downloaded."), Color()));
+	add_child(download_confirm);
+
+	link_confirm = memnew(ConfirmationDialog);
+	link_confirm->set_title(TTR("Open Link?"));
+	link_confirm->set_ok_button_text(TTR("Open in Browser"));
+	link_confirm->set_cancel_button_text(TTR("Don't Open"));
+	link_confirm->set_autowrap(true);
+	link_confirm->set_min_size(Size2(520, 0) * EDSCALE);
+	link_confirm->connect(SceneStringName(confirmed), callable_mp(this, &StreamlineInstaller::_open_pending_link));
+	add_child(link_confirm);
+	texts.push_back(download_confirm_text);
 
 	downloader = memnew(HTTPRequest);
 	downloader->set_use_threads(true);
