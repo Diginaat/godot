@@ -196,7 +196,7 @@ private:
 		float inv_projection[16];
 		float cam_rotation[12];
 		int32_t screen_size[2];
-		float energy;
+		uint32_t flags; // 1: half resolution GI buffer.
 		uint32_t debug_mode;
 	};
 	static_assert(sizeof(ApplyPushConstant) == 128, "Push constants are limited to 128 bytes");
@@ -227,8 +227,9 @@ public:
 	/// is built for this frame.
 	void update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_raytracing, RTViewportState *p_rt_state, uint32_t p_rt_flags);
 
-	/// Writes the diffuse indirect light into the GI ambient buffer.
-	void apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices);
+	/// Writes the diffuse indirect light into the GI ambient buffer, at half
+	/// the internal resolution if p_half_resolution.
+	void apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution);
 
 	/// Debug view of the probes over the internal color buffer (before tonemapping).
 	void debug_draw(RenderDataRD *p_render_data);

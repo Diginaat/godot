@@ -61,12 +61,12 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 		ivec3 offs = ivec3(i & 1u, (i >> 1u) & 1u, (i >> 2u) & 1u);
 		ivec3 logical = base + offs;
 		uint probe = ddgi_probe_index(vol, logical);
-		DDGIProbe pd = ddgi_probes[probe];
-		if (pd.state == DDGI_PROBE_NEW || pd.state == DDGI_PROBE_INSIDE) {
+		uint state = ddgi_probes[probe].state;
+		if (state == DDGI_PROBE_NEW || state == DDGI_PROBE_INSIDE) {
 			continue;
 		}
 
-		vec3 probe_local = ddgi_probe_local_position(vol, logical) + pd.offset;
+		vec3 probe_local = ddgi_probe_local_position(vol, logical) + ddgi_probes[probe].offset;
 		vec3 to_probe = probe_local - local;
 		float dist = length(to_probe);
 		vec3 dir = dist > 0.0 ? to_probe / dist : local_normal;

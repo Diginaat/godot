@@ -44,8 +44,8 @@ layout(rgba16f, set = 0, binding = 6) uniform restrict image2D color_buffer;
 layout(push_constant, std430) uniform Params {
 	mat4 inv_projection; // Includes the depth correction used by the depth buffer.
 	vec4 cam_rotation[3]; // Rows of the camera-to-world 3x4 transform.
-	ivec2 screen_size;
-	float energy;
+	ivec2 screen_size; // Internal (full) resolution.
+	uint flags; // FLAG_HALF_RES: the GI buffer has half the resolution.
 	uint debug_mode; // Environment.DDGIDebugMode.
 }
 params;
@@ -60,6 +60,8 @@ params;
 #define DEBUG_PROBE_STATES 4u
 #define DEBUG_PROBE_PRIORITY 5u
 #define DEBUG_CASCADES 6u
+
+#define FLAG_HALF_RES 1u
 
 vec3 view_position(ivec2 p_pixel, float p_depth) {
 	vec4 pos = vec4((vec2(p_pixel) + 0.5) / vec2(params.screen_size) * 2.0 - 1.0, p_depth, 1.0);
@@ -77,7 +79,11 @@ vec3 cascade_color(int p_volume) {
 #ifdef MODE_APPLY
 
 void main() {
-	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	// Half resolution: each GI buffer texel takes the top-left pixel of its
+	// 2x2 block.
+	ivec2 out_pixel = ivec2(gl_GlobalInvocationID.xy);
+	bool half_res = (params.flags & FLAG_HALF_RES) != 0u;
+	ivec2 pixel = half_res ? out_pixel * 2 : out_pixel;
 	if (any(greaterThanEqual(pixel, params.screen_size))) {
 		return;
 	}
@@ -99,15 +105,15 @@ void main() {
 			ambient = vec4(cascade_color(ddgi_volume_at(world_pos)), 1.0);
 		} else {
 			ambient = ddgi_sample_irradiance(world_pos, normal, to_camera);
-			ambient.rgb *= params.energy;
+			ambient.rgb *= ddgi.volumes[0].params.x; // Energy.
 			if (any(isnan(ambient)) || any(isinf(ambient))) {
 				ambient = vec4(0.0);
 			}
 		}
 	}
 
-	imageStore(ambient_buffer, pixel, ambient);
-	imageStore(reflection_buffer, pixel, vec4(0.0));
+	imageStore(ambient_buffer, out_pixel, ambient);
+	imageStore(reflection_buffer, out_pixel, vec4(0.0));
 }
 
 #endif // MODE_APPLY

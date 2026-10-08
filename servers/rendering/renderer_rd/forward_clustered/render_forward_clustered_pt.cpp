@@ -594,7 +594,7 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 	if (rt_state) {
 		ddgi->update_probes(p_render_data, raytracing, rt_state, rt_flags);
 	}
-	ddgi->apply(p_render_data, p_normal_roughness_slices);
+	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution);
 	RD::get_singleton()->draw_command_end_label();
 }
 
