@@ -74,6 +74,8 @@ func _apply_args() -> void:
 	env.pathtracing_max_bounces = int(args.get("bounces", "3"))
 	env.pathtracing_debug_mode = int(args.get("debug", "0"))
 	env.pathtracing_denoiser = int(args.get("denoiser", "0"))
+	if args.has("rr_debug"):
+		ProjectSettings.set_setting("rendering/ray_reconstruction/debug_mode", int(args["rr_debug"]))
 	if args.has("vfog_sky_affect"):
 		env.volumetric_fog_sky_affect = float(args["vfog_sky_affect"])
 	# Measurement mode: linear tonemap and a low exposure keep values from
@@ -99,6 +101,16 @@ func _set_view(p_view: String) -> void:
 	# Volumetric fog only in the fog view, unless forced with --volfog.
 	env.volumetric_fog_enabled = args.get("volfog", "1" if view == "fog" else "0") == "1"
 	_update_hud()
+
+
+# --orbit=speed (radians per second): the camera circles the view's target,
+# for testing reflections and disocclusion while moving. Fixed time step.
+func _process(_delta: float) -> void:
+	if not args.has("orbit"):
+		return
+	var target: Vector3 = VIEWS[view][1]
+	var offset := camera.position - target
+	camera.look_at_from_position(target + offset.rotated(Vector3.UP, float(args["orbit"]) / 60.0), target)
 
 
 func _update_hud() -> void:

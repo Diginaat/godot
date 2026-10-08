@@ -618,11 +618,37 @@ void main() {
 		PathState rs = path_unpack(payload);
 		bool opaque_part = rand(rs.rng_state) < m.alpha;
 		payload.rng_state = rs.rng_state;
+#ifdef NATIVE_RR_ENABLED
+		// One guide for both outcomes, or the denoiser would remodulate the
+		// history with a different albedo whenever sample 0 changes its mind.
+		if (get_total_bounces(rs.packed_bounces_flags) == 0u && is_sample_zero(rs.packed_bounces_flags)) {
+			rr_write_guide(DLSSRR_computeDiffuseAlbedo(m.albedo, m.metalness), vec3(1.0), m.normal, m.roughness, -1.0, RR_GUIDE_FLAG_TRANSMISSIVE);
+			rr_guide_written = true;
+		}
+#endif
 		if (!opaque_part) {
 			refract_and_bounce(h, m, material_ior(mat.flags));
 			return;
 		}
 	}
+#ifdef NATIVE_RR_ENABLED
+	// Alpha blend at the primary hit (any hit let it through): shade the alpha
+	// part, pass the rest straight through. One guide for both outcomes; the
+	// light seen through goes to the specular signal (albedo 1).
+	else if ((mat.flags & MAT_FLAG_ALPHA_BLEND) != 0u && get_total_bounces(payload.packed_bounces_flags) == 0u) {
+		PathState rs = path_unpack(payload);
+		bool opaque_part = rand(rs.rng_state) < m.alpha;
+		payload.rng_state = rs.rng_state;
+		if (is_sample_zero(rs.packed_bounces_flags)) {
+			rr_write_guide(DLSSRR_computeDiffuseAlbedo(m.albedo, m.metalness), vec3(1.0), m.normal, m.roughness, -1.0, RR_GUIDE_FLAG_TRANSMISSIVE);
+			rr_guide_written = true;
+		}
+		if (!opaque_part) {
+			transmit_and_bounce(h);
+			return;
+		}
+	}
+#endif
 	shade_and_bounce(h, m);
 #endif
 }
@@ -736,6 +762,12 @@ void main() {
 	alpha *= mat.albedo_color.a;
 
 	if ((mat.flags & MAT_FLAG_ALPHA_BLEND) != 0u) {
+#ifdef NATIVE_RR_ENABLED
+		// Primary rays always stop here; the closest hit splits the surface.
+		if (get_total_bounces(payload.packed_bounces_flags) == 0u && !is_shadow_ray(payload.packed_bounces_flags)) {
+			return;
+		}
+#endif
 		if (!material_alpha_blend_hit(alpha, payload.rng_state, geometry_idx, gl_PrimitiveID)) {
 			ignoreIntersectionEXT;
 		}

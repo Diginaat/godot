@@ -397,7 +397,17 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 			rr_inputs.depth = raytracing->rt_get_depth_texture(rb.ptr());
 			rr_inputs.velocity = rb->get_velocity_buffer(false);
 			rr_inputs.size = rb->get_internal_size();
-			rr_inputs.projection = p_render_data->scene_data->get_cam_projection();
+			{
+				const RenderSceneDataRD *sd = p_render_data->scene_data;
+				Projection correction;
+				correction.set_depth_correction(sd->flip_y);
+				Projection prev_correction = correction;
+				prev_correction.add_jitter_offset(sd->prev_taa_jitter);
+				rr_inputs.projection = sd->get_cam_projection();
+				rr_inputs.prev_projection = prev_correction * sd->prev_cam_projection;
+				rr_inputs.projection_unjittered = correction * sd->cam_projection;
+				rr_inputs.prev_projection_unjittered = correction * sd->prev_cam_projection;
+			}
 			rr_inputs.cam_transform = p_render_data->scene_data->cam_transform;
 			rr_inputs.prev_cam_transform = p_render_data->scene_data->prev_cam_transform;
 			// The path tracer traces one view; other views get a copy.

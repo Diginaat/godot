@@ -41,7 +41,9 @@ All user arguments (after `--`):
 | `--spp=` | `4` | Path tracer samples per pixel (1-16) |
 | `--bounces=` | `3` | Path tracer max bounces (1-8) |
 | `--debug=` | `0` | `Environment.pathtracing_debug_mode` (see the enum in `scene/resources/environment.h`) |
-| `--denoiser=` | `0` | `0` none, `1` DLSS Ray Reconstruction (needs the Streamline DLLs) |
+| `--denoiser=` | `0` | `0` none, `1` DLSS Ray Reconstruction (needs the Streamline DLLs), `2` native denoiser (docs/renderer/native_ray_reconstruction.md) |
+| `--rr_debug=` | `0` | Native denoiser debug view (`rendering/ray_reconstruction/debug_mode`) |
+| `--orbit=` | off | Camera circles the view's target at this speed (radians per second, fixed 60 fps step) |
 | `--volfog=` | view default | `1` forces volumetric fog on, `0` off |
 | `--frames=` | `90` | Frames to render before the screenshot. Use 300-400 after changing RT shader code: custom hit groups recompile asynchronously and are skipped until ready |
 | `--sun_only` | off | Remove every light except the sun (isolates light selection) |

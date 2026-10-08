@@ -68,8 +68,12 @@ layout(set = 0, binding = 12, r16f) uniform image2D dlss_rr_specular_hit_dist;
 // rr_specular: specular radiance (rgb, includes refraction), a = hit distance
 // of the specular ray after the primary hit (RR_MISS_DISTANCE on a miss, -1 when
 // no sample took the specular lobe).
-// rr_guide: x = diffuse albedo (unorm8 rgb), y = specular albedo (unorm8 rgb),
-// z = octahedral normal (unorm16 x2, vec3_to_oct), w = roughness (unorm16) | flags << 16.
+// rr_guide: x = diffuse albedo (unorm8 rgb), y = specular albedo (unorm8 rgb,
+// a = 1 for transmissive surfaces), z = octahedral normal (unorm16 x2,
+// vec3_to_oct), w = half2(roughness, mirror hit distance). The mirror hit
+// distance is traced along the perfect reflection on smooth surfaces
+// (roughness < MAX_DENOISER_SPECULAR_HIT_THRESHOLD); RR_MISS_DISTANCE on a
+// miss, -1 where it isn't traced.
 layout(set = 0, binding = 40, rgba16f) uniform image2D rr_diffuse;
 layout(set = 0, binding = 41, rgba16f) uniform image2D rr_specular;
 layout(set = 0, binding = 42, rgba32ui) uniform uimage2D rr_guide;
@@ -77,12 +81,12 @@ layout(set = 0, binding = 42, rgba32ui) uniform uimage2D rr_guide;
 #define RR_MISS_DISTANCE 10000.0
 #define RR_GUIDE_FLAG_TRANSMISSIVE 1u
 
-void rr_write_guide(vec3 p_diffuse_albedo, vec3 p_specular_albedo, vec3 p_normal, float p_roughness, uint p_flags) {
+void rr_write_guide(vec3 p_diffuse_albedo, vec3 p_specular_albedo, vec3 p_normal, float p_roughness, float p_mirror_hit_distance, uint p_flags) {
 	uvec4 g;
 	g.x = packUnorm4x8(vec4(p_diffuse_albedo, 0.0));
-	g.y = packUnorm4x8(vec4(p_specular_albedo, 0.0));
+	g.y = packUnorm4x8(vec4(p_specular_albedo, (p_flags & RR_GUIDE_FLAG_TRANSMISSIVE) != 0u ? 1.0 : 0.0));
 	g.z = packUnorm2x16(vec3_to_oct(normalize(p_normal)));
-	g.w = (uint(clamp(p_roughness, 0.0, 1.0) * 65535.0 + 0.5) & 0xFFFFu) | (p_flags << 16u);
+	g.w = packHalf2x16(vec2(clamp(p_roughness, 0.0, 1.0), min(p_mirror_hit_distance, RR_MISS_DISTANCE)));
 	imageStore(rr_guide, ivec2(gl_LaunchIDEXT.xy), g);
 }
 #endif

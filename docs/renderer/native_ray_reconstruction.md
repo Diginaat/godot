@@ -177,7 +177,7 @@ traceRays (1 spp)                     compute, internal resolution
 | 1 | Audit: signals, render graph, motion vectors, jitter, history, capabilities; baseline timings and images | Done |
 | 2 | Path tracer signal split: diffuse and specular radiance, clean primary emission/sky/fog, guide buffers for the native denoiser; pass-through compose must match today's image | Done |
 | 3 | Core SVGF: `PT_DENOISER_NATIVE`, history resources, reprojection with depth/normal tests, moments, variance, a-trous, compose, timestamps | Done |
-| 4 | Specular reconstruction: roughness-aware history and kernel, hit distance, virtual-hit reprojection for glossy surfaces | Open |
+| 4 | Specular reconstruction: roughness-aware history and kernel, hit distance, virtual-hit reprojection for glossy surfaces | Done |
 | 5 | Anti-ghosting: history clipping, confidence, firefly clamp, NaN guards, disocclusion fallback | Open |
 | 6 | Test harness: accumulated reference, metrics (error vs reference, temporal flicker, ghost trails, edge sharpness), moving scenes, thin geometry, mirrors, moving emitters | Open |
 | 7 | Settings and debug views: `rendering/ray_reconstruction/*`, presets measured against each other, debug views, editor exposure | Open |
@@ -269,9 +269,55 @@ ms at 1080p even where it skips its neighbors, which points at bandwidth
 (about 40 bytes read and written per pixel per pass), and the native path
 tracer variant costs 8-13% more than the plain one (bigger payload).
 
+## Specular and glass (step 4)
+
+- **Mirror hit distance**: the primary hit of sample 0 traces one ray query
+  along the perfect reflection on surfaces with roughness below 0.25 (the
+  same query the DLSS RR guide uses) and stores the distance in the guide
+  (`w` = half2(roughness, hit distance)). Rougher surfaces use the sampled
+  distance of the specular bounce (`rr_specular.a`). Both are accumulated in
+  a history of their own (`specular_hit_*`, r16f), so a frame without a
+  specular sample keeps the old value.
+- **Virtual-image reprojection**: a reflection on a smooth surface moves like
+  the virtual image of the hit point (hit distance behind the surface along
+  the view ray), not like the surface. The temporal pass projects that point
+  into the previous frame (unjittered projections), and accepts taps that lie
+  on the same plane in the current view (previous linear depth rebuilt with
+  last frame's view ray, moved into the current view). It blends to the
+  surface motion as roughness goes from 0 to 0.4. When the virtual tap fails,
+  the specular history restarts.
+- **History**: mirror-like 8 frames rising to 24 at roughness 0.4; glass 16.
+- **Kernel radius**: the specular a-trous iterations stop at the blur radius
+  of the reflection lobe: hit distance x roughness^2 (GGX alpha as an angle)
+  seen from depth + hit distance away, in pixels. Mirror-like and contact
+  reflections stay sharp, rough and far ones get the full kernel. Glass gets
+  at least 4 pixels.
+- **Glass**: refractive and alpha blended surfaces write the transmissive
+  flag (specular albedo alpha) and a specular albedo of 1. Their primary hit
+  writes one guide for both outcomes of the alpha choice; before, sample 0
+  picked opaque or refracted at random, the albedo flipped between frames and
+  the history was remodulated with the wrong one (dark dots). With the native
+  denoiser, primary rays always stop at alpha blended surfaces (any hit lets
+  them through) and the closest hit either shades the surface (probability
+  alpha) or passes straight through (`transmit_and_bounce()`, counted as
+  specular). Without the denoiser alpha blend is unchanged.
+
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-10: Step 4 (specular) done. PBR view, still camera: the mirror
+  spheres are clean and sharp (were sparkling). Orbiting camera
+  (`--orbit=0.3`, new in the path tracer test project): reflections follow,
+  but the sun shadows on the floor are softer than in the 16 spp reference,
+  most likely from resampling the history bilinearly every frame (step 5).
+  A firefly smeared into a short bright streak on one sphere (step 5). Glass
+  view: the alpha blended sphere was a speckled mix of sphere and wall
+  (stochastic alpha at the primary hit), the refractive sphere had dark dots
+  (guide albedo flipping); both clean now, the refracted pillars a little
+  softer than in the reference. The objects with custom shaders were only
+  missing because their hit groups compile for the native shader variant on
+  first use; at 400 frames they are there.
 
 - 2026-10-10: Step 3 (core SVGF) done. Room view at 1 spp: a still camera
   converges to a clean image within about 30 frames; a moving camera keeps

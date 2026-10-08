@@ -91,6 +91,7 @@ bool RayReconstruction::_ensure_history(Ref<RenderSceneBuffersRD> p_render_buffe
 		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("specular_" + n), RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
 		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("moments_" + n), RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
 		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("surface_" + n), RD::DATA_FORMAT_R32G32_UINT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
+		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("specular_hit_" + n), RD::DATA_FORMAT_R16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
 		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("filter_diffuse_" + n), RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
 		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("filter_specular_" + n), RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
 	}
@@ -131,20 +132,26 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 	ubo.filter_params[1] = 128.0f; // Normal power.
 	ubo.filter_params[2] = 1.0f; // Plane distance sigma (in pixel footprints).
 	ubo.filter_params[3] = 2.0f / (Math::abs(p_inputs.projection.columns[1][1]) * p_inputs.size.y); // Pixel size at depth 1.
-	{
-		// View ray at unit depth, affine in uv: xy = scale * uv + offset.
-		const Projection inv_projection = p_inputs.projection.inverse();
+	// View ray at unit depth, affine in uv: xy = scale * uv + offset.
+	auto store_view_ray = [](const Projection &p_projection, float *r_out) {
+		const Projection inv_projection = p_projection.inverse();
 		auto ray = [&](real_t p_u, real_t p_v) -> Vector2 {
 			Vector4 r = inv_projection.xform(Vector4(p_u * 2.0 - 1.0, p_v * 2.0 - 1.0, 1.0, 1.0));
 			Vector3 d = Vector3(r.x, r.y, r.z) / r.w;
 			return Vector2(d.x, d.y) / -d.z;
 		};
 		const Vector2 o = ray(0.0, 0.0);
-		ubo.view_ray[0] = ray(1.0, 0.0).x - o.x;
-		ubo.view_ray[1] = ray(0.0, 1.0).y - o.y;
-		ubo.view_ray[2] = o.x;
-		ubo.view_ray[3] = o.y;
-	}
+		r_out[0] = ray(1.0, 0.0).x - o.x;
+		r_out[1] = ray(0.0, 1.0).y - o.y;
+		r_out[2] = o.x;
+		r_out[3] = o.y;
+	};
+	store_view_ray(p_inputs.projection, ubo.view_ray);
+	store_view_ray(p_inputs.prev_projection, ubo.previous_view_ray);
+	MaterialStorage::store_camera(p_inputs.projection_unjittered, ubo.projection_unjittered);
+	MaterialStorage::store_camera(p_inputs.prev_projection_unjittered, ubo.previous_projection_unjittered);
+	MaterialStorage::store_transform(p_inputs.cam_transform.affine_inverse() * p_inputs.prev_cam_transform, ubo.previous_to_current_view);
+	ubo.specular_params[0] = 0.4f; // Virtual (reflection) reprojection blends to surface motion up to this roughness.
 	rd->buffer_update(vs.params_buffer, 0, sizeof(ParamsUBO), &ubo);
 
 	PushConstant pc = {};
@@ -174,7 +181,9 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, tex("diffuse_", cur)),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, tex("specular_", cur)),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, tex("moments_", cur)),
-				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, tex("surface_", cur)));
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, tex("surface_", cur)),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, tex("specular_hit_", prev)),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 14, tex("specular_hit_", cur)));
 		rd->compute_list_bind_uniform_set(cl, set, 1);
 		rd->compute_list_set_push_constant(cl, &pc, sizeof(PushConstant));
 		rd->compute_list_dispatch_threads(cl, p_inputs.size.x, p_inputs.size.y, 1);
@@ -225,7 +234,8 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, p_inputs.guide),
 					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, p_inputs.diffuse),
 					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, p_inputs.specular),
-					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, p_inputs.output));
+					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, p_inputs.output),
+					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, tex("specular_hit_", cur)));
 			rd->compute_list_bind_uniform_set(cl, set, 1);
 			pc.step_size = 1 << i;
 			pc.iteration = i;
