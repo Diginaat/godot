@@ -455,8 +455,14 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 	// Environment fog for this ray segment (before surface contribution).
 	apply_segment_fog(gl_HitTEXT, ps.radiance, ps.throughput);
 
-	// Emissive contribution.
-	ps.radiance += ps.throughput * m.emissive;
+	// Emissive contribution. Skipped when the previous vertex already sampled
+	// this emitter as a mesh light (counted once, by NEE).
+	bool emission_sampled_by_nee = is_emissive_sampled(ps.packed_bounces_flags) &&
+			(geometries[h.geometry_idx].flags & FLAG_EMISSIVE_LIGHT) != 0u;
+	if (!emission_sampled_by_nee) {
+		ps.radiance += ps.throughput * m.emissive;
+	}
+	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, false);
 
 	// Bounce limit check.
 	if (total_bounces >= RT_GET_MAX_BOUNCES() || diffuse_bounces >= MAX_DIFFUSE_BOUNCES) {
@@ -526,13 +532,17 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 	path_pack(payload, ps);
 
 	uint rt_light_count = uint(get_rt_param(RT_PARAM_LIGHT_COUNT));
-	if (rt_light_count > 0u) {
+	// Glossy surfaces leave emissive meshes to BRDF sampling (sharp reflections).
+	bool sample_mesh_lights = m.roughness >= RT_MESH_LIGHT_MIN_ROUGHNESS;
+	uint rt_mesh_count = sample_mesh_lights ? uint(get_rt_param(RT_PARAM_EMISSIVE_MESH_COUNT)) : 0u;
+	if (rt_light_count + rt_mesh_count > 0u) {
 		vec3 hit_pos_offset = offset_ray_origin(h.hit_pos, h.geometry_normal);
 		bool is_indirect = (diffuse_bounces > 0u);
 		vec3 direct_light = lights_evaluate_direct_lighting(
-				hit_pos_offset, N, V, brdf_mat, ps.rng_state, is_indirect, rt_light_count);
+				hit_pos_offset, N, V, brdf_mat, ps.rng_state, is_indirect, rt_light_count, rt_mesh_count);
 		ps.radiance += ps.throughput * direct_light;
 	}
+	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, rt_mesh_count > 0u);
 
 	// =================================================================
 	// BRDF importance sampling for next bounce

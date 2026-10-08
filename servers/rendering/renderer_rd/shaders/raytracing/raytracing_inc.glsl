@@ -19,7 +19,8 @@
 #define RT_PARAM_SAMPLE_COUNT 1 // rt_params[0].y - Samples per pixel
 #define RT_PARAM_MAX_BOUNCES 2 // rt_params[0].z - Maximum ray bounces
 #define RT_PARAM_DENOISER 3 // rt_params[0].w - Denoiser selection (0=none, 1=DLSS RR)
-// Indices 4-13 reserved for future use
+// Indices 4-12 reserved for future use
+#define RT_PARAM_EMISSIVE_MESH_COUNT 13 // rt_params[3].y - Number of emissive meshes sampled as lights
 #define RT_PARAM_LIGHT_COUNT 14 // rt_params[3].z - Number of active lights in light buffer
 #define RT_PARAM_FRAME_INDEX 15 // rt_params[3].w - Frame counter for temporal variation
 
@@ -130,6 +131,17 @@ bool is_path_terminated(uint packed) {
 	return (packed & PATH_TERMINATED_FLAG) != 0u;
 }
 
+// Set when the previous path vertex sampled emissive meshes with NEE. The next
+// hit then skips emission from geometry with FLAG_EMISSIVE_LIGHT, so that light
+// is counted once (by NEE) instead of twice.
+const uint EMISSIVE_SAMPLED_FLAG = (1u << 27);
+uint set_emissive_sampled(uint packed, bool p_sampled) {
+	return p_sampled ? (packed | EMISSIVE_SAMPLED_FLAG) : (packed & ~EMISSIVE_SAMPLED_FLAG);
+}
+bool is_emissive_sampled(uint packed) {
+	return (packed & EMISSIVE_SAMPLED_FLAG) != 0u;
+}
+
 // Bounce limits
 #define MAX_DIFFUSE_BOUNCES 2u
 #define MAX_DENOISER_SPECULAR_HIT_THRESHOLD 0.25
@@ -142,6 +154,8 @@ const uint FLAG_COMPRESSED = 1u;
 const uint FLAG_PROCEDURAL = 2u;
 // Set when the BLAS uses a per-frame-deformed vertex buffer.
 const uint FLAG_DEFORMED = 4u;
+// Emission from this geometry is sampled as a mesh light (EmissiveMeshData).
+const uint FLAG_EMISSIVE_LIGHT = 8u;
 
 // ============================================================================
 // RANDOM NUMBER GENERATION - PCG (Permuted Congruential Generator)

@@ -46,6 +46,28 @@ layout(set = 0, binding = RT_LIGHT_BUFFER_BINDING, std430) readonly buffer Light
 };
 
 // ============================================================================
+// Emissive meshes sampled as lights (matches C++ RT_EmissiveMeshData, 80 bytes)
+// ============================================================================
+
+struct EmissiveMeshData {
+	vec4 object_to_world[3]; // Rows of the object-to-world 3x4 (includes the compression AABB).
+	vec3 center; // World-space bounds center.
+	float radius; // World-space bounds radius.
+	uint geometry_idx; // Index into geometries[] and materials[].
+	uint primitive_count; // Triangle count.
+	float power; // Emission luminance times surface area estimate.
+	float _pad;
+};
+
+layout(set = 0, binding = 33, std430) readonly buffer EmissiveMeshBuffer {
+	EmissiveMeshData rt_emissive_meshes[];
+};
+
+// Below this roughness, emissive meshes are left to BRDF sampling (sharp
+// reflections of emitters); at or above it, NEE samples them.
+#define RT_MESH_LIGHT_MIN_ROUGHNESS 0.3
+
+// ============================================================================
 // Unified Cone Sampling (for sphere, directional, spot lights)
 // ============================================================================
 
@@ -292,6 +314,110 @@ float lights_selection_weight(RTLightData light, vec3 hit_pos, vec3 N) {
 	return w;
 }
 
+// Selection weight for an emissive mesh, from its bounding sphere. Like
+// lights_selection_weight(), it is > 0 wherever the mesh can add light.
+float lights_mesh_selection_weight(EmissiveMeshData em, vec3 hit_pos, vec3 N) {
+	vec3 to_center = em.center - hit_pos;
+	float dist_sq = dot(to_center, to_center);
+	float radius_sq = em.radius * em.radius;
+	float cos_w = 1.0; // Inside the bounds the mesh can be in any direction.
+	if (dist_sq > radius_sq) {
+		float inv_dist = inversesqrt(dist_sq);
+		float sin_a = clamp(em.radius * inv_dist, 0.0, 1.0);
+		cos_w = max(dot(N, to_center * inv_dist) + sin_a, 0.0);
+	}
+	return em.power * scene_data_block.data.emissive_exposure_normalization * cos_w / max(dist_sq, max(radius_sq, 1e-4));
+}
+
+// Object-space vertex position (normalized to the compression AABB for compressed meshes).
+vec3 lights_fetch_object_position(in GeometryData geom, uint idx) {
+	if ((geom.flags & FLAG_COMPRESSED) != 0u) {
+		Uint32Buffer vb = Uint32Buffer(geom.vertex_address);
+		uint w0 = vb.v[idx * 2u];
+		uint w1 = vb.v[idx * 2u + 1u];
+		return vec3(float(w0 & 0xFFFFu), float(w0 >> 16u), float(w1 & 0xFFFFu)) / 65535.0;
+	}
+	FloatBuffer fb = FloatBuffer(geom.vertex_address);
+	uint base = idx * (geom.position_stride >> 2u);
+	return vec3(fb.v[base], fb.v[base + 1u], fb.v[base + 2u]);
+}
+
+vec3 lights_mesh_to_world(EmissiveMeshData em, vec3 p) {
+	vec4 p4 = vec4(p, 1.0);
+	return vec3(dot(em.object_to_world[0], p4), dot(em.object_to_world[1], p4), dot(em.object_to_world[2], p4));
+}
+
+// Direct light from one emissive mesh: picks a triangle uniformly and a point
+// uniformly on it. Returns the contribution before dividing by the light
+// selection PDF.
+vec3 lights_sample_emissive_mesh(uint mesh_idx, vec3 hit_pos, vec3 N, vec3 V, MaterialProperties material, inout uint rng_state) {
+	EmissiveMeshData em = rt_emissive_meshes[mesh_idx];
+	GeometryData geom = geometries[em.geometry_idx];
+	if (geom.vertex_address == 0ul || em.primitive_count == 0u) {
+		return vec3(0.0);
+	}
+
+	uint triangle = min(uint(rand(rng_state) * float(em.primitive_count)), em.primitive_count - 1u);
+	uint i0, i1, i2;
+	get_triangle_indices_ex(geom, triangle, i0, i1, i2);
+	vec3 p0 = lights_mesh_to_world(em, lights_fetch_object_position(geom, i0));
+	vec3 p1 = lights_mesh_to_world(em, lights_fetch_object_position(geom, i1));
+	vec3 p2 = lights_mesh_to_world(em, lights_fetch_object_position(geom, i2));
+
+	vec3 cross_e = cross(p1 - p0, p2 - p0);
+	float twice_area = length(cross_e);
+	if (twice_area < 1e-12) {
+		return vec3(0.0);
+	}
+
+	// Uniform point on the triangle.
+	vec2 u = rand2(rng_state);
+	float su = sqrt(u.x);
+	vec3 bary = vec3(1.0 - su, su * (1.0 - u.y), su * u.y);
+	vec3 P = p0 * bary.x + p1 * bary.y + p2 * bary.z;
+
+	vec3 to_light = P - hit_pos;
+	float dist_sq = dot(to_light, to_light);
+	if (dist_sq < 1e-8) {
+		return vec3(0.0);
+	}
+	float dist = sqrt(dist_sq);
+	vec3 L = to_light / dist;
+	if (dot(N, L) <= 0.0) {
+		return vec3(0.0);
+	}
+	// Two-sided, like emission seen by a ray hit.
+	float cos_light = abs(dot(cross_e / twice_area, L));
+	if (cos_light < 1e-4) {
+		return vec3(0.0);
+	}
+
+	// Emitted radiance at the point, as the closest hit computes it for HG0.
+	MaterialData mat = materials[em.geometry_idx];
+	vec3 Le = mat.emission_color * mat.emission_strength;
+	if ((mat.flags & 2u) != 0u) {
+		vec2 uv = fetch_uv(geom, i0, i1, i2, bary) * mat.uv1_scale + mat.uv1_offset;
+		Le *= texture(sampler2D(bindless_textures[nonuniformEXT(mat.emission_texture_idx)], SAMPLER_LINEAR_WITH_MIPMAPS_REPEAT), uv).rgb;
+	}
+	Le *= scene_data_block.data.emissive_exposure_normalization;
+	if (max(Le.r, max(Le.g, Le.b)) <= 0.0) {
+		return vec3(0.0);
+	}
+
+	// Stop the shadow ray just short of the emitter so it doesn't hit itself.
+	if (!lights_trace_shadow_ray(hit_pos, L, dist * 0.999, rng_state)) {
+		return vec3(0.0);
+	}
+
+	vec3 brdf_diffuse, brdf_specular;
+	evalCombinedBRDFSeparate(N, L, V, material, brdf_diffuse, brdf_specular);
+
+	// Area PDF is 1 / (triangle_count * area); converting to solid angle
+	// multiplies by dist^2 / cos_light.
+	float area = 0.5 * twice_area;
+	return (brdf_diffuse + brdf_specular) * Le * (cos_light * float(em.primitive_count) * area / dist_sq);
+}
+
 // Evaluate direct lighting using NEE with stochastic light selection.
 // Selects one light by resampled importance sampling (lights_selection_weight).
 vec3 lights_evaluate_direct_lighting(
@@ -301,8 +427,11 @@ vec3 lights_evaluate_direct_lighting(
 		MaterialProperties material,
 		inout uint rng_state,
 		bool is_indirect_bounce,
-		uint light_count) {
-	if (light_count == 0u) {
+		uint light_count,
+		uint mesh_count) {
+	// Candidates 0..light_count-1 are analytic lights, the rest emissive meshes.
+	const uint total_count = light_count + mesh_count;
+	if (total_count == 0u) {
 		return vec3(0.0);
 	}
 
@@ -311,15 +440,17 @@ vec3 lights_evaluate_direct_lighting(
 	// is a candidate; with many, RT_LIGHT_RESERVOIR_SIZE random candidates.
 	// Uniform selection used to pick a far spot light as often as the sun, which
 	// left directly lit pixels black when the sun was never picked.
-	const bool enumerate_all = light_count <= uint(RT_LIGHT_RESERVOIR_SIZE);
-	const uint candidate_count = enumerate_all ? light_count : uint(RT_LIGHT_RESERVOIR_SIZE);
+	const bool enumerate_all = total_count <= uint(RT_LIGHT_RESERVOIR_SIZE);
+	const uint candidate_count = enumerate_all ? total_count : uint(RT_LIGHT_RESERVOIR_SIZE);
 	float weight_sum = 0.0;
 	float selected_weight = 0.0;
 	uint selected_idx = 0u;
 
 	for (uint i = 0u; i < candidate_count; i++) {
-		uint idx = enumerate_all ? i : min(uint(rand(rng_state) * float(light_count)), light_count - 1u);
-		float w = lights_selection_weight(rt_lights[idx], hit_pos, N);
+		uint idx = enumerate_all ? i : min(uint(rand(rng_state) * float(total_count)), total_count - 1u);
+		float w = (idx < light_count)
+				? lights_selection_weight(rt_lights[idx], hit_pos, N)
+				: lights_mesh_selection_weight(rt_emissive_meshes[idx - light_count], hit_pos, N);
 		if (w <= 0.0) {
 			continue;
 		}
@@ -335,9 +466,13 @@ vec3 lights_evaluate_direct_lighting(
 	}
 
 	// RIS with uniformly drawn candidates: the effective selection PDF is
-	// w / (light_count / candidate_count * weight_sum). With enumerate_all this
+	// w / (total_count / candidate_count * weight_sum). With enumerate_all this
 	// is exactly w / weight_sum.
-	float light_select_pdf = selected_weight * float(candidate_count) / (float(light_count) * weight_sum);
+	float light_select_pdf = selected_weight * float(candidate_count) / (float(total_count) * weight_sum);
+
+	if (selected_idx >= light_count) {
+		return lights_sample_emissive_mesh(selected_idx - light_count, hit_pos, N, V, material, rng_state) / max(light_select_pdf, 1e-10);
+	}
 
 	RTLightData light = rt_lights[selected_idx];
 	vec2 u = rand2(rng_state);
