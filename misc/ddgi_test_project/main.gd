@@ -91,6 +91,10 @@ func _apply_args() -> void:
 	move_camera = args.get("move", "0") == "1"
 	if args.has("quality"):
 		ProjectSettings.set_setting("rendering/global_illumination/ddgi/quality", int(args["quality"]))
+	if args.has("budget"):
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/gpu_time_budget_ms", float(args["budget"]))
+	if args.has("half"):
+		RenderingServer.gi_set_use_half_resolution(args["half"] == "1")
 	if args.has("cascades"):
 		env.ddgi_cascades = int(args["cascades"])
 	if args.has("spacing"):
@@ -260,8 +264,8 @@ func _run_capture() -> void:
 		var vram := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0
 		var tex_mem := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED) / 1048576.0
 		var buf_mem := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED) / 1048576.0
-		print("BENCH view=%s gi=%s quality=%s res=%dx%d scale3d=%s frames=%d  gpu_ms=%.3f cpu_ms=%.3f frame_ms=%.3f fps=%.1f  ddgi_ms=%.3f%s  vram_mb=%.1f tex_mb=%.1f buf_mb=%.1f" % [
-			view, gi_mode, args.get("quality", "1"), vp.get_visible_rect().size.x, vp.get_visible_rect().size.y,
+		print("BENCH view=%s gi=%s quality=%s half=%s budget=%s move=%s res=%dx%d scale3d=%s frames=%d  gpu_ms=%.3f cpu_ms=%.3f frame_ms=%.3f fps=%.1f  ddgi_ms=%.3f%s  vram_mb=%.1f tex_mb=%.1f buf_mb=%.1f" % [
+			view, gi_mode, args.get("quality", "1"), args.get("half", "0"), args.get("budget", "0"), args.get("move", "0"), vp.get_visible_rect().size.x, vp.get_visible_rect().size.y,
 			args.get("scale3d", "native"), frames, gpu / frames, cpu / frames, wall_ms, 1000.0 / wall_ms,
 			ddgi_total, pass_text, vram, tex_mem, buf_mem])
 
