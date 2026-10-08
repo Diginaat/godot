@@ -192,6 +192,8 @@ enum {
 	RT_GEOM_FLAG_DEFORMED = 4u,
 	// Emission from this geometry is sampled as a mesh light (see RT_EmissiveMeshData).
 	RT_GEOM_FLAG_EMISSIVE_LIGHT = 8u,
+	// Positions come from the material's vertex() (process_displaced_surface).
+	RT_GEOM_FLAG_VERTEX_DISPLACED = 16u,
 };
 
 /// Per-instance state for procedural RT geometry. Heap-allocated, only exists for procedural instances.
@@ -274,6 +276,13 @@ struct RTDeformedCacheEntry {
 	uint32_t cached_vertex_count = 0;
 	uint32_t cached_full_size = 0;
 	bool prev_pos_seeded = false; // False until the first owned->prev copy has run.
+
+	// Custom vertex() displacement (process_displaced_surface): compute output and its parameters.
+	RID displaced_vb;
+	uint32_t displaced_vb_capacity = 0; // Bytes; grow-only.
+	RID displace_params;
+	RID displace_uniform_set; // Binds displaced_vb and displace_params; freed with them.
+	uint32_t displaced_frame = UINT32_MAX; // Frame the compute pass last ran.
 };
 
 /// Cache entry for a per-(MultiMesh, surface) merged BLAS.
@@ -448,6 +457,15 @@ class RenderRaytracing {
 			const void *p_surf,
 			void *p_mesh_surface,
 			const struct RTDeformedGeometrySource &p_source,
+			LocalVector<RID> &r_dirty_blas_list,
+			LocalVector<RID> &r_dirty_blas_update_list);
+	RTSurfaceData *process_displaced_surface(
+			const void *p_surf,
+			void *p_mesh_surface,
+			RID p_material_rid,
+			uint32_t p_surface_invalidation_counter,
+			const Transform3D &p_transform,
+			const RenderDataRD *p_render_data,
 			LocalVector<RID> &r_dirty_blas_list,
 			LocalVector<RID> &r_dirty_blas_update_list);
 	void _populate_surface_blas(

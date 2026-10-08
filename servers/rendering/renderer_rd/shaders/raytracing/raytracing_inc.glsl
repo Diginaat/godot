@@ -156,6 +156,8 @@ const uint FLAG_PROCEDURAL = 2u;
 const uint FLAG_DEFORMED = 4u;
 // Emission from this geometry is sampled as a mesh light (EmissiveMeshData).
 const uint FLAG_EMISSIVE_LIGHT = 8u;
+// Positions come from the material's vertex() (raytracing_vertex_displace.glsl).
+const uint FLAG_VERTEX_DISPLACED = 16u;
 
 // ============================================================================
 // RANDOM NUMBER GENERATION - PCG (Permuted Congruential Generator)

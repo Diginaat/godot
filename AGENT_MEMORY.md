@@ -76,6 +76,17 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 - To check a sampling change for bias, compare mean **linear** brightness
   against a reference build at higher spp, with `--linear` and a low exposure.
   Means of tonemapped 8-bit images look darker the noisier they are.
+- Custom hit groups compile asynchronously; their surfaces are skipped until
+  ready. After shader template changes, screenshot after 300-400 frames, or
+  custom-shader objects are simply missing.
+- Runtime-generated RT shaders (hit groups, `raytracing_vertex_displace.glsl`)
+  are ShaderRD templates: `version_build_variant_stage_sources()` gives the
+  expanded source, then placeholders are replaced and it is compiled with
+  `shader_compile_spirv_from_source()`. Compute can't use `gl_PrimitiveID`.
+- A BLAS dies with the buffers it was built from. Check
+  `RenderingDevice::acceleration_structure_is_valid()` before freeing one from
+  a cache. Don't bind buffers you free later through a linear-pool uniform
+  set; use a persistent set (freed with the buffer).
 
 ## In-editor DLSS installer
 

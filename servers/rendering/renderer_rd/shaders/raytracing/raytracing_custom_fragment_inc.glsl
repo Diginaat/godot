@@ -53,7 +53,19 @@ rt_screen_uv = vec2(gl_LaunchIDEXT.xy) / vec2(gl_LaunchSizeEXT.xy);
 rt_frag_coord = vec4(gl_LaunchIDEXT.xy, 0.0, 1.0);
 
 // Run vertex shader (computes varyings, may modify built-ins).
+vec3 rt_pre_vertex = vertex;
+vec3 rt_pre_normal = normal;
+vec3 rt_pre_tangent = tangent;
+vec3 rt_pre_binormal = binormal;
 /* RT_CUSTOM_VERTEX_CALL */
+if ((rt_geom.flags & FLAG_VERTEX_DISPLACED) != 0u) {
+	// The geometry already went through vertex() in the displacement pass;
+	// keep the varyings it computed, but don't move the hit point again.
+	vertex = rt_pre_vertex;
+	normal = rt_pre_normal;
+	tangent = rt_pre_tangent;
+	binormal = rt_pre_binormal;
+}
 
 // Post-vertex transform: object-space -> view-space (mirrors rasterizer post-vertex).
 mat4 rt_modelview = rt_view_matrix * read_model_matrix;
