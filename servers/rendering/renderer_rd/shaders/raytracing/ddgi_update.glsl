@@ -152,6 +152,11 @@ void main() {
 
 #if defined(MODE_BLEND_IRRADIANCE) || defined(MODE_BLEND_DISTANCE)
 
+// The probe's rays, loaded once per workgroup instead of once per texel.
+#define MAX_RAYS 512
+shared vec4 shared_rays[MAX_RAYS]; // Irradiance: rgb radiance, a 1 if usable. Distance: x d, y d*d, z 1 if usable.
+shared vec3 shared_dirs[MAX_RAYS];
+
 #ifdef MODE_BLEND_IRRADIANCE
 #define TILE_TEXELS ddgi.atlas.x
 // Up to 16x16 texels per tile.
@@ -193,6 +198,32 @@ void main() {
 	vec3 sum_previous = vec3(0.0);
 #endif
 
+	uint ray_count = min(ray_end - ray_begin, uint(MAX_RAYS));
+	for (uint i = local_index; i < ray_count; i += 64u) {
+		uint r = ray_begin + i;
+		vec4 ray = imageLoad(ddgi_ray_data, ivec2(r, slot));
+		shared_dirs[i] = ddgi_probe_ray_direction(r);
+#ifdef MODE_BLEND_IRRADIANCE
+		// Back faces (the inside of geometry) add no light; a single NaN would
+		// stay in the probe forever (hysteresis).
+		bool usable = ray.a >= 0.0 && !any(isnan(ray.rgb)) && !any(isinf(ray.rgb));
+		// Clamp single bright rays (fireflies) without changing the hue.
+		vec3 radiance = ray.rgb;
+		float lum = ddgi_luminance(radiance);
+		if (lum > ddgi.schedule.z) {
+			radiance *= ddgi.schedule.z / lum;
+		}
+		shared_rays[i] = usable ? vec4(radiance, 1.0) : vec4(0.0);
+#else
+		float d = ray.a;
+		bool usable = !isnan(d) && !isinf(d);
+		// Back faces count as very close: points past them are occluded.
+		d = d < 0.0 ? -d * 0.2 : min(d, max_distance);
+		shared_rays[i] = usable ? vec4(d, d * d, 1.0, 0.0) : vec4(0.0);
+#endif
+	}
+	barrier();
+
 	for (int ty = int(gl_LocalInvocationID.y); ty < texels; ty += 8) {
 		for (int tx = int(gl_LocalInvocationID.x); tx < texels; tx += 8) {
 			ivec2 texel = ivec2(tx, ty);
@@ -201,24 +232,10 @@ void main() {
 #ifdef MODE_BLEND_IRRADIANCE
 			vec3 sum = vec3(0.0);
 			float weight_sum = 0.0;
-			float max_radiance = ddgi.schedule.z;
-			for (uint r = ray_begin; r < ray_end; r++) {
-				vec4 ray = imageLoad(ddgi_ray_data, ivec2(r, slot));
-				if (ray.a < 0.0) {
-					continue; // Back face: the inside of geometry adds no light.
-				}
-				// A single NaN would stay in the probe forever (hysteresis).
-				if (any(isnan(ray.rgb)) || any(isinf(ray.rgb))) {
-					continue;
-				}
-				float w = max(0.0, dot(texel_dir, ddgi_probe_ray_direction(r)));
-				// Clamp single bright rays (fireflies) without changing the hue.
-				vec3 radiance = ray.rgb;
-				float lum = ddgi_luminance(radiance);
-				if (lum > max_radiance) {
-					radiance *= max_radiance / lum;
-				}
-				sum += radiance * w;
+			for (uint i = 0u; i < ray_count; i++) {
+				vec4 ray = shared_rays[i];
+				float w = max(0.0, dot(texel_dir, shared_dirs[i])) * ray.a;
+				sum += ray.rgb * w;
 				weight_sum += w;
 			}
 			vec3 previous = imageLoad(ddgi_atlas, origin + texel).rgb;
@@ -233,15 +250,17 @@ void main() {
 #else
 			vec2 sum = vec2(0.0);
 			float weight_sum = 0.0;
-			for (uint r = ray_begin; r < ray_end; r++) {
-				float d = imageLoad(ddgi_ray_data, ivec2(r, slot)).a;
-				if (isnan(d) || isinf(d)) {
-					continue;
-				}
-				// Back faces count as very close: points past them are occluded.
-				d = d < 0.0 ? -d * 0.2 : min(d, max_distance);
-				float w = pow(max(0.0, dot(texel_dir, ddgi_probe_ray_direction(r))), 50.0);
-				sum += vec2(d, d * d) * w;
+			for (uint i = 0u; i < ray_count; i++) {
+				vec4 ray = shared_rays[i];
+				float c = max(0.0, dot(texel_dir, shared_dirs[i]));
+				// A sharp lobe (cos^50): distance varies faster than light.
+				float c2 = c * c;
+				float c4 = c2 * c2;
+				float c8 = c4 * c4;
+				float c16 = c8 * c8;
+				float c32 = c16 * c16;
+				float w = c32 * c16 * c2 * ray.z;
+				sum += ray.xy * w;
 				weight_sum += w;
 			}
 			vec2 previous = imageLoad(ddgi_atlas, origin + texel).rg;

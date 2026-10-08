@@ -72,8 +72,11 @@ ivec3 ddgi_imod(ivec3 a, ivec3 n) {
 
 // Logical probe coordinates (0..grid-1 from the volume's min corner) to the
 // global probe index. Scrolling volumes rotate storage instead of moving data.
+// Both the coordinates and the scroll offset are in 0..grid-1, so a
+// conditional subtraction replaces the (slow) integer modulo.
 uint ddgi_probe_index(DDGIVolume vol, ivec3 logical) {
-	ivec3 s = ddgi_imod(logical + vol.scroll.xyz, vol.grid.xyz);
+	ivec3 s = logical + vol.scroll.xyz;
+	s -= ivec3(greaterThanEqual(s, vol.grid.xyz)) * vol.grid.xyz;
 	return uint(vol.grid.w + s.x + s.y * vol.grid.x + s.z * vol.grid.x * vol.grid.y);
 }
 
@@ -91,9 +94,11 @@ vec3 ddgi_probe_world_position(DDGIVolume vol, ivec3 logical, vec3 offset) {
 	return ddgi_xform(vol.local_to_world, ddgi_probe_local_position(vol, logical) + offset);
 }
 
-// Top-left texel of the probe's tile interior.
+// Top-left texel of the probe's tile interior. The probes per atlas row are
+// a power of two, so this needs no integer division.
 ivec2 ddgi_tile_origin(uint p_probe, uint p_texels, uint p_probes_per_row) {
-	return ivec2(p_probe % p_probes_per_row, p_probe / p_probes_per_row) * int(p_texels + 2u) + 1;
+	uint shift = uint(findMSB(p_probes_per_row));
+	return ivec2(p_probe & (p_probes_per_row - 1u), p_probe >> shift) * int(p_texels + 2u) + 1;
 }
 
 vec2 ddgi_atlas_uv(uint p_probe, vec3 p_dir, uint p_texels, uint p_probes_per_row, vec2 p_inv_size) {

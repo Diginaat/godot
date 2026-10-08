@@ -31,6 +31,10 @@ var move_camera := false
 var time := 0.0
 var animated: Array[Callable] = []
 var bench_samples := []
+# The viewport the 3D scene renders to: the window, or with --res an
+# offscreen SubViewport of exactly that size (the window can't be larger
+# than the screen).
+var vp: Viewport
 
 
 func _ready() -> void:
@@ -38,10 +42,14 @@ func _ready() -> void:
 		var parts: PackedStringArray = arg.trim_prefix("--").split("=", true, 1)
 		args[parts[0]] = parts[1] if parts.size() > 1 else "1"
 
+	vp = get_viewport()
 	if args.has("res"):
 		var res: PackedStringArray = args["res"].split("x")
-		get_window().size = Vector2i(int(res[0]), int(res[1]))
-		get_window().content_scale_size = Vector2i(0, 0)
+		var sub := SubViewport.new()
+		sub.size = Vector2i(int(res[0]), int(res[1]))
+		sub.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+		add_child(sub)
+		vp = sub
 
 	_build_environment()
 	_build_room(Vector3(0, 0, 0))
@@ -51,7 +59,17 @@ func _ready() -> void:
 	camera = Camera3D.new()
 	camera.fov = 60.0
 	camera.far = 600.0
-	add_child(camera)
+	if vp == get_viewport():
+		add_child(camera)
+	else:
+		vp.add_child(camera)
+		# Show the offscreen image in the window too.
+		var rect := TextureRect.new()
+		rect.texture = (vp as SubViewport).get_texture()
+		rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+		rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		add_child(rect)
 
 	hud = Label.new()
 	hud.position = Vector2(12, 8)
@@ -90,8 +108,8 @@ func _apply_args() -> void:
 	env.pathtracing_denoiser = int(args.get("denoiser", "0"))
 	if args.has("scale3d"):
 		# 0 bilinear, 1 FSR1, 2 FSR2, 6 DLSS (see Viewport.Scaling3DMode).
-		get_viewport().scaling_3d_mode = int(args["scale3d"])
-		get_viewport().scaling_3d_scale = float(args.get("scale", "0.67"))
+		vp.scaling_3d_mode = int(args["scale3d"])
+		vp.scaling_3d_scale = float(args.get("scale", "0.67"))
 	if args.has("linear"):
 		env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 		env.tonemap_exposure = float(args.get("exposure", "1.0"))
@@ -216,7 +234,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # GPU and CPU frame time, the DDGI pass times (with --gpu-profile on the
 # engine command line) and video memory.
 func _run_capture() -> void:
-	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	RenderingServer.viewport_set_measure_render_time(vp.get_viewport_rid(), true)
 	for i in int(args.get("frames", "120")):
 		await RenderingServer.frame_post_draw
 
@@ -228,8 +246,8 @@ func _run_capture() -> void:
 		var start := Time.get_ticks_usec()
 		for i in frames:
 			await RenderingServer.frame_post_draw
-			gpu += RenderingServer.viewport_get_measured_render_time_gpu(get_viewport().get_viewport_rid())
-			cpu += RenderingServer.viewport_get_measured_render_time_cpu(get_viewport().get_viewport_rid())
+			gpu += RenderingServer.viewport_get_measured_render_time_gpu(vp.get_viewport_rid())
+			cpu += RenderingServer.viewport_get_measured_render_time_cpu(vp.get_viewport_rid())
 			var p := _ddgi_pass_times()
 			for k in p:
 				passes[k] = passes.get(k, 0.0) + p[k]
@@ -243,13 +261,13 @@ func _run_capture() -> void:
 		var tex_mem := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED) / 1048576.0
 		var buf_mem := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED) / 1048576.0
 		print("BENCH view=%s gi=%s quality=%s res=%dx%d scale3d=%s frames=%d  gpu_ms=%.3f cpu_ms=%.3f frame_ms=%.3f fps=%.1f  ddgi_ms=%.3f%s  vram_mb=%.1f tex_mb=%.1f buf_mb=%.1f" % [
-			view, gi_mode, args.get("quality", "1"), get_window().size.x, get_window().size.y,
+			view, gi_mode, args.get("quality", "1"), vp.get_visible_rect().size.x, vp.get_visible_rect().size.y,
 			args.get("scale3d", "native"), frames, gpu / frames, cpu / frames, wall_ms, 1000.0 / wall_ms,
 			ddgi_total, pass_text, vram, tex_mem, buf_mem])
 
 	if args.has("shot"):
 		var path: String = args["shot"]
-		var err := get_viewport().get_texture().get_image().save_png(path)
+		var err := vp.get_texture().get_image().save_png(path)
 		print("Screenshot %s: %s" % [path, error_string(err)])
 
 	# --switch: turn every light and emitter of the current view off, then
@@ -271,7 +289,7 @@ func _run_capture() -> void:
 				await RenderingServer.frame_post_draw
 				frame += 1
 			var path: String = String(args["shot"]).get_basename() + "_%d.png" % frame
-			get_viewport().get_texture().get_image().save_png(path)
+			vp.get_texture().get_image().save_png(path)
 			print("Screenshot %s" % path)
 	get_tree().quit()
 
@@ -295,6 +313,8 @@ func _ddgi_pass_times() -> Dictionary:
 			key = "as"
 		elif in_as and (name == "BLAS Build" or name == "TLAS Build"):
 			key = "as"
+		elif name == "DDGI Done":
+			in_as = false
 		elif name.begins_with("DDGI "):
 			in_as = false
 			key = name.trim_prefix("DDGI ").to_snake_case()

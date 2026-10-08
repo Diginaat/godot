@@ -31,6 +31,7 @@
 #include "render_ddgi.h"
 
 #include "core/config/project_settings.h"
+#include "core/math/math_funcs_binary.h"
 #include "servers/rendering/renderer_rd/environment/gi.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_raytracing.h"
@@ -211,8 +212,12 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 	p_data->update_capacity_used = p_data->capacity;
 
 	// Lay probe tiles out in rows; the distance tiles are the larger ones.
+	// Probes per row are a power of two (shaders use shifts, not divisions).
 	uint32_t max_per_row = DDGI_MAX_ATLAS_SIZE / (p_quality.distance_texels + 2);
-	uint32_t per_row = CLAMP((uint32_t)Math::ceil(Math::sqrt((double)p_data->total_probes)), 1u, max_per_row);
+	uint32_t per_row = Math::next_power_of_2((uint32_t)Math::ceil(Math::sqrt((double)p_data->total_probes)));
+	while (per_row > max_per_row) {
+		per_row >>= 1;
+	}
 	uint32_t rows = (p_data->total_probes + per_row - 1) / per_row;
 	ERR_FAIL_COND_MSG(rows * (p_quality.distance_texels + 2) > DDGI_MAX_ATLAS_SIZE, "DDGI: too many probes for the atlas. Reduce Environment.ddgi_probe_grid or ddgi_cascades.");
 	p_data->probes_per_row = per_row;
@@ -548,7 +553,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	rd->draw_command_end_label();
 }
 
-void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) {
+void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution) {
 	ERR_FAIL_COND(!initialized);
 	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
 	ERR_FAIL_COND(rb.is_null());
@@ -565,17 +570,23 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 	Size2i internal_size = rb->get_internal_size();
 
 	// The GI buffers are shared with SDFGI/VoxelGI (which are off while DDGI
-	// is on). DDGI writes them at full resolution.
-	if (rb->has_texture(RB_SCOPE_GI, RB_TEX_AMBIENT) && rb->get_texture_format(RB_SCOPE_GI, RB_TEX_AMBIENT).width != uint32_t(internal_size.x)) {
-		rb->clear_context(RB_SCOPE_GI);
+	// is on), including the half resolution setting
+	// (rendering/global_illumination/gi/use_half_resolution).
+	Size2i gi_size = p_half_resolution ? Size2i((internal_size.x + 1) / 2, (internal_size.y + 1) / 2) : internal_size;
+	if (rb->has_texture(RB_SCOPE_GI, RB_TEX_AMBIENT)) {
+		RD::TextureFormat f = rb->get_texture_format(RB_SCOPE_GI, RB_TEX_AMBIENT);
+		if (f.width != uint32_t(gi_size.x) || f.height != uint32_t(gi_size.y)) {
+			rb->clear_context(RB_SCOPE_GI);
+		}
 	}
 	if (!rb->has_texture(RB_SCOPE_GI, RB_TEX_AMBIENT)) {
 		uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-		rb->create_texture(RB_SCOPE_GI, RB_TEX_AMBIENT, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, internal_size);
-		rb->create_texture(RB_SCOPE_GI, RB_TEX_REFLECTION, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, internal_size);
+		rb->create_texture(RB_SCOPE_GI, RB_TEX_AMBIENT, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, gi_size);
+		rb->create_texture(RB_SCOPE_GI, RB_TEX_REFLECTION, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, gi_size);
 		if (rb->has_custom_data(RB_SCOPE_GI)) {
+			// Keep GI::process_gi's own bookkeeping in step.
 			Ref<RendererRD::GI::RenderBuffersGI> rbgi = rb->get_custom_data(RB_SCOPE_GI);
-			rbgi->using_half_size_gi = false; // So GI::process_gi recreates them if it needs half size.
+			rbgi->using_half_size_gi = p_half_resolution;
 		}
 	}
 
@@ -598,7 +609,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
 		push.screen_size[0] = internal_size.x;
 		push.screen_size[1] = internal_size.y;
-		push.energy = s.energy;
+		push.flags = p_half_resolution ? 1 : 0;
 		push.debug_mode = uint32_t(s.debug_mode);
 
 		RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
@@ -613,11 +624,13 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 
 		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_ambient, u_reflection), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
-		rd->compute_list_dispatch_threads(list, internal_size.x, internal_size.y, 1);
+		rd->compute_list_dispatch_threads(list, gi_size.x, gi_size.y, 1);
 	}
 
 	rd->compute_list_end();
 	rd->draw_command_end_label();
+	// Closes the "DDGI Apply" interval for the profiler.
+	_ddgi_timestamp("DDGI Done", false);
 }
 
 void RenderDDGI::debug_draw(RenderDataRD *p_render_data) {
@@ -656,7 +669,7 @@ void RenderDDGI::debug_draw(RenderDataRD *p_render_data) {
 		RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
 		push.screen_size[0] = internal_size.x;
 		push.screen_size[1] = internal_size.y;
-		push.energy = s.energy;
+		push.flags = 0;
 		push.debug_mode = uint32_t(s.debug_mode);
 
 		RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
