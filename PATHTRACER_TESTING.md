@@ -89,7 +89,7 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | 7 | Custom `vertex()` displacement in the path tracer (B4) | Done |
 | 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | Done |
 | 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | Done |
-| 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | Next |
+| 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | Done (release 0.3.0) |
 
 ## Known bugs
 
