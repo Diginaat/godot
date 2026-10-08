@@ -117,7 +117,7 @@ the scene renders exactly as with DDGI off, including SDFGI/VoxelGI.
 | Indirect Light | Only the DDGI light (the GI buffer) |
 | Probe Irradiance | Probes as spheres with their stored light |
 | Probe Distance | Probes shaded by distance to the nearest surface |
-| Probe States | Blue = not updated yet, green = active, gray = inactive, red = inside geometry |
+| Probe States | Blue = not updated yet, green = active, gray = inactive, red = inside geometry, orange = scrolled in, not traced yet |
 | Probe Update Priority | Green = stable, red = changing (updated more often), white = updated this frame |
 | Cascades | Surfaces colored by the cascade that covers them |
 
@@ -204,7 +204,12 @@ the depth prepass, where SDFGI/VoxelGI would run):
 
 Scrolling: each cascade's probes are addressed through a toroidal offset, so
 when the camera moves by whole probes only the newly covered slab is reset;
-a jump larger than the grid resets the cascade.
+a jump larger than the grid resets the cascade. Each cascade snaps to its
+own spacing, so coarse cascades scroll less often. Probes in the new slab
+get the state "scrolled": the scheduler gives them update slots first, and
+until they are traced the sampler uses the atlas texels left by the probes
+that scrolled out (stale, but no black holes). Their first update replaces
+those texels instead of blending with them.
 
 ## Known limitations
 
@@ -234,7 +239,7 @@ a jump larger than the grid resets the cascade.
 | 4 | Forward+ integration: GI buffer, SDFGI/VoxelGI exclusion | Done |
 | 5 | Dynamic scenes: moving lights and objects, BLAS refit | Done |
 | 6 | Performance: scheduling, classification, relocation, GPU budget, benchmarks | Done |
-| 7 | Scrolling cascades | Open |
+| 7 | Scrolling cascades | Done |
 | 8 | Editor: settings, debug views, documentation | Partial: `DDGIVolume` node |
 | 9 | Compatibility: DLSS, path tracer, D3D12 fallback | Open |
 | 10 | Validation: test scenes, benchmarks, this document | Open |
@@ -262,7 +267,9 @@ Arguments (after `--`): `--view=`, `--gi=none|sdfgi|ddgi`, `--quality=0..4`,
 `--speed=`, `--pt=1`, `--scale3d=6 --scale=0.67` (DLSS), `--res=WxH`,
 `--frames=N` (warm-up), `--shot=path`, `--bench=N`, `--instances=`, `--lights=`,
 `--linear --exposure=`, `--budget=ms` (GPU time budget), `--half=1` (half
-resolution apply).
+resolution apply), `--settle=N` (with `--shot`: stop the camera, wait N
+frames and save `<shot>_settled.png`; the difference to the first shot is
+the error that moving leaves).
 
 Keys: `1`-`3` views, `G` GI mode, `U` quality, `Tab` debug mode, `L`
 animation, `M` camera path, `P` path tracing; fly camera with the right mouse
@@ -330,6 +337,31 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-09: Step 7 (scrolling cascades) done. Scrolling itself was in
+  place (toroidal addressing per cascade, slab reset, two-pass scheduler,
+  stale fallback). Found and fixed one problem: a scrolled-in probe was
+  set to active and its first trace blended with the hysteresis (0.95 for
+  distance, at least 0.38 for irradiance) against the texels of the probe
+  that had scrolled out at the far side of the grid. The wrong distance
+  moments broke the visibility test for many updates (light leaking at the
+  edges of building interiors while moving). Scrolled probes now have
+  their own state (`DDGI_PROBE_SCROLLED`, orange in the probe states
+  view); they are still sampled until traced, and the first update
+  replaces their data like a new probe's.
+  Measured with `--settle` (outdoor, Medium, indirect light view, 1280x720,
+  moving shot against the shot 600 frames after stopping, 3 runs each):
+  at 8 m/s the mean error went from 4.05 to 3.44 and the pixels off by
+  more than 16/255 from 4.6% to 3.5%; at 30 m/s no difference beyond the
+  noise (3.5 to 3.6, 2.2% to 2.0%). The noise floor with a still camera
+  is 1.5 mean and 0.04%. Startup convergence is unchanged.
+  The rest of the moving error is multi-bounce lag: new probes see
+  neighbors that have no bounced light yet, and that settles over
+  seconds (still 2.3% of pixels off 120 frames after stopping). Tried and
+  dropped, because they didn't help: tracing relocated probes again in
+  the next frame (error up by 0.2-0.3), and averaging the first updates
+  evenly instead of with the hysteresis (better after 30 frames, worse
+  after 10, because the light that is still building up gets averaged in).
 
 - 2026-10-08: Step 6 done. Rechecked the code: scheduling (two passes,
   credit, in-view and variability weights, `rate_scale` feedback),

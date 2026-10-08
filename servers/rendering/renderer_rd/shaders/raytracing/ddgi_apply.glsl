@@ -191,8 +191,8 @@ void main() {
 						float mean = textureLod(sampler2D(ddgi_distance_atlas, linear_sampler), ddgi_atlas_uv(probe, n, ddgi.atlas.y, ddgi.atlas.z, ddgi.atlas_inv_size.zw), 0.0).r;
 						best_color = vec3(clamp(mean / max(vol.spacing.w, 0.001), 0.0, 1.0));
 					} else if (params.debug_mode == DEBUG_PROBE_STATES) {
-						const vec3 state_colors[4] = vec3[](vec3(0.2, 0.4, 1.0), vec3(0.2, 1.0, 0.2), vec3(0.4, 0.4, 0.4), vec3(1.0, 0.15, 0.15));
-						best_color = state_colors[min(pd.state, 3u)];
+						const vec3 state_colors[5] = vec3[](vec3(0.2, 0.4, 1.0), vec3(0.2, 1.0, 0.2), vec3(0.4, 0.4, 0.4), vec3(1.0, 0.15, 0.15), vec3(1.0, 0.6, 0.1));
+						best_color = state_colors[min(pd.state, 4u)];
 					} else {
 						// Update priority: green = stable, red = changing; white = traced this frame.
 						best_color = mix(vec3(0.1, 0.8, 0.1), vec3(1.0, 0.1, 0.1), clamp(pd.variability * 4.0, 0.0, 1.0));
