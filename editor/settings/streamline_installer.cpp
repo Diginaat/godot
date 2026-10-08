@@ -164,6 +164,7 @@ void StreamlineInstaller::_meta_clicked(const Variant &p_meta) {
 	// Never open the browser without asking: show the address first.
 	pending_url = p_meta;
 	link_confirm->set_text(vformat(TTR("Open this link in your web browser?\n\n%s\n\nThis leaves the editor and connects to that website."), pending_url));
+	link_confirm->reset_size();
 	link_confirm->popup_centered();
 }
 
@@ -379,7 +380,9 @@ void StreamlineInstaller::_accept_toggled(bool p_pressed) {
 void StreamlineInstaller::_install_pressed() {
 	ERR_FAIL_COND(!accept_check->is_pressed());
 	_log(TTR("Asking for confirmation before connecting to GitHub..."));
-	download_confirm->popup_centered(Size2(620, 0) * EDSCALE);
+	// Shrink to the text: the window keeps its largest size otherwise.
+	download_confirm->reset_size();
+	download_confirm->popup_centered();
 }
 
 void StreamlineInstaller::_start_install() {
@@ -710,6 +713,9 @@ StreamlineInstaller::StreamlineInstaller() {
 	download_confirm_text = memnew(RichTextLabel);
 	download_confirm_text->set_use_bbcode(true);
 	download_confirm_text->set_fit_content(true);
+	// A fixed width lets fit_content measure the real height. Without it the
+	// text wraps at a tiny width and the popup becomes very tall.
+	download_confirm_text->set_custom_minimum_size(Size2(600, 0) * EDSCALE);
 	download_confirm_text->set_scroll_active(false);
 	download_confirm_text->set_selection_enabled(true);
 	download_confirm->add_child(download_confirm_text);
