@@ -74,6 +74,8 @@ func _apply_args() -> void:
 	env.pathtracing_max_bounces = int(args.get("bounces", "3"))
 	env.pathtracing_debug_mode = int(args.get("debug", "0"))
 	env.pathtracing_denoiser = int(args.get("denoiser", "0"))
+	if args.has("vfog_sky_affect"):
+		env.volumetric_fog_sky_affect = float(args["vfog_sky_affect"])
 	# Measurement mode: linear tonemap and a low exposure keep values from
 	# clipping, so mean brightness can be compared between builds.
 	if args.has("linear"):

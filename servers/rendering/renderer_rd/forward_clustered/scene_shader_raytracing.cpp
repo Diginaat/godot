@@ -1324,16 +1324,7 @@ void SceneShaderRaytracing::_build_pipeline_worker(PipelineBuildTask *p_task) {
 void SceneShaderRaytracing::_finalize_pipeline_build(PipelineBuildTask *p_task) {
 	HashMap<uint32_t, PipelineBundle>::Iterator bit = pipeline_bundles.find(p_task->rt_flags);
 	if (bit == pipeline_bundles.end()) {
-		for (uint32_t i = 0; i < p_task->slots.size(); i++) {
-			if (p_task->slots[i].existing_per_hg_shader.is_null() &&
-					i < p_task->new_per_hg_shaders.size() &&
-					p_task->new_per_hg_shaders[i].is_valid()) {
-				RD::get_singleton()->free_rid(p_task->new_per_hg_shaders[i]);
-			}
-		}
-		if (p_task->new_pipeline.is_valid()) {
-			RD::get_singleton()->free_rid(p_task->new_pipeline);
-		}
+		_free_task_owned_outputs(p_task);
 		return;
 	}
 	PipelineBundle &bundle = bit->value;
@@ -1401,6 +1392,26 @@ void SceneShaderRaytracing::_finalize_pipeline_build(PipelineBuildTask *p_task) 
 	bundle.hit_sbt = new_sbt;
 	bundle.live_hg_count = n;
 	bundle.live_ready_mask = p_task->new_ready_mask;
+}
+
+void SceneShaderRaytracing::_free_task_owned_outputs(PipelineBuildTask *p_task) {
+	if (!p_task) {
+		return;
+	}
+	for (uint32_t i = 0; i < p_task->new_per_hg_shaders.size(); i++) {
+		if (i < p_task->slots.size() && p_task->slots[i].existing_per_hg_shader.is_valid()) {
+			continue;
+		}
+		RID shader = p_task->new_per_hg_shaders[i];
+		if (shader.is_valid()) {
+			RD::get_singleton()->free_rid(shader);
+			p_task->new_per_hg_shaders[i] = RID();
+		}
+	}
+	if (p_task->new_pipeline.is_valid()) {
+		RD::get_singleton()->free_rid(p_task->new_pipeline);
+		p_task->new_pipeline = RID();
+	}
 }
 
 // Single-lane rebuild dispatcher.
@@ -1510,12 +1521,11 @@ void SceneShaderRaytracing::_join_lane_for_shutdown() {
 		if (current->worker_id != WorkerThreadPool::INVALID_TASK_ID && WorkerThreadPool::get_singleton()) {
 			WorkerThreadPool::get_singleton()->wait_for_task_completion(current->worker_id);
 		}
-		if (current->new_pipeline.is_valid()) {
-			RD::get_singleton()->free_rid(current->new_pipeline);
-		}
+		_free_task_owned_outputs(current);
 		memdelete(current);
 	}
 	for (PipelineBuildTask *t : queued) {
+		_free_task_owned_outputs(t);
 		memdelete(t);
 	}
 }

@@ -95,7 +95,7 @@ struct RT_InstanceMotionData {
 static_assert(sizeof(RT_InstanceMotionData) == 48, "RT_InstanceMotionData must be 48 bytes");
 
 /// An emissive StandardMaterial3D surface that direct-light sampling (NEE) can
-/// target (matches GLSL EmissiveMeshData, std430, 80 bytes).
+/// target (matches GLSL EmissiveMeshData, std430, 96 bytes).
 struct RT_EmissiveMeshData {
 	float object_to_world[12]; // Current object-to-world (transposed 3x4), includes the compression AABB.
 	float center[3]; // World-space bounds center.
@@ -104,8 +104,10 @@ struct RT_EmissiveMeshData {
 	uint32_t primitive_count; // Triangle count.
 	float power; // Selection weight: emission luminance times surface area estimate.
 	float _pad;
+	float half_extents[3]; // World-space bounds half size (AABB around center).
+	float _pad2;
 };
-static_assert(sizeof(RT_EmissiveMeshData) == 80, "RT_EmissiveMeshData must be 80 bytes");
+static_assert(sizeof(RT_EmissiveMeshData) == 96, "RT_EmissiveMeshData must be 96 bytes");
 
 // Must match GLSL MaterialData (std430, 96 bytes).
 struct alignas(16) RT_MaterialData {

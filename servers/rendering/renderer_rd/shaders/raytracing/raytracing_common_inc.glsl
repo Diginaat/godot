@@ -16,6 +16,12 @@ layout(constant_id = 0) const uint RT_FLAGS = 0u;
 #define RT_MAX_BOUNCES_MASK 0x7u
 #define RT_GET_MAX_BOUNCES() (((RT_FLAGS >> RT_MAX_BOUNCES_SHIFT) & RT_MAX_BOUNCES_MASK) + 1u)
 
+#define RT_PARAM_VOLUMETRIC_FOG_INV_LENGTH 4u
+#define RT_PARAM_VOLUMETRIC_FOG_DETAIL_SPREAD 5u
+#define RT_PARAM_HAS_VOLUMETRIC_FOG 6u
+#define RT_PARAM_VOLUMETRIC_FOG_SKY_AFFECT 7u
+#define RT_PARAM_FOG_USE_LEGACY_BLENDING 8u
+
 // Cull back faces by default; double-sided instances override via CULL_DISABLE flag.
 #define RT_RAY_FLAGS gl_RayFlagsCullBackFacingTrianglesEXT
 
@@ -59,7 +65,20 @@ layout(set = 0, binding = 12, r16f) uniform image2D dlss_rr_specular_hit_dist;
 // Samplers occupy 16-27 (see raytracing_samplers_inc.glsl); velocity sits at
 // the first free slot past them so we do not collide with either.
 layout(set = 0, binding = 28, rg16f) uniform image2D rt_velocity_image;
+layout(set = 0, binding = 29) uniform sampler3D volumetric_fog_texture;
 layout(set = 0, binding = 15, r32f) uniform image2D rt_depth_image;
+
+vec4 sample_primary_volumetric_fog(float view_depth) {
+	vec2 uv = (vec2(gl_LaunchIDEXT.xy) + vec2(0.5)) / vec2(gl_LaunchSizeEXT.xy);
+	float z = view_depth * get_rt_param(RT_PARAM_VOLUMETRIC_FOG_INV_LENGTH);
+	if (z < 0.0) {
+		return vec4(0.0, 0.0, 0.0, 1.0);
+	}
+	if (z < 1.0) {
+		z = pow(z, get_rt_param(RT_PARAM_VOLUMETRIC_FOG_DETAIL_SPREAD));
+	}
+	return texture(volumetric_fog_texture, vec3(uv, z));
+}
 
 #endif // !RT_STAGE_ANY_HIT
 

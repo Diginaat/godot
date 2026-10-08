@@ -46,7 +46,7 @@ layout(set = 0, binding = RT_LIGHT_BUFFER_BINDING, std430) readonly buffer Light
 };
 
 // ============================================================================
-// Emissive meshes sampled as lights (matches C++ RT_EmissiveMeshData, 80 bytes)
+// Emissive meshes sampled as lights (matches C++ RT_EmissiveMeshData, 96 bytes)
 // ============================================================================
 
 struct EmissiveMeshData {
@@ -57,6 +57,8 @@ struct EmissiveMeshData {
 	uint primitive_count; // Triangle count.
 	float power; // Emission luminance times surface area estimate.
 	float _pad;
+	vec3 half_extents; // World-space bounds half size (AABB around center).
+	float _pad2;
 };
 
 layout(set = 0, binding = 33, std430) readonly buffer EmissiveMeshBuffer {
@@ -318,6 +320,13 @@ float lights_selection_weight(RTLightData light, vec3 hit_pos, vec3 N) {
 // lights_selection_weight(), it is > 0 wherever the mesh can add light.
 float lights_mesh_selection_weight(EmissiveMeshData em, vec3 hit_pos, vec3 N) {
 	vec3 to_center = em.center - hit_pos;
+	// No point of the mesh lies in front of the surface when every corner of
+	// its bounds is behind it (the dot product is linear, so this is exact).
+	// The sphere bound below can't tell: a wide panel just under a roof pokes
+	// through the roof plane, and the roof would waste samples on it.
+	if (dot(N, to_center) + dot(abs(N), em.half_extents) <= 0.0) {
+		return 0.0;
+	}
 	float dist_sq = dot(to_center, to_center);
 	float radius_sq = em.radius * em.radius;
 	float cos_w = 1.0; // Inside the bounds the mesh can be in any direction.
