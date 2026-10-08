@@ -15,6 +15,9 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 - **Branches.** New work goes on `dev` first. `nvidia-pt-dlss` (published as
   `nvidia-dlss-physx`) only gets tested work: build plus smoke tests passing,
   and the maintainer's OK. After publishing, fast-forward `dev` and push both.
+- **Path tracer work goes on `dev-pt`**, so `dev` stays clean. Merge it into
+  `dev` only when a step is finished and tested. Merge `dev` into `dev-pt`
+  after every sync.
 - **Never push to `origin`** (NVIDIA-RTX). Publish only through the `fork` remote.
 - **The fork is public.** Before every push, check tracked files for private
   paths and private project names (`git grep`).

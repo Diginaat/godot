@@ -5,7 +5,8 @@ handle PBR materials, lights, emission, custom shaders and fog natively. This
 file is the shared memory for humans and agents working on it: read it before
 starting, and update the step table and the findings log as you go.
 
-Work happens on the `dev` branch (see [CUSTOM_BUILD.md](CUSTOM_BUILD.md)).
+Work happens on the `dev-pt` branch. A finished step (build, smoke tests,
+screenshots) is merged into `dev`; see [CUSTOM_BUILD.md](CUSTOM_BUILD.md).
 
 ## How to run the test scene
 

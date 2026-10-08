@@ -22,6 +22,13 @@ the published branch always works. After publishing, fast-forward `dev` to
 `nvidia-pt-dlss` and push both:
 `git push fork nvidia-pt-dlss:nvidia-dlss-physx dev:dev`.
 
+New path tracer features are tried on `dev-pt` first (branched from `dev`,
+also pushed to the fork). Merge `dev-pt` into `dev` only when the step is
+finished: build, smoke tests, and the test scene screenshots checked against
+raster (see [PATHTRACER_TESTING.md](PATHTRACER_TESTING.md)). Keep `dev-pt`
+current by merging `dev` into it after every sync. Release flow:
+`dev-pt` -> `dev` -> `nvidia-pt-dlss`.
+
 If a remote is missing:
 
 ```
