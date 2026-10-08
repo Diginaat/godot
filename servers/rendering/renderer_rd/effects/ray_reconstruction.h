@@ -53,6 +53,9 @@ public:
 		RID output; // Internal color texture (rgba16f).
 		Size2i size;
 		Projection projection; // As the path tracer's primary rays use it (depth correction and jitter included).
+		Projection prev_projection; // Same for the previous frame.
+		Projection projection_unjittered; // Depth correction, no jitter.
+		Projection prev_projection_unjittered;
 		Transform3D cam_transform;
 		Transform3D prev_cam_transform;
 	};
@@ -86,8 +89,14 @@ private:
 		float history[4];
 		float filter_params[4];
 		float view_ray[4];
+		float projection_unjittered[16];
+		float previous_projection_unjittered[16];
+		float previous_to_current_view[16];
+		float previous_view_ray[4];
+		float specular_params[4];
+		float reserved[8];
 	};
-	static_assert(sizeof(ParamsUBO) == 256);
+	static_assert(sizeof(ParamsUBO) == 512);
 
 	struct PushConstant {
 		int32_t step_size;

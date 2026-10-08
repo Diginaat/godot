@@ -507,6 +507,10 @@ void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout Pat
 }
 
 #ifdef NATIVE_RR_ENABLED
+// Set when the closest hit already wrote this pixel's guide (alpha blended
+// primary hits write one guide for both of their outcomes).
+bool rr_guide_written = false;
+
 /// Primary hit only: hand raygen the clean part (emission, fog in-scatter) and
 /// the specular part of direct light, so it can split the path for the
 /// native denoiser. Everything else of the hit's radiance is diffuse.
@@ -624,10 +628,33 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 #endif
 
 #ifdef NATIVE_RR_ENABLED
-	if (total_bounces == 0u && is_sample_zero(ps.packed_bounces_flags)) {
+	if (total_bounces == 0u && is_sample_zero(ps.packed_bounces_flags) && !rr_guide_written) {
+		// Distance to what the perfect reflection hits, for reprojecting
+		// reflections on smooth surfaces (same query as the DLSS RR guide).
+		float mirror_hit = -1.0;
+		if (m.roughness < MAX_DENOISER_SPECULAR_HIT_THRESHOLD) {
+			vec3 spec_dir = reflect(-V, N);
+			rayQueryEXT spec_rq;
+			rayQueryInitializeEXT(spec_rq, tlas, RT_RAY_FLAGS | gl_RayFlagsTerminateOnFirstHitEXT,
+					0xFF, offset_ray_origin(h.hit_pos, spec_dir), 0.001, spec_dir, RR_MISS_DISTANCE);
+			while (rayQueryProceedEXT(spec_rq)) {
+				if (rayQueryGetIntersectionTypeEXT(spec_rq, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+					if (ray_query_alpha_test(
+								rayQueryGetIntersectionInstanceCustomIndexEXT(spec_rq, false),
+								rayQueryGetIntersectionPrimitiveIndexEXT(spec_rq, false),
+								rayQueryGetIntersectionBarycentricsEXT(spec_rq, false),
+								ps.rng_state)) {
+						rayQueryConfirmIntersectionEXT(spec_rq);
+					}
+				}
+			}
+			mirror_hit = rayQueryGetIntersectionTypeEXT(spec_rq, true) != gl_RayQueryCommittedIntersectionNoneEXT
+					? rayQueryGetIntersectionTEXT(spec_rq, true)
+					: RR_MISS_DISTANCE;
+		}
 		rr_write_guide(DLSSRR_computeDiffuseAlbedo(m.albedo, m.metalness),
 				DLSSRR_computeSpecularAlbedo(m.albedo, m.metalness, brdf_mat.dielectricF0, m.roughness, NdotV),
-				N, m.roughness, 0u);
+				N, m.roughness, mirror_hit, 0u);
 	}
 #endif
 
@@ -713,6 +740,29 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 	path_pack(payload, ps);
 }
 
+#ifdef NATIVE_RR_ENABLED
+// ============================================================================
+// TRANSMIT AND BOUNCE (native ray reconstruction, alpha blend at the primary hit)
+// ============================================================================
+
+/// The (1 - alpha) part of an alpha blended surface hit by a primary ray: the
+/// ray continues straight through, as an IOR of 1 would. With the native
+/// denoiser primary rays always stop at alpha blended surfaces (any hit) and
+/// the closest hit picks shading or passing through, so the denoiser sees the
+/// same surface every frame instead of a random mix of it and what's behind.
+void transmit_and_bounce(HitData h) {
+	PathState ps = path_unpack(payload);
+	apply_segment_fog(gl_HitTEXT, ps.radiance, ps.throughput);
+	rr_store_primary(ps.radiance, vec3(0.0), ps.packed_bounces_flags);
+
+	ps.packed_bounces_flags = inc_total_bounce(ps.packed_bounces_flags);
+	ps.hit_t = gl_HitTEXT;
+	ps.offset_normal = dot(gl_WorldRayDirectionEXT, h.geometry_normal) > 0.0 ? h.geometry_normal : -h.geometry_normal;
+	ps.next_ray_dir = gl_WorldRayDirectionEXT;
+	path_pack(payload, ps);
+}
+#endif
+
 // ============================================================================
 // REFRACT AND BOUNCE (StandardMaterial3D refraction)
 // ============================================================================
@@ -750,8 +800,8 @@ void refract_and_bounce(HitData h, MaterialResult m, float ior) {
 	// specular albedo of 1 (nothing to demodulate).
 	if (total_bounces == 0u) {
 		rr_store_primary(ps.radiance, vec3(0.0), ps.packed_bounces_flags);
-		if (is_sample_zero(ps.packed_bounces_flags)) {
-			rr_write_guide(vec3(0.0), vec3(1.0), m.normal, m.roughness, RR_GUIDE_FLAG_TRANSMISSIVE);
+		if (is_sample_zero(ps.packed_bounces_flags) && !rr_guide_written) {
+			rr_write_guide(vec3(0.0), vec3(1.0), m.normal, m.roughness, -1.0, RR_GUIDE_FLAG_TRANSMISSIVE);
 		}
 	}
 #endif

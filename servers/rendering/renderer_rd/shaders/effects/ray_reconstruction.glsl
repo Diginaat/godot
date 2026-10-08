@@ -26,6 +26,12 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	vec4 history; // max diffuse history, max specular history, max moment history, history valid (0/1)
 	vec4 filter_params; // luminance sigma, normal power, depth sigma, pixel footprint at depth 1
 	vec4 view_ray; // View ray at unit depth: xy = scale * uv + offset (scale.xy, offset.xy).
+	mat4 projection_unjittered; // Current view space -> clip, without jitter.
+	mat4 previous_projection_unjittered; // Previous view space -> clip, without jitter.
+	mat4 previous_to_current_view; // Previous view space -> current view space.
+	vec4 previous_view_ray; // As view_ray, for the previous frame.
+	vec4 specular_params; // x: virtual reprojection below this roughness (blends out above), yzw unused.
+	vec4 reserved[2];
 }
 params;
 
@@ -83,7 +89,17 @@ vec3 guide_normal(uvec4 g) {
 }
 
 float guide_roughness(uvec4 g) {
-	return float(g.w & 0xFFFFu) / 65535.0;
+	return unpackHalf2x16(g.w).x;
+}
+
+// Distance to what the perfect reflection hits; < 0 when not traced.
+float guide_mirror_hit(uvec4 g) {
+	return unpackHalf2x16(g.w).y;
+}
+
+vec2 project_uv(mat4 p_projection, vec3 p_view) {
+	vec4 clip = p_projection * vec4(p_view, 1.0);
+	return clip.xy / clip.w * 0.5 + 0.5;
 }
 
 vec3 guide_diffuse_albedo(uvec4 g) {
@@ -92,6 +108,12 @@ vec3 guide_diffuse_albedo(uvec4 g) {
 
 vec3 guide_specular_albedo(uvec4 g) {
 	return max(unpackUnorm4x8(g.y).rgb, vec3(ALBEDO_MIN));
+}
+
+// Glass and other refractive surfaces: the specular signal is the light seen
+// through them.
+bool guide_transmissive(uvec4 g) {
+	return (g.y >> 24u) != 0u;
 }
 
 vec3 sanitize(vec3 c) {
@@ -115,6 +137,56 @@ layout(rgba16f, set = 1, binding = 9) uniform restrict writeonly image2D diffuse
 layout(rgba16f, set = 1, binding = 10) uniform restrict writeonly image2D specular_history;
 layout(rgba16f, set = 1, binding = 11) uniform restrict writeonly image2D moments_history;
 layout(rg32ui, set = 1, binding = 12) uniform restrict writeonly uimage2D surface;
+// Specular hit distance (0 = unknown), accumulated like the colors.
+layout(r16f, set = 1, binding = 13) uniform restrict readonly image2D prev_specular_hit_history;
+layout(r16f, set = 1, binding = 14) uniform restrict writeonly image2D specular_hit_history;
+
+// Last frame's specular history at the place where the reflection seen at this
+// pixel was: the virtual image of the hit point, p_hit_distance behind the
+// surface along the view ray. Taps must lie on the same surface (plane and
+// normal test in the current view). Returns the weight found.
+float reproject_virtual(vec3 p_view_pos, vec3 p_view_normal, vec3 p_normal, float p_hit_distance, vec2 p_uv, ivec2 p_size, out vec4 r_specular) {
+	r_specular = vec4(0.0);
+	vec3 virtual_pos = p_view_pos * (1.0 + p_hit_distance / max(length(p_view_pos), 1e-4));
+	vec3 previous_virtual = (params.current_to_previous_view * vec4(virtual_pos, 1.0)).xyz;
+	vec2 delta = project_uv(params.previous_projection_unjittered, previous_virtual) - project_uv(params.projection_unjittered, virtual_pos);
+	vec2 prev_pixel = (p_uv + delta) * params.size.xy - 0.5;
+	ivec2 base = ivec2(floor(prev_pixel));
+	vec2 f = prev_pixel - vec2(base);
+	float depth = -p_view_pos.z;
+	float plane_tolerance = 0.01 * depth + 2.0 * params.filter_params.w * depth;
+	float weight_sum = 0.0;
+	for (int i = 0; i < 4; i++) {
+		ivec2 off = ivec2(i & 1, i >> 1);
+		ivec2 p = base + off;
+		if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, p_size))) {
+			continue;
+		}
+		float w = (off.x == 1 ? f.x : 1.0 - f.x) * (off.y == 1 ? f.y : 1.0 - f.y);
+		if (w <= 0.0) {
+			continue;
+		}
+		float pd;
+		vec3 pn;
+		float pr;
+		unpack_surface(imageLoad(prev_surface, p).xy, pd, pn, pr);
+		if (pd <= 0.0 || dot(pn, p_normal) < 0.8) {
+			continue;
+		}
+		vec2 puv = (vec2(p) + 0.5) * params.size.zw;
+		vec3 prev_view = vec3(puv * params.previous_view_ray.xy + params.previous_view_ray.zw, -1.0) * pd;
+		vec3 in_current = (params.previous_to_current_view * vec4(prev_view, 1.0)).xyz;
+		if (abs(dot(p_view_normal, in_current - p_view_pos)) > plane_tolerance) {
+			continue;
+		}
+		r_specular += w * imageLoad(prev_specular_history, p);
+		weight_sum += w;
+	}
+	if (weight_sum > 1e-3) {
+		r_specular /= weight_sum;
+	}
+	return weight_sum;
+}
 
 void main() {
 	ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
@@ -130,6 +202,7 @@ void main() {
 		imageStore(specular_history, pos, vec4(0.0));
 		imageStore(moments_history, pos, vec4(0.0));
 		imageStore(surface, pos, uvec4(0u));
+		imageStore(specular_hit_history, pos, vec4(0.0));
 		return;
 	}
 
@@ -152,6 +225,7 @@ void main() {
 	vec4 prev_diffuse = vec4(0.0);
 	vec4 prev_specular = vec4(0.0);
 	vec4 prev_moments = vec4(0.0);
+	float prev_hit = 0.0;
 	float weight_sum = 0.0;
 	if (params.history.w > 0.5) {
 		vec2 prev_uv = uv + imageLoad(velocity_image, pos).xy;
@@ -184,6 +258,7 @@ void main() {
 			prev_diffuse += w * imageLoad(prev_diffuse_history, p);
 			prev_specular += w * imageLoad(prev_specular_history, p);
 			prev_moments += w * imageLoad(prev_moments_history, p);
+			prev_hit += w * imageLoad(prev_specular_hit_history, p).r;
 			weight_sum += w;
 		}
 	}
@@ -194,13 +269,45 @@ void main() {
 		prev_diffuse /= weight_sum;
 		prev_specular /= weight_sum;
 		prev_moments /= weight_sum;
+		prev_hit /= weight_sum;
 		diffuse_length = prev_diffuse.a;
 		specular_length = prev_specular.a;
 	}
 
-	// Mirror-like reflections move with the reflected scene, not the surface:
-	// keep their history short (step 4 reprojects them properly).
-	float max_specular = mix(2.0, params.history.y, smoothstep(0.05, 0.5, roughness));
+	// Specular hit distance: traced along the mirror direction on smooth
+	// surfaces, sampled (noisy, only when the specular lobe was picked) on
+	// rough ones. Accumulated so a frame without a sample keeps the old value.
+	float hit = guide_mirror_hit(g);
+	if (hit < 0.0) {
+		hit = imageLoad(specular_image, pos).a;
+	}
+	if (hit > 0.0) {
+		hit = prev_hit > 0.0 ? mix(prev_hit, hit, 0.5) : hit;
+	} else {
+		hit = prev_hit;
+	}
+	imageStore(specular_hit_history, pos, vec4(hit));
+
+	// Smooth surfaces: the reflection moves like the virtual image of the hit
+	// point, not like the surface. Blend between both by roughness.
+	// Refracted light has no single virtual image: use the surface motion.
+	const bool transmissive = guide_transmissive(g);
+	float surface_motion = transmissive ? 1.0 : smoothstep(0.0, params.specular_params.x, roughness);
+	if (params.history.w > 0.5 && surface_motion < 1.0 && hit > 0.0) {
+		vec4 virtual_specular;
+		vec3 vn = normal * mat3(params.view_to_world_rotation);
+		float wv = reproject_virtual(vpos, vn, normal, hit, uv, size, virtual_specular);
+		if (wv > 1e-3) {
+			prev_specular = weight_sum > 1e-3 ? mix(virtual_specular, prev_specular, surface_motion) : virtual_specular;
+			specular_length = prev_specular.a;
+		} else {
+			// The reflection was not visible here last frame: start over.
+			specular_length = min(specular_length, 1.0 + 2.0 * surface_motion);
+		}
+	}
+
+	// Mirror-like reflections keep a shorter history than rough ones.
+	float max_specular = transmissive ? 16.0 : mix(8.0, params.history.y, smoothstep(0.0, 0.4, roughness));
 	diffuse_length = min(diffuse_length + 1.0, params.history.x);
 	specular_length = min(specular_length + 1.0, max_specular);
 
@@ -345,11 +452,17 @@ layout(rgba32ui, set = 1, binding = 8) uniform restrict readonly uimage2D guide_
 layout(rgba16f, set = 1, binding = 9) uniform restrict readonly image2D raw_diffuse_image;
 layout(rgba16f, set = 1, binding = 10) uniform restrict readonly image2D raw_specular_image;
 layout(rgba16f, set = 1, binding = 11) uniform restrict writeonly image2D output_image;
+layout(r16f, set = 1, binding = 12) uniform restrict readonly image2D specular_hit_history;
 
-// Roughness below which the specular signal isn't filtered at this iteration:
-// mirror-like reflections stay sharp, rough ones get the full kernel.
-float specular_min_roughness(int iteration) {
-	return 0.02 * float(1 << iteration);
+// How far (in pixels) the reflection of this surface is blurred by its
+// roughness: the lobe (GGX alpha as an angle) spreads over hit distance *
+// alpha at the reflected point, seen from depth + hit distance away. The
+// specular filter doesn't go wider than that, so mirror-like reflections stay
+// sharp and near reflections (contact) stay sharper than far ones.
+float specular_radius_pixels(float p_roughness, float p_depth, float p_hit) {
+	float alpha = p_roughness * p_roughness;
+	float hit = p_hit > 0.0 ? p_hit : 1e4;
+	return hit * alpha / ((p_depth + hit) * params.filter_params.w);
 }
 
 vec3 heatmap(float t) {
@@ -382,7 +495,13 @@ void main() {
 		// below a small fraction of the signal (converged or bright pixels).
 		const float SKIP_RELATIVE_NOISE = 0.02;
 		bool filter_diffuse = pc.iteration == 0 || sqrt(d_center.a) > SKIP_RELATIVE_NOISE * (ld + 1e-3);
-		bool filter_specular = c.roughness >= specular_min_roughness(pc.iteration) &&
+		float s_radius = specular_radius_pixels(c.roughness, c.depth, imageLoad(specular_hit_history, pos).r);
+		if (guide_transmissive(imageLoad(guide_image, pos))) {
+			// Paths through glass are very noisy at low sample counts; a few
+			// pixels of blur are less visible than the noise.
+			s_radius = max(s_radius, 4.0);
+		}
+		bool filter_specular = (pc.iteration == 0 || float(pc.step_size) <= s_radius) &&
 				(pc.iteration == 0 || sqrt(s_center.a) > SKIP_RELATIVE_NOISE * (ls + 1e-3));
 
 		const float kernel[2] = float[](1.0, 0.5);
