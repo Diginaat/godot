@@ -24,6 +24,8 @@ Godot `master`.
 
 Prebuilt Windows editors (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
+Each release has this build's own version first and the Godot version it's
+based on second: `v0.2.0-godot4.8-dev` is build 0.2.0, on Godot 4.8-dev.
 
 > [!IMPORTANT]
 > **The downloads work out of the box. You only need the NVIDIA Streamline SDK
