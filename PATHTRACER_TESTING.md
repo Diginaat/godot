@@ -21,7 +21,7 @@ Interactive:
 bin\godot.windows.editor.x86_64.exe --path misc\pathtracer_test_project
 ```
 
-Keys: `1`-`7` switch views, `P` toggles path tracing, `D` cycles the debug
+Keys: `1`-`8` switch views, `P` toggles path tracing, `D` cycles the debug
 mode, `R` toggles DLSS Ray Reconstruction, `F` toggles volumetric fog.
 
 Screenshots (for comparing path traced against raster, or before against
@@ -36,7 +36,7 @@ All user arguments (after `--`):
 
 | Argument | Default | Meaning |
 | --- | --- | --- |
-| `--view=` | `overview` | `overview`, `pbr`, `lighting`, `emissive`, `shaders`, `glass`, `fog` |
+| `--view=` | `overview` | `overview`, `pbr`, `lighting`, `emissive`, `shaders`, `glass`, `fog`, `lights` (48 omni lights; in `--shot`/`--bench` runs of other views those lights are left out) |
 | `--pt=` | `1` | `1` path traced, `0` raster |
 | `--spp=` | `4` | Path tracer samples per pixel (1-16) |
 | `--bounces=` | `3` | Path tracer max bounces (1-8) |
@@ -53,6 +53,9 @@ All user arguments (after `--`):
 | `--adaptive=` | `0` | `1` turns on `Environment.pathtracing_adaptive_sampling` |
 | `--adaptive_threshold=` | `0.02` | Adaptive sampling threshold (standard error of tonemapped luminance) |
 | `--adaptive_debug=1` | off | Show samples used per pixel instead of the image (blue few, red all) |
+| `--restir=` | `0` | `1` turns on `Environment.pathtracing_restir_di` |
+| `--orbit=` | off | Turn the camera this many degrees per frame around the view target (tests temporal reuse under motion) |
+| `--yaw=` | off | Static camera turned this many degrees around the view target |
 
 ## What the path tracer supports today
 
@@ -78,6 +81,7 @@ Audited on 2026-10-08 at commit `ca52415e30`. Shader sources are in
 | Refraction (StandardMaterial3D) | Supported: dielectric with Fresnel, IOR = 1 + 10 x `refraction_scale` (0.05 gives 1.5), albedo tints, roughness scatters. Casts opaque shadows (as raster) | `refract_and_bounce()` |
 | Custom shader alpha blend, add/sub/mul blending, billboards, proximity fade | Raster overlay on top of the path traced image | `ShaderData::rt_traces_transparency()` |
 | Debug views | 22 modes in `Environment.pathtracing_debug_mode` | `debug_visualize()` |
+| ReSTIR DI | Opt-in toggle `Environment.pathtracing_restir_di`: temporal reuse of light samples at the primary hit. Best at 1 spp | `raytracing_restir_di_inc.glsl` |
 | Adaptive sampling | Opt-in toggle in the Environment's Pathtracing section (`pathtracing_adaptive_sampling`), needs 2+ samples per pixel; samples per pixel becomes the maximum. Disables SER while on | raygen sample loop |
 
 ## Steps
@@ -109,8 +113,8 @@ its reservoir logic may be reusable.
 | --- | --- | --- | --- | --- |
 | 11 | Profile the tracer, verify SER | Baseline numbers | | Done |
 | 12 | Adaptive sampling: more rays for noisy pixels, fewer for stable ones | Less wasted work | Scene-dependent / medium | Done |
-| 13 | ReSTIR DI: reuse light samples across pixels and frames | Direct light with many lights | High / high | Next |
-| 14 | ReSTIR GI: reuse indirect paths | Multi-bounce at low spp | High / very high | |
+| 13 | ReSTIR DI: reuse light samples across pixels and frames | Direct light with many lights | High / high | Done (temporal reuse; spatial reuse off, see findings) |
+| 14 | ReSTIR GI: reuse indirect paths | Multi-bounce at low spp | High / very high | Next |
 | 15 | Path guiding experiments | Better ray directions | Unknown | |
 
 ### Baseline (step 11)
@@ -164,6 +168,54 @@ Other notes:
 ## Findings log
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
+
+- 2026-10-08: Step 13 done (ReSTIR DI, temporal reuse). New Environment
+  toggle `pathtracing_restir_di` (C++-only server call, like adaptive
+  sampling), raygen variant `USE_RESTIR_DI` (`RT_FLAG_RESTIR_DI`), new test
+  view `lights` (48 small omni lights between pillars) and harness options
+  `--restir`, `--orbit`, `--yaw`.
+  Design: a sample is (light, random numbers for the point on it), so any
+  pixel re-evaluates it with `lights_eval_light()` /
+  `lights_eval_emissive_mesh()` (the NEE code was split into pick, evaluate
+  and one shared shadow ray). At the primary hit, sample 0 resamples its RIS
+  candidate with last frame's reservoir at the reprojected pixel, weighting
+  with the generalized balance heuristic (other surfaces judged by
+  `lights_selection_weight()`), traces one shadow ray and stores the
+  reservoir (rgba32ui sample + rgba32f surface images, ping-pong by frame
+  parity, bindings 34-38). Light indices change every frame (lights are
+  re-sorted by a camera-dependent score), so the host uploads a previous to
+  current index map built from light instance RIDs and emissive surface
+  pointers. Samples 1+ of a pixel hit the same surface (no jitter) and reuse
+  sample 0's reservoir (`shadercallcoherent` images; W's sign records the
+  shadow, so no extra shadow ray).
+  Measured, lights view, 1 spp: direct light RMSE 0.110 -> 0.058, full path
+  (linear) 0.115 -> 0.073, tonemapped 0.356 -> 0.255; linear mean equal to
+  the 64 spp reference (0.0190), also with a moving camera (0.0157 vs
+  0.0160, RMSE 0.103 -> 0.062). Emissive view (mesh lights): unbiased, RMSE
+  0.111 -> 0.089. Cost: 1 spp 6.09 -> 6.12 ms, 4 spp 24.8 -> 29.6 ms. At 4
+  spp the samples share one direct light estimate, so ReSTIR helps little
+  there; it's meant for 1 spp with a denoiser.
+  Dead ends, all measured: (1) plain 1/M weights with visibility reuse: 28%
+  too dark. (2) M counted only over surfaces the sample can reach: unbiased
+  per frame, but rare large weights fed on themselves through reuse
+  (fireflies spreading, 30% too bright in some runs). (3) Storing 1/M weights
+  to stop that: stable but 17% dark. The balance heuristic fixed all three.
+  (4) Running the full resampling for every sample: 3x slower, because
+  lanes drift apart across samples and the primary-hit code and its shadow
+  ray then run in turns with the later bounces' NEE; one shared pick and
+  shadow-ray call site cut it, reusing sample 0's result fixed it.
+  (5) Spatial reuse from last frame's neighbors: fine with a static camera,
+  but under motion the image brightened frame after frame (x5.7 after 120
+  frames at 0.1 degrees per frame), and it added almost nothing over
+  temporal reuse here (direct RMSE 0.057 vs 0.058). Not caused by the light
+  remap, the neighbor weight functions or the reprojection (each tested).
+  Left off (`RESTIR_SPATIAL_SAMPLES 0`); open for a later step.
+  Also found: `vec3_to_oct()` returns [0, 1] but `oct_to_vec3()` takes
+  [-1, 1]; decoding without remapping broke every normal check. And the
+  NEE refactor alone skips shadow rays toward lights that can't contribute:
+  emissive view 21.4 -> 17.6 ms, lights view 31.1 -> 25.0 ms with ReSTIR off.
+  Seen once, not reproduced in 20+ runs: `Attempted to free invalid ID` in
+  the first run after a rebuild.
 
 - 2026-10-08: Step 12 follow-up: the on/off switch moved from the project
   setting to `Environment.pathtracing_adaptive_sampling` (Pathtracing section

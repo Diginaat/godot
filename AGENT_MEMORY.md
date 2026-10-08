@@ -117,6 +117,16 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   that look at a pixel's own samples bias dark; vote per subgroup instead.
 - Never use subgroup operations in raygen together with SER
   (`hitObject*`/`reorderThreadEXT`): it crashed the NVIDIA driver.
+- Brightness comparisons: decode sRGB to linear before averaging, and use
+  `--linear --exposure=0.04` so little clips. Means of sRGB-encoded pixels
+  look darker the noisier the image is, even when nothing is biased.
+- Test anything temporal with a moving camera too (`--orbit=0.1`): ReSTIR
+  spatial reuse was unbiased with a static camera and blew up under motion.
+- In the closest hit, keep one call site for shadow rays and other costly
+  work shared between the primary hit and later bounces. Lanes of a warp
+  drift to different samples/bounces, and code that only some of them run
+  (with its own `traceRayEXT`) then runs in turns.
+- `vec3_to_oct()` returns [0, 1]; `oct_to_vec3()` expects [-1, 1].
 - A BLAS dies with the buffers it was built from. Check
   `RenderingDevice::acceleration_structure_is_valid()` before freeing one from
   a cache. Don't bind buffers you free later through a linear-pool uniform

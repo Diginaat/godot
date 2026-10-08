@@ -192,6 +192,12 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 			raytracing->dlss_rr_free_buffers(rb.ptr());
 		}
 
+		if (rt_flags & SceneShaderRaytracing::RT_FLAG_RESTIR_DI) {
+			raytracing->restir_di_ensure_buffers(rb.ptr());
+		} else if (raytracing->restir_di_has_buffers(rb.ptr())) {
+			raytracing->restir_di_free_buffers(rb.ptr());
+		}
+
 		RTViewportState *rt_state = raytracing->build_tlas(p_render_data, rt_flags);
 		if (rt_state) {
 			rt_uniform_set = raytracing->update_uniform_set(rt_state, p_render_data, rt_flags);

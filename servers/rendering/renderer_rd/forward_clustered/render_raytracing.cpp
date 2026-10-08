@@ -143,6 +143,9 @@ void RenderRaytracing::_free_viewport_state_internal(RTViewportState *p_state) {
 	if (p_state->params_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(p_state->params_buffer);
 	}
+	if (p_state->restir_remap_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(p_state->restir_remap_buffer);
+	}
 	if (p_state->scene_uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(p_state->scene_uniform_set)) {
 		RD::get_singleton()->free_rid(p_state->scene_uniform_set);
 	}
@@ -216,6 +219,34 @@ void RenderRaytracing::dlss_rr_ensure_buffers(RenderSceneBuffersRD *p_render_buf
 	p_render_buffers->create_texture(RB_SCOPE_DLSS_RR, RB_TEX_DLSS_RR_NORMAL_ROUGHNESS, RD::DATA_FORMAT_R8G8B8A8_SNORM, usage_bits, RD::TEXTURE_SAMPLES_1);
 	// Specular Hit Distance: Single channel distance (R16F is sufficient).
 	p_render_buffers->create_texture(RB_SCOPE_DLSS_RR, RB_TEX_DLSS_RR_SPECULAR_HIT_DIST, RD::DATA_FORMAT_R16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1);
+}
+
+void RenderRaytracing::restir_di_ensure_buffers(RenderSceneBuffersRD *p_render_buffers) {
+	ERR_FAIL_NULL(p_render_buffers);
+	if (p_render_buffers->has_texture(RB_SCOPE_RESTIR_DI, RB_TEX_RESTIR_SAMPLE_0)) {
+		return;
+	}
+	uint32_t usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
+	// Sample: light key, packed random numbers, W, M. Surface: world position
+	// and packed normal, for validating reuse.
+	const StringName samples[2] = { RB_TEX_RESTIR_SAMPLE_0, RB_TEX_RESTIR_SAMPLE_1 };
+	const StringName surfaces[2] = { RB_TEX_RESTIR_SURFACE_0, RB_TEX_RESTIR_SURFACE_1 };
+	for (int i = 0; i < 2; i++) {
+		RID sample = p_render_buffers->create_texture(RB_SCOPE_RESTIR_DI, samples[i], RD::DATA_FORMAT_R32G32B32A32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1);
+		RID surface = p_render_buffers->create_texture(RB_SCOPE_RESTIR_DI, surfaces[i], RD::DATA_FORMAT_R32G32B32A32_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1);
+		// M = 0 marks "no reservoir", so the first frame reuses nothing.
+		RD::get_singleton()->texture_clear(sample, Color(0, 0, 0, 0), 0, 1, 0, 1);
+		RD::get_singleton()->texture_clear(surface, Color(0, 0, 0, 0), 0, 1, 0, 1);
+	}
+}
+
+void RenderRaytracing::restir_di_free_buffers(RenderSceneBuffersRD *p_render_buffers) {
+	ERR_FAIL_NULL(p_render_buffers);
+	p_render_buffers->clear_context(RB_SCOPE_RESTIR_DI);
+}
+
+bool RenderRaytracing::restir_di_has_buffers(RenderSceneBuffersRD *p_render_buffers) const {
+	return p_render_buffers && p_render_buffers->has_texture(RB_SCOPE_RESTIR_DI, RB_TEX_RESTIR_SAMPLE_0);
 }
 
 void RenderRaytracing::dlss_rr_free_buffers(RenderSceneBuffersRD *p_render_buffers) {
@@ -543,6 +574,7 @@ void RenderRaytracing::prepare_frame() {
 	motion_indices.clear();
 	motion_transforms.clear();
 	emissive_meshes.clear();
+	emissive_mesh_keys.clear();
 	deformed_active_this_frame.clear();
 	merged_mm_active_this_frame.clear();
 
@@ -2866,6 +2898,7 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 					em.primitive_count = triangle_count;
 					em.power = emission_luminance * area_estimate;
 					emissive_meshes.push_back(em);
+					emissive_mesh_keys.push_back((uint64_t)(uintptr_t)surf);
 					geometry_data[geometry_data.size() - 1].flags |= RT_GEOM_FLAG_EMISSIVE_LIGHT;
 				}
 			}
@@ -3056,7 +3089,7 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 // Light gathering
 // ---------------------------------------------------------------------------
 
-uint32_t RenderRaytracing::gather_lights(const RenderDataRD *p_render_data, RT_LightData *r_light_data, uint32_t p_max_lights) {
+uint32_t RenderRaytracing::gather_lights(const RenderDataRD *p_render_data, RT_LightData *r_light_data, uint32_t p_max_lights, RID *r_light_keys) {
 	uint32_t rt_light_count = 0;
 
 	if (!p_render_data || !p_render_data->lights) {
@@ -3168,6 +3201,9 @@ uint32_t RenderRaytracing::gather_lights(const RenderDataRD *p_render_data, RT_L
 		ld.spot_direction[0] = 0.0f;
 		ld.spot_direction[1] = 0.0f;
 		ld.spot_direction[2] = 0.0f;
+		if (r_light_keys) {
+			r_light_keys[rt_light_count] = light_instance;
+		}
 		rt_light_count++;
 	}
 
@@ -3232,6 +3268,9 @@ uint32_t RenderRaytracing::gather_lights(const RenderDataRD *p_render_data, RT_L
 			ld.spot_direction[0] = 0.0f;
 			ld.spot_direction[1] = 0.0f;
 			ld.spot_direction[2] = 0.0f;
+		}
+		if (r_light_keys) {
+			r_light_keys[rt_light_count] = light_instance;
 		}
 		rt_light_count++;
 	}
@@ -3408,8 +3447,44 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		// --- Light gathering ---
 		uint32_t rt_light_count = 0;
 		RT_LightData rt_light_data[RT_LIGHTS_MAX] = {};
+		RID rt_light_keys[RT_LIGHTS_MAX];
 
-		rt_light_count = gather_lights(p_render_data, rt_light_data, RT_LIGHTS_MAX);
+		rt_light_count = gather_lights(p_render_data, rt_light_data, RT_LIGHTS_MAX, rt_light_keys);
+
+		// ReSTIR DI: map last frame's light indices to this frame's (lights are
+		// re-sorted every frame), 0xFFFFFFFF for lights that are gone.
+		if (restir_di_has_buffers(rb)) {
+			uint32_t remap[RT_LIGHTS_MAX + RT_EMISSIVE_MESHES_MAX];
+			for (uint32_t i = 0; i < RT_LIGHTS_MAX + RT_EMISSIVE_MESHES_MAX; i++) {
+				remap[i] = 0xFFFFFFFFu;
+			}
+			for (uint32_t i = 0; i < p_state->prev_light_keys.size(); i++) {
+				for (uint32_t j = 0; j < rt_light_count; j++) {
+					if (rt_light_keys[j] == p_state->prev_light_keys[i]) {
+						remap[i] = j;
+						break;
+					}
+				}
+			}
+			for (uint32_t i = 0; i < p_state->prev_mesh_keys.size(); i++) {
+				for (uint32_t j = 0; j < emissive_mesh_keys.size(); j++) {
+					if (emissive_mesh_keys[j] == p_state->prev_mesh_keys[i]) {
+						remap[RT_LIGHTS_MAX + i] = j;
+						break;
+					}
+				}
+			}
+			if (!p_state->restir_remap_buffer.is_valid()) {
+				p_state->restir_remap_buffer = RD::get_singleton()->storage_buffer_create(sizeof(remap));
+				RD::get_singleton()->set_resource_name(p_state->restir_remap_buffer, "RT ReSTIR Light Remap");
+			}
+			RD::get_singleton()->buffer_update(p_state->restir_remap_buffer, 0, sizeof(remap), remap);
+		}
+		p_state->prev_light_keys.resize(rt_light_count);
+		for (uint32_t i = 0; i < rt_light_count; i++) {
+			p_state->prev_light_keys[i] = rt_light_keys[i];
+		}
+		p_state->prev_mesh_keys = emissive_mesh_keys;
 
 		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_LIGHT_COUNT] = float(rt_light_count);
 		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_EMISSIVE_MESH_COUNT] = float(emissive_meshes.size());
@@ -3583,6 +3658,23 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 				RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
 		u.append_id(fog_texture);
 		uniforms.push_back(u);
+	}
+
+	// Bindings 34-38: ReSTIR DI light remap and reservoirs (only in the ReSTIR DI variant).
+	if (restir_di_has_buffers(rb) && p_state->restir_remap_buffer.is_valid()) {
+		RD::Uniform u_remap;
+		u_remap.binding = 34;
+		u_remap.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		u_remap.append_id(p_state->restir_remap_buffer);
+		uniforms.push_back(u_remap);
+		const StringName names[4] = { RB_TEX_RESTIR_SAMPLE_0, RB_TEX_RESTIR_SAMPLE_1, RB_TEX_RESTIR_SURFACE_0, RB_TEX_RESTIR_SURFACE_1 };
+		for (int i = 0; i < 4; i++) {
+			RD::Uniform u;
+			u.binding = 35 + i;
+			u.uniform_type = RD::UNIFORM_TYPE_IMAGE;
+			u.append_id(rb->get_texture(RB_SCOPE_RESTIR_DI, names[i]));
+			uniforms.push_back(u);
+		}
 	}
 
 	RID shader_rd = shader ? shader->get_pipeline_shader_rd(p_rt_flags) : RID();

@@ -620,6 +620,14 @@ bool RendererSceneRender::environment_get_pathtracing_adaptive_sampling(RID p_en
 	return environment_storage.environment_get_pathtracing_adaptive_sampling(p_env);
 }
 
+void RendererSceneRender::environment_set_pathtracing_restir_di(RID p_env, bool p_enable) {
+	environment_storage.environment_set_pathtracing_restir_di(p_env, p_enable);
+}
+
+bool RendererSceneRender::environment_get_pathtracing_restir_di(RID p_env) const {
+	return environment_storage.environment_get_pathtracing_restir_di(p_env);
+}
+
 void RendererSceneRender::environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction) {
 	environment_storage.environment_set_adjustment(p_env, p_enable, p_brightness, p_contrast, p_saturation, p_use_1d_color_correction, p_color_correction);
 }

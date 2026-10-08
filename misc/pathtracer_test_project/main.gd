@@ -9,6 +9,7 @@ extends Node3D
 ##   shaders   custom ShaderMaterials (fragment, TIME, normal map, alpha, vertex)
 ##   glass     alpha-blended and refractive materials
 ##   fog       volumetric fog, a FogVolume and a spot light shaft
+##   lights    closed room lit by 48 small omni lights (many-light sampling)
 
 const VIEWS := {
 	"overview": [Vector3(0, 14, 30), Vector3(0, 1, 0)],
@@ -18,8 +19,9 @@ const VIEWS := {
 	"shaders": [Vector3(0, 2.4, -7.5), Vector3(0, 1.2, -14)],
 	"glass": [Vector3(16, 2.0, -8.5), Vector3(16, 1.2, -14)],
 	"fog": [Vector3(-16, 3.0, -4.0), Vector3(-16, 2.0, -14)],
+	"lights": [Vector3(0, 2.2, -21.0), Vector3(0, 1.4, -28)],
 }
-const VIEW_KEYS := ["pbr", "lighting", "emissive", "shaders", "glass", "fog", "overview"]
+const VIEW_KEYS := ["pbr", "lighting", "emissive", "shaders", "glass", "fog", "overview", "lights"]
 const DEBUG_MODE_COUNT := 23
 
 var args := {}
@@ -42,6 +44,7 @@ func _ready() -> void:
 	_build_shaders(Vector3(0, 0, -14))
 	_build_glass(Vector3(16, 0, -14))
 	_build_fog(Vector3(-16, 0, -14))
+	_build_many_lights(Vector3(0, 0, -28))
 
 	if args.has("sun_only"):
 		# Keep only the sun: isolates direct-light sampling from light selection.
@@ -81,6 +84,7 @@ func _apply_args() -> void:
 		# Read by the path tracer every frame, so it can change at run time.
 		ProjectSettings.set_setting("rendering/pathtracing/use_shader_execution_reordering", args["ser"] == "1")
 	env.pathtracing_adaptive_sampling = args.get("adaptive", "0") == "1"
+	env.pathtracing_restir_di = args.get("restir", "0") == "1"
 	if args.has("adaptive_threshold"):
 		ProjectSettings.set_setting("rendering/pathtracing/adaptive_sampling_threshold", float(args["adaptive_threshold"]))
 	if args.has("adaptive_debug"):
@@ -107,13 +111,28 @@ func _set_view(p_view: String) -> void:
 		p_view = "overview"
 	view = p_view
 	camera.look_at_from_position(VIEWS[view][0], VIEWS[view][1])
+	if args.has("yaw"):
+		# Static camera turned around the view target (see --orbit).
+		var target: Vector3 = VIEWS[view][1]
+		camera.look_at_from_position(target + (camera.position - target).rotated(Vector3.UP, deg_to_rad(float(args["yaw"]))), target)
 	# Volumetric fog only in the fog view, unless forced with --volfog.
 	env.volumetric_fog_enabled = args.get("volfog", "1" if view == "fog" else "0") == "1"
 	_update_hud()
 
 
+# --orbit=D: turn the camera D degrees per frame around the view target, so
+# temporal reuse (ReSTIR) sees camera motion. Fixed per frame, so a given
+# --frames always ends at the same camera.
+func _process(_delta: float) -> void:
+	if not args.has("orbit"):
+		return
+	var target: Vector3 = VIEWS[view][1]
+	var offset := camera.position - target
+	camera.look_at_from_position(target + offset.rotated(Vector3.UP, deg_to_rad(float(args["orbit"]))), target)
+
+
 func _update_hud() -> void:
-	hud.text = "view: %s   path tracing: %s   spp %d   bounces %d   debug %d   denoiser %d   volumetric fog: %s\n1-7 views   P path tracing   D debug mode   R denoiser   F volumetric fog" % [
+	hud.text = "view: %s   path tracing: %s   spp %d   bounces %d   debug %d   denoiser %d   volumetric fog: %s\n1-8 views   P path tracing   D debug mode   R denoiser   F volumetric fog" % [
 		view, "on" if env.pathtracing_enabled else "off",
 		env.pathtracing_samples_per_pixel, env.pathtracing_max_bounces,
 		env.pathtracing_debug_mode, env.pathtracing_denoiser,
@@ -124,7 +143,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if key.keycode >= KEY_1 and key.keycode <= KEY_7:
+	if key.keycode >= KEY_1 and key.keycode <= KEY_8:
 		args.erase("volfog")
 		_set_view(VIEW_KEYS[key.keycode - KEY_1])
 	elif key.keycode == KEY_P:
@@ -163,9 +182,9 @@ func _benchmark() -> void:
 		gpu += RenderingServer.viewport_get_measured_render_time_gpu(vp)
 		cpu += RenderingServer.viewport_get_measured_render_time_cpu(vp)
 	var size := get_viewport().get_visible_rect().size
-	print("BENCH view=%s pt=%s spp=%d bounces=%d ser=%s adaptive=%s@%s res=%dx%d frames=%d gpu_ms=%.3f cpu_ms=%.3f" % [
+	print("BENCH view=%s pt=%s spp=%d bounces=%d ser=%s adaptive=%s@%s restir=%s res=%dx%d frames=%d gpu_ms=%.3f cpu_ms=%.3f" % [
 		view, "1" if env.pathtracing_enabled else "0", env.pathtracing_samples_per_pixel,
-		env.pathtracing_max_bounces, args.get("ser", "default"), args.get("adaptive", "0"), args.get("adaptive_threshold", "0.02"), size.x, size.y, count,
+		env.pathtracing_max_bounces, args.get("ser", "default"), args.get("adaptive", "0"), args.get("adaptive_threshold", "0.02"), args.get("restir", "0"), size.x, size.y, count,
 		gpu / count, cpu / count])
 	get_tree().quit()
 
@@ -380,6 +399,39 @@ func _build_glass(o: Vector3) -> void:
 	scissor.alpha_scissor_threshold = 0.3
 	_mesh(_sphere(0.8), scissor, o + Vector3(2.4, 0.9, 0.5), Vector3.ZERO, "ScissorThreshold0.3")
 	_label("alpha blend | refraction | alpha scissor 0.3 (should be visible)", o + Vector3(0, 2.6, 0.5))
+
+
+func _build_many_lights(o: Vector3) -> void:
+	# Closed room (open towards the camera) with 48 small colored omni lights
+	# between pillars: direct light from many lights, each lighting a small area.
+	var wall := _mat(Color(0.75, 0.75, 0.75), 0.7)
+	_mesh(_box(Vector3(10, 0.1, 8)), wall, o + Vector3(0, 0.05, 0))
+	_mesh(_box(Vector3(10, 0.1, 8)), wall, o + Vector3(0, 4.0, 0))
+	_mesh(_box(Vector3(10, 4, 0.1)), wall, o + Vector3(0, 2, -4))
+	_mesh(_box(Vector3(0.1, 4, 8)), wall, o + Vector3(-5, 2, 0))
+	_mesh(_box(Vector3(0.1, 4, 8)), wall, o + Vector3(5, 2, 0))
+	for x in 4:
+		for z in 2:
+			_mesh(_box(Vector3(0.4, 4, 0.4)), _mat(Color(0.8, 0.8, 0.8), 0.5), o + Vector3(-3.6 + x * 2.4, 2, -2.2 + z * 2.4))
+	_mesh(_sphere(0.5), _mat(Color(0.9, 0.9, 0.9), 0.2, 1.0), o + Vector3(0, 0.5, 1.5))
+	_label("48 omni lights", o + Vector3(0, 4.5, 3.0))
+	# The 48 lights count in every view (light sampling sees all lights), so
+	# screenshot and benchmark runs of other views leave them out; that keeps
+	# their numbers comparable with the baselines in PATHTRACER_TESTING.md.
+	var measuring := args.has("shot") or args.has("bench")
+	if measuring and args.get("view", "overview") != "lights":
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	for i in 48:
+		var light := OmniLight3D.new()
+		light.position = o + Vector3(rng.randf_range(-4.6, 4.6), rng.randf_range(0.3, 3.6), rng.randf_range(-3.6, 3.0))
+		light.light_color = Color.from_hsv(rng.randf(), 0.7, 1.0)
+		light.light_energy = 1.5
+		light.omni_range = 2.5
+		light.light_size = 0.05
+		light.shadow_enabled = true
+		add_child(light)
 
 
 func _build_fog(o: Vector3) -> void:

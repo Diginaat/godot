@@ -81,6 +81,7 @@ public:
 		RT_FLAG_SER_ENABLED = (1 << 3),
 		RT_FLAG_RAY_QUERY_SHADOWS_ENABLED = (1 << 4),
 		RT_FLAG_ADAPTIVE_SAMPLING = (1 << 5),
+		RT_FLAG_RESTIR_DI = (1 << 6),
 	};
 
 	constexpr static uint32_t RT_SAMPLE_COUNT_SHIFT = 21;

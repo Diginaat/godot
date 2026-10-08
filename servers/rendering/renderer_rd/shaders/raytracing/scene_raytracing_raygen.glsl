@@ -203,6 +203,9 @@ void main() {
 	}
 #endif
 
+#ifdef USE_RESTIR_DI
+	restir_clear_pixel(ps.packed_bounces_flags);
+#endif
 	// Miss always ends the path.
 	ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
 
