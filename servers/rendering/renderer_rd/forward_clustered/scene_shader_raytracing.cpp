@@ -356,6 +356,19 @@ SceneShaderRaytracing::~SceneShaderRaytracing() {
 		raygen_shader.version_free(raygen_shader_version);
 	}
 
+	for (KeyValue<uint32_t, VertexDisplaceProgram> &kv : vertex_displace_programs) {
+		if (kv.value.pipeline.is_valid()) {
+			RD::get_singleton()->free_rid(kv.value.pipeline);
+		}
+		if (kv.value.shader.is_valid()) {
+			RD::get_singleton()->free_rid(kv.value.shader);
+		}
+	}
+	vertex_displace_programs.clear();
+	if (vertex_displace_shader_version.is_valid()) {
+		vertex_displace_shader.version_free(vertex_displace_shader_version);
+	}
+
 	singleton = nullptr;
 }
 
@@ -561,6 +574,73 @@ uint32_t SceneShaderRaytracing::_register_slot(uint32_t /*p_shader_id*/, RID p_m
 	return slot_index;
 }
 
+RID SceneShaderRaytracing::get_vertex_displace_pipeline(uint32_t p_slot_index, RID &r_shader) {
+	r_shader = RID();
+	const CustomShaderEntry *entry = get_custom_shader_entry(p_slot_index);
+	if (!entry || !entry->writes_vertex || entry->is_procedural || entry->vertex_code.is_empty()) {
+		return RID();
+	}
+
+	if (const VertexDisplaceProgram *existing = vertex_displace_programs.getptr(p_slot_index)) {
+		r_shader = existing->shader;
+		return existing->failed ? RID() : existing->pipeline;
+	}
+
+	// Mark as failed until every stage below succeeds, so a broken shader is
+	// compiled (and reported) once, not every frame.
+	VertexDisplaceProgram &program = vertex_displace_programs[p_slot_index];
+	program.failed = true;
+
+	ERR_FAIL_COND_V(!vertex_displace_shader_version.is_valid(), RID());
+	Vector<String> sources = vertex_displace_shader.version_build_variant_stage_sources(vertex_displace_shader_version, 0);
+	ERR_FAIL_COND_V(sources.size() <= RD::SHADER_STAGE_COMPUTE || sources[RD::SHADER_STAGE_COMPUTE].is_empty(), RID());
+
+	String source = sources[RD::SHADER_STAGE_COMPUTE];
+	int version_pos = source.find("#version");
+	ERR_FAIL_COND_V(version_pos < 0, RID());
+	source = source.insert(source.find("\n", version_pos) + 1, "#define RT_VERTEX_DISPLACE_CUSTOM\n");
+	source = source.replace("/* RT_CUSTOM_UNIFORM_MEMBERS */", entry->uniform_members.is_empty() ? String("float _rt_pad;") : entry->uniform_members);
+	// Textures aren't bound in this pass. A vertex() that samples one fails to
+	// compile here and the surface is traced undisplaced.
+	source = source.replace("/* RT_CUSTOM_TEXTURE_DEFINES */", String());
+	source = source.replace("/* RT_CUSTOM_FRAGMENT_GLOBALS */", entry->vertex_globals);
+	source = source.replace("/* RT_CUSTOM_VERTEX_FUNCTION */", "void rt_run_vertex_shader() {\n" + entry->vertex_code + "\n}\n");
+
+	String error;
+	Vector<uint8_t> spirv;
+	{
+		MutexLock lock(spirv_compile_mutex);
+		spirv = RD::get_singleton()->shader_compile_spirv_from_source(RD::SHADER_STAGE_COMPUTE, source, RD::SHADER_LANGUAGE_GLSL, &error);
+	}
+	if (spirv.is_empty()) {
+		_dump_failed_shader(source, vformat("hg%d_vertex_displace", p_slot_index));
+		WARN_PRINT(vformat("RT: The vertex() of hit group %d can't run in the path tracer's displacement pass (it may sample a texture); the surface is traced undisplaced.\n%s", p_slot_index, error));
+		return RID();
+	}
+
+	Vector<RD::ShaderStageSPIRVData> stages;
+	RD::ShaderStageSPIRVData stage;
+	stage.shader_stage = RD::SHADER_STAGE_COMPUTE;
+	stage.spirv = spirv;
+	stages.push_back(stage);
+
+	Vector<uint8_t> binary;
+	{
+		MutexLock lock(spirv_compile_mutex);
+		binary = RD::get_singleton()->shader_compile_binary_from_spirv(stages, vformat("RT_hg%d_vertex_displace", p_slot_index));
+	}
+	ERR_FAIL_COND_V(binary.is_empty(), RID());
+
+	program.shader = RD::get_singleton()->shader_create_from_bytecode(binary);
+	ERR_FAIL_COND_V(!program.shader.is_valid(), RID());
+	program.pipeline = RD::get_singleton()->compute_pipeline_create(program.shader);
+	ERR_FAIL_COND_V(!program.pipeline.is_valid(), RID());
+
+	program.failed = false;
+	r_shader = program.shader;
+	return program.pipeline;
+}
+
 bool SceneShaderRaytracing::_preprocess_shader(RID p_material, bool p_is_procedural, CustomShaderEntry &r_entry) {
 	String code = RendererRD::MaterialStorage::get_singleton()->material_get_shader_code_rt(p_material);
 	if (code.is_empty()) {
@@ -577,6 +657,8 @@ bool SceneShaderRaytracing::_preprocess_shader(RID p_material, bool p_is_procedu
 
 	bool detected_alpha_clip = false;
 	actions.usage_flag_pointers["ALPHA_SCISSOR_THRESHOLD"] = &detected_alpha_clip;
+	bool detected_vertex_write = false;
+	actions.write_flag_pointers["VERTEX"] = &detected_vertex_write;
 	actions.usage_flag_pointers["ALPHA_HASH_SCALE"] = &detected_alpha_clip;
 
 	HashMap<StringName, ShaderLanguage::ShaderNode::Uniform> uniform_sink;
@@ -593,6 +675,8 @@ bool SceneShaderRaytracing::_preprocess_shader(RID p_material, bool p_is_procedu
 	r_entry.is_procedural = p_is_procedural;
 	r_entry.uses_alpha_clip = detected_alpha_clip;
 	r_entry.vertex_code = gen_code.code.has("vertex") ? gen_code.code["vertex"] : String();
+	r_entry.writes_vertex = detected_vertex_write;
+	r_entry.vertex_globals = gen_code.stage_globals[ShaderCompiler::STAGE_VERTEX];
 	r_entry.fragment_code = gen_code.code.has("fragment") ? gen_code.code["fragment"] : String();
 	r_entry.fragment_globals = gen_code.stage_globals[ShaderCompiler::STAGE_FRAGMENT];
 	if (p_is_procedural) {
@@ -1458,6 +1542,14 @@ void SceneShaderRaytracing::init(const String p_defines) {
 
 	// Now create a version to access the embedded raytracing shader
 	raygen_shader_version = raygen_shader.version_create();
+
+	// Vertex displacement compute template (specialized per material on demand).
+	{
+		Vector<String> displace_modes;
+		displace_modes.push_back("\n");
+		vertex_displace_shader.initialize(displace_modes);
+		vertex_displace_shader_version = vertex_displace_shader.version_create();
+	}
 	if (raygen_shader_version.is_valid()) {
 		const PipelineBundle &b = ensure_pipeline_bundle(RT_FLAG_NONE);
 		if (!b.pipeline.is_valid()) {

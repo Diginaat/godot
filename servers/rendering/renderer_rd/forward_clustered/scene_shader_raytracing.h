@@ -33,6 +33,7 @@
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/pipeline_hash_map_rd.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h" // IWYU pragma: keep
+#include "servers/rendering/renderer_rd/shaders/raytracing/raytracing_vertex_displace.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/raytracing/scene_raytracing_raygen.glsl.gen.h"
 
 namespace RendererSceneRenderImplementation {
@@ -343,6 +344,17 @@ public:
 
 	SceneRaytracingRaygenShaderRD raygen_shader;
 
+	// Compute pass that applies a custom vertex() to mesh vertices, so the BLAS
+	// matches the rasterized surface (raytracing_vertex_displace.glsl).
+	RaytracingVertexDisplaceShaderRD vertex_displace_shader;
+	RID vertex_displace_shader_version;
+	struct VertexDisplaceProgram {
+		RID shader;
+		RID pipeline;
+		bool failed = false;
+	};
+	HashMap<uint32_t, VertexDisplaceProgram> vertex_displace_programs; // By hit group slot.
+
 	struct TextureUniformInfo {
 		StringName name;
 		ShaderLanguage::ShaderNode::Uniform::Hint hint = ShaderLanguage::ShaderNode::Uniform::HINT_NONE;
@@ -365,6 +377,8 @@ public:
 		Vector<TextureUniformInfo> texture_uniforms; // Sampler2D packed as bindless indices after UBO
 		bool uses_alpha_clip = false; // Writes ALPHA_SCISSOR_THRESHOLD; needs per-HG any-hit
 		bool is_procedural = false; // Uses intersection shader instead of triangle geometry
+		bool writes_vertex = false; // vertex() assigns VERTEX; the path tracer displaces the mesh in a compute pass
+		String vertex_globals; // Functions and globals the vertex stage uses
 		uint32_t alpha_texture_buffer_offset = UINT32_MAX; // Byte offset of hint_alpha texture index in CustomMaterialUniforms UBO; UINT32_MAX if absent
 	};
 
@@ -432,6 +446,10 @@ public:
 	uint32_t register_procedural_shader(uint32_t p_shader_id, RID p_material);
 
 	const CustomShaderEntry *get_custom_shader_entry(uint32_t p_slot_index) const;
+	/// Compute pipeline that runs the slot's vertex() over a mesh (see
+	/// raytracing_vertex_displace.glsl). Invalid if vertex() doesn't move
+	/// vertices or can't run there; the surface is then traced undisplaced.
+	RID get_vertex_displace_pipeline(uint32_t p_slot_index, RID &r_shader);
 	uint32_t get_hit_group_slot_count() const { return hit_group_slots.size(); }
 
 	bool is_hg_ready_in_bundle(uint32_t p_slot_index, uint32_t p_rt_flags) const;

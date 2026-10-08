@@ -5017,6 +5017,12 @@ bool RenderingDevice::uniform_set_is_valid(RID p_uniform_set) {
 	return uniform_set_owner.owns(p_uniform_set);
 }
 
+bool RenderingDevice::acceleration_structure_is_valid(RID p_acceleration_structure) {
+	_THREAD_SAFE_METHOD_
+
+	return acceleration_structure_owner.owns(p_acceleration_structure);
+}
+
 void RenderingDevice::uniform_set_set_invalidation_callback(RID p_uniform_set, InvalidationCallback p_callback, void *p_userdata) {
 	_THREAD_SAFE_METHOD_
 

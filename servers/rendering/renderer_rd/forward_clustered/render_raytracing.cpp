@@ -349,7 +349,8 @@ void RenderRaytracing::cleanup_caches() {
 				continue;
 			}
 			if (e->ptr) {
-				if (e->ptr->blas.is_valid()) {
+				// The BLAS may already be gone: freeing the mesh buffers it was built from frees it.
+				if (e->ptr->blas.is_valid() && rd->acceleration_structure_is_valid(e->ptr->blas)) {
 					rd->free_rid(e->ptr->blas);
 				}
 				memdelete(e->ptr);
@@ -362,6 +363,18 @@ void RenderRaytracing::cleanup_caches() {
 			if (e->prev_pos_vb.is_valid()) {
 				rd->free_rid(e->prev_pos_vb);
 				e->prev_pos_vb = RID();
+			}
+			if (e->displace_uniform_set.is_valid() && rd->uniform_set_is_valid(e->displace_uniform_set)) {
+				rd->free_rid(e->displace_uniform_set);
+			}
+			e->displace_uniform_set = RID();
+			if (e->displaced_vb.is_valid()) {
+				rd->free_rid(e->displaced_vb);
+				e->displaced_vb = RID();
+			}
+			if (e->displace_params.is_valid()) {
+				rd->free_rid(e->displace_params);
+				e->displace_params = RID();
 			}
 			deformed_pool.free(live[i]);
 		}
@@ -376,7 +389,9 @@ void RenderRaytracing::cleanup_caches() {
 				continue;
 			}
 			if (e->blas.is_valid()) {
-				rd->free_rid(e->blas);
+				if (rd->acceleration_structure_is_valid(e->blas)) {
+					rd->free_rid(e->blas);
+				}
 				e->blas = RID();
 			}
 			if (e->merged_vtx_buffer.is_valid()) {
@@ -546,7 +561,8 @@ void RenderRaytracing::prepare_frame() {
 				continue;
 			}
 			if (e->ptr) {
-				if (e->ptr->blas.is_valid()) {
+				// The BLAS may already be gone: freeing the mesh buffers it was built from frees it.
+				if (e->ptr->blas.is_valid() && rd->acceleration_structure_is_valid(e->ptr->blas)) {
 					rd->free_rid(e->ptr->blas);
 				}
 				memdelete(e->ptr);
@@ -559,6 +575,18 @@ void RenderRaytracing::prepare_frame() {
 			if (e->prev_pos_vb.is_valid()) {
 				rd->free_rid(e->prev_pos_vb);
 				e->prev_pos_vb = RID();
+			}
+			if (e->displace_uniform_set.is_valid() && rd->uniform_set_is_valid(e->displace_uniform_set)) {
+				rd->free_rid(e->displace_uniform_set);
+			}
+			e->displace_uniform_set = RID();
+			if (e->displaced_vb.is_valid()) {
+				rd->free_rid(e->displaced_vb);
+				e->displaced_vb = RID();
+			}
+			if (e->displace_params.is_valid()) {
+				rd->free_rid(e->displace_params);
+				e->displace_params = RID();
 			}
 			deformed_pool.free(live[i]);
 		}
@@ -577,7 +605,9 @@ void RenderRaytracing::prepare_frame() {
 				continue;
 			}
 			if (e->blas.is_valid()) {
-				rd->free_rid(e->blas);
+				if (rd->acceleration_structure_is_valid(e->blas)) {
+					rd->free_rid(e->blas);
+				}
 				e->blas = RID();
 			}
 			if (e->merged_vtx_buffer.is_valid()) {
@@ -1772,6 +1802,166 @@ RTMaterialData *RenderRaytracing::process_material(RID p_material_rid, uint16_t 
 }
 
 // ---------------------------------------------------------------------------
+// Custom vertex() displacement
+// ---------------------------------------------------------------------------
+
+// Matches DisplaceParams in raytracing_vertex_displace.glsl (std430).
+struct alignas(16) RT_VertexDisplaceParams {
+	RT_GeometryData src;
+	float model_matrix[16];
+	float view_matrix[16];
+	float inv_view_matrix[16];
+	float projection_matrix[16];
+	float inv_projection_matrix[16];
+	uint64_t material_address;
+	uint32_t vertex_count;
+	uint32_t has_normal;
+	uint32_t has_tangent;
+	uint32_t dst_tbn_base_words;
+	float time;
+	float prev_time;
+	float viewport_size[2];
+	uint32_t _pad[2];
+};
+static_assert(sizeof(RT_VertexDisplaceParams) == 496, "RT_VertexDisplaceParams must match the GLSL DisplaceParams layout");
+
+RTSurfaceData *RenderRaytracing::process_displaced_surface(
+		const void *p_surf,
+		void *p_mesh_surface,
+		RID p_material_rid,
+		uint32_t p_surface_invalidation_counter,
+		const Transform3D &p_transform,
+		const RenderDataRD *p_render_data,
+		LocalVector<RID> &r_dirty_blas_list,
+		LocalVector<RID> &r_dirty_blas_update_list) {
+	const RenderForwardClustered::GeometryInstanceSurfaceDataCache *surf =
+			static_cast<const RenderForwardClustered::GeometryInstanceSurfaceDataCache *>(p_surf);
+
+	if (!p_material_rid.is_valid()) {
+		return nullptr;
+	}
+	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
+	RTMaterialData *mat_data = process_material(p_material_rid, material_storage->material_get_rt_invalidation_counter(p_material_rid));
+	if (!mat_data || !mat_data->is_custom_shader || mat_data->rt_sbt_offset == 0) {
+		return nullptr;
+	}
+
+	RID displace_shader;
+	RID pipeline = SceneShaderRaytracing::get_singleton()->get_vertex_displace_pipeline(mat_data->rt_sbt_offset, displace_shader);
+	if (!pipeline.is_valid()) {
+		return nullptr;
+	}
+
+	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	uint64_t fmt = mesh_storage->mesh_surface_get_format(p_mesh_surface);
+	if (fmt & RSE::ARRAY_FLAG_USE_2D_VERTICES) {
+		return nullptr;
+	}
+	uint32_t vertex_count = mesh_storage->mesh_surface_get_vertex_count(p_mesh_surface);
+	if (vertex_count == 0) {
+		return nullptr;
+	}
+	bool has_n = fmt & RSE::ARRAY_FORMAT_NORMAL;
+	bool has_t = fmt & RSE::ARRAY_FORMAT_TANGENT;
+	// Same uncompressed layout process_deformed_surface() expects.
+	uint32_t tbn_words = has_n ? (has_t ? 2u : 1u) : 0u;
+	uint32_t full_size = (3u + tbn_words) * 4u * vertex_count;
+
+	RTDeformedCacheEntry *entry = _access_deformed_slot(surf->rt_deformed_handle);
+	ERR_FAIL_NULL_V(entry, nullptr);
+
+	RD *rd = RD::get_singleton();
+	if (entry->displaced_vb_capacity < full_size) {
+		if (entry->displaced_vb.is_valid()) {
+			rd->free_rid(entry->displaced_vb);
+		}
+		entry->displaced_vb = rd->storage_buffer_create(full_size); // The old one took its uniform set with it.
+		ERR_FAIL_COND_V(!entry->displaced_vb.is_valid(), nullptr);
+		entry->displaced_vb_capacity = full_size;
+		rd->set_resource_name(entry->displaced_vb, "RT displaced VB");
+	}
+	if (!entry->displace_params.is_valid()) {
+		entry->displace_params = rd->storage_buffer_create(sizeof(RT_VertexDisplaceParams));
+		ERR_FAIL_COND_V(!entry->displace_params.is_valid(), nullptr);
+		rd->set_resource_name(entry->displace_params, "RT vertex displace params");
+	}
+
+	uint32_t current_frame = RSG::rasterizer->get_frame_number();
+	if (entry->displaced_frame != current_frame) {
+		entry->displaced_frame = current_frame;
+
+		RT_VertexDisplaceParams params = {};
+		RTSurfaceData source;
+		RID src_vb, src_attr, src_idx;
+		_fill_surface_geometry_data(p_mesh_surface, false, &source, &src_vb, &src_attr, &src_idx);
+		params.src = source.geometry;
+		ERR_FAIL_COND_V(!src_vb.is_valid(), nullptr);
+		params.src.vertex_buffer_address = rd->buffer_get_device_address(src_vb);
+		params.src.attribute_buffer_address = src_attr.is_valid() ? rd->buffer_get_device_address(src_attr) : 0;
+		params.src.index_buffer_address = 0;
+
+		RendererRD::MaterialStorage::store_transform(p_transform, params.model_matrix);
+		const RenderSceneDataRD *scene_data = p_render_data->scene_data;
+		RendererRD::MaterialStorage::store_transform(scene_data->cam_transform.affine_inverse(), params.view_matrix);
+		RendererRD::MaterialStorage::store_transform(scene_data->cam_transform, params.inv_view_matrix);
+		RendererRD::MaterialStorage::store_camera(scene_data->cam_projection, params.projection_matrix);
+		RendererRD::MaterialStorage::store_camera(scene_data->cam_projection.inverse(), params.inv_projection_matrix);
+		params.material_address = mat_data->data.uniform_address;
+		params.vertex_count = vertex_count;
+		params.has_normal = has_n ? 1u : 0u;
+		params.has_tangent = (has_n && has_t) ? 1u : 0u;
+		params.dst_tbn_base_words = 3u * vertex_count;
+		params.time = scene_data->time;
+		params.prev_time = scene_data->time - scene_data->time_step;
+		params.viewport_size[0] = 1.0f;
+		params.viewport_size[1] = 1.0f;
+		rd->buffer_update(entry->displace_params, 0, sizeof(params), &params);
+
+		Vector<RD::Uniform> uniforms;
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 0;
+			u.append_id(entry->displaced_vb);
+			uniforms.push_back(u);
+		}
+		{
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 1;
+			u.append_id(entry->displace_params);
+			uniforms.push_back(u);
+		}
+		// Persistent set: freeing either buffer frees it too. A linear-pool set
+		// would already be gone by then and the dependency free would fail.
+		if (!entry->displace_uniform_set.is_valid() || !rd->uniform_set_is_valid(entry->displace_uniform_set)) {
+			entry->displace_uniform_set = rd->uniform_set_create(uniforms, displace_shader, 0);
+			ERR_FAIL_COND_V(!entry->displace_uniform_set.is_valid(), nullptr);
+		}
+		RID uniform_set = entry->displace_uniform_set;
+
+		RD::ComputeListID compute_list = rd->compute_list_begin();
+		rd->compute_list_bind_compute_pipeline(compute_list, pipeline);
+		rd->compute_list_bind_uniform_set(compute_list, uniform_set, 0);
+		rd->compute_list_dispatch(compute_list, (vertex_count + 63u) / 64u, 1, 1);
+		rd->compute_list_end();
+	}
+
+	RTDeformedGeometrySource src;
+	src.current_vb = entry->displaced_vb;
+	src.change_stamp = current_frame; // Re-run every frame (TIME, uniforms).
+	src.cache_key = (uint64_t)(uintptr_t)p_surf;
+	src.cache_version = 0;
+	src.surface_counter = p_surface_invalidation_counter;
+	RTSurfaceData *result = process_deformed_surface(p_surf, p_mesh_surface, src, r_dirty_blas_list, r_dirty_blas_update_list);
+	if (result) {
+		// Tells the hit shader the geometry already carries the vertex() result.
+		result->geometry.flags |= RT_GEOM_FLAG_VERTEX_DISPLACED;
+	}
+	return result;
+}
+
+// ---------------------------------------------------------------------------
 // Acceleration structure building
 // ---------------------------------------------------------------------------
 
@@ -2530,6 +2720,23 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 					src.surface_counter = surface_counter;
 					surf_data = process_deformed_surface(surf, mesh_surface, src, dirty_blas_list, dirty_blas_update_list);
 				}
+			}
+			if (!surf_data) {
+				// A custom vertex() that moves vertices: displace on the GPU and trace the result.
+				RID displace_material;
+				if (surf->owner->data->material_override.is_valid()) {
+					displace_material = surf->owner->data->material_override;
+				} else if (surf->surface_index < surf->owner->data->surface_materials.size() &&
+						surf->owner->data->surface_materials[surf->surface_index].is_valid()) {
+					displace_material = surf->owner->data->surface_materials[surf->surface_index];
+				} else {
+					RID mesh_rid = surf->owner->data->base;
+					if (mesh_rid.is_valid() && mesh_storage->owns_mesh(mesh_rid)) {
+						displace_material = mesh_storage->mesh_surface_get_material(mesh_rid, surf->surface_index);
+					}
+				}
+				surf_data = process_displaced_surface(surf, mesh_surface, displace_material, surface_counter,
+						instance_transform, p_render_data, dirty_blas_list, dirty_blas_update_list);
 			}
 			if (!surf_data) {
 				surf_data = process_surface(surf, mesh_surface, surface_counter, instance_transform, dirty_blas_list);

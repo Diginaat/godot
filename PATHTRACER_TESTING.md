@@ -42,7 +42,7 @@ All user arguments (after `--`):
 | `--debug=` | `0` | `Environment.pathtracing_debug_mode` (see the enum in `scene/resources/environment.h`) |
 | `--denoiser=` | `0` | `0` none, `1` DLSS Ray Reconstruction (needs the Streamline DLLs) |
 | `--volfog=` | view default | `1` forces volumetric fog on, `0` off |
-| `--frames=` | `90` | Frames to render before the screenshot |
+| `--frames=` | `90` | Frames to render before the screenshot. Use 300-400 after changing RT shader code: custom hit groups recompile asynchronously and are skipped until ready |
 | `--sun_only` | off | Remove every light except the sun (isolates light selection) |
 | `--panel_only` | off | Only the emissive room's ceiling panel emits |
 | `--linear` | off | Linear tonemap with `--exposure=` (default 0.25), for brightness measurements |
@@ -66,7 +66,7 @@ Audited on 2026-10-08 at commit `ca52415e30`. Shader sources are in
 | Depth and height fog | Supported per ray segment | `apply_segment_fog()` |
 | Volumetric fog, FogVolume | **Not supported** | no reference in the RT code |
 | Custom ShaderMaterial `fragment()` | Supported through custom hit groups | `scene_shader_raytracing.cpp`, `raytracing_custom_fragment_inc.glsl` |
-| Custom `vertex()` displacement | Unknown, to test | |
+| Custom `vertex()` displacement | Supported when `vertex()` writes `VERTEX` and samples no textures (compute pass, then deformed BLAS) | `raytracing_vertex_displace.glsl`, `process_displaced_surface()` |
 | Alpha scissor | Supported (StandardMaterial uses a fixed 0.5 threshold) | any hit |
 | Alpha blend, refraction, transmission | **Not supported** (`transmissivness = 0.0`) | `shade_and_bounce()` |
 | Debug views | 22 modes in `Environment.pathtracing_debug_mode` | `debug_visualize()` |
@@ -84,8 +84,8 @@ a build, the smoke tests from CUSTOM_BUILD.md, and an update to this file.
 | 4 | Quick bugs: StandardMaterial emission without a texture (B1), StandardMaterial alpha scissor threshold (B2) | Done |
 | 5 | Black pixels in directly lit areas (B3): find the cause, fix it | Done |
 | 6 | Emission as a light: light sampling toward emissive meshes so emitters light the scene without heavy noise | Done |
-| 7 | Custom `vertex()` displacement in the path tracer (B4) | Next |
-| 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | |
+| 7 | Custom `vertex()` displacement in the path tracer (B4) | Done |
+| 8 | Volumetric fog in the path tracer (B5): Environment volumetric fog first, then FogVolume, then light shafts | Next |
 | 9 | Glass (B6): path traced alpha blend, refraction and transmission instead of the raster overlay | |
 | 10 | Clean up, document, merge `dev` into `nvidia-pt-dlss` | |
 
@@ -100,7 +100,7 @@ both modes.
 | B1 | emissive | **Fixed in step 4.** StandardMaterial3D emission rendered **black**. Debug mode 21 (Emissive) is 0 on every emitter. Emission from a custom ShaderMaterial works (shaders view, orange stripes). | `scene_raytracing_raygen.glsl` closest hit HG0 only adds emission when `mat.flags & 2` (`RT_MAT_FLAG_HAS_EMISSION_TEX`) is set, which `render_raytracing.cpp` sets only when an emission texture exists. Color and energy alone are ignored. |
 | B2 | glass, pbr | **Fixed in step 4.** Alpha scissor sphere with threshold 0.3 and alpha 0.4 is **missing** (no surface, no shadow). | Any-hit HG0 uses a hard-coded `alpha < 0.5`; the material's `alpha_scissor_threshold` isn't passed. |
 | B3 | lighting, all | **Fixed in step 5.** Pure black pixels scattered over surfaces that the sun or a lamp lights directly. With light sampling, direct light on a flat diffuse floor should be nearly noise-free. | Unknown. Some paths return zero radiance. Debug mode 22 (BRDF rejection) shows rejection noise on every surface. Check NEE shadow rays, `offset_ray_origin`, and BRDF sample rejection. |
-| B4 | shaders | `vertex()` displacement is ignored: the wave renders flat and casts a flat shadow. | The BLAS is built from the original mesh. Needs the vertex shader applied before the BLAS build (a compute pass or the raster pipeline's transform feedback). |
+| B4 | shaders | **Fixed in step 7** (no textures in `vertex()` yet). `vertex()` displacement was ignored: the wave renders flat and casts a flat shadow. | The BLAS is built from the original mesh. Needs the vertex shader applied before the BLAS build (a compute pass or the raster pipeline's transform feedback). |
 | B5 | fog | Volumetric fog, FogVolume and the spot light shaft are **not rendered at all**. Only distance/height fog works. | Not implemented. Needs ray marching through Godot's froxel fog volume, or a path traced participating medium. |
 | B6 | glass | Alpha blend and refraction materials are drawn by the raster transparent pass on top of the path traced image. No shadows or reflections, and refraction smears the noisy screen texture into horizontal streaks. | Transparent geometry is skipped by the path tracer (`transmissivness = 0.0`). |
 
@@ -120,6 +120,27 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-10-08: Step 7 done. Custom `vertex()` displacement now shows in the
+  path tracer. `_preprocess_shader()` marks shaders that write `VERTEX`
+  (`write_flag_pointers`). `raytracing_vertex_displace.glsl` is a ShaderRD
+  compute template whose expanded source gets the material's vertex code,
+  uniform members and vertex-stage globals at runtime
+  (`SceneShaderRaytracing::get_vertex_displace_pipeline()`, one program per hit
+  group slot). `process_displaced_surface()` (TLAS loop, before
+  `process_surface()`) fills the static `GeometryData`, dispatches the compute
+  once per frame into a per-surface uncompressed vertex buffer, then hands it
+  to `process_deformed_surface()` (BLAS refit, motion vectors). The geometry
+  gets `FLAG_VERTEX_DISPLACED`, and the hit template restores
+  `vertex`/`normal`/`tangent`/`binormal` after re-running `vertex()` so the
+  hit isn't displaced twice. Limits: `vertex()` that samples a texture fails
+  to compile in the pass (warning, traced undisplaced); 2D meshes skipped.
+  Also fixed: exit errors `Attempted to free invalid ID` (a BLAS is freed with
+  the mesh buffers it was built from; added
+  `RenderingDevice::acceleration_structure_is_valid()` and use it in the
+  cache cleanup) and the old `4 RIDs of type "Shader" were leaked` warning no
+  longer shows. Verified: wave and its shadow match raster.
+  Follow-up: the emissive room's roof shows dark specks, because light
+  selection doesn't know the emitters inside are hidden from the roof.
 - 2026-10-08: Step 6 done. Emissive StandardMaterial3D surfaces are mesh
   lights now. Host (`render_raytracing.cpp`, TLAS loop): each emissive HG0
   surface becomes an `RT_EmissiveMeshData` (transform incl. compression AABB,
