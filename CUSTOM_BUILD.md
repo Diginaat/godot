@@ -60,6 +60,7 @@ Update this table after every sync.
 | --- | --- | --- | --- | --- |
 | 2026-10-07 | `e7b12e7492` | `135dff3887` | `2de7ea521f` (Flow builds pipelines on first use) | `2424aa594a` |
 | 2026-10-08 | `e7b12e7492` (no change) | `135dff3887` (no change) | `5681d7519a` (Flow on Linux, MIT license) | on `dev`, see log |
+| 2026-10-08 | `65e8d16951` | `135dff3887` (no change) | `5681d7519a` (no change) | on `dev`, see log |
 
 ## Update procedure
 

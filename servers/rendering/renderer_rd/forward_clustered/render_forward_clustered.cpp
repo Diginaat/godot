@@ -5293,7 +5293,10 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::_free_procedural_
 		return;
 	}
 	if (rt_procedural->blas.is_valid()) {
-		RD::get_singleton()->free_rid(rt_procedural->blas);
+		RD *rd = RD::get_singleton();
+		if (rd->acceleration_structure_is_valid(rt_procedural->blas)) {
+			rd->free_rid(rt_procedural->blas);
+		}
 	}
 	if (rt_procedural->gpu_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(rt_procedural->gpu_buffer);
