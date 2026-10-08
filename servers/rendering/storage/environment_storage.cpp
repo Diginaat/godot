@@ -938,6 +938,37 @@ RSE::PathtracingDenoiser RendererEnvironmentStorage::environment_get_pathtracing
 	return env->pathtracing_denoiser;
 }
 
+// DDGI
+
+void RendererEnvironmentStorage::environment_set_ddgi(RID p_env, bool p_enable, int p_cascades, float p_probe_spacing, const Vector3i &p_probe_grid, float p_energy, float p_normal_bias, float p_view_bias, float p_hysteresis, bool p_probe_relocation, bool p_probe_classification, bool p_follow_camera, int p_debug_mode) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi.enabled = p_enable;
+	env->ddgi.cascades = CLAMP(p_cascades, 1, 4);
+	env->ddgi.probe_spacing = MAX(0.05f, p_probe_spacing);
+	env->ddgi.probe_grid = Vector3i(CLAMP(p_probe_grid.x, 2, 64), CLAMP(p_probe_grid.y, 2, 64), CLAMP(p_probe_grid.z, 2, 64));
+	env->ddgi.energy = MAX(0.0f, p_energy);
+	env->ddgi.normal_bias = p_normal_bias;
+	env->ddgi.view_bias = p_view_bias;
+	env->ddgi.hysteresis = CLAMP(p_hysteresis, 0.0f, 0.999f);
+	env->ddgi.probe_relocation = p_probe_relocation;
+	env->ddgi.probe_classification = p_probe_classification;
+	env->ddgi.follow_camera = p_follow_camera;
+	env->ddgi.debug_mode = p_debug_mode;
+}
+
+bool RendererEnvironmentStorage::environment_get_ddgi_enabled(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, false);
+	return env->ddgi.enabled;
+}
+
+RendererEnvironmentStorage::DDGISettings RendererEnvironmentStorage::environment_get_ddgi(RID p_env) const {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL_V(env, DDGISettings());
+	return env->ddgi;
+}
+
 // Adjustments
 
 void RendererEnvironmentStorage::environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction) {

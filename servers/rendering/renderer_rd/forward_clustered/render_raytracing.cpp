@@ -32,6 +32,7 @@
 #include "core/math/math_funcs.h"
 #include "servers/rendering/renderer_rd/environment/fog.h"
 #include "servers/rendering/renderer_rd/environment/sky.h"
+#include "servers/rendering/renderer_rd/forward_clustered/render_ddgi.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_raytracing.h"
 #include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
@@ -74,6 +75,13 @@ RenderRaytracing::~RenderRaytracing() {
 	if (mat_ubo_pool_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(mat_ubo_pool_buffer);
 		mat_ubo_pool_buffer = RID();
+	}
+
+	for (RID *r : { &defaults.ddgi_uniform_buffer, &defaults.image_rgba16f, &defaults.image_r32f, &defaults.image_rg16f }) {
+		if (r->is_valid()) {
+			RD::get_singleton()->free_rid(*r);
+			*r = RID();
+		}
 	}
 
 	if (bindless_block) {
@@ -2048,6 +2056,14 @@ void RenderRaytracing::finalize_buffers(RTViewportState *p_state) {
 		}
 	};
 
+	// Double-sided instances report back faces as real surfaces. DDGI probe
+	// rays treat every other back face hit as "the probe is inside geometry".
+	for (uint32_t i = 0; i < instance_flags.size() && i < geometry_data.size(); i++) {
+		if (instance_flags[i] & RD::ACCELERATION_STRUCTURE_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT) {
+			geometry_data[i].flags |= RT_GEOM_FLAG_DOUBLE_SIDED;
+		}
+	}
+
 	update_or_grow(p_state->geometry_buffer, p_state->geometry_buffer_capacity,
 			geometry_data.ptr(), geometry_data.size() * sizeof(RT_GeometryData));
 	update_or_grow(p_state->material_buffer, p_state->material_buffer_capacity,
@@ -3243,7 +3259,32 @@ uint32_t RenderRaytracing::gather_lights(const RenderDataRD *p_render_data, RT_L
 // Uniform set update
 // ---------------------------------------------------------------------------
 
-RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderDataRD *p_render_data, uint32_t p_rt_flags) {
+void RenderRaytracing::_ensure_default_resources() {
+	if (defaults.ddgi_uniform_buffer.is_valid()) {
+		return;
+	}
+	RD *rd = RD::get_singleton();
+
+	// All zero: no DDGI volumes, so hit shaders add no DDGI light.
+	Vector<uint8_t> zeros;
+	zeros.resize(sizeof(DDGIDataGPU));
+	zeros.fill(0);
+	defaults.ddgi_uniform_buffer = rd->uniform_buffer_create(zeros.size(), zeros);
+	rd->set_resource_name(defaults.ddgi_uniform_buffer, "RT DDGI Default Data");
+
+	RD::TextureFormat tf;
+	tf.width = 1;
+	tf.height = 1;
+	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT;
+	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+	defaults.image_rgba16f = rd->texture_create(tf, RD::TextureView());
+	tf.format = RD::DATA_FORMAT_R32_SFLOAT;
+	defaults.image_r32f = rd->texture_create(tf, RD::TextureView());
+	tf.format = RD::DATA_FORMAT_R16G16_SFLOAT;
+	defaults.image_rg16f = rd->texture_create(tf, RD::TextureView());
+}
+
+RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderDataRD *p_render_data, uint32_t p_rt_flags, const RTDDGIBindings *p_ddgi) {
 	ERR_FAIL_NULL_V(p_state, RID());
 
 	Ref<RenderForwardClustered::RenderBufferDataForwardClustered> rb_data;
@@ -3259,6 +3300,10 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 
 	RenderSceneBuffersRD *rb = p_render_data->render_buffers.ptr();
 
+	_ensure_default_resources();
+	// DDGI probe tracing writes none of the camera outputs: don't allocate them.
+	const bool ddgi_trace = p_ddgi && p_ddgi->trace;
+
 	// SET 0 indices must match raytracing_common_inc.glsl / scene_raytracing_raygen.glsl / samplers includes.
 	Vector<RD::Uniform> uniforms;
 
@@ -3266,8 +3311,12 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		RD::Uniform u;
 		u.binding = 0;
 		u.uniform_type = RD::UNIFORM_TYPE_IMAGE;
-		rt_ensure_textures(rb);
-		u.append_id(rt_get_texture(rb));
+		if (ddgi_trace) {
+			u.append_id(defaults.image_rgba16f);
+		} else {
+			rt_ensure_textures(rb);
+			u.append_id(rt_get_texture(rb));
+		}
 		uniforms.push_back(u);
 	}
 
@@ -3385,6 +3434,7 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 			}
 		}
 		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_FOG_USE_LEGACY_BLENDING] = owner->fog_use_legacy_blending_get() ? 1.0f : 0.0f;
+		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_DDGI_TRACE] = ddgi_trace ? 1.0f : 0.0f;
 
 		// rt_params layout (see RaytracingParamIndex enum):
 		// [0] = VIS_MODE, [1] = SAMPLE_COUNT, [2] = MAX_BOUNCES,
@@ -3546,7 +3596,7 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		RD::Uniform u;
 		u.binding = 15;
 		u.uniform_type = RD::UNIFORM_TYPE_IMAGE;
-		u.append_id(rt_get_depth_texture(rb));
+		u.append_id(ddgi_trace ? defaults.image_r32f : rt_get_depth_texture(rb));
 		uniforms.push_back(u);
 	}
 
@@ -3555,11 +3605,15 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 
 	// Binding 28: Velocity output (RG16F). Past the 16-27 sampler range.
 	{
-		rb->ensure_velocity();
 		RD::Uniform u;
 		u.binding = 28;
 		u.uniform_type = RD::UNIFORM_TYPE_IMAGE;
-		u.append_id(rb->get_velocity_buffer(false));
+		if (ddgi_trace) {
+			u.append_id(defaults.image_rg16f);
+		} else {
+			rb->ensure_velocity();
+			u.append_id(rb->get_velocity_buffer(false));
+		}
 		uniforms.push_back(u);
 	}
 
@@ -3581,6 +3635,21 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 				RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
 		u.append_id(fog_texture);
 		uniforms.push_back(u);
+	}
+
+	// Bindings 34-39: DDGI (raytracing_ddgi_inc.glsl).
+	{
+		RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
+		RID default_ssbo = RendererRD::MeshStorage::get_singleton()->get_default_rd_storage_buffer();
+		RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+		const bool has_ddgi = p_ddgi && p_ddgi->uniform_buffer.is_valid();
+
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 34, has_ddgi ? p_ddgi->uniform_buffer : defaults.ddgi_uniform_buffer));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 35, has_ddgi ? p_ddgi->irradiance_atlas : black));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 36, has_ddgi ? p_ddgi->distance_atlas : black));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 37, has_ddgi ? p_ddgi->probe_buffer : default_ssbo));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 38, has_ddgi ? p_ddgi->ray_data : defaults.image_rgba16f));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 39, has_ddgi ? p_ddgi->update_list : default_ssbo));
 	}
 
 	RID shader_rd = shader ? shader->get_pipeline_shader_rd(p_rt_flags) : RID();

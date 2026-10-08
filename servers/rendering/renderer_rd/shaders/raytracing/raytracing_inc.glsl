@@ -19,7 +19,9 @@
 #define RT_PARAM_SAMPLE_COUNT 1 // rt_params[0].y - Samples per pixel
 #define RT_PARAM_MAX_BOUNCES 2 // rt_params[0].z - Maximum ray bounces
 #define RT_PARAM_DENOISER 3 // rt_params[0].w - Denoiser selection (0=none, 1=DLSS RR)
-// Indices 4-12 reserved for future use
+// Indices 4-8: volumetric fog (raytracing_common_inc.glsl)
+#define RT_PARAM_DDGI_TRACE 9 // rt_params[2].y - 1 when this dispatch traces DDGI probe rays
+// Indices 10-12 reserved for future use
 #define RT_PARAM_EMISSIVE_MESH_COUNT 13 // rt_params[3].y - Number of emissive meshes sampled as lights
 #define RT_PARAM_LIGHT_COUNT 14 // rt_params[3].z - Number of active lights in light buffer
 #define RT_PARAM_FRAME_INDEX 15 // rt_params[3].w - Frame counter for temporal variation
@@ -142,6 +144,18 @@ bool is_emissive_sampled(uint packed) {
 	return (packed & EMISSIVE_SAMPLED_FLAG) != 0u;
 }
 
+// Set on DDGI probe rays (bit 28). The closest hit then returns the radiance
+// leaving the hit point toward the probe (emission, direct light, and the
+// previous frame's DDGI irradiance) and ends the path, and the miss shader
+// returns the sky or the environment's ambient color.
+const uint DDGI_PROBE_RAY_FLAG = (1u << 28);
+uint set_ddgi_probe_ray(uint packed) {
+	return packed | DDGI_PROBE_RAY_FLAG;
+}
+bool is_ddgi_probe_ray(uint packed) {
+	return (packed & DDGI_PROBE_RAY_FLAG) != 0u;
+}
+
 // Bounce limits
 #define MAX_DIFFUSE_BOUNCES 2u
 #define MAX_DENOISER_SPECULAR_HIT_THRESHOLD 0.25
@@ -158,6 +172,8 @@ const uint FLAG_DEFORMED = 4u;
 const uint FLAG_EMISSIVE_LIGHT = 8u;
 // Positions come from the material's vertex() (raytracing_vertex_displace.glsl).
 const uint FLAG_VERTEX_DISPLACED = 16u;
+// Face culling is disabled: back faces are real surfaces, not the inside of a mesh.
+const uint FLAG_DOUBLE_SIDED = 32u;
 
 // ============================================================================
 // RANDOM NUMBER GENERATION - PCG (Permuted Congruential Generator)

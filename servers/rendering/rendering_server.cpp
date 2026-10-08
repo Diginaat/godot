@@ -3106,6 +3106,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_fog_depth", "env", "curve", "begin", "end"), &RenderingServer::environment_set_fog_depth);
 	ClassDB::bind_method(D_METHOD("environment_set_sdfgi", "env", "enable", "cascades", "min_cell_size", "y_scale", "use_occlusion", "bounce_feedback", "read_sky", "energy", "normal_bias", "probe_bias"), &RenderingServer::environment_set_sdfgi);
 	ClassDB::bind_method(D_METHOD("environment_set_pathtracing", "env", "enable", "debug_mode", "samples_per_pixel", "max_bounces", "denoiser"), &RenderingServer::environment_set_pathtracing);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi", "env", "enable", "cascades", "probe_spacing", "probe_grid", "energy", "normal_bias", "view_bias", "hysteresis", "probe_relocation", "probe_classification", "follow_camera", "debug_mode"), &RenderingServer::environment_set_ddgi);
 	ClassDB::bind_method(D_METHOD("environment_set_volumetric_fog", "env", "enable", "density", "albedo", "emission", "emission_energy", "anisotropy", "length", "detail_spread", "gi_inject", "temporal_reprojection", "temporal_reprojection_amount", "ambient_inject", "sky_affect"), &RenderingServer::environment_set_volumetric_fog);
 
 	ClassDB::bind_method(D_METHOD("environment_glow_set_use_bicubic_upscale", "enable"), &RenderingServer::environment_glow_set_use_bicubic_upscale);
@@ -3850,6 +3851,13 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/pathtracing/deformed_mesh_cache_ttl_frames", PROPERTY_HINT_RANGE, "1,3600,1"), 60);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/pathtracing/multimesh_blas_cache_ttl_frames", PROPERTY_HINT_RANGE, "1,18000,1"), 3600);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/pathtracing/multimesh_merged_blas_max_triangles", PROPERTY_HINT_RANGE, "256,1048576,1"), 65536);
+
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/quality", PROPERTY_HINT_ENUM, "Low (Fastest),Medium,High,Ultra (Slowest),Custom"), 1);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_rays_per_probe", PROPERTY_HINT_RANGE, "32,512,32"), 128);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_probes_per_frame", PROPERTY_HINT_RANGE, "64,65536,64"), 2048);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_irradiance_texels", PROPERTY_HINT_RANGE, "4,16,1"), 6);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_distance_texels", PROPERTY_HINT_RANGE, "8,32,1"), 14);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/gpu_time_budget_ms", PROPERTY_HINT_RANGE, "0,16,0.1,or_greater,suffix:ms"), 0.0);
 
 	// OpenGL limits
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/opengl/max_renderable_elements", PROPERTY_HINT_RANGE, "1024,65536,1"), 65536);

@@ -104,6 +104,17 @@ public:
 		RT_DEBUG_MAX
 	};
 
+	enum DDGIDebugMode {
+		DDGI_DEBUG_DISABLED,
+		DDGI_DEBUG_INDIRECT_LIGHT,
+		DDGI_DEBUG_PROBE_IRRADIANCE,
+		DDGI_DEBUG_PROBE_DISTANCE,
+		DDGI_DEBUG_PROBE_STATES,
+		DDGI_DEBUG_PROBE_PRIORITY,
+		DDGI_DEBUG_CASCADES,
+		DDGI_DEBUG_MAX
+	};
+
 	enum FogMode {
 		FOG_MODE_EXPONENTIAL,
 		FOG_MODE_DEPTH,
@@ -197,6 +208,21 @@ private:
 	int pathtracing_max_bounces = 3;
 	RSE::PathtracingDenoiser pathtracing_denoiser = RSE::PT_DENOISER_DLSS_RAY_RECONSTRUCTION;
 	void _update_pathtracing();
+
+	// DDGI
+	bool ddgi_enabled = false;
+	int ddgi_cascades = 3;
+	float ddgi_probe_spacing = 1.0;
+	Vector3i ddgi_probe_grid = Vector3i(24, 12, 24);
+	float ddgi_energy = 1.0;
+	float ddgi_normal_bias = 0.1;
+	float ddgi_view_bias = 0.3;
+	float ddgi_hysteresis = 0.95;
+	bool ddgi_probe_relocation = true;
+	bool ddgi_probe_classification = true;
+	bool ddgi_follow_camera = true;
+	DDGIDebugMode ddgi_debug_mode = DDGI_DEBUG_DISABLED;
+	void _update_ddgi();
 
 	// Glow
 	bool glow_enabled = false;
@@ -397,6 +423,32 @@ public:
 	void set_pathtracing_denoiser(RSE::PathtracingDenoiser p_denoiser);
 	RSE::PathtracingDenoiser get_pathtracing_denoiser() const;
 
+	// DDGI
+	void set_ddgi_enabled(bool p_enabled);
+	bool is_ddgi_enabled() const;
+	void set_ddgi_cascades(int p_cascades);
+	int get_ddgi_cascades() const;
+	void set_ddgi_probe_spacing(float p_spacing);
+	float get_ddgi_probe_spacing() const;
+	void set_ddgi_probe_grid(const Vector3i &p_grid);
+	Vector3i get_ddgi_probe_grid() const;
+	void set_ddgi_energy(float p_energy);
+	float get_ddgi_energy() const;
+	void set_ddgi_normal_bias(float p_bias);
+	float get_ddgi_normal_bias() const;
+	void set_ddgi_view_bias(float p_bias);
+	float get_ddgi_view_bias() const;
+	void set_ddgi_hysteresis(float p_hysteresis);
+	float get_ddgi_hysteresis() const;
+	void set_ddgi_probe_relocation(bool p_enabled);
+	bool is_ddgi_probe_relocation_enabled() const;
+	void set_ddgi_probe_classification(bool p_enabled);
+	bool is_ddgi_probe_classification_enabled() const;
+	void set_ddgi_follow_camera(bool p_enabled);
+	bool is_ddgi_following_camera() const;
+	void set_ddgi_debug_mode(DDGIDebugMode p_mode);
+	DDGIDebugMode get_ddgi_debug_mode() const;
+
 	// Glow
 	void set_glow_enabled(bool p_enabled);
 	bool is_glow_enabled() const;
@@ -508,4 +560,5 @@ VARIANT_ENUM_CAST(Environment::ToneMapper)
 VARIANT_ENUM_CAST(Environment::SDFGIYScale)
 VARIANT_ENUM_CAST(Environment::GlowBlendMode)
 VARIANT_ENUM_CAST(Environment::PathtracingDebugMode)
+VARIANT_ENUM_CAST(Environment::DDGIDebugMode)
 VARIANT_ENUM_CAST(Environment::FogMode)

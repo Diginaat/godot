@@ -104,6 +104,7 @@ public:
 	static constexpr int RT_PARAM_HAS_VOLUMETRIC_FOG = 6;
 	static constexpr int RT_PARAM_VOLUMETRIC_FOG_SKY_AFFECT = 7;
 	static constexpr int RT_PARAM_FOG_USE_LEGACY_BLENDING = 8;
+	static constexpr int RT_PARAM_DDGI_TRACE = 9;
 	// Indices 9-12 reserved for future use.
 	static constexpr int RT_PARAM_EMISSIVE_MESH_COUNT = 13;
 	static constexpr int RT_PARAM_LIGHT_COUNT = 14;

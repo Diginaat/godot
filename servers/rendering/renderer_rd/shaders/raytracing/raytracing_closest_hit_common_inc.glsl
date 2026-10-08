@@ -244,6 +244,9 @@ void apply_segment_fog(float segment_dist, inout vec3 radiance, inout vec3 throu
 	}
 
 	PathState ps = path_unpack(payload);
+	if (is_ddgi_probe_ray(ps.packed_bounces_flags)) {
+		return; // Fog is a camera effect; probes don't see it.
+	}
 	if (get_rt_param(RT_PARAM_HAS_VOLUMETRIC_FOG) > 0.5 && get_total_bounces(ps.packed_bounces_flags) == 0u) {
 		mat4 view_mat = transpose(mat4(
 				scene_data_block.data.view_matrix[0],
@@ -456,6 +459,54 @@ void debug_visualize(
 #endif // RT_DEBUG_ENABLED
 
 // ============================================================================
+// DDGI PROBE RAY HIT
+// ============================================================================
+
+/// Radiance leaving a surface toward a DDGI probe: emission, direct light from
+/// analytic lights (NEE), and indirect light from the previous frame's probes
+/// (this gives infinite bounces over time). Emissive meshes are not sampled
+/// with NEE here: their light already reaches the surface through the probes,
+/// which see emitters directly. Ends the path.
+void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout PathState ps) {
+	ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
+
+	bool double_sided = (geometries[h.geometry_idx].flags & FLAG_DOUBLE_SIDED) != 0u;
+	if (!h.is_front_face && !double_sided) {
+		// The inside of closed geometry: no light, and a negative distance
+		// tells relocation and classification that the probe is inside.
+		ps.radiance = vec3(0.0);
+		ps.hit_t = -gl_HitTEXT;
+		return;
+	}
+	ps.hit_t = gl_HitTEXT;
+
+	MaterialProperties brdf_mat;
+	brdf_mat.baseColor = m.albedo;
+	brdf_mat.metalness = m.metalness;
+	brdf_mat.roughness = m.roughness;
+	brdf_mat.dielectricF0 = specular_to_f0(m.specular);
+	brdf_mat.emissive = m.emissive;
+	brdf_mat.transmissivness = 0.0;
+	brdf_mat.opacity = 1.0;
+
+	vec3 radiance = m.emissive;
+
+	uint rt_light_count = uint(get_rt_param(RT_PARAM_LIGHT_COUNT));
+	if (rt_light_count > 0u) {
+		vec3 hit_pos_offset = offset_ray_origin(h.hit_pos, h.geometry_normal);
+		radiance += lights_evaluate_direct_lighting(hit_pos_offset, N, V, brdf_mat, ps.rng_state, true, rt_light_count, 0u);
+	}
+
+	vec3 diffuse_reflectance = baseColorToDiffuseReflectance(m.albedo, m.metalness);
+	if (luminance(diffuse_reflectance) > 0.0) {
+		vec4 irradiance = ddgi_sample_irradiance(h.hit_pos, N, V);
+		radiance += diffuse_reflectance * irradiance.rgb * irradiance.a;
+	}
+
+	ps.radiance = (any(isnan(radiance)) || any(isinf(radiance))) ? vec3(0.0) : radiance;
+}
+
+// ============================================================================
 // SHADE AND BOUNCE
 // ============================================================================
 
@@ -469,6 +520,12 @@ void shade_and_bounce(HitData h, MaterialResult m) {
 	// Clamp shading normal toward geometry at grazing view angles to keep BRDF above the geometry hemisphere.
 	vec3 N = clampShadingNormal(m.normal, h.geometry_normal, V, RT_SHADING_NORMAL_CLAMP_THRESHOLD);
 	float NdotV = max(dot(N, V), 0.0001);
+
+	if (is_ddgi_probe_ray(ps.packed_bounces_flags)) {
+		ddgi_probe_ray_shade(h, m, N, V, ps);
+		path_pack(payload, ps);
+		return;
+	}
 
 	uint total_bounces = get_total_bounces(ps.packed_bounces_flags);
 	uint diffuse_bounces = get_diffuse_bounces(ps.packed_bounces_flags);

@@ -3092,6 +3092,30 @@
 			If [code]true[/code], disables the threaded optimization feature from the NVIDIA drivers, which are known to cause stuttering in most OpenGL applications.
 			[b]Note:[/b] This setting only works on Windows, as threaded optimization is disabled by default on other platforms.
 		</member>
+		<member name="rendering/global_illumination/ddgi/custom_distance_texels" type="int" setter="" getter="" default="14">
+			Distance (visibility) map resolution per probe side when [member rendering/global_illumination/ddgi/quality] is Custom. Higher values give sharper indirect shadows and fewer leaks.
+		</member>
+		<member name="rendering/global_illumination/ddgi/custom_irradiance_texels" type="int" setter="" getter="" default="6">
+			Irradiance map resolution per probe side when [member rendering/global_illumination/ddgi/quality] is Custom.
+		</member>
+		<member name="rendering/global_illumination/ddgi/custom_probes_per_frame" type="int" setter="" getter="" default="2048">
+			The most probes traced per frame when [member rendering/global_illumination/ddgi/quality] is Custom. With more probes per frame, indirect light reacts faster to changes; the ray tracing cost grows linearly.
+		</member>
+		<member name="rendering/global_illumination/ddgi/custom_rays_per_probe" type="int" setter="" getter="" default="128">
+			Rays traced per probe update when [member rendering/global_illumination/ddgi/quality] is Custom. More rays give less noisy indirect light; the ray tracing cost grows linearly.
+		</member>
+		<member name="rendering/global_illumination/ddgi/gpu_time_budget_ms" type="float" setter="" getter="" default="0.0">
+			If above zero, DDGI measures its GPU time and lowers the number of probes traced per frame to stay within this many milliseconds (but never below an eighth of the quality setting's value). [code]0[/code] disables the budget.
+		</member>
+		<member name="rendering/global_illumination/ddgi/quality" type="int" setter="" getter="" default="1">
+			The DDGI workload. Each preset sets the rays per probe, the probes traced per frame and the probe map resolutions:
+			- Low: 64 rays, 1024 probes per frame, 6x6 irradiance, 12x12 distance.
+			- Medium: 128 rays, 2048 probes per frame, 6x6 irradiance, 14x14 distance.
+			- High: 192 rays, 4096 probes per frame, 8x8 irradiance, 14x14 distance.
+			- Ultra: 256 rays, 8192 probes per frame, 8x8 irradiance, 16x16 distance.
+			- Custom: uses the [code]custom_*[/code] settings in this section.
+			Can be changed at runtime.
+		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
 			[b]Note:[/b] This property is only read when the project starts. To set half-resolution GI at run-time, call [method RenderingServer.gi_set_use_half_resolution] instead.
