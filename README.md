@@ -97,6 +97,23 @@ CPU, rendering without DLSS).
   plus `--gpu-markers`, `--debug-shaders` and `--raytracing-validation`
   command-line flags.
 
+### DDGI ray traced global illumination
+
+- **`DDGIVolume` node** for Forward+ Vulkan scenes: place the GI volume in the
+  scene like any other 3D node and resize its width, height and depth directly
+  in the editor viewport.
+- Real-time ray traced diffuse GI using the fork's hardware ray tracing path.
+  Probes update over time, support moving lights and dynamic geometry, and can
+  show debug views for indirect light, probe irradiance, distance, states,
+  update priority and cascades.
+- Environment DDGI inspector controls are hidden; use `DDGIVolume` as the
+  standard authoring workflow. A WorldEnvironment is still required because the
+  renderer stores DDGI state on the active environment RID.
+- Default `DDGIVolume` values are set for gameplay-sized rooms:
+  size `60.264 x 5.774 x 62.86 m`, probe spacing `2 m`, `3` cascades,
+  energy `1.0`, normal bias `0.1`, view bias `0.3`, hysteresis `0.95`, probe
+  relocation/classification off.
+
 ### PhysX 5 (from the godot_physx module)
 
 Select it in Project Settings > Physics > 3D > Physics Engine = `PhysX`. Every

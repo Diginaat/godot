@@ -771,6 +771,13 @@ Environment::DDGIDebugMode Environment::get_ddgi_debug_mode() const {
 	return ddgi_debug_mode;
 }
 
+void Environment::set_ddgi_volume(bool p_node_volume, const Vector3 &p_center, const Vector3 &p_size) {
+	ddgi_node_volume = p_node_volume;
+	ddgi_volume_center = p_center;
+	ddgi_volume_size = p_size.maxf(0.1f);
+	RS::get_singleton()->environment_set_ddgi_volume(environment, ddgi_node_volume, ddgi_volume_center, ddgi_volume_size);
+}
+
 void Environment::_update_ddgi() {
 	RS::get_singleton()->environment_set_ddgi(
 			environment,
@@ -786,6 +793,7 @@ void Environment::_update_ddgi() {
 			ddgi_probe_classification,
 			ddgi_follow_camera,
 			(int)ddgi_debug_mode);
+	RS::get_singleton()->environment_set_ddgi_volume(environment, ddgi_node_volume, ddgi_volume_center, ddgi_volume_size);
 }
 
 // Glow
@@ -1291,6 +1299,10 @@ void Environment::_update_adjustment() {
 
 void Environment::_validate_property(PropertyInfo &p_property) const {
 	if (!Engine::get_singleton()->is_editor_hint()) {
+		return;
+	}
+	if (p_property.name.begins_with("ddgi_")) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 		return;
 	}
 	if (p_property.name == "sky" || p_property.name == "sky_custom_fov" || p_property.name == "sky_rotation" || p_property.name == "ambient_light_sky_contribution") {

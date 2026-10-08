@@ -159,6 +159,7 @@ public:
 		struct VolumeState {
 			Vector3i origin; // World probe index of logical probe (0,0,0).
 			Vector3i scroll;
+			Vector3 center;
 			float spacing = 0.0;
 			bool valid = false;
 		};
@@ -189,7 +190,8 @@ private:
 
 	struct UpdatePushConstant {
 		uint32_t total_probes;
-		uint32_t pad[3];
+		uint32_t schedule_new_only;
+		uint32_t pad[2];
 	};
 
 	struct ApplyPushConstant {

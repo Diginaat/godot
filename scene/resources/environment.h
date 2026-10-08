@@ -221,6 +221,9 @@ private:
 	bool ddgi_probe_relocation = true;
 	bool ddgi_probe_classification = true;
 	bool ddgi_follow_camera = true;
+	bool ddgi_node_volume = false;
+	Vector3 ddgi_volume_center;
+	Vector3 ddgi_volume_size = Vector3(24, 12, 24);
 	DDGIDebugMode ddgi_debug_mode = DDGI_DEBUG_DISABLED;
 	void _update_ddgi();
 
@@ -448,6 +451,7 @@ public:
 	bool is_ddgi_following_camera() const;
 	void set_ddgi_debug_mode(DDGIDebugMode p_mode);
 	DDGIDebugMode get_ddgi_debug_mode() const;
+	void set_ddgi_volume(bool p_node_volume, const Vector3 &p_center, const Vector3 &p_size);
 
 	// Glow
 	void set_glow_enabled(bool p_enabled);

@@ -62,7 +62,7 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 		ivec3 logical = base + offs;
 		uint probe = ddgi_probe_index(vol, logical);
 		uint state = ddgi_probes[probe].state;
-		if (state == DDGI_PROBE_NEW || state == DDGI_PROBE_INSIDE) {
+		if (state == DDGI_PROBE_NEW || state == DDGI_PROBE_INACTIVE || state == DDGI_PROBE_INSIDE) {
 			continue;
 		}
 

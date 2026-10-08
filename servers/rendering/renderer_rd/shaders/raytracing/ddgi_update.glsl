@@ -62,7 +62,7 @@ layout(set = 0, binding = 4, rg16f) uniform restrict coherent image2D ddgi_atlas
 
 layout(push_constant, std430) uniform Params {
 	uint total_probes;
-	uint pad0;
+	uint schedule_new_only;
 	uint pad1;
 	uint pad2;
 }
@@ -98,26 +98,51 @@ void main() {
 
 	// Probes that scrolling (or a reset) brought into the volume start over.
 	ivec4 reset = ddgi.volume_reset[volume];
-	bool reset_probe = reset.w != 0;
-	for (int a = 0; a < 3 && !reset_probe; a++) {
+	bool full_reset = reset.w != 0;
+	bool scroll_reset = false;
+	for (int a = 0; a < 3 && !scroll_reset; a++) {
 		int d = reset[a];
 		if ((d > 0 && logical[a] >= vol.grid[a] - d) || (d < 0 && logical[a] < -d)) {
-			reset_probe = true;
+			scroll_reset = true;
 		}
 	}
-	if (reset_probe) {
+	if (full_reset) {
 		pd.offset = vec3(0.0);
 		pd.state = DDGI_PROBE_NEW;
 		pd.urgency = 0.0;
 		pd.variability = 1.0;
 		pd.last_update_frame = 0u;
 		pd.luminance = 0.0;
+	} else if (scroll_reset) {
+		// Keep the atlas texels as a one-frame fallback. They belong to the old
+		// toroidal slot, so they may be stale, but stale lighting is less visible
+		// than sampling no probe at all (black flicker) while the camera moves.
+		pd.offset = vec3(0.0);
+		pd.state = DDGI_PROBE_ACTIVE;
+		pd.urgency = max(pd.urgency, 1.0);
+		pd.variability = 1.0;
+		pd.last_update_frame = 0u;
+	}
+
+	bool new_pass = params.schedule_new_only != 0u;
+	bool priority_probe = pd.state == DDGI_PROBE_NEW || pd.last_update_frame == 0u;
+	if (new_pass) {
+		if (!priority_probe) {
+			ddgi_probes[probe] = pd;
+			return;
+		}
+	} else if (priority_probe) {
+		// New/full-reset probes and scrolled probes were offered the budget first.
+		// If the budget was exhausted by them, keep them due for the next frame
+		// instead of letting older probes jump the queue.
+		ddgi_probes[probe] = pd;
+		return;
 	}
 
 	// Update rate: the base rate spreads the per-frame budget over all
 	// probes; each probe then gets more or less of it.
 	float rate = ddgi.schedule.x * vol.params.z * ddgi_stats.rate_scale;
-	if (pd.state == DDGI_PROBE_NEW) {
+	if (new_pass) {
 		rate = 1000.0; // As soon as there is room.
 	} else if (pd.state == DDGI_PROBE_INACTIVE || pd.state == DDGI_PROBE_INSIDE) {
 		rate *= 0.125; // Only to notice changes in classification.

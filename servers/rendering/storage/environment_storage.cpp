@@ -957,6 +957,14 @@ void RendererEnvironmentStorage::environment_set_ddgi(RID p_env, bool p_enable, 
 	env->ddgi.debug_mode = p_debug_mode;
 }
 
+void RendererEnvironmentStorage::environment_set_ddgi_volume(RID p_env, bool p_node_volume, const Vector3 &p_center, const Vector3 &p_size) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi.node_volume = p_node_volume;
+	env->ddgi.volume_center = p_center;
+	env->ddgi.volume_size = p_size.maxf(0.1f);
+}
+
 bool RendererEnvironmentStorage::environment_get_ddgi_enabled(RID p_env) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, false);
