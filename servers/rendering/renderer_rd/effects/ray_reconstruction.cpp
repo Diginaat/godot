@@ -47,6 +47,7 @@ RayReconstruction::RayReconstruction() {
 	modes.push_back("\n#define MODE_TEMPORAL\n");
 	modes.push_back("\n#define MODE_VARIANCE\n");
 	modes.push_back("\n#define MODE_ATROUS\n");
+	modes.push_back("\n#define MODE_REFERENCE\n");
 	shader.initialize(modes);
 	shader_version = shader.version_create();
 	for (int i = 0; i < MODE_MAX; i++) {
@@ -98,6 +99,45 @@ bool RayReconstruction::_ensure_history(Ref<RenderSceneBuffersRD> p_render_buffe
 	return false;
 }
 
+// Debug reference: a plain running average of the path tracer's image (no
+// filtering), restarted whenever the camera moves or the mode is entered. Test
+// harnesses freeze their animation and wait for it to converge.
+void RayReconstruction::_process_reference(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs, ViewportState &r_state) {
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	RD *rd = RD::get_singleton();
+
+	if (!p_render_buffers->has_texture(RB_SCOPE_RR_HISTORY, SNAME("reference"))) {
+		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, SNAME("reference"), RD::DATA_FORMAT_R32G32B32A32_SFLOAT, RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
+		r_state.reference_active = false;
+	}
+	const bool reset = !r_state.reference_active || !r_state.reference_cam_transform.is_equal_approx(p_inputs.cam_transform);
+	r_state.reference_active = true;
+	r_state.reference_cam_transform = p_inputs.cam_transform;
+	// The denoiser's history is stale once this mode ends.
+	r_state.frame = 0;
+
+	PushConstant pc = {};
+	pc.flags = reset ? FLAG_RESET : 0;
+	pc.debug_mode = DEBUG_REFERENCE;
+
+	RENDER_TIMESTAMP("RR Reference");
+	RID s = _get_shader(MODE_REFERENCE);
+	RD::ComputeListID cl = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(cl, pipelines[MODE_REFERENCE]);
+	rd->compute_list_bind_uniform_set(cl, uniform_set_cache->get_cache(s, 0, RD::Uniform(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, r_state.params_buffer)), 0);
+	RID set = uniform_set_cache->get_cache(s, 1,
+			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 0, p_inputs.base),
+			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, p_inputs.diffuse),
+			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, p_inputs.specular),
+			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 3, p_render_buffers->get_texture(RB_SCOPE_RR_HISTORY, SNAME("reference"))),
+			RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 4, p_inputs.output));
+	rd->compute_list_bind_uniform_set(cl, set, 1);
+	rd->compute_list_set_push_constant(cl, &pc, sizeof(PushConstant));
+	rd->compute_list_dispatch_threads(cl, p_inputs.size.x, p_inputs.size.y, 1);
+	rd->compute_list_end();
+	RENDER_TIMESTAMP("RR Done");
+}
+
 void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs) {
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	ERR_FAIL_NULL(uniform_set_cache);
@@ -107,6 +147,17 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 	if (vs.params_buffer.is_null()) {
 		vs.params_buffer = rd->uniform_buffer_create(sizeof(ParamsUBO));
 	}
+
+	const uint32_t debug_mode = uint32_t(int(GLOBAL_GET_CACHED(int, "rendering/ray_reconstruction/debug_mode")));
+	if (debug_mode == DEBUG_REFERENCE) {
+		ParamsUBO ubo = {};
+		ubo.size[0] = p_inputs.size.x;
+		ubo.size[1] = p_inputs.size.y;
+		rd->buffer_update(vs.params_buffer, 0, sizeof(ParamsUBO), &ubo);
+		_process_reference(p_render_buffers, p_inputs, vs);
+		return;
+	}
+	vs.reference_active = false;
 	const bool history_valid = _ensure_history(p_render_buffers) && vs.frame > 0;
 	const uint32_t cur = vs.frame & 1;
 	const uint32_t prev = cur ^ 1;
@@ -155,7 +206,7 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 	rd->buffer_update(vs.params_buffer, 0, sizeof(ParamsUBO), &ubo);
 
 	PushConstant pc = {};
-	pc.debug_mode = uint32_t(int(GLOBAL_GET_CACHED(int, "rendering/ray_reconstruction/debug_mode")));
+	pc.debug_mode = debug_mode;
 
 	RD::Uniform u_params(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vs.params_buffer);
 
@@ -163,6 +214,7 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 
 	// 1. Temporal accumulation.
 	RENDER_TIMESTAMP("RR Temporal");
+	const RID linear_sampler = MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	{
 		RID s = _get_shader(MODE_TEMPORAL);
 		RD::ComputeListID cl = rd->compute_list_begin();
@@ -174,8 +226,8 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, p_inputs.guide),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 3, p_inputs.depth),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 4, p_inputs.velocity),
-				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 5, tex("diffuse_", prev)),
-				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 6, tex("specular_", prev)),
+				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 5, Vector<RID>({ linear_sampler, tex("diffuse_", prev) })),
+				RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 6, Vector<RID>({ linear_sampler, tex("specular_", prev) })),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 7, tex("moments_", prev)),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 8, tex("surface_", prev)),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 9, tex("diffuse_", cur)),
@@ -210,8 +262,7 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 		rd->compute_list_end();
 	}
 
-	// 3. Edge-aware a-trous iterations. The first one feeds the history, the
-	// last one composes the final image.
+	// 3. Edge-aware a-trous iterations; the last one composes the final image.
 	{
 		RID s = _get_shader(MODE_ATROUS);
 		for (int i = 0; i < ATROUS_ITERATIONS; i++) {
@@ -239,7 +290,10 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 			rd->compute_list_bind_uniform_set(cl, set, 1);
 			pc.step_size = 1 << i;
 			pc.iteration = i;
-			pc.flags = (i == 0 ? FLAG_FEEDBACK : 0) | (i == ATROUS_ITERATIONS - 1 ? FLAG_COMPOSE : 0);
+			// No feedback of filtered results into the history (SVGF does it):
+			// measured, it darkened the image (the filter's bias adds up every
+			// frame) without lowering the error.
+			pc.flags = i == ATROUS_ITERATIONS - 1 ? FLAG_COMPOSE : 0;
 			rd->compute_list_set_push_constant(cl, &pc, sizeof(PushConstant));
 			rd->compute_list_dispatch_threads(cl, p_inputs.size.x, p_inputs.size.y, 1);
 			rd->compute_list_end();

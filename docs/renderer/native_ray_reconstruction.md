@@ -178,8 +178,9 @@ traceRays (1 spp)                     compute, internal resolution
 | 2 | Path tracer signal split: diffuse and specular radiance, clean primary emission/sky/fog, guide buffers for the native denoiser; pass-through compose must match today's image | Done |
 | 3 | Core SVGF: `PT_DENOISER_NATIVE`, history resources, reprojection with depth/normal tests, moments, variance, a-trous, compose, timestamps | Done |
 | 4 | Specular reconstruction: roughness-aware history and kernel, hit distance, virtual-hit reprojection for glossy surfaces | Done |
-| 5 | Anti-ghosting: history clipping, confidence, firefly clamp, NaN guards, disocclusion fallback | Open |
-| 6 | Test harness: accumulated reference, metrics (error vs reference, temporal flicker, ghost trails, edge sharpness), moving scenes, thin geometry, mirrors, moving emitters | Open |
+| 5 | Anti-ghosting: history clipping, confidence, firefly clamp, NaN guards, disocclusion fallback | Done (heuristic change detection; see 5b) |
+| 5b | A-SVGF temporal gradients (Schied et al. 2018) in place of the heuristic change detection | Open |
+| 6 | Test harness: accumulated reference, metrics (error vs reference, temporal flicker, ghost trails, edge sharpness), moving scenes, thin geometry, mirrors, moving emitters | Done |
 | 7 | Settings and debug views: `rendering/ray_reconstruction/*`, presets measured against each other, debug views, editor exposure | Open |
 | 8 | History invalidation and upscaler integration: camera cuts (also FSR2/DLSS reset), resize, mode switches, viewport create/destroy; FSR2/TAA/DLSS SR combinations; zero-jitter debug | Open |
 | 9 | DDGI review: probe validity and generation, transitions, whether a screen-space pass helps (only if measured) | Open |
@@ -302,9 +303,115 @@ tracer variant costs 8-13% more than the plain one (bigger payload).
   alpha) or passes straight through (`transmit_and_bounce()`, counted as
   specular). Without the denoiser alpha blend is unchanged.
 
+## Test suite (step 6)
+
+[`misc/denoiser_test_project/`](../../misc/denoiser_test_project/) builds eight
+scenes from code. Every view is a pure function of the simulation time (fixed
+1/60 s steps while capturing), so separate runs line up frame by frame.
+
+| View | Tests |
+| --- | --- |
+| `cornell` | Box lit by an emissive ceiling panel (and the sun through the open front), still camera |
+| `pan` | Pillars behind a railing of 2.5 cm bars, fast camera pan (disocclusion, thin geometry) |
+| `emissive` | Dark room, a bright emissive ball circling (ghost trails of moving light) |
+| `skinned` | Three bending skinned tentacles (deformed BLAS, motion vectors), orbiting camera |
+| `thin` | 1.5 cm fence bars and alpha scissor leaves, strafing camera |
+| `mirror` | Mirror and glossy floors, rough metal spheres, a moving box, orbiting camera |
+| `lights` | Two moving colored omni lights and a sweeping spot light (moving shadows) |
+| `dark` | Dark room, one small bright light and tiny emitters (high contrast) |
+
+```
+godot --path misc/denoiser_test_project -- --view=mirror                  # interactive: 1-8 views, R denoiser, D debug view
+godot --path misc/denoiser_test_project -- --view=pan --tonemap=linear --sequence=30 --out=out/denoised
+godot --path misc/denoiser_test_project -- --view=pan --tonemap=linear --sequence=30 --reference=256 --out=out/reference
+python misc/denoiser_test_project/metrics.py out/denoised out/reference --prefix=pan
+python misc/denoiser_test_project/run_suite.py --godot=<editor console exe> --out=<dir> [--keep-reference]
+godot --gpu-profile --path misc/denoiser_test_project -- --view=cornell --res=2560x1440 --bench=200
+```
+
+Arguments (after `--`): `--view=`, `--res=WxH` (offscreen viewport, default
+1280x720), `--spp=`, `--bounces=`, `--denoiser=0|1|2` (default 2),
+`--rr_debug=0..8`, `--pt_debug=` (path tracer debug view), `--tonemap=linear`
+with `--exposure=` (measurements), `--scale3d=` and `--scale=`, `--taa=1`,
+`--frames=N` warm-up, `--shot=`, `--sequence=N --out=dir`, `--reference=K`
+(each sequence frame is the average of K frames with the scene frozen, via
+the denoiser's Reference debug mode), `--bench=N`, `--teleport=N` (camera cut
+every N frames), `--resize_at=F:WxH`, `--scale_at=F:MODE`, `--cycles=N` (create
+and free N extra path traced viewports first).
+
+**Reference mode** (`rendering/ray_reconstruction/debug_mode` = 8): the
+denoiser is replaced by a running average of the path tracer's image in fp32,
+restarted when the camera moves or the mode is entered. With the scene frozen
+it converges to the noise-free image (256 frames at 1 spp still leave visible
+noise next to small bright lights, as in the cornell and dark views).
+
+**Metrics** (`metrics.py`, numpy and Pillow only), against the reference, on
+linear values: `rmse`; `relmse` (relative, weighs dark areas); `ssim`;
+`temporal` (change between frames that the reference doesn't have: flicker,
+lag, ghost trails); `flicker` (change where the reference is still);
+`moving` (error where the reference changes); `sharpness` (gradient on the
+reference's strongest 5% of edges, 1 = as sharp); `bias` (mean brightness
+error). SSIM alone rewards blur; read it with sharpness and temporal. The raw
+input's bias is a few percent low because 1 spp values clip at the linear
+tonemap's white point.
+
+## Anti-ghosting and bias (step 5)
+
+Measured on the suite (960x540, 1 spp, 30 frames after 60 warm-up frames,
+256-frame references, RTX 3060). Each change was kept only if it measured
+better:
+
+- **Catmull-Rom history resampling** (5 bilinear taps, clamped to the four
+  surface taps against ringing) where all four taps are valid. Bilinear
+  resampling blurs a little every frame while moving: pan sharpness 0.77 to
+  0.89.
+- **No history feedback.** SVGF writes its first filtered iteration back into
+  the history. Here that darkened the cornell view by 7% (the filter's bias
+  adds up every frame) and didn't lower the error; without it -3.8% and lower
+  RMSE.
+- **Geometry-only first iteration.** Comparing luminance on the noisiest data
+  favors the darker samples of skewed path tracing noise; leaving it out of the
+  3x3 iteration cut the cornell bias to -1.9% and the RMSE to 0.0227.
+- **Lighting change detection** (heuristic): the history is compared with the
+  current 3x3 neighborhood mean (demodulated luminance); where the difference
+  is larger than the neighborhood's standard deviation + 5%, the history is
+  shortened in proportion, from the next frame on. Applying it in the same
+  frame weighted samples by their own value and darkened the noisiest scenes
+  by 10-30%. Big gains for moving light (lights RMSE 0.055 to 0.042, emissive
+  0.040 to 0.022), but it still triggers on 1 spp noise in still scenes: the
+  cornell view is 7% too dark with it (1.9% without), the emissive room 17%.
+  Step 5b replaces it with measured temporal gradients (A-SVGF).
+- Tried and dropped: a firefly clamp against history and neighborhood (never
+  triggered at 4 sigma), luminance weights against the local mean instead of
+  the center (less bias, more blur), a looser luminance sigma for short
+  histories (no effect).
+
+| View | RMSE step 4 | RMSE step 5 | Bias step 5 | Sharpness step 5 | Raw input RMSE |
+| --- | --- | --- | --- | --- | --- |
+| cornell | 0.0285 | 0.0277 | -7.3% | 0.28 | 0.1226 |
+| pan | 0.0101 | 0.0074 | -0.3% | 0.85 | 0.0190 |
+| emissive | (scene changed) | 0.0218 | -16.8% | 0.12 | 0.0676 |
+| skinned | 0.0106 | 0.0072 | -0.6% | 0.80 | 0.0263 |
+| thin | 0.0260 | 0.0187 | -0.9% | 0.82 | 0.0284 |
+| mirror | 0.0243 | 0.0199 | -0.7% | 0.54 | 0.0234 |
+| lights | 0.0548 | 0.0419 | +1.7% | 0.63 | 0.0894 |
+| dark | 0.0059 | 0.0054 | -0.9% | 0.31 | 0.0703 |
+
+Sharpness is low on cornell, emissive and dark because their references
+still have visible noise on the strongest gradients (bright, small lights).
+
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-10: Steps 5 and 6 done (6 first, to measure 5). The emissive room
+  went black for 8 frames in the first suite run: the ball's orbit passed
+  through the metal sphere (the room's only light hidden); fixed in the scene.
+  Lesson: any history weight that depends on the current samples (detection
+  in the same frame, feedback of filtered results) biases skewed path tracing
+  noise dark; check `bias` in the suite after every change. Next: A-SVGF
+  (step 5b); its reference code is BSD-3-Clause (Schied, KIT), compatible with
+  the engine's MIT license if the notice is kept.
 
 - 2026-10-10: Step 4 (specular) done. PBR view, still camera: the mirror
   spheres are clean and sharp (were sparkling). Orbiting camera

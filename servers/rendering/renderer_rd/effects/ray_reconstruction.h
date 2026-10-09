@@ -72,12 +72,17 @@ private:
 		MODE_TEMPORAL,
 		MODE_VARIANCE,
 		MODE_ATROUS,
+		MODE_REFERENCE,
 		MODE_MAX,
 	};
 
 	enum {
-		FLAG_FEEDBACK = 1,
 		FLAG_COMPOSE = 2,
+		FLAG_RESET = 4,
+	};
+
+	enum {
+		DEBUG_REFERENCE = 8, // Running average of the input while nothing moves.
 	};
 
 	// Matches Params in ray_reconstruction.glsl (std140).
@@ -108,6 +113,9 @@ private:
 	struct ViewportState {
 		RID params_buffer;
 		uint32_t frame = 0;
+		// Reference mode: restarts when the camera moves or the mode is entered.
+		bool reference_active = false;
+		Transform3D reference_cam_transform;
 	};
 
 	RayReconstructionShaderRD shader;
@@ -117,6 +125,7 @@ private:
 
 	RID _get_shader(Mode p_mode);
 	bool _ensure_history(Ref<RenderSceneBuffersRD> p_render_buffers);
+	void _process_reference(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs, ViewportState &r_state);
 };
 
 } // namespace RendererRD
