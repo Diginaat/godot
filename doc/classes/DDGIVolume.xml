@@ -26,6 +26,15 @@
 		</method>
 	</methods>
 	<members>
+		<member name="ao_enabled" type="bool" setter="set_ao_enabled" getter="is_ao_enabled" default="false">
+			If [code]true[/code], DDGI darkens its indirect light where nearby geometry blocks it (corners, the floor under objects, around moving objects, also off screen). It needs no rays: the probes' distance maps tell whether points around each surface are free. It is coarse (about the probe spacing) and complements [member Environment.ssao_enabled], which adds the fine contact detail. Direct light and reflections aren't affected. Works with baked probes and without ray tracing hardware. Costs about 0.4 ms at 1920×1080 on an RTX 3060 (a quarter of that with [member ProjectSettings.rendering/global_illumination/gi/use_half_resolution]). Use the Ambient Occlusion [member debug_mode] to tune it.
+		</member>
+		<member name="ao_radius" type="float" setter="set_ao_radius" getter="get_ao_radius" default="1.0">
+			How far around a surface geometry counts as occluding, in meters. It is limited to the probe spacing of the finest cascade covering the surface: beyond that, the probe grid would show in the result.
+		</member>
+		<member name="ao_strength" type="float" setter="set_ao_strength" getter="get_ao_strength" default="0.75">
+			How much the ambient occlusion darkens the indirect light: [code]0.0[/code] none, [code]1.0[/code] fully.
+		</member>
 		<member name="bake_mode" type="int" setter="set_bake_mode" getter="get_bake_mode" enum="DDGIVolume.BakeMode" default="0">
 			How the probes use [member probe_data]. See [enum BakeMode]. When the baked data doesn't fit the volume (it was moved, resized, or its probe spacing or cascades changed), the probes are updated dynamically until baked again, and a configuration warning says so.
 		</member>

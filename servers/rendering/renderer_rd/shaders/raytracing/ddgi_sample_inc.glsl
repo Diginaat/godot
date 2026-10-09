@@ -20,6 +20,19 @@ vec3 ddgi_probe_ray_direction(uint p_ray) {
 
 #ifdef DDGI_SAMPLING
 
+#ifdef DDGI_AO
+// Ambient occlusion from the probe distances, filled by ddgi_sample_volume()
+// for the finest volume that covers the point: 1 = open, 0 = fully occluded
+// within ddgi.ao.y (at most the probe spacing). For a few directions around
+// the normal, the probes tell whether a point at about that distance is free
+// (visible from them).
+// Weighted like the irradiance (trilinear, backface, visibility), so probes
+// behind walls don't count. Coarse (probe resolution), but it needs no rays
+// and covers off-screen geometry.
+float ddgi_ao_visibility = 1.0;
+bool ddgi_ao_done = false;
+#endif
+
 // Fraction of the volume's weight at a point: 1 inside, fading to 0 over the
 // edge blend width at the borders of the probe grid.
 float ddgi_volume_weight(DDGIVolume vol, vec3 p_local) {
@@ -56,6 +69,28 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 
 	vec3 sum = vec3(0.0);
 	float weight_sum = 0.0;
+
+#ifdef DDGI_AO
+	const bool ao_active = !ddgi_ao_done && ddgi.ao.x > 0.0;
+	vec3 ao_dirs[3];
+	// Beyond about one probe spacing the probes see the sample points along
+	// the surface at grazing angles, where their distance maps are blurred:
+	// the result turns into a pattern of the probe grid. So the radius stops
+	// at the spacing.
+	const float ao_radius = min(ddgi.ao.y, vol.spacing.x);
+	float ao_sum = 0.0;
+	float ao_weight_sum = 0.0;
+	if (ao_active) {
+		// Three directions 60 degrees off the normal, 120 degrees apart around
+		// it: most of what occludes a point (walls in corners, the floor
+		// under objects) is near the surface plane.
+		vec3 t1 = normalize(abs(local_normal.y) < 0.9 ? cross(local_normal, vec3(0.0, 1.0, 0.0)) : cross(local_normal, vec3(1.0, 0.0, 0.0)));
+		vec3 t2 = cross(local_normal, t1);
+		ao_dirs[0] = local_normal * 0.5 + t1 * 0.866;
+		ao_dirs[1] = local_normal * 0.5 + (t1 * -0.5 + t2 * 0.866) * 0.866;
+		ao_dirs[2] = local_normal * 0.5 + (t1 * -0.5 - t2 * 0.866) * 0.866;
+	}
+#endif
 
 	for (uint i = 0u; i < 8u; i++) {
 		ivec3 offs = ivec3(i & 1u, (i >> 1u) & 1u, (i >> 2u) & 1u);
@@ -99,12 +134,48 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 
 		weight *= trilinear;
 
+#ifdef DDGI_AO
+		// Probes that barely count (mostly the ones behind a wall) are skipped.
+		if (ao_active && weight > 0.01) {
+			// Is a point at about the AO radius from the surface, in each
+			// direction, visible from this probe? Points inside a wall (in
+			// a corner) or under an object are not. The probe sees what the
+			// shading point sees well enough when it sees the shading point,
+			// which the visibility weight above makes sure of.
+			float open = 0.0;
+			for (int k = 0; k < 3; k++) {
+				vec3 to_sample = local + ao_dirs[k] * (0.75 * ao_radius) - probe_local;
+				float sample_dist = length(to_sample);
+				vec3 sample_dir = sample_dist > 0.0 ? to_sample / sample_dist : ao_dirs[k];
+				vec2 m = textureLod(sampler2D(ddgi_distance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, ddgi_xform_dir(vol.local_to_world, sample_dir), dist_texels, per_row, ddgi.atlas_inv_size.zw), 0.0).rg;
+				// Chebyshev bound, as for the light, with a variance of at least
+				// (radius / 4)^2: a soft transition instead of the steps of the
+				// low resolution distance map.
+				float behind = sample_dist - m.x;
+				float variance = max(abs(m.x * m.x - m.y), 0.0625 * ao_radius * ao_radius);
+				open += behind <= 0.0 ? 1.0 : variance / (variance + behind * behind);
+			}
+			ao_sum += open * (1.0 / 3.0) * weight;
+			ao_weight_sum += weight;
+		}
+#endif
+
 		vec3 irradiance = textureLod(sampler2D(ddgi_irradiance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, p_normal, irr_texels, per_row, ddgi.atlas_inv_size.xy), 0.0).rgb;
 		// Blend in a perceptual (square root) space: smoother transitions
 		// between bright and dark probes.
 		sum += sqrt(max(irradiance, vec3(0.0))) * weight;
 		weight_sum += weight;
 	}
+
+#ifdef DDGI_AO
+	if (ao_active && ao_weight_sum > 0.0) {
+		// Fade out with the volume, as the light does.
+		// Squared: one blocked side of three reads as a clear darkening.
+		float open = ao_sum / ao_weight_sum;
+		ddgi_ao_visibility = mix(1.0, open * open, volume_weight);
+		ddgi_ao_done = true;
+	}
+#endif
 
 	if (weight_sum <= 0.0) {
 		return vec4(0.0);

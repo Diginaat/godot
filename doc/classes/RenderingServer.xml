@@ -1381,6 +1381,16 @@
 				Configures dynamic diffuse global illumination (DDGI) for the environment. See [member Environment.ddgi_enabled] and the other [code]ddgi_*[/code] properties of [Environment] for details.
 			</description>
 		</method>
+		<method name="environment_set_ddgi_ao">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="strength" type="float" />
+			<param index="3" name="radius" type="float" />
+			<description>
+				Sets the ambient occlusion DDGI computes from its probe distances. See [member Environment.ddgi_ao_enabled].
+			</description>
+		</method>
 		<method name="environment_set_ddgi_baked_data">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

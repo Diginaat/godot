@@ -60,6 +60,7 @@ struct DDGIDataBlock {
 	vec4 atlas_inv_size; // xy: irradiance atlas, zw: distance atlas.
 	vec4 schedule; // x: base update rate, y: total probes, z: max radiance per ray, w: bounce energy.
 	vec4 miss_color; // rgb: radiance of rays that miss when there is no sky, w: 1 = use the sky.
+	vec4 ao; // x: ambient occlusion strength (0 = off), y: radius (world units).
 };
 
 vec3 ddgi_xform(vec4 rows[3], vec3 p) {
