@@ -383,7 +383,15 @@ Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 	// A small offscreen view of the same world: the probes of a fixed volume
 	// don't depend on the camera, and the view keeps them updating.
 	SubViewport *vp = memnew(SubViewport);
-	vp->set_size(Size2i(16, 16));
+	// Native resolution, no upscaler or anti-aliasing: new viewports take
+	// the project's defaults, and DLSS or FSR at a size this small fail (and
+	// post effects need a few mip levels). 64x64 costs next to nothing.
+	vp->set_size(Size2i(64, 64));
+	vp->set_scaling_3d_mode(Viewport::SCALING_3D_MODE_BILINEAR);
+	vp->set_scaling_3d_scale(1.0);
+	vp->set_msaa_3d(Viewport::MSAA_DISABLED);
+	vp->set_screen_space_aa(Viewport::SCREEN_SPACE_AA_DISABLED);
+	vp->set_use_taa(false);
 	vp->set_update_mode(SubViewport::UPDATE_ALWAYS);
 	vp->set_world_3d(get_world_3d());
 	Camera3D *camera = memnew(Camera3D);

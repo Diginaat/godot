@@ -438,6 +438,16 @@ How to read them:
 
 Newest first. Note the date, the commit, what you saw or changed.
 
+- 2026-10-09: Bake errors in projects with DLSS or FSR as the default 3D
+  scaling ("slEvaluateFeature ... eErrorNGXFailed", "Too many mipmaps
+  requested", "Dispatch amount of X compute threads (0) is zero", invalid
+  textures). The bake's offscreen view takes the project's scaling
+  defaults, and step 14 had made it 16x16: DLSS at about 10x10 pixels
+  fails, and post effects need a few mip levels. The view now renders at
+  native resolution without upscaler or anti-aliasing, at 64x64.
+  Reproduced with the harness's `--ps_scale3d=6` (100 errors); with the
+  fix none for DLSS, FSR2 and bilinear, bake time unchanged (0.53 s).
+
 - 2026-10-09: Step 14. `DDGIVolume.probe_count` (probes per axis, linked to
   `size`; the spacing stays the same on every axis, so the shaders didn't
   change) and `infinite_world` (the former `follow_camera`, never
