@@ -111,7 +111,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 
 void RenderDDGI::ViewportData::free_data() {
 	RD *rd = RD::get_singleton();
-	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &ray_data, &irradiance_atlas, &distance_atlas };
+	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &ray_data, &irradiance_atlas, &irradiance_display, &distance_atlas };
 	for (RID *r : rids) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
@@ -137,6 +137,7 @@ void RenderDDGI::initialize() {
 		modes.push_back("\n#define MODE_BLEND_IRRADIANCE\n");
 		modes.push_back("\n#define MODE_BLEND_DISTANCE\n");
 		modes.push_back("\n#define MODE_RELOCATE_CLASSIFY\n");
+		modes.push_back("\n#define MODE_SMOOTH\n");
 		update_shader.initialize(modes);
 		update_shader_version = update_shader.version_create();
 		for (int i = 0; i < UPDATE_MODE_MAX; i++) {
@@ -240,8 +241,6 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 	p_data->grid = p_grid;
 	p_data->quality = p_quality;
 	p_data->total_probes = uint32_t(p_cascades) * uint32_t(p_grid.x * p_grid.y * p_grid.z);
-	p_data->capacity = MIN(p_quality.probes_per_frame, p_data->total_probes);
-	p_data->update_capacity_used = p_data->capacity;
 
 	// Lay probe tiles out in rows; the distance tiles are the larger ones.
 	// Probes per row are a power of two (shaders use shifts, not divisions).
@@ -268,13 +267,6 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 		rd->set_resource_name(p_data->probe_buffer, "DDGI Probes");
 	}
 	{
-		Vector<uint8_t> init;
-		init.resize(16 + p_data->capacity * 4);
-		init.fill(0);
-		p_data->update_list = rd->storage_buffer_create(init.size(), init);
-		rd->set_resource_name(p_data->update_list, "DDGI Update List");
-	}
-	{
 		float stats[4] = { 1.0f, 0, 0, 0 }; // rate_scale starts at 1.
 		p_data->stats_buffer = rd->storage_buffer_create(sizeof(stats), Span<uint8_t>((uint8_t *)stats, sizeof(stats)));
 		rd->set_resource_name(p_data->stats_buffer, "DDGI Stats");
@@ -284,19 +276,15 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 	tf.texture_type = RD::TEXTURE_TYPE_2D;
 
 	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
-	tf.width = p_quality.rays_per_probe;
-	tf.height = p_data->capacity;
-	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
-	p_data->ray_data = rd->texture_create(tf, RD::TextureView());
-	rd->set_resource_name(p_data->ray_data, "DDGI Ray Data");
-
-	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	tf.width = p_data->irradiance_size.x;
 	tf.height = p_data->irradiance_size.y;
 	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_UPDATE_BIT;
 	p_data->irradiance_atlas = rd->texture_create(tf, RD::TextureView());
 	rd->set_resource_name(p_data->irradiance_atlas, "DDGI Irradiance Atlas");
 	rd->texture_clear(p_data->irradiance_atlas, Color(0, 0, 0, 0), 0, 1, 0, 1);
+	p_data->irradiance_display = rd->texture_create(tf, RD::TextureView());
+	rd->set_resource_name(p_data->irradiance_display, "DDGI Irradiance Display");
+	rd->texture_clear(p_data->irradiance_display, Color(0, 0, 0, 0), 0, 1, 0, 1);
 
 	tf.format = RD::DATA_FORMAT_R16G16_SFLOAT;
 	tf.width = p_data->distance_size.x;
@@ -304,6 +292,40 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 	p_data->distance_atlas = rd->texture_create(tf, RD::TextureView());
 	rd->set_resource_name(p_data->distance_atlas, "DDGI Distance Atlas");
 	rd->texture_clear(p_data->distance_atlas, Color(0, 0, 0, 0), 0, 1, 0, 1);
+
+	_allocate_rays(p_data, p_quality);
+}
+
+void RenderDDGI::_allocate_rays(ViewportData *p_data, const Quality &p_quality) {
+	RD *rd = RD::get_singleton();
+	for (RID *r : { &p_data->ray_data, &p_data->update_list }) {
+		if (r->is_valid()) {
+			rd->free_rid(*r);
+			*r = RID();
+		}
+	}
+	p_data->quality.rays_per_probe = p_quality.rays_per_probe;
+	p_data->quality.probes_per_frame = p_quality.probes_per_frame;
+	p_data->capacity = MIN(p_quality.probes_per_frame, p_data->total_probes);
+	p_data->update_capacity_used = p_data->capacity;
+	p_data->realtime_offset = 0;
+
+	{
+		Vector<uint8_t> init;
+		init.resize(16 + p_data->capacity * 4);
+		init.fill(0);
+		p_data->update_list = rd->storage_buffer_create(init.size(), init);
+		rd->set_resource_name(p_data->update_list, "DDGI Update List");
+	}
+
+	RD::TextureFormat tf;
+	tf.texture_type = RD::TEXTURE_TYPE_2D;
+	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+	tf.width = p_quality.rays_per_probe;
+	tf.height = p_data->capacity;
+	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
+	p_data->ray_data = rd->texture_create(tf, RD::TextureView());
+	rd->set_resource_name(p_data->ray_data, "DDGI Ray Data");
 }
 
 uint32_t RenderDDGI::_setup_volumes(ViewportData *p_data, const RenderDataRD *p_render_data, DDGIDataGPU &r_gpu) {
@@ -379,7 +401,10 @@ uint32_t RenderDDGI::_setup_volumes(ViewportData *p_data, const RenderDataRD *p_
 		v.spacing[2] = s.view_bias * spacing;
 		v.spacing[3] = spacing * 1.75f; // A little more than the cell diagonal.
 		v.params[0] = s.energy;
-		v.params[1] = s.hysteresis;
+		// Realtime updates come every frame instead of every few frames: a
+		// lower hysteresis per update gives about the same noise after the
+		// display easing, and follows light changes much sooner.
+		v.params[1] = s.realtime ? CLAMP(1.0f - (1.0f - s.hysteresis) * 2.0f, 0.0f, 0.999f) : s.hysteresis;
 		// Coarser cascades cover distant, less detailed lighting: fewer updates.
 		v.params[2] = 1.0f / float(1 << c);
 		// Fade over the outermost probe of each cascade, so the next one takes over.
@@ -402,15 +427,24 @@ Ref<RenderDDGI::ViewportData> RenderDDGI::_prepare_viewport(RenderDataRD *p_rend
 		r_quality.distance_texels = CLAMP(int(s.baked_data.get("distance_texels", r_quality.distance_texels)), 8, 32);
 	}
 
+	// Realtime updates: every probe every frame (in chunks of up to 16384,
+	// the most one dispatch can hold), with fewer rays per update; the
+	// hysteresis averages them over the frames.
+	if (s.realtime) {
+		r_quality.rays_per_probe = CLAMP(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ddgi/realtime_rays_per_probe"), 16, 512);
+		r_quality.probes_per_frame = 16384;
+	}
+
 	Ref<ViewportData> vd = _get_viewport_data(rb.ptr());
 	const Quality &q = r_quality;
-	if (vd->cascades != s.cascades || vd->grid != s.probe_grid || vd->quality.rays_per_probe != q.rays_per_probe ||
-			vd->quality.probes_per_frame != q.probes_per_frame || vd->quality.irradiance_texels != q.irradiance_texels ||
+	if (vd->cascades != s.cascades || vd->grid != s.probe_grid || vd->quality.irradiance_texels != q.irradiance_texels ||
 			vd->quality.distance_texels != q.distance_texels || !vd->data_buffer.is_valid()) {
 		_allocate(vd.ptr(), s.cascades, s.probe_grid, q);
 		if (!vd->data_buffer.is_valid()) {
 			return Ref<ViewportData>();
 		}
+	} else if (vd->quality.rays_per_probe != q.rays_per_probe || vd->quality.probes_per_frame != q.probes_per_frame) {
+		_allocate_rays(vd.ptr(), q);
 	}
 
 	if (!use_baked) {
@@ -436,6 +470,7 @@ bool RenderDDGI::_upload_baked(ViewportData *p_data, const RendererEnvironmentSt
 	ERR_FAIL_COND_V_MSG(uint32_t(probes.size()) != p_data->total_probes * 4, false, "DDGI: the baked probe data has the wrong number of probes. Bake again.");
 
 	rd->texture_update(p_data->irradiance_atlas, 0, irradiance->get_data());
+	rd->texture_update(p_data->irradiance_display, 0, irradiance->get_data());
 	rd->texture_update(p_data->distance_atlas, 0, distance->get_data());
 
 	// Offsets and states from the bake. The probes count as updated (not new),
@@ -514,6 +549,13 @@ void RenderDDGI::_write_frame_data(ViewportData *p_data, const RenderDataRD *p_r
 	r_gpu.schedule[1] = float(p_data->total_probes);
 	r_gpu.schedule[2] = DDGI_MAX_RAY_RADIANCE;
 	r_gpu.schedule[3] = s.bounce_energy;
+	// The display irradiance closes this share of its gap to the probes' each
+	// frame: a time constant of light_transition_time at 60 frames per
+	// second. Counted in frames, like the probe updates whose steps it hides.
+	{
+		float transition_frames = MAX(0.0f, GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/light_transition_time")) * 60.0f;
+		r_gpu.smoothing[0] = transition_frames > 1.0f ? 1.0f - Math::exp(-1.0f / transition_frames) : 1.0f;
+	}
 
 	// What rays that leave the scene see: the sky, or the ambient color when
 	// there is no sky to sample.
@@ -609,9 +651,12 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		vd->frame = 1; // 0 means "never updated" in last_update_frame.
 	}
 
+	const bool realtime = RendererEnvironmentStorage::get_singleton()->environment_get_ddgi(p_render_data->environment).realtime;
+
 	// GPU time budget: scale the probes traced per frame to the measured cost
 	// per probe, between an eighth of the quality setting and all of it.
-	const bool use_budget = q.gpu_time_budget_ms > 0.0f;
+	// Realtime updates trace every probe instead.
+	const bool use_budget = q.gpu_time_budget_ms > 0.0f && !realtime;
 	if (use_budget) {
 		float measured_ms = _ddgi_measured_update_ms();
 		if (measured_ms > 0.0f) {
@@ -631,8 +676,9 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 
 	rd->buffer_update(vd->data_buffer, 0, sizeof(DDGIDataGPU), &gpu);
 	{
-		// Empty list.
-		uint32_t header[4] = { 0, 0, 0, 0 };
+		// Empty list, or for realtime updates the full chunk (the scheduler
+		// writes the slots directly).
+		uint32_t header[4] = { realtime ? capacity : 0u, 0, 0, 0 };
 		rd->buffer_update(vd->update_list, 0, sizeof(header), header);
 	}
 
@@ -643,10 +689,18 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	RD::Uniform u_rays(RD::UNIFORM_TYPE_IMAGE, 3, vd->ray_data);
 	RD::Uniform u_stats(RD::UNIFORM_TYPE_STORAGE_BUFFER, 5, vd->stats_buffer);
 	RD::Uniform u_irradiance(RD::UNIFORM_TYPE_IMAGE, 4, vd->irradiance_atlas);
+	RD::Uniform u_display(RD::UNIFORM_TYPE_IMAGE, 6, vd->irradiance_display);
 	RD::Uniform u_distance(RD::UNIFORM_TYPE_IMAGE, 4, vd->distance_atlas);
 
 	UpdatePushConstant push = {};
 	push.total_probes = vd->total_probes;
+	push.realtime = realtime ? 1 : 0;
+	push.realtime_offset = vd->realtime_offset;
+	if (realtime) {
+		// Next frame continues after this chunk: neighboring probes (one
+		// slab of the grid) update together, and every probe once per round.
+		vd->realtime_offset = (vd->realtime_offset + capacity) % MAX(vd->total_probes, 1u);
+	}
 
 	// 1. Pick the probes to trace. This is split into two passes so full-reset
 	// probes and scrolled-in probes get update slots before older probes spend
@@ -673,7 +727,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		_ddgi_timestamp("DDGI Trace Probe Rays", false);
 		RTDDGIBindings bindings;
 		bindings.uniform_buffer = vd->data_buffer;
-		bindings.irradiance_atlas = vd->irradiance_atlas;
+		bindings.irradiance_atlas = vd->irradiance_display;
 		bindings.distance_atlas = vd->distance_atlas;
 		bindings.probe_buffer = vd->probe_buffer;
 		bindings.ray_data = vd->ray_data;
@@ -703,18 +757,24 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 
 		RID shader = update_shader.version_get_shader(update_shader_version, UPDATE_BLEND_IRRADIANCE);
 		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_BLEND_IRRADIANCE]);
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_irradiance, u_stats), 0);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_irradiance, u_stats, u_display), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		// One group per list slot; groups past the list count exit at once.
 		// (An indirect dispatch from the list count didn't see this frame's
 		// count reliably, so the probes stopped updating.)
 		rd->compute_list_dispatch(list, capacity, 1, 1);
 
-		shader = update_shader.version_get_shader(update_shader_version, UPDATE_BLEND_DISTANCE);
-		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_BLEND_DISTANCE]);
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_distance, u_stats), 0);
-		rd->compute_list_set_push_constant(list, &push, sizeof(push));
-		rd->compute_list_dispatch(list, capacity, 1, 1);
+		// Distances change only when geometry moves. With realtime updates
+		// (every probe every frame) they are blended every 4th frame: about
+		// half the blend cost, and moving objects still update within a few
+		// frames.
+		if (!realtime || (vd->frame & 3u) == 0u) {
+			shader = update_shader.version_get_shader(update_shader_version, UPDATE_BLEND_DISTANCE);
+			rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_BLEND_DISTANCE]);
+			rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_distance, u_stats), 0);
+			rd->compute_list_set_push_constant(list, &push, sizeof(push));
+			rd->compute_list_dispatch(list, capacity, 1, 1);
+		}
 
 		rd->compute_list_end();
 
@@ -727,6 +787,18 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_stats), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		rd->compute_list_dispatch_threads(list, capacity, 1, 1);
+
+		rd->compute_list_end();
+
+		// 4. Ease the display irradiance (what surfaces sample) toward the
+		// probes', every texel every frame.
+		_ddgi_timestamp("DDGI Smooth", false);
+		list = rd->compute_list_begin();
+		shader = update_shader.version_get_shader(update_shader_version, UPDATE_SMOOTH);
+		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_SMOOTH]);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_irradiance, u_stats, u_display), 0);
+		rd->compute_list_set_push_constant(list, &push, sizeof(push));
+		rd->compute_list_dispatch_threads(list, vd->irradiance_size.x, vd->irradiance_size.y, 1);
 
 		rd->compute_list_end();
 	}
@@ -795,7 +867,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 
 		RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
 		RD::Uniform u_probes(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, vd->probe_buffer);
-		RD::Uniform u_irradiance(RD::UNIFORM_TYPE_TEXTURE, 2, vd->irradiance_atlas);
+		RD::Uniform u_irradiance(RD::UNIFORM_TYPE_TEXTURE, 2, vd->irradiance_display);
 		RD::Uniform u_distance(RD::UNIFORM_TYPE_TEXTURE, 3, vd->distance_atlas);
 		RD::Uniform u_sampler(RD::UNIFORM_TYPE_SAMPLER, 4, linear_sampler);
 		RD::Uniform u_depth(RD::UNIFORM_TYPE_TEXTURE, 5, rb->get_depth_texture(v));
@@ -855,7 +927,7 @@ void RenderDDGI::debug_draw(RenderDataRD *p_render_data) {
 
 		RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
 		RD::Uniform u_probes(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, vd->probe_buffer);
-		RD::Uniform u_irradiance(RD::UNIFORM_TYPE_TEXTURE, 2, vd->irradiance_atlas);
+		RD::Uniform u_irradiance(RD::UNIFORM_TYPE_TEXTURE, 2, vd->irradiance_display);
 		RD::Uniform u_distance(RD::UNIFORM_TYPE_TEXTURE, 3, vd->distance_atlas);
 		RD::Uniform u_sampler(RD::UNIFORM_TYPE_SAMPLER, 4, linear_sampler);
 		RD::Uniform u_depth(RD::UNIFORM_TYPE_TEXTURE, 5, rb->get_depth_texture(v));

@@ -126,6 +126,7 @@ void DDGIVolume::_apply_to_environment() {
 	env->set_ddgi_probe_grid(_grid_from_size());
 	env->set_ddgi_energy(energy);
 	env->set_ddgi_bounce_energy(bounce_energy);
+	env->set_ddgi_realtime_updates(realtime_updates);
 	env->set_ddgi_normal_bias(normal_bias);
 	env->set_ddgi_view_bias(view_bias);
 	env->set_ddgi_hysteresis(hysteresis);
@@ -241,6 +242,15 @@ void DDGIVolume::set_bounce_energy(float p_energy) {
 
 float DDGIVolume::get_bounce_energy() const {
 	return bounce_energy;
+}
+
+void DDGIVolume::set_realtime_updates(bool p_enabled) {
+	realtime_updates = p_enabled;
+	_apply_to_environment();
+}
+
+bool DDGIVolume::is_realtime_updates_enabled() const {
+	return realtime_updates;
 }
 
 void DDGIVolume::set_normal_bias(float p_bias) {
@@ -505,6 +515,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_energy"), &DDGIVolume::get_energy);
 	ClassDB::bind_method(D_METHOD("set_bounce_energy", "energy"), &DDGIVolume::set_bounce_energy);
 	ClassDB::bind_method(D_METHOD("get_bounce_energy"), &DDGIVolume::get_bounce_energy);
+	ClassDB::bind_method(D_METHOD("set_realtime_updates", "enabled"), &DDGIVolume::set_realtime_updates);
+	ClassDB::bind_method(D_METHOD("is_realtime_updates_enabled"), &DDGIVolume::is_realtime_updates_enabled);
 	ClassDB::bind_method(D_METHOD("set_normal_bias", "bias"), &DDGIVolume::set_normal_bias);
 	ClassDB::bind_method(D_METHOD("get_normal_bias"), &DDGIVolume::get_normal_bias);
 	ClassDB::bind_method(D_METHOD("set_view_bias", "bias"), &DDGIVolume::set_view_bias);
@@ -534,6 +546,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cascades", PROPERTY_HINT_RANGE, "1,4,1"), "set_cascades", "get_cascades");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "energy", PROPERTY_HINT_RANGE, "0,8,0.01,or_greater"), "set_energy", "get_energy");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bounce_energy", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_bounce_energy", "get_bounce_energy");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "realtime_updates"), "set_realtime_updates", "is_realtime_updates_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "normal_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_normal_bias", "get_normal_bias");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "view_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_view_bias", "get_view_bias");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hysteresis", PROPERTY_HINT_RANGE, "0,0.999,0.001"), "set_hysteresis", "get_hysteresis");

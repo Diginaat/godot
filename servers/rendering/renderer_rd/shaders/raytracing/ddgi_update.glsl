@@ -12,9 +12,13 @@
 //     fills the tile border for bilinear filtering.
 //   MODE_RELOCATE_CLASSIFY: one thread per traced probe. Moves probes out of
 //     geometry and marks probes as active, inactive or inside.
+//   MODE_SMOOTH: one thread per irradiance atlas texel. Eases the display
+//     irradiance (what surfaces sample) toward the probes' irradiance.
 
 #ifdef MODE_SCHEDULE
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+#elif defined(MODE_SMOOTH)
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 #elif defined(MODE_RELOCATE_CLASSIFY)
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #else
@@ -55,6 +59,13 @@ ddgi_stats;
 
 #ifdef MODE_BLEND_IRRADIANCE
 layout(set = 0, binding = 4, rgba16f) uniform restrict coherent image2D ddgi_atlas;
+// The first update of a probe also replaces what surfaces see, instead of
+// easing in from stale or empty texels.
+layout(set = 0, binding = 6, rgba16f) uniform restrict writeonly image2D ddgi_display;
+#endif
+#ifdef MODE_SMOOTH
+layout(set = 0, binding = 4, rgba16f) uniform restrict readonly image2D ddgi_atlas;
+layout(set = 0, binding = 6, rgba16f) uniform restrict image2D ddgi_display;
 #endif
 #ifdef MODE_BLEND_DISTANCE
 layout(set = 0, binding = 4, rg16f) uniform restrict coherent image2D ddgi_atlas;
@@ -63,8 +74,8 @@ layout(set = 0, binding = 4, rg16f) uniform restrict coherent image2D ddgi_atlas
 layout(push_constant, std430) uniform Params {
 	uint total_probes;
 	uint schedule_new_only;
-	uint pad1;
-	uint pad2;
+	uint realtime; // 1: every probe in turn (see below).
+	uint realtime_offset; // First probe of this frame's chunk.
 }
 params;
 
@@ -124,6 +135,24 @@ void main() {
 		pd.variability = 1.0;
 		pd.last_update_frame = 0u;
 		pd.pending_change = 0.0;
+	}
+
+	// Realtime updates: no credit, no priorities. Each frame traces the next
+	// chunk of probes in index order (a slab of the grid), every probe once
+	// per round; with the capacity at or above the probe count, all of them
+	// every frame. All probes follow a light change together, at the same
+	// rate, instead of one by one in their own turn.
+	if (params.realtime != 0u) {
+		if (params.schedule_new_only != 0u) {
+			uint rel = (probe + params.total_probes - params.realtime_offset) % params.total_probes;
+			if (rel < ddgi.counts.w) {
+				ddgi_update_probes[rel] = probe;
+				pd.urgency = 0.0;
+				pd.last_update_frame = ddgi.atlas.w;
+			}
+			ddgi_probes[probe] = pd;
+		}
+		return;
 	}
 
 	bool new_pass = params.schedule_new_only != 0u;
@@ -375,7 +404,10 @@ void main() {
 		float confirmed = pd.pending_change * direction > 0.0 ? min(signal, abs(pd.pending_change)) : 0.0;
 		ddgi_probes[probe].pending_change = first_update ? 0.0 : signal * direction;
 		// Adapt faster when the light changed a lot (lights switched, doors
-		// opened), so the GI doesn't lag behind. 1 when it didn't.
+		// opened), so the GI doesn't lag behind. 1 when it didn't. (Reacting
+		// to small confirmed changes too was tried: with skewed noise, two
+		// small dips in a row are common and two spikes rare, so it pulled
+		// rooms lit by a small source darker.)
 		shared_hysteresis = first_update ? 0.0 : clamp(1.0 - (confirmed - 0.1) * 1.5, 0.4, 1.0);
 		// Moving average of how much this probe's light changes per update.
 		ddgi_probes[probe].variability = first_update ? 1.0 : mix(pd.variability, min(signal, 4.0), 0.3);
@@ -391,7 +423,11 @@ void main() {
 			// too small to be told from the noise.
 			float steady = hysteresis > 0.0 ? mix(hysteresis, 1.0 - (1.0 - hysteresis) * 0.5, clamp(shared_noise[i] * 2.0, 0.0, 1.0)) : 0.0;
 			float h = steady * change_factor;
-			imageStore(ddgi_atlas, origin + ivec2(tx, ty), vec4(mix(shared_result[i], shared_previous[i], h), min(shared_noise[i], 8.0)));
+			vec4 value = vec4(mix(shared_result[i], shared_previous[i], h), min(shared_noise[i], 8.0));
+			imageStore(ddgi_atlas, origin + ivec2(tx, ty), value);
+			if (first_update) {
+				imageStore(ddgi_display, origin + ivec2(tx, ty), value);
+			}
 		}
 	}
 #endif
@@ -417,12 +453,40 @@ void main() {
 			b = ivec2((c & 1) != 0 ? texels : -1, (c & 2) != 0 ? texels : -1);
 		}
 		ivec2 src = ddgi_border_source(b, texels);
-		imageStore(ddgi_atlas, origin + b, imageLoad(ddgi_atlas, origin + src));
+		vec4 border = imageLoad(ddgi_atlas, origin + src);
+		imageStore(ddgi_atlas, origin + b, border);
+#ifdef MODE_BLEND_IRRADIANCE
+		if (first_update) {
+			imageStore(ddgi_display, origin + b, border);
+		}
+#endif
 	}
 
 }
 
 #endif // MODE_BLEND_IRRADIANCE || MODE_BLEND_DISTANCE
+
+#ifdef MODE_SMOOTH
+
+// Probes update at different times, each with a step. Surfaces sample a copy
+// that closes a fixed share of its gap every frame, so a light change (a
+// storm rolling in, a light switched) fades in evenly over the whole scene
+// instead of probe by probe. Borders are eased like the interior, so they
+// stay copies of it.
+void main() {
+	ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(texel, imageSize(ddgi_display)))) {
+		return;
+	}
+	vec4 target = imageLoad(ddgi_atlas, texel);
+	vec4 shown = imageLoad(ddgi_display, texel);
+	if (any(isnan(shown)) || any(isinf(shown))) {
+		shown = target;
+	}
+	imageStore(ddgi_display, texel, mix(shown, target, ddgi.smoothing.x));
+}
+
+#endif // MODE_SMOOTH
 
 #ifdef MODE_RELOCATE_CLASSIFY
 

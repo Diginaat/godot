@@ -1398,6 +1398,14 @@
 				Sets the multiplier for the light passed on from bounce to bounce inside the DDGI probes (0 to 2). See [member Environment.ddgi_bounce_energy].
 			</description>
 		</method>
+		<method name="environment_set_ddgi_realtime_updates">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				If [param enable] is [code]true[/code], DDGI updates every probe of the environment every frame. See [member Environment.ddgi_realtime_updates].
+			</description>
+		</method>
 		<method name="environment_set_ddgi_volume">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />

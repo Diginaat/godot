@@ -73,8 +73,9 @@ struct DDGIDataGPU {
 	float atlas_inv_size[4];
 	float schedule[4]; // Base update rate, total probes, max radiance per ray, bounce energy.
 	float miss_color[4];
+	float smoothing[4]; // x: blend of the display irradiance toward the probes' per frame, yzw: unused.
 };
-static_assert(sizeof(DDGIDataGPU) == 1616, "DDGIDataGPU must match the std140 layout of DDGIDataBlock");
+static_assert(sizeof(DDGIDataGPU) == 1632, "DDGIDataGPU must match the std140 layout of DDGIDataBlock");
 
 // std430, 32 bytes.
 struct DDGIProbeGPU {
@@ -154,10 +155,14 @@ public:
 		RID update_list;
 		RID stats_buffer;
 		RID ray_data;
-		RID irradiance_atlas;
+		RID irradiance_atlas; // What the probe updates write.
+		// What surfaces sample: eases toward irradiance_atlas every frame, so a
+		// probe's update never shows as a jump (see DDGI.md, "Smooth light changes").
+		RID irradiance_display;
 		RID distance_atlas;
 
 		bool node_volume = false; // The volumes were set up for a DDGIVolume node (fixed), not the camera.
+		uint32_t realtime_offset = 0; // Realtime updates: first probe of the next frame's chunk.
 		uint64_t baked_version = 0; // Baked data uploaded into the atlases, 0 for none.
 
 		struct VolumeState {
@@ -183,6 +188,7 @@ private:
 		UPDATE_BLEND_IRRADIANCE,
 		UPDATE_BLEND_DISTANCE,
 		UPDATE_RELOCATE_CLASSIFY,
+		UPDATE_SMOOTH,
 		UPDATE_MODE_MAX,
 	};
 
@@ -195,7 +201,8 @@ private:
 	struct UpdatePushConstant {
 		uint32_t total_probes;
 		uint32_t schedule_new_only;
-		uint32_t pad[2];
+		uint32_t realtime; // Every probe in turn, in chunks of the update capacity.
+		uint32_t realtime_offset;
 	};
 
 	struct ApplyPushConstant {
@@ -219,6 +226,9 @@ private:
 
 	Ref<ViewportData> _get_viewport_data(RenderSceneBuffersRD *p_render_buffers);
 	void _allocate(ViewportData *p_data, int p_cascades, const Vector3i &p_grid, const Quality &p_quality);
+	/// The buffers that depend on rays per probe and probes per frame only:
+	/// changing those (realtime updates on or off) keeps the probes' light.
+	void _allocate_rays(ViewportData *p_data, const Quality &p_quality);
 	uint32_t _setup_volumes(ViewportData *p_data, const RenderDataRD *p_render_data, DDGIDataGPU &r_gpu);
 	/// Allocates (or reallocates) the viewport's resources for the current
 	/// settings and uploads baked probes when needed. Null on failure.

@@ -717,6 +717,15 @@ float Environment::get_ddgi_bounce_energy() const {
 	return ddgi_bounce_energy;
 }
 
+void Environment::set_ddgi_realtime_updates(bool p_enabled) {
+	ddgi_realtime_updates = p_enabled;
+	RS::get_singleton()->environment_set_ddgi_realtime_updates(environment, ddgi_realtime_updates);
+}
+
+bool Environment::is_ddgi_realtime_updates_enabled() const {
+	return ddgi_realtime_updates;
+}
+
 void Environment::set_ddgi_normal_bias(float p_bias) {
 	ddgi_normal_bias = p_bias;
 	_update_ddgi();
@@ -808,6 +817,7 @@ void Environment::_update_ddgi() {
 			(int)ddgi_debug_mode);
 	RS::get_singleton()->environment_set_ddgi_volume(environment, ddgi_node_volume, ddgi_volume_center, ddgi_volume_size);
 	RS::get_singleton()->environment_set_ddgi_bounce_energy(environment, ddgi_bounce_energy);
+	RS::get_singleton()->environment_set_ddgi_realtime_updates(environment, ddgi_realtime_updates);
 }
 
 // Glow
@@ -1676,6 +1686,8 @@ void Environment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_ddgi_energy"), &Environment::get_ddgi_energy);
 	ClassDB::bind_method(D_METHOD("set_ddgi_bounce_energy", "energy"), &Environment::set_ddgi_bounce_energy);
 	ClassDB::bind_method(D_METHOD("get_ddgi_bounce_energy"), &Environment::get_ddgi_bounce_energy);
+	ClassDB::bind_method(D_METHOD("set_ddgi_realtime_updates", "enabled"), &Environment::set_ddgi_realtime_updates);
+	ClassDB::bind_method(D_METHOD("is_ddgi_realtime_updates_enabled"), &Environment::is_ddgi_realtime_updates_enabled);
 	ClassDB::bind_method(D_METHOD("set_ddgi_normal_bias", "bias"), &Environment::set_ddgi_normal_bias);
 	ClassDB::bind_method(D_METHOD("get_ddgi_normal_bias"), &Environment::get_ddgi_normal_bias);
 	ClassDB::bind_method(D_METHOD("set_ddgi_view_bias", "bias"), &Environment::set_ddgi_view_bias);
@@ -1698,6 +1710,7 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3I, "ddgi_probe_grid"), "set_ddgi_probe_grid", "get_ddgi_probe_grid");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_energy", PROPERTY_HINT_RANGE, "0,8,0.01,or_greater"), "set_ddgi_energy", "get_ddgi_energy");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_bounce_energy", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_ddgi_bounce_energy", "get_ddgi_bounce_energy");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_realtime_updates"), "set_ddgi_realtime_updates", "is_ddgi_realtime_updates_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_normal_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_ddgi_normal_bias", "get_ddgi_normal_bias");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_view_bias", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_ddgi_view_bias", "get_ddgi_view_bias");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_hysteresis", PROPERTY_HINT_RANGE, "0,0.999,0.001"), "set_ddgi_hysteresis", "get_ddgi_hysteresis");

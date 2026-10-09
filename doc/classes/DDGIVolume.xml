@@ -68,6 +68,9 @@
 		<member name="probe_spacing" type="float" setter="set_probe_spacing" getter="get_probe_spacing" default="1.0">
 			The distance between probes of the finest cascade, in meters. Smaller spacing gives more detailed indirect light and fewer leaks through thin walls, but needs more probes for the same area.
 		</member>
+		<member name="realtime_updates" type="bool" setter="set_realtime_updates" getter="is_realtime_updates_enabled" default="false">
+			If [code]true[/code], every probe is updated every frame (in chunks of up to 16384 neighboring probes when there are more), with [member ProjectSettings.rendering/global_illumination/ddgi/realtime_rays_per_probe] rays instead of the quality's, and a per-update hysteresis matched to the faster updates. The indirect light then follows light changes (a weather system dimming the sun and sky, a day/night cycle) evenly over the whole scene and about twice as fast. It costs more ray tracing: about 3.6 ms instead of 1.7 ms for 20736 probes at 1920×1080 on an RTX 3060, and it is a little noisier in dark rooms lit by a small bright source. It can be switched at runtime without losing the probes' light, for example only while a weather change runs. If [code]false[/code], [member ProjectSettings.rendering/global_illumination/ddgi/quality] sets how many probes update per frame, and probes whose light changes or that are in view get more of them.
+		</member>
 		<member name="size" type="Vector3" setter="set_size" getter="get_size" default="Vector3(24, 12, 24)">
 			The size of the box filled with probes, in meters. The number of probes per axis is [code]size / probe_spacing + 1[/code] (at most 64 per axis), see [member probe_count]. The box can be resized with the gizmo handles in the 3D editor.
 		</member>

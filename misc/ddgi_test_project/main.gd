@@ -89,7 +89,7 @@ func _ready() -> void:
 	_apply_args()
 	_setup_volume()
 
-	if args.has("shot") or args.has("bench") or args.has("measure"):
+	if args.has("shot") or args.has("bench") or args.has("measure") or args.has("weather"):
 		hud.visible = false
 		_run_capture()
 
@@ -114,6 +114,10 @@ func _apply_args() -> void:
 		env.ddgi_hysteresis = float(args["hysteresis"])
 	if args.has("energy"):
 		env.ddgi_energy = float(args["energy"])
+	if args.has("realtime"):
+		env.ddgi_realtime_updates = args["realtime"] == "1"
+	if args.has("rt_rays"):
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/realtime_rays_per_probe", int(args["rt_rays"]))
 	if args.has("reloc"):
 		env.ddgi_probe_relocation = args["reloc"] == "1"
 	if args.has("classify"):
@@ -162,7 +166,7 @@ func _update_hud() -> void:
 
 func _process(delta: float) -> void:
 	# Fixed time step when capturing, so a given --frames is reproducible.
-	var capturing := args.has("shot") or args.has("bench") or args.has("measure")
+	var capturing := args.has("shot") or args.has("bench") or args.has("measure") or args.has("weather")
 	var dt := 1.0 / 60.0 if capturing else delta
 	if animate:
 		time += dt
@@ -262,6 +266,7 @@ func _setup_volume() -> void:
 	volume.enabled = gi_mode == "ddgi"
 	if args.has("bounce"):
 		volume.bounce_energy = float(args["bounce"])
+	volume.realtime_updates = env.ddgi_realtime_updates
 	add_child(volume)
 	if args.has("baked"):
 		volume.probe_data = load(args["baked"])
@@ -320,6 +325,24 @@ func _run_capture() -> void:
 
 	if args.has("measure"):
 		await _measure(int(args["measure"]))
+
+	# --weather=dir: a storm rolls in over --weather_frames (default 120)
+	# frames: the sun dims to a cold light and the sky darkens. Every frame
+	# from the start to 120 frames after the end is saved as dir/fNNN.png
+	# (use --debug=1 to see only the indirect light).
+	if args.has("weather"):
+		var dir: String = args["weather"]
+		DirAccess.make_dir_recursive_absolute(dir)
+		var n := int(args.get("weather_frames", "120"))
+		var sky_mat := env.sky.sky_material as ProceduralSkyMaterial
+		for f in n + 120:
+			var t := clampf(float(f) / n, 0.0, 1.0)
+			sun.light_energy = lerpf(1.5, 0.25, t)
+			sun.light_color = Color.WHITE.lerp(Color(0.6, 0.66, 0.8), t)
+			sky_mat.energy_multiplier = lerpf(1.0, 0.25, t)
+			await RenderingServer.frame_post_draw
+			vp.get_texture().get_image().save_png(dir.path_join("f%03d.png" % f))
+		print("WEATHER %d frames saved to %s" % [n + 120, dir])
 
 	if args.has("shot"):
 		var path: String = args["shot"]
