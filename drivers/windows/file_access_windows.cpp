@@ -332,6 +332,9 @@ void FileAccessWindows::_sync_for_write() const {
 	if (read_cache_consumed < read_cache_filled) {
 		// CRT cursor is past what the caller has logically consumed; realign.
 		_fseeki64(f, (int64_t)(read_cache_pos + read_cache_consumed), SEEK_SET);
+	} else {
+		// The CRT needs a seek between a read and a write, even in place.
+		_fseeki64(f, 0, SEEK_CUR);
 	}
 	_invalidate_read_cache();
 }
@@ -559,9 +562,12 @@ bool FileAccessWindows::store_buffer(const uint8_t *p_src, uint64_t p_length) {
 	ERR_FAIL_COND_V(!p_src && p_length > 0, false);
 
 	if (flags == READ_WRITE || flags == WRITE_READ) {
-		if (prev_op == READ) {
-			// Rewind the CRT cursor to the caller's logical position so the
-			// write lands where they expect, not past any buffered read-ahead.
+		// Rewind the CRT cursor to the caller's logical position so the write
+		// lands where they expect, not past any buffered read-ahead. Check the
+		// cache too: seek() inside the cached range resets prev_op without
+		// moving the CRT cursor (fixup_embedded_pck() wrote the PE section
+		// table 32 KiB too far and broke exports with an embedded PCK).
+		if (prev_op == READ || read_cache_filled > 0) {
 			_sync_for_write();
 		}
 		prev_op = WRITE;
