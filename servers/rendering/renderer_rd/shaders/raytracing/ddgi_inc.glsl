@@ -46,7 +46,7 @@ struct DDGIProbe {
 	float urgency; // Scheduler credit; the probe is traced when it reaches 1.
 	float variability; // Moving average of the relative change per update.
 	uint last_update_frame;
-	float luminance; // Mean irradiance luminance after the last update.
+	float pending_change; // Signed relative change of the last update above the noise, not applied yet.
 };
 
 struct DDGIDataBlock {
@@ -58,7 +58,7 @@ struct DDGIDataBlock {
 	uvec4 counts; // x: volume count, y: rays per probe, z: fixed rays per probe, w: update capacity.
 	uvec4 atlas; // x: irradiance texels, y: distance texels, z: probes per atlas row, w: frame.
 	vec4 atlas_inv_size; // xy: irradiance atlas, zw: distance atlas.
-	vec4 schedule; // x: base update rate, y: total probes, z: max radiance per ray, w: unused.
+	vec4 schedule; // x: base update rate, y: total probes, z: max radiance per ray, w: bounce energy.
 	vec4 miss_color; // rgb: radiance of rays that miss when there is no sky, w: 1 = use the sky.
 };
 

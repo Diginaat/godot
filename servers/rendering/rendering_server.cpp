@@ -2924,6 +2924,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("viewport_get_measured_render_time_cpu", "viewport"), &RenderingServer::viewport_get_measured_render_time_cpu);
 
 	ClassDB::bind_method(D_METHOD("viewport_get_measured_render_time_gpu", "viewport"), &RenderingServer::viewport_get_measured_render_time_gpu);
+	ClassDB::bind_method(D_METHOD("viewport_get_ddgi_probe_data", "viewport"), &RenderingServer::viewport_get_ddgi_probe_data);
 
 	ClassDB::bind_method(D_METHOD("viewport_set_vrs_mode", "viewport", "mode"), &RenderingServer::viewport_set_vrs_mode);
 	ClassDB::bind_method(D_METHOD("viewport_set_vrs_update_mode", "viewport", "mode"), &RenderingServer::viewport_set_vrs_update_mode);
@@ -3107,6 +3108,8 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_pathtracing", "env", "enable", "debug_mode", "samples_per_pixel", "max_bounces", "denoiser"), &RenderingServer::environment_set_pathtracing);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi", "env", "enable", "cascades", "probe_spacing", "probe_grid", "energy", "normal_bias", "view_bias", "hysteresis", "probe_relocation", "probe_classification", "follow_camera", "debug_mode"), &RenderingServer::environment_set_ddgi);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_volume", "env", "node_volume", "center", "size"), &RenderingServer::environment_set_ddgi_volume);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_bounce_energy", "env", "energy"), &RenderingServer::environment_set_ddgi_bounce_energy);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_baked_data", "env", "mode", "data"), &RenderingServer::environment_set_ddgi_baked_data);
 	ClassDB::bind_method(D_METHOD("environment_set_volumetric_fog", "env", "enable", "density", "albedo", "emission", "emission_energy", "anisotropy", "length", "detail_spread", "gi_inject", "temporal_reprojection", "temporal_reprojection_amount", "ambient_inject", "sky_affect"), &RenderingServer::environment_set_volumetric_fog);
 
 	ClassDB::bind_method(D_METHOD("environment_glow_set_use_bicubic_upscale", "enable"), &RenderingServer::environment_glow_set_use_bicubic_upscale);

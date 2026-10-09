@@ -93,6 +93,7 @@
 #include "editor/scene/2d/sprite_2d_editor_plugin.h"
 #include "editor/scene/3d/bone_map_editor_plugin.h"
 #include "editor/scene/3d/camera_3d_editor_plugin.h"
+#include "editor/scene/3d/ddgi_volume_editor_plugin.h"
 #include "editor/scene/3d/gpu_particles_collision_sdf_editor_plugin.h"
 #include "editor/scene/3d/lightmap_gi_editor_plugin.h"
 #include "editor/scene/3d/mesh_editor_plugin.h"
@@ -290,6 +291,7 @@ void register_editor_types() {
 	EditorPlugins::add_by_type<Polygon3DEditorPlugin>();
 	EditorPlugins::add_by_type<Skeleton3DEditorPlugin>();
 	EditorPlugins::add_by_type<VoxelGIEditorPlugin>();
+	EditorPlugins::add_by_type<DDGIVolumeEditorPlugin>();
 	// 3D physics editor plugins.
 	EditorPlugins::add_by_type<PhysicalBone3DEditorPlugin>();
 #ifndef DISABLE_DEPRECATED

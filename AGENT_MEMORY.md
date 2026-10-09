@@ -110,6 +110,19 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   a cache. Don't bind buffers you free later through a linear-pool uniform
   set; use a persistent set (freed with the buffer).
 
+## DDGI
+
+- Notes, test project and findings: DDGI.md. Work on `dev-ddgi`.
+- Measure flicker before guessing: the test project's `--measure` with
+  `--stdmap` (where) and `--trace_px` (how it moves over time). The probe
+  RNG is deterministic, so a spike repeats at the same frame in every run.
+- Any rule that adapts the blend weight to the sampled value (like "lower
+  the hysteresis when the light changed") biases the result and turns ray
+  noise into flicker. Require the change to stand out of the noise and to
+  repeat before acting on it.
+- Opening a test project in the editor rewrites its `project.godot` (drops
+  values equal to the defaults) and adds `.uid` files: revert those.
+
 ## In-editor DLSS installer
 
 - `editor/settings/streamline_installer.cpp`. Pinned to Streamline SDK 2.10.0

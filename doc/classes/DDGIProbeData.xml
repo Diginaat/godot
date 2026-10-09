@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="DDGIProbeData" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Baked probes of a [DDGIVolume].
+	</brief_description>
+	<description>
+		The irradiance and distance of every probe of a [DDGIVolume], their offsets and states, and the volume they were baked for (cascades, probe grid, probe spacing and center). Made by [method DDGIVolume.bake]; see [member DDGIVolume.bake_mode] for how it is used.
+		The data is only used while it fits the volume: moving or resizing the volume, or changing its probe spacing or cascades, needs a new bake. The atlas resolution comes from the DDGI quality setting at bake time.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_cascades" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of cascades the data was baked with.
+			</description>
+		</method>
+		<method name="get_center" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the center of the volume the data was baked for, in world space.
+			</description>
+		</method>
+		<method name="get_data" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns the baked data, as returned by [method RenderingServer.viewport_get_ddgi_probe_data].
+			</description>
+		</method>
+		<method name="get_probe_grid" qualifiers="const">
+			<return type="Vector3i" />
+			<description>
+				Returns the number of probes per axis of each cascade.
+			</description>
+		</method>
+		<method name="get_probe_spacing" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the probe spacing of the finest cascade, in meters.
+			</description>
+		</method>
+		<method name="set_data">
+			<return type="void" />
+			<param index="0" name="data" type="Dictionary" />
+			<description>
+				Sets the baked data, in the format of [method RenderingServer.viewport_get_ddgi_probe_data].
+			</description>
+		</method>
+	</methods>
+</class>

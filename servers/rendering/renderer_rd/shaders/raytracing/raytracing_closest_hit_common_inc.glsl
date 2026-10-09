@@ -500,7 +500,14 @@ void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout Pat
 	vec3 diffuse_reflectance = baseColorToDiffuseReflectance(m.albedo, m.metalness);
 	if (luminance(diffuse_reflectance) > 0.0) {
 		vec4 irradiance = ddgi_sample_irradiance(h.hit_pos, N, V);
-		radiance += diffuse_reflectance * irradiance.rgb * irradiance.a;
+		// Bounce energy (DDGIVolume.bounce_energy) scales the light passed on
+		// from bounce to bounce: above 1, rooms lit indirectly get brighter.
+		// The feedback stays below 1, or the bounces would add up forever.
+		vec3 feedback = diffuse_reflectance * ddgi.schedule.w;
+		if (ddgi.schedule.w > 1.0) {
+			feedback = min(feedback, vec3(0.95));
+		}
+		radiance += feedback * irradiance.rgb * irradiance.a;
 	}
 
 	ps.radiance = (any(isnan(radiance)) || any(isinf(radiance))) ? vec3(0.0) : radiance;

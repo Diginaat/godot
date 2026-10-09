@@ -95,6 +95,9 @@
 			[b]Note:[/b] When [member pathtracing_enabled] is [code]true[/code], the path tracer computes all indirect light and DDGI is not used.
 			[b]Note:[/b] The workload (rays per probe, probes updated per frame, probe resolution) is set in [member ProjectSettings.rendering/global_illumination/ddgi/quality].
 		</member>
+		<member name="ddgi_bounce_energy" type="float" setter="set_ddgi_bounce_energy" getter="get_ddgi_bounce_energy" default="1.0">
+			Multiplier for the light passed on from bounce to bounce inside the DDGI probes. Above [code]1.0[/code], indirectly lit rooms get brighter. See [member DDGIVolume.bounce_energy].
+		</member>
 		<member name="ddgi_energy" type="float" setter="set_ddgi_energy" getter="get_ddgi_energy" default="1.0">
 			Multiplier for the indirect light DDGI adds to surfaces.
 		</member>

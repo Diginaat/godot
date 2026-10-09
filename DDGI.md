@@ -64,6 +64,8 @@ RTXGI 2.x (NRC, SHaRC) is a different technique and isn't used.
 4. Pick the workload in `Project Settings > Rendering > Global Illumination >
    DDGI > Quality` (Low, Medium, High, Ultra or Custom). It can be changed at
    runtime with `ProjectSettings.set_setting()`.
+5. Optional: bake the probes (below), so the game starts with finished
+   indirect light, or doesn't trace at all.
 
 `DDGIVolume` properties:
 
@@ -74,6 +76,9 @@ RTXGI 2.x (NRC, SHaRC) is a different technique and isn't used.
 | `probe_spacing` | 1.0 m | Spacing of the finest grid |
 | `cascades` | 3 | Probe grids; each one has twice the spacing of the previous |
 | `follow_camera` | off | Grids follow the camera and scroll; `size` then only sets the probe count |
+| `bounce_energy` | 1.0 | Multiplier for the light passed on from bounce to bounce inside the probes; above 1, indirectly lit rooms get brighter (0 to 2) |
+| `bake_mode` | Dynamic | Dynamic: traced at runtime. Baked: only the baked probes, no rays (also without ray tracing hardware). Baked + Dynamic: start from the bake, then update |
+| `probe_data` | | The baked probes (`DDGIProbeData`) |
 | `energy`, `normal_bias`, `view_bias`, `hysteresis`, `probe_relocation`, `probe_classification`, `debug_mode` | | As the Environment properties below |
 
 The node writes these into the `Environment` of its world and turns DDGI
@@ -93,6 +98,7 @@ set them directly:
 | `ddgi_probe_spacing` | 1.0 m | Spacing of the finest grid |
 | `ddgi_probe_grid` | 24 x 12 x 24 | Probes per axis per cascade |
 | `ddgi_energy` | 1.0 | Indirect light multiplier |
+| `ddgi_bounce_energy` | 1.0 | Multiplier for the light passed on from bounce to bounce (0 to 2) |
 | `ddgi_normal_bias`, `ddgi_view_bias` | 0.1, 0.3 | Sampling offsets (fraction of the spacing) against self shadowing and leaks |
 | `ddgi_hysteresis` | 0.95 | Temporal smoothing (higher = less noise, slower response) |
 | `ddgi_probe_relocation` | on | Move probes out of geometry |
@@ -107,6 +113,46 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `quality` | Preset: Low 64 rays / 1024 probes per frame / 6x6 irradiance / 12x12 distance; Medium 128 / 2048 / 6 / 14; High 192 / 4096 / 8 / 14; Ultra 256 / 8192 / 8 / 16; Custom |
 | `custom_*` | The four workload values for Custom |
 | `gpu_time_budget_ms` | Optional: lower the probes traced per frame to stay within this GPU time |
+
+### Baking
+
+Select the `DDGIVolume` and press **Bake DDGI** in the 3D editor toolbar
+(or call `DDGIVolume.bake()` from a script). The bake renders a small
+offscreen view until every probe has been updated about 128 times (the
+second half with a longer average, so the result has less noise than the
+running probes), reads the atlases back and saves them as a `DDGIProbeData`
+resource (`<scene>.<node>.ddgi.res`, compressed). The interior test scene
+(4968 probes, Medium) bakes in about a second into 4.7 MB.
+
+| Bake mode | At runtime |
+| --- | --- |
+| Dynamic | The bake is ignored; probes are traced as before |
+| Baked | Only the baked probes are sampled: no ray tracing, no update cost, no noise or flicker. The light doesn't follow changes. Works on the D3D12 driver and on GPUs without ray tracing |
+| Baked + Dynamic | The probes start from the bake (no dark, blotchy first seconds) and are then updated as in Dynamic |
+
+The bake belongs to one volume layout: moving or resizing the volume, or
+changing its probe spacing or cascades, makes it unusable until baked again
+(a configuration warning says so; meanwhile the probes are traced
+dynamically when the hardware can). The atlas resolution of the bake (from
+the quality setting at bake time) is kept at runtime; rays and probes per
+frame still come from the current quality. `bounce_energy` changes what the
+probes see, so bake again after changing it. Baking needs ray tracing
+(Vulkan, a GPU with ray tracing pipelines) and a fixed volume
+(`follow_camera` off).
+
+### Dark interiors
+
+DDGI is physically based: a room lit through one window is dark. The
+`interior` test view, compared with the path tracer, is about as dark (DDGI
+is slightly brighter), so the probes don't lose light. To make interiors
+brighter without flicker:
+
+- Raise `bounce_energy` (1.5 to 2): more light passed on between surfaces.
+  It is averaged inside the probes, so it brightens without flicker (in the
+  interior view, 2.0 gives +28% overall and less flicker).
+- Use auto exposure (`CameraAttributes`), as for any interior.
+- `energy` scales the final indirect light (including the parts that are
+  already bright).
 
 ### How it interacts with other GI
 
@@ -154,7 +200,7 @@ Common problems:
   `ddgi_probe_spacing`.
 - Dark blotches near corners: raise `ddgi_normal_bias` / `ddgi_view_bias`.
 - Noisy or flickering indirect light: raise the quality (more rays) or
-  `ddgi_hysteresis`.
+  `ddgi_hysteresis`, or bake the probes (Baked has no noise at all).
 - Slow reaction to light changes: raise the probes per frame (quality) or
   lower `ddgi_hysteresis`.
 
@@ -191,6 +237,8 @@ Common problems:
 | Data layout, probe addressing, sampling | `shaders/raytracing/ddgi_inc.glsl`, `ddgi_sample_inc.glsl`, `raytracing_ddgi_inc.glsl` |
 | Schedule, blend, relocate, classify | `shaders/raytracing/ddgi_update.glsl` |
 | Apply (GI buffer) and probe debug view | `shaders/raytracing/ddgi_apply.glsl` |
+| Baking: node, resource, editor button | `scene/3d/ddgi_volume.*` (`DDGIProbeData`, `DDGIVolume::bake()`), `editor/scene/3d/ddgi_volume_editor_plugin.*` |
+| Baking: readback, upload, baked only | `RenderDDGI::get_probe_data()`, `_upload_baked()`, `update_baked()`; `RenderingServer.viewport_get_ddgi_probe_data()`, `environment_set_ddgi_baked_data()` |
 
 Per frame, for each view that uses DDGI (inside `_pre_opaque_render()`, after
 the depth prepass, where SDFGI/VoxelGI would run):
@@ -211,8 +259,10 @@ the depth prepass, where SDFGI/VoxelGI would run):
    the sky (or ambient color).
 4. **Blend** (compute, one workgroup per probe): irradiance (cosine weighted)
    and distance moments (sharp lobe) of the new rays are blended into the
-   probe tiles with hysteresis, lowered automatically when the light changed
-   a lot; tile borders are refreshed for bilinear filtering.
+   probe tiles with hysteresis. It is lowered when the light changed by
+   more than the ray noise in two updates in a row, and raised for texels
+   whose light comes from a few bright rays; tile borders are refreshed for
+   bilinear filtering.
 5. **Relocate and classify** (compute, one thread per probe), from the fixed
    rays: probes inside geometry step through the closest back face, probes
    too close to a surface step away; probes inside geometry are marked
@@ -249,7 +299,9 @@ those texels instead of blending with them.
 - Thin single-sided geometry (planes) is seen as "inside" from behind;
   classification can then switch off probes behind it. Use closed meshes for
   walls.
-- There is no baked/static fallback for hardware without ray tracing.
+- Without ray tracing hardware only baked probes work (Bake Mode: Baked),
+  and they don't follow light changes.
+- Baked probes belong to one volume position and size.
 
 ## Steps
 
@@ -265,10 +317,12 @@ those texels instead of blending with them.
 | 8 | Editor: settings, debug views, documentation | Done |
 | 9 | Compatibility: DLSS, path tracer, D3D12 fallback | Open |
 | 10 | Validation: test scenes, benchmarks, this document | Open |
+| 11 | Interiors: flicker in dark rooms, bounce energy | Done |
+| 12 | Baking: `DDGIProbeData`, bake modes, editor button, baked-only without ray tracing | Done |
 
 ## Test project
 
-[`misc/ddgi_test_project/`](misc/ddgi_test_project/) builds three scenes from
+[`misc/ddgi_test_project/`](misc/ddgi_test_project/) builds four scenes from
 code (`main.gd`):
 
 | View | Contents |
@@ -276,6 +330,7 @@ code (`main.gd`):
 | `room` | Closed room: white walls, red and green side walls, orange and blue emissive panels, moving and color-changing omni light, moving box and ball |
 | `outdoor` | Sun with a time-of-day cycle, 400 m street of open-fronted buildings and pillars; `--move` flies the camera down the street (scrolling) |
 | `stress` | 4000 MultiMesh instances, 40 moving slabs, 32 fast-changing omni lights; `--move` orbits the camera |
+| `interior` | Closed house lit only by the sun through one window, and a windowless back room behind a doorway (bounce light only); use `--tod=0` |
 
 ```
 bin\godot.windows.editor.x86_64.exe --path misc\ddgi_test_project
@@ -291,9 +346,27 @@ Arguments (after `--`): `--view=`, `--gi=none|sdfgi|ddgi`, `--quality=0..4`,
 `--linear --exposure=`, `--budget=ms` (GPU time budget), `--half=1` (half
 resolution apply), `--settle=N` (with `--shot`: stop the camera, wait N
 frames and save `<shot>_settled.png`; the difference to the first shot is
-the error that moving leaves).
+the error that moving leaves), `--reloc=0|1`, `--classify=0|1`,
+`--bounces=` (path tracer), `--bounce=` (bounce energy).
 
-Keys: `1`-`3` views, `G` GI mode, `U` quality, `Tab` debug mode, `L`
+Flicker and brightness: `--measure=N` captures N frames and prints mean
+linear brightness, the mean temporal deviation per pixel (8-bit levels) and
+the share of pixels deviating by more than 2 levels; `--mean=path` and
+`--stdmap=path` save the mean image and a deviation map (white = 8 levels),
+`--trace_px=x,y` prints one pixel per frame. Use `--anim=0 --tod=0`: a
+perfect result then has no flicker at all.
+
+Baking: `--volume=cx,cy,cz,sx,sy,sz` adds a `DDGIVolume` (with
+`--vspacing=`, `--vcascades=`), `--bake=path.res` bakes and saves it before
+the capture, `--baked=path.res --bake_mode=0|1|2` loads one.
+
+```
+bin\godot.windows.editor.x86_64.console.exe --path misc\ddgi_test_project -- --view=interior --tod=0 --anim=0 --res=640x360 --linear --exposure=4 --frames=600 --measure=60 --stdmap=C:\tmp\std.png
+bin\godot.windows.editor.x86_64.console.exe --path misc\ddgi_test_project -- --view=interior --tod=0 --anim=0 --volume=400,1.5,0,13,3.6,11 --vspacing=0.5 --bake=C:\tmp\interior.ddgi.res --frames=1 --measure=2
+bin\godot.windows.editor.x86_64.console.exe --rendering-driver d3d12 --path misc\ddgi_test_project -- --view=interior --tod=0 --anim=0 --volume=400,1.5,0,13,3.6,11 --vspacing=0.5 --baked=C:\tmp\interior.ddgi.res --bake_mode=1 --frames=10 --measure=30
+```
+
+Keys: `1`-`4` views, `G` GI mode, `U` quality, `Tab` debug mode, `L`
 animation, `M` camera path, `P` path tracing; fly camera with the right mouse
 button and WASD/QE.
 
@@ -359,6 +432,64 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-09: Steps 11 (interiors) and 12 (baking). New `interior` view and
+  `--measure` (flicker and brightness), all numbers below at 640x360,
+  Medium, static scene (`--anim=0 --tod=0`), linear exposure 4, RTX 3060.
+  **Flicker.** Before: 29% of the pixels deviated by more than 2 levels from
+  frame to frame (mean deviation 1.68 levels), with the light unchanged.
+  `--trace_px` on a flickering spot showed the cause: now and then one
+  update jumped (35 to 57 levels) and decayed over a few updates. A few rays
+  hitting the small sunlit patch (or the sky's sun disk through the window)
+  carry most of a dark probe's light; such an update passed the "light
+  changed" test, the hysteresis dropped to 40%, and the spike went in at 60%.
+  Relocation, classification and the visibility test had nothing to do with
+  it (switched off one by one, no change). Fixes, in
+  `ddgi_update.glsl` and the miss shader: (1) only the change above two
+  standard errors of the update's ray mean counts as a light change; (2) a
+  change counts only when the next update changes the same way
+  (`DDGIProbe.pending_change`, the former unused `luminance`); a probe with
+  a pending change is traced again the next frame, so this costs one frame;
+  (3) each texel tracks its own noise (standard error of its cosine lobe,
+  a slowly decaying maximum kept in the irradiance atlas alpha) and noisy
+  texels blend in with down to half the weight; (4) probe rays that miss
+  read the sky at a blur matching the ray footprint (4 pi / rays sr), not
+  at mip 0, so the sun disk is spread over the rays near it. After: 0.35%
+  to 0.9% of the pixels (four runs), mean deviation 0.33 to 0.36. Ultra:
+  18% to 0%. With a `DDGIVolume` at 0.5 m spacing, 1.4% to 1.7% (more
+  probes, each updated less often); baked, 0%.
+  **Brightness.** The old adaptive hysteresis was biased upward in noisy
+  scenes: bright spikes changed the probe more (relatively) than dark dips,
+  so they got more weight. In the room light switch test (one small panel
+  left) the old code settled at a mean of 126 (tonemapped), the new one at
+  104; the new one has a fixed weight when nothing changed, so it is
+  unbiased. That makes such scenes darker than before. The interior compared
+  with the path tracer: DDGI 0.0455 vs 0.0407 (path tracer, 16 spp, 120
+  frames, 3 bounces), so DDGI doesn't lose light. Blending probes linearly
+  instead of in square root space changed the mean by 2% only, so that
+  stayed. For brighter interiors: `bounce_energy` (multi-bounce feedback,
+  capped at 0.95 per channel when above 1): 1.5 gives +10%, 2.0 +28% in the
+  interior view, with less flicker (0%).
+  **Cost of the stability.** Reaction to big changes is slower: after the
+  light switch the room needs about 80 frames to get within 9 levels of
+  its final state (before: about 20, but to a biased, blotchy result).
+  Small slow changes take longer too in noisy probes. Scrolling got a
+  little better (outdoor at 8 m/s: mean error 3.44 to 3.08, pixels off by
+  more than 16 levels 3.5% to 3.0%). GPU time unchanged or lower (room
+  Medium DDGI 1.26 to 1.19 ms, outdoor 1.79 to 1.73 ms at 1080p).
+  **Baking.** `DDGIVolume.bake()` renders a 64x64 offscreen view of the
+  world for 128 updates per probe (second half at hysteresis 0.98), reads
+  the atlases and probe buffer back (`RenderingServer.viewport_get_ddgi_probe_data`)
+  into a `DDGIProbeData`. `RenderDDGI` uploads it into the atlases when it
+  matches the volume (cascades, grid, spacing, center) and the baked probes
+  count as updated, so dynamic updates blend into them. Baked only skips
+  the TLAS, the trace and the wide ray tracing cull set, and runs on the
+  D3D12 driver. Interior: bake 965 ms, 4.7 MB; first frames with Baked
+  0.0457 vs settled dynamic 0.0466, no flicker (0.00%), same image on
+  Vulkan and D3D12. Editor: Bake DDGI toolbar button
+  (`editor/scene/3d/ddgi_volume_editor_plugin.cpp`), saves next to the
+  scene and switches Dynamic to Baked + Dynamic. The button itself wasn't
+  clicked in a test (no UI automation); the bake path it calls was.
 
 - 2026-10-09: Step 8 (editor) done. Reviewed the `DDGIVolume` node and
   fixed: removing the node left DDGI on in the Environment (fixed in place
