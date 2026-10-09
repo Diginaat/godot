@@ -277,6 +277,11 @@ func _setup_volume() -> void:
 func _run_capture() -> void:
 	RenderingServer.viewport_set_measure_render_time(vp.get_viewport_rid(), true)
 	if args.has("bake") and volume:
+		# --ps_scale3d=N: the project's default 3D scaling mode during the bake
+		# (new viewports, like the bake's own, take it).
+		if args.has("ps_scale3d"):
+			ProjectSettings.set_setting("rendering/scaling_3d/mode", int(args["ps_scale3d"]))
+			ProjectSettings.set_setting("rendering/scaling_3d/scale", 0.67)
 		await RenderingServer.frame_post_draw
 		var t0 := Time.get_ticks_msec()
 		var data := volume.bake()
