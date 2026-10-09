@@ -433,6 +433,19 @@ How to read them:
 
 Newest first. Note the date, the commit, what you saw or changed.
 
+- 2026-10-09: Two errors while baking in the editor. (1) "Failed to call
+  streamline slSetConstants. Result: sl::eErrorDuplicatedConstants": the
+  bake renders hundreds of frames with `RenderingServer::draw()` inside one
+  main loop iteration, but the Streamline frame token only advances at the
+  start of an iteration, so every DLSS viewport set its constants twice for
+  one token (and skipped DLSS for those draws). `DLSSEffect::upscale()` now
+  takes a new token when the viewport's constants were already set for the
+  current one. Bake of the interior with DLSS on: 345 errors before, 0
+  after. (2) "Another resource is loaded from path ... (possible cyclic
+  resource inclusion)" on a rebake: the new `DDGIProbeData` got the path of
+  the old one, which was still loaded. The Bake DDGI button now updates the
+  loaded resource in place (and a new one takes the path over).
+
 - 2026-10-09: Steps 11 (interiors) and 12 (baking). New `interior` view and
   `--measure` (flicker and brightness), all numbers below at 640x360,
   Medium, static scene (`--anim=0 --tod=0`), linear exposure 4, RTX 3060.

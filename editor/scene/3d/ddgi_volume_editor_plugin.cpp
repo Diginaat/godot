@@ -30,7 +30,6 @@
 
 #include "ddgi_volume_editor_plugin.h"
 
-#include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
 #include "editor/editor_interface.h"
@@ -67,18 +66,26 @@ void DDGIVolumeEditorPlugin::_bake_and_save(const String &p_path) {
 	if (!volume) {
 		return;
 	}
+	Ref<DDGIProbeData> previous = volume->get_probe_data();
 	Ref<DDGIProbeData> data = volume->bake();
 	if (data.is_null()) {
 		return; // Cancelled, or the bake printed why it failed.
 	}
-	data->set_path(p_path);
+	if (previous.is_valid() && previous->get_path() == p_path) {
+		// Rebaking: the loaded resource owns the path, so update it in place
+		// (a second resource with the same path is a "cyclic inclusion" error).
+		previous->set_data(data->get_data());
+		data = previous;
+		volume->set_probe_data(data);
+	} else {
+		// Replaces whatever resource is cached for the path.
+		data->set_path(p_path, true);
+	}
 	Error err = ResourceSaver::save(data, p_path, ResourceSaver::FLAG_CHANGE_PATH | ResourceSaver::FLAG_COMPRESS);
 	if (err != OK) {
 		EditorNode::get_singleton()->show_warning(vformat(TTR("Couldn't save the DDGI probe data to \"%s\"."), p_path));
 		return;
 	}
-	// Reload from the file, so the scene references it instead of embedding it.
-	volume->set_probe_data(ResourceLoader::load(p_path, "", ResourceFormatLoader::CACHE_MODE_REPLACE));
 	if (volume->get_bake_mode() == DDGIVolume::BAKE_MODE_DYNAMIC) {
 		volume->set_bake_mode(DDGIVolume::BAKE_MODE_BAKED_DYNAMIC);
 	}

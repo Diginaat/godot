@@ -56,6 +56,10 @@ public:
 	sl::DLSSOptions currentDlssOptions;
 	sl::DLSSOptimalSettings currentOptimalSettings;
 	sl::DLSSDOptions currentDlssDOptions; // DLSS Ray Reconstruction options
+	// Frame index the constants were last set for. Streamline accepts one set
+	// of constants per viewport and frame token.
+	uint32_t constants_frame = UINT32_MAX;
+	bool constants_set = false;
 
 	DLSSContextInner();
 	virtual ~DLSSContextInner();
@@ -219,10 +223,15 @@ void DLSSEffect::upscale(const DLSSContext::Parameters &p_params) {
 		return;
 	}
 
-	// Begin frame if needed.
-	if (StreamlineContext::get().last_token == nullptr) {
+	// Begin frame if needed. The token normally advances once per main loop
+	// iteration; extra draws within one iteration (RenderingServer::draw()
+	// from the editor, such as baking DDGI or previews) need their own, or
+	// slSetConstants fails with eErrorDuplicatedConstants.
+	if (StreamlineContext::get().last_token == nullptr ||
+			(context->constants_set && uint32_t(*StreamlineContext::get().last_token) == context->constants_frame)) {
 		StreamlineContext::get().get_new_frame_token();
 	}
+	ERR_FAIL_NULL(StreamlineContext::get().last_token);
 
 	context->last_parameters = p_params;
 	context->last_effect = this;
@@ -447,6 +456,8 @@ void DLSSEffect::_upscale_internal(RDD::CommandBufferID cmdid, const DLSSContext
 		if (result != sl::Result::eOk) {
 			ERR_FAIL_MSG("Failed to call streamline slSetConstants. Result: " + String(StreamlineContext::result_to_string(result)));
 		}
+		context->constants_frame = uint32_t(*StreamlineContext::get().last_token);
+		context->constants_set = true;
 	}
 
 	// Tag resources
