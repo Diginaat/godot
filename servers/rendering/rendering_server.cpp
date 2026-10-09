@@ -3109,6 +3109,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi", "env", "enable", "cascades", "probe_spacing", "probe_grid", "energy", "normal_bias", "view_bias", "hysteresis", "probe_relocation", "probe_classification", "follow_camera", "debug_mode"), &RenderingServer::environment_set_ddgi);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_volume", "env", "node_volume", "center", "size"), &RenderingServer::environment_set_ddgi_volume);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_bounce_energy", "env", "energy"), &RenderingServer::environment_set_ddgi_bounce_energy);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_realtime_updates", "env", "enable"), &RenderingServer::environment_set_ddgi_realtime_updates);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_baked_data", "env", "mode", "data"), &RenderingServer::environment_set_ddgi_baked_data);
 	ClassDB::bind_method(D_METHOD("environment_set_volumetric_fog", "env", "enable", "density", "albedo", "emission", "emission_energy", "anisotropy", "length", "detail_spread", "gi_inject", "temporal_reprojection", "temporal_reprojection_amount", "ambient_inject", "sky_affect"), &RenderingServer::environment_set_volumetric_fog);
 
@@ -3860,6 +3861,8 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_probes_per_frame", PROPERTY_HINT_RANGE, "64,16384,64"), 2048);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_irradiance_texels", PROPERTY_HINT_RANGE, "4,16,1"), 6);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_distance_texels", PROPERTY_HINT_RANGE, "8,32,1"), 14);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/light_transition_time", PROPERTY_HINT_RANGE, "0,1,0.01,suffix:s"), 0.2);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/realtime_rays_per_probe", PROPERTY_HINT_RANGE, "16,512,8"), 64);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/gpu_time_budget_ms", PROPERTY_HINT_RANGE, "0,16,0.1,or_greater,suffix:ms"), 0.0);
 
 	// OpenGL limits

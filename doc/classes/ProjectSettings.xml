@@ -3125,6 +3125,9 @@
 		<member name="rendering/global_illumination/ddgi/gpu_time_budget_ms" type="float" setter="" getter="" default="0.0">
 			If above zero, DDGI measures its GPU time and lowers the number of probes traced per frame to stay within this many milliseconds (but never below an eighth of the quality setting's value). [code]0[/code] disables the budget.
 		</member>
+		<member name="rendering/global_illumination/ddgi/light_transition_time" type="float" setter="" getter="" default="0.2">
+			How long the indirect light takes to fade to a probe's new light, in seconds at 60 frames per second (counted in frames, like the probe updates). Probes update one by one, each in a step; surfaces see a copy of the probes' light that eases toward them, so a light change (a storm rolling in, a lamp switched on) fades in evenly instead of probe by probe. Higher values give smoother transitions and less flicker, lower values a faster reaction. [code]0[/code] shows each update at once.
+		</member>
 		<member name="rendering/global_illumination/ddgi/quality" type="int" setter="" getter="" default="1">
 			The DDGI workload. Each preset sets the rays per probe, the probes traced per frame and the probe map resolutions:
 			- Low: 64 rays, 1024 probes per frame, 6x6 irradiance, 12x12 distance.
@@ -3133,6 +3136,9 @@
 			- Ultra: 256 rays, 8192 probes per frame, 8x8 irradiance, 16x16 distance.
 			- Custom: uses the [code]custom_*[/code] settings in this section.
 			Can be changed at runtime.
+		</member>
+		<member name="rendering/global_illumination/ddgi/realtime_rays_per_probe" type="int" setter="" getter="" default="64">
+			Rays per probe and frame when [member DDGIVolume.realtime_updates] is on (every probe every frame). More rays give less noise in dark, unevenly lit rooms and cost more ray tracing; the light is averaged over the frames, so fewer rays than the quality preset's are enough.
 		</member>
 		<member name="rendering/global_illumination/gi/use_half_resolution" type="bool" setter="" getter="" default="false" keywords="size">
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.

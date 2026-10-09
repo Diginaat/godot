@@ -78,6 +78,7 @@ RTXGI 2.x (NRC, SHaRC) is a different technique and isn't used.
 | `cascades` | 3 | Probe grids; each one has twice the spacing of the previous |
 | `infinite_world` | off | Unlimited world: the grids are centered on the camera and scroll with it; `probe_count` (or `size`) then only sets the probes per cascade. Can't be baked. (Called `follow_camera` in earlier dev builds; old scenes still load.) |
 | `bounce_energy` | 1.0 | Multiplier for the light passed on from bounce to bounce inside the probes; above 1, indirectly lit rooms get brighter (0 to 2) |
+| `realtime_updates` | off | Every probe every frame (fewer rays per update): light changes such as weather follow evenly and faster; more GPU time |
 | `bake_mode` | Dynamic | Dynamic: traced at runtime. Baked: only the baked probes, no rays (also without ray tracing hardware). Baked + Dynamic: start from the bake, then update |
 | `probe_data` | | The baked probes (`DDGIProbeData`) |
 | `energy`, `normal_bias`, `view_bias`, `hysteresis`, `probe_relocation`, `probe_classification`, `debug_mode` | | As the Environment properties below |
@@ -100,6 +101,7 @@ set them directly:
 | `ddgi_probe_grid` | 24 x 12 x 24 | Probes per axis per cascade |
 | `ddgi_energy` | 1.0 | Indirect light multiplier |
 | `ddgi_bounce_energy` | 1.0 | Multiplier for the light passed on from bounce to bounce (0 to 2) |
+| `ddgi_realtime_updates` | off | Every probe every frame |
 | `ddgi_normal_bias`, `ddgi_view_bias` | 0.1, 0.3 | Sampling offsets (fraction of the spacing) against self shadowing and leaks |
 | `ddgi_hysteresis` | 0.95 | Temporal smoothing (higher = less noise, slower response) |
 | `ddgi_probe_relocation` | on | Move probes out of geometry |
@@ -114,6 +116,8 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `quality` | Preset: Low 64 rays / 1024 probes per frame / 6x6 irradiance / 12x12 distance; Medium 128 / 2048 / 6 / 14; High 192 / 4096 / 8 / 14; Ultra 256 / 8192 / 8 / 16; Custom |
 | `custom_*` | The four workload values for Custom |
 | `gpu_time_budget_ms` | Optional: lower the probes traced per frame to stay within this GPU time |
+| `light_transition_time` | 0.2 s (at 60 fps): how long surfaces take to fade to a probe's new light |
+| `realtime_rays_per_probe` | 64: rays per probe and frame with realtime updates |
 
 ### Baking
 
@@ -143,6 +147,38 @@ frame still come from the current quality. `bounce_energy` changes what the
 probes see, so bake again after changing it. Baking needs ray tracing
 (Vulkan, a GPU with ray tracing pipelines) and a fixed volume
 (`infinite_world` off).
+
+### Smooth light changes (weather, day and night)
+
+A light change reaches the probes one by one: each is updated in its turn,
+and each update is a step. Seen directly, a storm rolling in dimmed the
+scene in blotches, probe by probe. Two things deal with it:
+
+- **Light transition** (always on): the probes write one irradiance atlas,
+  surfaces read a second one that eases toward the first every frame
+  (a 0.1 ms compute pass at 1080p). A probe's step then fades in over
+  `light_transition_time` (0.2 s at 60 fps), so the whole scene changes
+  evenly. It also removes the last flicker of noisy probes. The first
+  update of a new or scrolled-in probe is shown at once.
+- **Realtime updates** (`DDGIVolume.realtime_updates`): every probe every
+  frame, in chunks of up to 16384 neighboring probes (index order, so a
+  slab of the grid at a time), with `realtime_rays_per_probe` rays (64)
+  and a hysteresis matched to the per-frame updates (0.95 becomes 0.9).
+  Distances are blended every 4th frame only. The light follows about
+  twice as fast and over the whole scene at once, including far cascades.
+  It can be switched on only while a weather change runs; switching keeps
+  the probes' light.
+
+Weather test (outdoor view, Medium, a storm over 2 s: sun 1.5 to 0.25 and
+cold, sky 1.0 to 0.25; frames until the indirect light is within 2 levels
+of its final value after the storm ends; RTX 3060, 1080p for the costs):
+
+| Mode | DDGI ms | Lag outdoor / interior | Flicker, static interior |
+| --- | --- | --- | --- |
+| Before (no transition) | 1.63 | 72 / 57 frames, blotchy | 0.4 - 0.9% of pixels |
+| Budgeted + transition | 1.72 | 100 / 67 frames, even | 0.02% |
+| Realtime (64 rays) + transition | 3.61 | 58 / 36 frames, even | 3.5% |
+| Realtime, 128 rays | 6.39 | | 0.12% |
 
 ### Dark interiors
 
@@ -324,6 +360,7 @@ those texels instead of blending with them.
 | 11 | Interiors: flicker in dark rooms, bounce energy | Done |
 | 12 | Baking: `DDGIProbeData`, bake modes, editor button, baked-only without ray tracing | Done |
 | 14 | Probe count per axis, infinite world toggle, faster bake | Done |
+| 15 | Smooth light changes: light transition, realtime updates | Done |
 
 ## Test project
 
@@ -352,7 +389,10 @@ Arguments (after `--`): `--view=`, `--gi=none|sdfgi|ddgi`, `--quality=0..4`,
 resolution apply), `--settle=N` (with `--shot`: stop the camera, wait N
 frames and save `<shot>_settled.png`; the difference to the first shot is
 the error that moving leaves), `--reloc=0|1`, `--classify=0|1`,
-`--bounces=` (path tracer), `--bounce=` (bounce energy).
+`--bounces=` (path tracer), `--bounce=` (bounce energy), `--realtime=1`
+(realtime updates), `--rt_rays=` (realtime rays per probe), `--weather=dir`
+(a storm over `--weather_frames`, every frame saved; see "Smooth light
+changes").
 
 Flicker and brightness: `--measure=N` captures N frames and prints mean
 linear brightness, the mean temporal deviation per pixel (8-bit levels) and
@@ -437,6 +477,30 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-09: Step 15, smooth light changes. Report: switching a weather
+  system to a storm showed the probes updating one by one, blotchy, and
+  lagging. Measured with `--weather` (indirect light view, every frame
+  saved): the frame-to-frame change showed dark blobs where single probes
+  jumped. Each probe sees a real change at its own update; once confirmed,
+  the hysteresis drops to 40% and the probe jumps 60% of the way. Tried:
+  (1) realtime updates alone (every probe every frame, 48 rays): even, but
+  noisy (static interior 6.5% flicker) and only a little faster, because
+  the per-update hysteresis then sets the pace. (2) A display atlas that
+  eases toward the probes every frame: hides the steps; first with a time
+  in seconds, which at the harness's 500 fps meant 100 frames, so it is
+  counted in frames (seconds at 60 fps). (3) Reacting to every confirmed
+  change in proportion (no 0.1 threshold): faster, but darker in rooms lit
+  by a small source (switch test settled at 95.5 instead of 104): with
+  skewed noise two small dips in a row are common, two spikes rare.
+  Reverted. Kept: the display atlas (0.2 s), realtime updates with 64
+  rays, per-update hysteresis 1 - 2 x (1 - h), distances every 4th frame.
+  Numbers in "Smooth light changes". Scrolling got a little worse (outdoor
+  at 8 m/s: mean error 3.08 to 3.25, pixels off by more than 16 levels
+  3.0% to 3.6%): the easing adds lag while moving. Considered and not done:
+  keeping the sun's and the sky's light as separate, normalized atlases,
+  so their brightness and color would apply at once without tracing: three
+  irradiance atlases, three blends and three lookups per probe.
 
 - 2026-10-09: Bake errors in projects with DLSS or FSR as the default 3D
   scaling ("slEvaluateFeature ... eErrorNGXFailed", "Too many mipmaps

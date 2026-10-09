@@ -626,6 +626,10 @@ void RendererSceneRender::environment_set_ddgi_bounce_energy(RID p_env, float p_
 	environment_storage.environment_set_ddgi_bounce_energy(p_env, p_energy);
 }
 
+void RendererSceneRender::environment_set_ddgi_realtime_updates(RID p_env, bool p_enable) {
+	environment_storage.environment_set_ddgi_realtime_updates(p_env, p_enable);
+}
+
 void RendererSceneRender::environment_set_ddgi_baked_data(RID p_env, int p_mode, const Dictionary &p_data) {
 	environment_storage.environment_set_ddgi_baked_data(p_env, p_mode, p_data);
 }

@@ -216,6 +216,7 @@ private:
 	Vector3i ddgi_probe_grid = Vector3i(24, 12, 24);
 	float ddgi_energy = 1.0;
 	float ddgi_bounce_energy = 1.0;
+	bool ddgi_realtime_updates = false;
 	float ddgi_normal_bias = 0.1;
 	float ddgi_view_bias = 0.3;
 	float ddgi_hysteresis = 0.95;
@@ -440,6 +441,8 @@ public:
 	float get_ddgi_energy() const;
 	void set_ddgi_bounce_energy(float p_energy);
 	float get_ddgi_bounce_energy() const;
+	void set_ddgi_realtime_updates(bool p_enabled);
+	bool is_ddgi_realtime_updates_enabled() const;
 	void set_ddgi_normal_bias(float p_bias);
 	float get_ddgi_normal_bias() const;
 	void set_ddgi_view_bias(float p_bias);

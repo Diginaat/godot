@@ -122,6 +122,9 @@
 		<member name="ddgi_probe_spacing" type="float" setter="set_ddgi_probe_spacing" getter="get_ddgi_probe_spacing" default="1.0">
 			The distance between probes in the finest cascade, in meters. Smaller values capture smaller lighting details (and leak less) at the cost of a smaller covered area.
 		</member>
+		<member name="ddgi_realtime_updates" type="bool" setter="set_ddgi_realtime_updates" getter="is_ddgi_realtime_updates_enabled" default="false">
+			If [code]true[/code], DDGI updates every probe every frame. See [member DDGIVolume.realtime_updates].
+		</member>
 		<member name="ddgi_view_bias" type="float" setter="set_ddgi_view_bias" getter="get_ddgi_view_bias" default="0.3">
 			Moves the point where probes are sampled toward the camera, as a fraction of the probe spacing. Reduces self shadowing and light leaks at grazing angles.
 		</member>

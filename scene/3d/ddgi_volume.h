@@ -81,6 +81,7 @@ private:
 	int cascades = 3;
 	float energy = 1.0f;
 	float bounce_energy = 1.0f;
+	bool realtime_updates = false;
 	float normal_bias = 0.1f;
 	float view_bias = 0.3f;
 	float hysteresis = 0.95f;
@@ -125,6 +126,9 @@ public:
 
 	void set_bounce_energy(float p_energy);
 	float get_bounce_energy() const;
+
+	void set_realtime_updates(bool p_enabled);
+	bool is_realtime_updates_enabled() const;
 
 	void set_normal_bias(float p_bias);
 	float get_normal_bias() const;
