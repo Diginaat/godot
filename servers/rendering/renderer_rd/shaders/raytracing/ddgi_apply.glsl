@@ -52,9 +52,6 @@ params;
 
 #define DDGI_SAMPLER linear_sampler
 #define DDGI_SAMPLING
-#ifdef MODE_APPLY
-#define DDGI_AO
-#endif
 #include "ddgi_sample_inc.glsl"
 
 #define DEBUG_INDIRECT_LIGHT 1u
@@ -63,7 +60,6 @@ params;
 #define DEBUG_PROBE_STATES 4u
 #define DEBUG_PROBE_PRIORITY 5u
 #define DEBUG_CASCADES 6u
-#define DEBUG_AMBIENT_OCCLUSION 7u
 
 #define FLAG_HALF_RES 1u
 
@@ -110,13 +106,6 @@ void main() {
 		} else {
 			ambient = ddgi_sample_irradiance(world_pos, normal, to_camera);
 			ambient.rgb *= ddgi.volumes[0].params.x; // Energy.
-			// Ambient occlusion darkens only the indirect light DDGI adds.
-			float ao = 1.0 - ddgi.ao.x * (1.0 - ddgi_ao_visibility);
-			if (params.debug_mode == DEBUG_AMBIENT_OCCLUSION) {
-				ambient = vec4(vec3(ao), 1.0);
-			} else {
-				ambient.rgb *= ao;
-			}
 			if (any(isnan(ambient)) || any(isinf(ambient))) {
 				ambient = vec4(0.0);
 			}

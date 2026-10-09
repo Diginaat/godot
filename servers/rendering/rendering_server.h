@@ -707,7 +707,6 @@ public:
 	virtual void environment_set_ddgi(RID p_env, bool p_enable, int p_cascades, float p_probe_spacing, const Vector3i &p_probe_grid, float p_energy, float p_normal_bias, float p_view_bias, float p_hysteresis, bool p_probe_relocation, bool p_probe_classification, bool p_follow_camera, int p_debug_mode) = 0;
 	virtual void environment_set_ddgi_volume(RID p_env, bool p_node_volume, const Vector3 &p_center, const Vector3 &p_size) = 0;
 	virtual void environment_set_ddgi_bounce_energy(RID p_env, float p_energy) = 0;
-	virtual void environment_set_ddgi_ao(RID p_env, bool p_enable, float p_strength, float p_radius) = 0;
 	virtual void environment_set_ddgi_baked_data(RID p_env, int p_mode, const Dictionary &p_data) = 0;
 
 	virtual void environment_set_fog(RID p_env, bool p_enable, const Color &p_light_color, float p_light_energy, float p_sun_scatter, float p_density, float p_height, float p_height_density, float p_aerial_perspective, float p_sky_affect, RSE::EnvironmentFogMode p_mode = RSE::EnvironmentFogMode::ENV_FOG_MODE_EXPONENTIAL) = 0;

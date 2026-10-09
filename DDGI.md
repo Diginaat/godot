@@ -77,7 +77,6 @@ RTXGI 2.x (NRC, SHaRC) is a different technique and isn't used.
 | `cascades` | 3 | Probe grids; each one has twice the spacing of the previous |
 | `follow_camera` | off | Grids follow the camera and scroll; `size` then only sets the probe count |
 | `bounce_energy` | 1.0 | Multiplier for the light passed on from bounce to bounce inside the probes; above 1, indirectly lit rooms get brighter (0 to 2) |
-| `ao_enabled`, `ao_strength`, `ao_radius` | off, 0.75, 1.0 m | Ambient occlusion from the probe distances (below) |
 | `bake_mode` | Dynamic | Dynamic: traced at runtime. Baked: only the baked probes, no rays (also without ray tracing hardware). Baked + Dynamic: start from the bake, then update |
 | `probe_data` | | The baked probes (`DDGIProbeData`) |
 | `energy`, `normal_bias`, `view_bias`, `hysteresis`, `probe_relocation`, `probe_classification`, `debug_mode` | | As the Environment properties below |
@@ -100,7 +99,6 @@ set them directly:
 | `ddgi_probe_grid` | 24 x 12 x 24 | Probes per axis per cascade |
 | `ddgi_energy` | 1.0 | Indirect light multiplier |
 | `ddgi_bounce_energy` | 1.0 | Multiplier for the light passed on from bounce to bounce (0 to 2) |
-| `ddgi_ao_enabled`, `ddgi_ao_strength`, `ddgi_ao_radius` | off, 0.75, 1.0 m | Ambient occlusion from the probe distances |
 | `ddgi_normal_bias`, `ddgi_view_bias` | 0.1, 0.3 | Sampling offsets (fraction of the spacing) against self shadowing and leaks |
 | `ddgi_hysteresis` | 0.95 | Temporal smoothing (higher = less noise, slower response) |
 | `ddgi_probe_relocation` | on | Move probes out of geometry |
@@ -156,29 +154,6 @@ brighter without flicker:
 - `energy` scales the final indirect light (including the parts that are
   already bright).
 
-### Ambient occlusion
-
-`DDGIVolume` > Ambient Occlusion (toggle, strength, radius) darkens the DDGI
-indirect light where geometry is close: corners, edges, the floor under
-objects, around moving objects, also off screen. It traces no rays. In the
-apply pass, for three directions 60 degrees off the surface normal, each of
-the 8 surrounding probes tells (Chebyshev test on its distance moments)
-whether a point 0.75 x radius away is free; the probes are weighted like the
-irradiance (trilinear, backface, visibility). Squared for contrast. It works
-with baked probes and on D3D12.
-
-- Coarse: about the probe spacing. SSAO adds the fine contact detail on
-  top. Direct light and reflections are not affected.
-- The radius is capped at the probe spacing of the finest covering cascade:
-  above that the probes see the sample points along the surface at grazing
-  angles, and the probe grid shows as a pattern (measured at 0.5 m spacing,
-  1 m radius).
-- Cost: about +0.43 ms at 1920x1080 on an RTX 3060 (apply 0.73 to 1.16 ms),
-  a quarter with half resolution GI. No flicker added (interior 0.54% of
-  pixels with and without).
-- Debug view: Ambient Occlusion (white = open), shown at full strength even
-  with AO off.
-
 ### How it interacts with other GI
 
 - **SDFGI and VoxelGI** are skipped for views that use DDGI (a warning says
@@ -207,7 +182,6 @@ the scene renders exactly as with DDGI off, including SDFGI/VoxelGI.
 
 | Mode | Shows |
 | --- | --- |
-| Ambient Occlusion | The DDGI ambient occlusion, white = open |
 | Indirect Light | Only the DDGI light (the GI buffer) |
 | Probe Irradiance | Probes as spheres with their stored light |
 | Probe Distance | Probes shaded by distance to the nearest surface |
@@ -345,7 +319,6 @@ those texels instead of blending with them.
 | 10 | Validation: test scenes, benchmarks, this document | Open |
 | 11 | Interiors: flicker in dark rooms, bounce energy | Done |
 | 12 | Baking: `DDGIProbeData`, bake modes, editor button, baked-only without ray tracing | Done |
-| 13 | Ambient occlusion from the probe distances | Done |
 
 ## Test project
 
@@ -374,8 +347,7 @@ Arguments (after `--`): `--view=`, `--gi=none|sdfgi|ddgi`, `--quality=0..4`,
 resolution apply), `--settle=N` (with `--shot`: stop the camera, wait N
 frames and save `<shot>_settled.png`; the difference to the first shot is
 the error that moving leaves), `--reloc=0|1`, `--classify=0|1`,
-`--bounces=` (path tracer), `--bounce=` (bounce energy), `--ao=strength`
-(0 off), `--ao_radius=m`.
+`--bounces=` (path tracer), `--bounce=` (bounce energy).
 
 Flicker and brightness: `--measure=N` captures N frames and prints mean
 linear brightness, the mean temporal deviation per pixel (8-bit levels) and
@@ -460,19 +432,6 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
-
-- 2026-10-09: Step 13, ambient occlusion from the probe distances (see
-  "Ambient occlusion"). Three tries: (1) moving each probe's distance in a
-  direction to the shading point (minus the probe-to-point offset): far too
-  weak, and a probe grid pattern at larger radii, because the probes are
-  half a spacing from the point. (2) Testing whether a point at the radius
-  is visible from the probe, against the mean distance: clear darkening in
-  corners and under objects, but hard bands and a pattern from the 14 texel
-  distance maps. (3) The same with the Chebyshev bound and a variance of at
-  least (radius / 4)^2: smooth. Cost brought from +0.64 to +0.43 ms at
-  1080p (three directions instead of four, probes with weight below 0.01
-  skipped). A radius of twice the spacing brought the grid pattern back,
-  so it is capped at the spacing.
 
 - 2026-10-09: Two errors while baking in the editor. (1) "Failed to call
   streamline slSetConstants. Result: sl::eErrorDuplicatedConstants": the

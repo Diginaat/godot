@@ -87,9 +87,6 @@ private:
 	bool probe_relocation = true;
 	bool probe_classification = true;
 	bool follow_camera = false;
-	bool ao_enabled = false;
-	float ao_strength = 0.75f;
-	float ao_radius = 1.0f;
 	Environment::DDGIDebugMode debug_mode = Environment::DDGI_DEBUG_DISABLED;
 	BakeMode bake_mode = BAKE_MODE_DYNAMIC;
 	Ref<DDGIProbeData> probe_data;
@@ -141,15 +138,6 @@ public:
 
 	void set_follow_camera(bool p_enabled);
 	bool is_following_camera() const;
-
-	void set_ao_enabled(bool p_enabled);
-	bool is_ao_enabled() const;
-
-	void set_ao_strength(float p_strength);
-	float get_ao_strength() const;
-
-	void set_ao_radius(float p_radius);
-	float get_ao_radius() const;
 
 	void set_debug_mode(Environment::DDGIDebugMode p_mode);
 	Environment::DDGIDebugMode get_debug_mode() const;
