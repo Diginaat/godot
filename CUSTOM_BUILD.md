@@ -161,6 +161,7 @@ Releases on GitHub name the Godot base and the own version:
 | Git tag | `godot<major>.<minor>-<status>-nvidia-rt-dlss-physx-v<own>` | `godot4.8-dev-nvidia-rt-dlss-physx-v0.2.0` |
 | Release title | `Godot NVIDIA + PhysX (Godot <major>.<minor>-<status>) v<own>` | `Godot NVIDIA + PhysX (Godot 4.8-dev) v0.2.0` |
 | Zip | `godot_<major>.<minor>-nvidia-rt-dlss-physx_v<own>-editor_windows_amd64[_mono].zip` | `godot_4.8-nvidia-rt-dlss-physx_v0.2.0-editor_windows_amd64.zip` (.NET: `..._amd64_mono.zip`) |
+| Export templates | `godot_<major>.<minor>-nvidia-rt-dlss-physx_v<own>-export_templates_windows_amd64[_mono].tpz` | `godot_4.8-nvidia-rt-dlss-physx_v0.5.1-export_templates_windows_amd64.tpz` |
 
 `package_editor_win64.ps1` builds the zip name from `CUSTOM_VERSION` and
 `version.py`, and prints the tag and title to use.
@@ -172,6 +173,7 @@ Releases on GitHub name the Godot base and the own version:
 | 0.3.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.3.0` | Blast and Flow in releases; path tracer: volumetric fog, glass |
 | 0.4.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.4.0` | DDGI Forward+ global illumination and `DDGIVolume` node |
 | 0.5.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.0` | DDGI baking, realtime updates, smooth light changes, bounce energy, probe count |
+| 0.5.1 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.1` | Windows export templates (standard and .NET); exported games get the PhysX, Blast, Flow and DLSS DLLs |
 
 ## Release packages (Windows)
 
@@ -199,6 +201,35 @@ files and, for mono, `bin/GodotSharp/`. Blast and Flow are always included:
 the script fails if any of their DLLs is missing from `bin/`. NVIDIA
 Streamline DLLs are bundled only with `-WithNvidiaRuntime` (private use; never
 `bin/development/`, which holds the debug variants).
+
+### Export templates
+
+Four builds, each followed by the packaging script (`.tpz` in `dist/`,
+installed with Editor > Manage Export Templates > Install from File):
+
+```
+# Standard templates
+python -m SCons platform=windows target=template_release production=yes <physx_sdk/blast_sdk/flow_sdk as above>
+python -m SCons platform=windows target=template_debug production=yes <physx_sdk/blast_sdk/flow_sdk as above>
+powershell -File misc/scripts/package_templates_win64.ps1
+
+# .NET templates
+python -m SCons platform=windows target=template_release production=yes module_mono_enabled=yes <...>
+python -m SCons platform=windows target=template_debug production=yes module_mono_enabled=yes <...>
+powershell -File misc/scripts/package_templates_win64.ps1 -Mono
+```
+
+The `.tpz` holds the templates (release, debug and their console wrappers),
+the D3D12 Agility SDK DLLs (`D3D12Core.x86_64.dll`, as the Windows export
+expects) and the licenses; `version.txt` comes from the template binary
+(`4.8.dev`, `4.8.dev.mono`). PhysX GPU, Blast and Flow DLLs are not in the
+templates: `NativeRuntimeExportPlugin`
+(`editor/export/native_runtime_export_plugin.cpp`) copies them from the
+editor's folder next to every exported Windows game, and the NVIDIA
+Streamline / DLSS files too when they are installed there (the editor's
+DLSS installer). Export options: `native_runtime/include_physx_libraries`,
+`native_runtime/include_nvidia_dlss`. So games made with this editor ship
+DLSS, but the public editor and template downloads never contain it.
 
 ## Test
 
