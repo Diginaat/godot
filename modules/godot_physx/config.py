@@ -5,7 +5,22 @@ from SCons.Script import ARGUMENTS
 _notified = False
 
 
-def _physx_sdk_path():
+def get_opts(platform):
+    # Registered as SCons options, so they can also come from custom.py (or a
+    # profile), not only from the command line or the environment variables.
+    from SCons.Variables import BoolVariable
+
+    return [
+        ("physx_sdk", "PhysX 5 SDK install folder (printed by misc/build_physx.py)", os.environ.get("PHYSX_SDK", "")),
+        BoolVariable("physx_gpu", "Build against the PhysX GPU SDK (CUDA GPU dynamics)", False),
+        ("blast_sdk", "NVIDIA Blast SDK folder (printed by misc/build_physx.py --blast)", os.environ.get("BLAST_SDK", "")),
+        ("flow_sdk", "NVIDIA Flow folder (printed by misc/build_physx.py --flow)", os.environ.get("FLOW_SDK", "")),
+    ]
+
+
+def _physx_sdk_path(env=None):
+    if env is not None and env.get("physx_sdk"):
+        return env["physx_sdk"]
     return ARGUMENTS.get("physx_sdk", os.environ.get("PHYSX_SDK", ""))
 
 
@@ -17,7 +32,7 @@ def can_build(env, platform):
 
     # The module links against an out-of-tree PhysX 5 SDK (it is not vendored).
     # With no SDK configured, quietly skip it so a stock build still succeeds.
-    if not _physx_sdk_path():
+    if not _physx_sdk_path(env):
         if not _notified:
             print(
                 "godot_physx: no PhysX SDK configured, module disabled. "

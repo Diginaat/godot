@@ -17,11 +17,13 @@ env_physx = env_modules.Clone()
 #
 # physx_gpu=yes builds against the GPU SDK. The GPU library gets copied next to
 # the Godot binary further down.
-physx_gpu = ARGUMENTS.get("physx_gpu", "no") not in ("no", "0", "false", "False")
+# The options come from config.py's get_opts(): command line, custom.py or the
+# PHYSX_SDK / BLAST_SDK / FLOW_SDK environment variables.
+physx_gpu = bool(env.get("physx_gpu", ARGUMENTS.get("physx_gpu", "no") not in ("no", "0", "false", "False")))
 
 # config.py::can_build() has already checked this is set (otherwise the module is
 # skipped), so it is always non-empty here.
-physx_sdk = ARGUMENTS.get("physx_sdk", os.environ.get("PHYSX_SDK", ""))
+physx_sdk = env.get("physx_sdk") or ARGUMENTS.get("physx_sdk", os.environ.get("PHYSX_SDK", ""))
 physx_inc = os.path.join(physx_sdk, "include")
 
 # Ordered so each library comes before the ones it depends on: GNU ld resolves
@@ -119,7 +121,7 @@ elif env["platform"] == "linuxbsd" and physx_gpu:
 #
 # Unlike PhysX, Blast ships as shared libraries. They get copied next to the
 # Godot binary, same as the GPU library.
-blast_sdk = ARGUMENTS.get("blast_sdk", os.environ.get("BLAST_SDK", ""))
+blast_sdk = env.get("blast_sdk") or ARGUMENTS.get("blast_sdk", os.environ.get("BLAST_SDK", ""))
 if blast_sdk:
     blast_inc = os.path.join(blast_sdk, "include")
     if not os.path.isdir(blast_inc):
@@ -177,7 +179,7 @@ if blast_sdk:
 # nvflowext.dll at run time, so a build with Flow support still runs without
 # them -- the Flow nodes just warn and stay inert. The DLLs are copied next to
 # the binary here for convenience.
-flow_sdk = ARGUMENTS.get("flow_sdk", os.environ.get("FLOW_SDK", ""))
+flow_sdk = env.get("flow_sdk") or ARGUMENTS.get("flow_sdk", os.environ.get("FLOW_SDK", ""))
 if flow_sdk:
     flow_inc = os.path.join(flow_sdk, "include")
     if not os.path.isdir(os.path.join(flow_inc, "nvflowext")):
