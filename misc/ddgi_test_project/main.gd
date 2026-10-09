@@ -114,6 +114,14 @@ func _apply_args() -> void:
 		env.ddgi_hysteresis = float(args["hysteresis"])
 	if args.has("energy"):
 		env.ddgi_energy = float(args["energy"])
+	# Screen-space effects and exposure for comparison shots.
+	env.ssao_enabled = args.get("ssao", "0") == "1"
+	env.ssil_enabled = args.get("ssil", "0") == "1"
+	env.ssr_enabled = args.get("ssr", "0") == "1"
+	if args.has("bounce"):
+		env.ddgi_bounce_energy = float(args["bounce"])
+	if args.has("tonemap_exposure"):
+		env.tonemap_exposure = float(args["tonemap_exposure"])
 	if args.has("realtime"):
 		env.ddgi_realtime_updates = args["realtime"] == "1"
 	if args.has("rt_rays"):
