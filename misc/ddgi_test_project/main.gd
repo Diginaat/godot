@@ -20,7 +20,7 @@ const VIEWS := {
 }
 const VIEW_KEYS := ["room", "outdoor", "stress", "interior"]
 const GI_MODES := ["none", "sdfgi", "ddgi"]
-const DEBUG_MODE_COUNT := 8
+const DEBUG_MODE_COUNT := 7
 
 var args := {}
 var env: Environment
@@ -114,11 +114,6 @@ func _apply_args() -> void:
 		env.ddgi_hysteresis = float(args["hysteresis"])
 	if args.has("energy"):
 		env.ddgi_energy = float(args["energy"])
-	# --ao=strength (0 off), --ao_radius=m.
-	if args.has("ao"):
-		env.ddgi_ao_enabled = float(args["ao"]) > 0.0
-		env.ddgi_ao_strength = float(args["ao"])
-	env.ddgi_ao_radius = float(args.get("ao_radius", "1.0"))
 	if args.has("reloc"):
 		env.ddgi_probe_relocation = args["reloc"] == "1"
 	if args.has("classify"):
@@ -267,10 +262,6 @@ func _setup_volume() -> void:
 	volume.enabled = gi_mode == "ddgi"
 	if args.has("bounce"):
 		volume.bounce_energy = float(args["bounce"])
-	volume.ao_enabled = env.ddgi_ao_enabled
-	volume.ao_strength = env.ddgi_ao_strength
-	volume.ao_radius = env.ddgi_ao_radius
-	volume.debug_mode = env.ddgi_debug_mode
 	add_child(volume)
 	if args.has("baked"):
 		volume.probe_data = load(args["baked"])

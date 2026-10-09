@@ -1392,7 +1392,6 @@ public:
 	PASS13(environment_set_ddgi, RID, bool, int, float, const Vector3i &, float, float, float, float, bool, bool, bool, int)
 	PASS4(environment_set_ddgi_volume, RID, bool, const Vector3 &, const Vector3 &)
 	PASS2(environment_set_ddgi_bounce_energy, RID, float)
-	PASS4(environment_set_ddgi_ao, RID, bool, float, float)
 	PASS3(environment_set_ddgi_baked_data, RID, int, const Dictionary &)
 	PASS1R(Dictionary, ddgi_get_probe_data, const Ref<RenderSceneBuffers> &)
 	PASS1RC(bool, environment_get_ddgi_enabled, RID)

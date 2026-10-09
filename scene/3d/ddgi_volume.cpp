@@ -133,9 +133,6 @@ void DDGIVolume::_apply_to_environment() {
 	// scroll with the camera instead of staying in this box.
 	env->set_ddgi_follow_camera(follow_camera);
 	env->set_ddgi_debug_mode(debug_mode);
-	env->set_ddgi_ao_enabled(ao_enabled);
-	env->set_ddgi_ao_strength(ao_strength);
-	env->set_ddgi_ao_radius(ao_radius);
 	env->set_ddgi_volume(enabled && !follow_camera, get_global_position(), size);
 	if (new_environment) {
 		_apply_baked_data();
@@ -279,33 +276,6 @@ void DDGIVolume::set_follow_camera(bool p_enabled) {
 
 bool DDGIVolume::is_following_camera() const {
 	return follow_camera;
-}
-
-void DDGIVolume::set_ao_enabled(bool p_enabled) {
-	ao_enabled = p_enabled;
-	_apply_to_environment();
-}
-
-bool DDGIVolume::is_ao_enabled() const {
-	return ao_enabled;
-}
-
-void DDGIVolume::set_ao_strength(float p_strength) {
-	ao_strength = CLAMP(p_strength, 0.0f, 1.0f);
-	_apply_to_environment();
-}
-
-float DDGIVolume::get_ao_strength() const {
-	return ao_strength;
-}
-
-void DDGIVolume::set_ao_radius(float p_radius) {
-	ao_radius = MAX(0.01f, p_radius);
-	_apply_to_environment();
-}
-
-float DDGIVolume::get_ao_radius() const {
-	return ao_radius;
 }
 
 void DDGIVolume::set_debug_mode(Environment::DDGIDebugMode p_mode) {
@@ -474,12 +444,6 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_probe_classification_enabled"), &DDGIVolume::is_probe_classification_enabled);
 	ClassDB::bind_method(D_METHOD("set_follow_camera", "enabled"), &DDGIVolume::set_follow_camera);
 	ClassDB::bind_method(D_METHOD("is_following_camera"), &DDGIVolume::is_following_camera);
-	ClassDB::bind_method(D_METHOD("set_ao_enabled", "enabled"), &DDGIVolume::set_ao_enabled);
-	ClassDB::bind_method(D_METHOD("is_ao_enabled"), &DDGIVolume::is_ao_enabled);
-	ClassDB::bind_method(D_METHOD("set_ao_strength", "strength"), &DDGIVolume::set_ao_strength);
-	ClassDB::bind_method(D_METHOD("get_ao_strength"), &DDGIVolume::get_ao_strength);
-	ClassDB::bind_method(D_METHOD("set_ao_radius", "radius"), &DDGIVolume::set_ao_radius);
-	ClassDB::bind_method(D_METHOD("get_ao_radius"), &DDGIVolume::get_ao_radius);
 	ClassDB::bind_method(D_METHOD("set_debug_mode", "mode"), &DDGIVolume::set_debug_mode);
 	ClassDB::bind_method(D_METHOD("get_debug_mode"), &DDGIVolume::get_debug_mode);
 	ClassDB::bind_method(D_METHOD("set_bake_mode", "mode"), &DDGIVolume::set_bake_mode);
@@ -500,11 +464,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_relocation"), "set_probe_relocation", "is_probe_relocation_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_classification"), "set_probe_classification", "is_probe_classification_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "follow_camera"), "set_follow_camera", "is_following_camera");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades,Ambient Occlusion"), "set_debug_mode", "get_debug_mode");
-	ADD_GROUP("Ambient Occlusion", "ao_");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ao_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_ao_enabled", "is_ao_enabled");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ao_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_ao_strength", "get_ao_strength");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ao_radius", PROPERTY_HINT_RANGE, "0.05,4,0.01,or_greater,suffix:m"), "set_ao_radius", "get_ao_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades"), "set_debug_mode", "get_debug_mode");
 	ADD_GROUP("Baking", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "bake_mode", PROPERTY_HINT_ENUM, "Dynamic,Baked,Baked + Dynamic"), "set_bake_mode", "get_bake_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "probe_data", PROPERTY_HINT_RESOURCE_TYPE, DDGIProbeData::get_class_static()), "set_probe_data", "get_probe_data");

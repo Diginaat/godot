@@ -904,7 +904,6 @@ public:
 	FUNC13(environment_set_ddgi, RID, bool, int, float, const Vector3i &, float, float, float, float, bool, bool, bool, int)
 	FUNC4(environment_set_ddgi_volume, RID, bool, const Vector3 &, const Vector3 &)
 	FUNC2(environment_set_ddgi_bounce_energy, RID, float)
-	FUNC4(environment_set_ddgi_ao, RID, bool, float, float)
 	FUNC3(environment_set_ddgi_baked_data, RID, int, const Dictionary &)
 
 	FUNC3R(Ref<Image>, environment_bake_panorama, RID, bool, const Size2i &)
