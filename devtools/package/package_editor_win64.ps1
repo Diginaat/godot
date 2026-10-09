@@ -10,9 +10,9 @@
 # (never bin/development). For your own machines only; do not publish.
 #
 # Usage (from the repo root):
-#   powershell -File misc/scripts/package_editor_win64.ps1                 # standard editor
-#   powershell -File misc/scripts/package_editor_win64.ps1 -Mono           # .NET editor
-#   powershell -File misc/scripts/package_editor_win64.ps1 -WithNvidiaRuntime
+#   powershell -File devtools/package/package_editor_win64.ps1                 # standard editor
+#   powershell -File devtools/package/package_editor_win64.ps1 -Mono           # .NET editor
+#   powershell -File devtools/package/package_editor_win64.ps1 -WithNvidiaRuntime
 param(
 	[switch]$Mono,
 	[switch]$WithNvidiaRuntime

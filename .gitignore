@@ -403,3 +403,6 @@ $RECYCLE.BIN/
 
 # Packaged editor zips (misc/scripts/package_editor_win64.ps1)
 /dist/
+
+# Output of the developer scripts (devtools/README.md)
+/devtools/out/

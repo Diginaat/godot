@@ -28,6 +28,11 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 
 ## Build
 
+- Setup, build, smoke test, DDGI test and release scripts are in `devtools/`
+  (see devtools/README.md). `devtools/setup/setup_dev_windows.ps1` writes the
+  PhysX/Blast/Flow SDK paths into `custom.py` (untracked), which SCons reads,
+  so builds need no SDK arguments. Put new helper scripts there, not in a
+  scratch folder, and keep them free of machine-specific paths.
 - `scons` isn't on PATH on the maintainer's machine; use `python -m SCons`.
   Pass `-j10` (the maintainer's preferred job count).
 - Stay on one flag set between builds (for example always `production=yes`).

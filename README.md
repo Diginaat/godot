@@ -184,7 +184,7 @@ The log shows `PhysX 5.10.0 initialized [GPU]` when GPU dynamics are active.
 - New projects default to the Vulkan driver on Windows, because the path
   tracer needs it. Requesting path tracing on D3D12 prints an explanatory
   warning.
-- `misc/scripts/package_editor_win64.ps1` packages a release editor with all
+- `devtools/package/package_editor_win64.ps1` packages a release editor with all
   runtime DLLs.
 - [`CUSTOM_BUILD.md`](CUSTOM_BUILD.md) is the maintenance runbook for keeping
   the three sources in sync.
@@ -206,17 +206,24 @@ The log shows `PhysX 5.10.0 initialized [GPU]` when GPU dynamics are active.
   python misc/scripts/install_d3d12_sdk_windows.py
   ```
 
-### 2. Get the source
+### 2. Get the source and set up
 
 ```
 git clone -b nvidia-dlss-physx https://github.com/Diginaat/godot.git godot-rtx
 cd godot-rtx
+powershell -ExecutionPolicy Bypass -File devtools\setup\setup_dev_windows.ps1 -Build
 ```
 
-### 3. Build the PhysX SDK
+The setup script checks the tools from step 1, installs SCons and the D3D12
+dependencies, sets the git remotes, builds the PhysX SDK (with Blast and
+Flow, and GPU dynamics when the CUDA Toolkit is installed) in a `physx-sdk`
+folder next to the repository, writes the SDK paths into `custom.py` and
+builds the editor into `bin\godot.windows.editor.x86_64.exe`. Running it again
+skips what is already done. All developer scripts (build, smoke tests, DDGI
+tests, release packaging) are described in
+[`devtools/README.md`](devtools/README.md).
 
-The PhysX SDK is not included. A script clones NVIDIA's PhysX repository at a
-pinned version, applies the Godot build preset and patches, and builds it:
+### 3. Build the PhysX SDK by hand (what the setup does)
 
 ```
 python modules/godot_physx/misc/build_physx.py --gpu --blast --flow
@@ -224,21 +231,20 @@ python modules/godot_physx/misc/build_physx.py --gpu --blast --flow
 
 Leave out `--gpu` for a CPU-only build. `--blast` also builds the NVIDIA Blast
 SDK (destruction) and `--flow` NVIDIA Flow (smoke and fire); the release
-editors include both. The script prints the full SCons command for the next
-step, with the `physx_sdk=`, `blast_sdk=` and `flow_sdk=` paths. It clones
-into a `physx-sdk` folder next to this repository.
+editors include both. The script prints the `physx_sdk=`, `blast_sdk=` and
+`flow_sdk=` paths; put them into `custom.py` (or pass them to SCons).
 
 ### 4. Build the editor
 
 ```
-python -m SCons platform=windows target=editor production=yes physx_sdk=<path from step 3> physx_gpu=yes blast_sdk=<path> flow_sdk=<path>
+devtools\build\build.ps1
+:: or directly
+python -m SCons platform=windows target=editor production=yes
 ```
 
 - Run it from PowerShell or cmd, not Git Bash (SCons can't find the D3D12
   dependencies there).
-- Leave out `blast_sdk` or `flow_sdk` to build without Blast or Flow.
-- Leave out `physx_gpu=yes` for a CPU-only PhysX build. Leave out `physx_sdk`
-  completely to build without PhysX.
+- Without `custom.py` (or the SDK arguments) the editor builds without PhysX.
 - The editor lands in `bin\godot.windows.editor.x86_64.exe`.
   `PhysXGpu_64.dll` and the Blast and Flow DLLs are copied next to it
   automatically.
@@ -277,9 +283,7 @@ unavailable.
 ### 6. Optional: C# (.NET) editor
 
 ```
-python -m SCons platform=windows target=editor production=yes module_mono_enabled=yes physx_sdk=<path> physx_gpu=yes blast_sdk=<path> flow_sdk=<path>
-bin\godot.windows.editor.x86_64.mono.console.exe --headless --generate-mono-glue modules\mono\glue
-python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=windows
+devtools\build\build.ps1 -Mono
 ```
 
 This produces `bin\godot.windows.editor.x86_64.mono.exe` and the
@@ -288,8 +292,8 @@ This produces `bin\godot.windows.editor.x86_64.mono.exe` and the
 ### 7. Optional: package a distributable zip
 
 ```
-powershell -File misc/scripts/package_editor_win64.ps1          # standard editor
-powershell -File misc/scripts/package_editor_win64.ps1 -Mono    # .NET editor
+powershell -File devtools/package/package_editor_win64.ps1          # standard editor
+powershell -File devtools/package/package_editor_win64.ps1 -Mono    # .NET editor
 ```
 
 The zip goes to `dist\`. It contains the editor, `PhysXGpu_64.dll`, the Blast

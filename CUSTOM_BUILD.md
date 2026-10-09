@@ -48,8 +48,10 @@ git remote add fork https://github.com/Diginaat/godot.git
   a master-based tree. Only `modules/godot_physx/` is taken from it. Its commits touch no
   other engine file that matters for PhysX.
 - `modules/godot_physx/` carries local changes on top of the vendored copy:
-  adaptations to upstream master API changes, plus the `generator="ninja"` line in
-  `misc/physx_presets/vc17win64-godot-gpu.xml`. Never overwrite the directory
+  adaptations to upstream master API changes, the `generator="ninja"` line in
+  `misc/physx_presets/vc17win64-godot-gpu.xml`, and SCons options for
+  `physx_sdk`, `physx_gpu`, `blast_sdk` and `flow_sdk` in `config.py`
+  (`get_opts()`, so `custom.py` can set them). Never overwrite the directory
   wholesale; merge 3-way (see below).
 
 ### Sync state log
@@ -58,9 +60,36 @@ Update this table after every sync.
 
 | Date | upstream/master | origin (NVIDIA) | physx module commit | Merge commit |
 | --- | --- | --- | --- | --- |
-| 2026-10-07 | `e7b12e7492` | `135dff3887` | `2de7ea521f` (Flow builds pipelines on first use) | `2424aa594a` |
+| 2026-10-07 | `e7b12e7492` | `135dff3887` | `2de7ea521f` (Flow builds pipelines on first use) | `4624c40df5` |
 | 2026-10-08 | `e7b12e7492` (no change) | `135dff3887` (no change) | `5681d7519a` (Flow on Linux, MIT license) | on `dev`, see log |
-| 2026-10-08 | `65e8d16951` | `135dff3887` (no change) | `5681d7519a` (no change) | on `dev`, see log |
+| 2026-10-08 | `65e8d16951` | `135dff3887` (no change) | `5681d7519a` (no change) | `4495b586dd` |
+
+### History layout
+
+The history was rebuilt on 2026-10-09 so that each source stays visible
+(`git log --first-parent` reads top to bottom as):
+
+| Commits | Source |
+| --- | --- |
+| Upstream Godot `master` | Official history, never rewritten; joined by merges `Merge upstream Godot master (<sha>)` |
+| `NVIDIA: Miscellaneous`, `NVIDIA: Dependencies`, `NVIDIA: Pathtracer + DLSS` | NVIDIA-RTX/godot, original commits and hashes |
+| `Merge upstream Godot master (b6a3291ea8) into NVIDIA RTX nvidia-pt-dlss` | Only the conflict resolutions between NVIDIA and upstream |
+| `godot_physx: import the PhysX 5 module by Wild Ox Studios` | uno1982/godot `feature/physx5-module` at `2de7ea521f`, verbatim, authored by uno1982 |
+| `godot_physx: adapt the module to Godot 4.8 master` | The local module changes |
+| Everything after | This fork's own commits, in one line, with upstream merges where they were synced |
+
+Before the rebuild, the first merge (`4f6baae206`) also carried the whole
+PhysX module and its adaptations, and four internal merges between `dev`
+and the published branch added nothing. Every rebuilt commit has the same
+files as the commit it replaces; the old history is in the release tags
+(v0.1.0 to v0.5.1 point to it) and in the `backup/history-clean-2026-10-09/*`
+branches of the maintainer's machine.
+
+Keep it this way: sync upstream and NVIDIA with merges (step 5 and 6
+below), take PhysX module updates as their own commit
+(`godot_physx: update to physx module <sha>`), and merge `dev` into the
+published branch with `--ff-only` (no merge commit) so the line stays
+straight.
 
 ## Update procedure
 
@@ -117,17 +146,23 @@ Update this table after every sync.
 
 ## Build (Windows)
 
-`scons` is not on PATH; use `python -m SCons`.
-
-PhysX SDK: built once with `modules/godot_physx/misc/build_physx.py --gpu --blast --flow`, pinned to
-`ovphysx-0.5.11`. It's installed at
-`C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX`. Blast and Flow
-come from the same checkout (`blast/` and `flow/`). Rebuild them only when the
-module's `build_physx.py` pin, patches or presets change.
+A new PC is set up with `devtools\setup\setup_dev_windows.ps1` (see
+[devtools/README.md](devtools/README.md)): it checks the tools, installs SCons
+and the D3D12 dependencies, sets the remotes, builds the PhysX, Blast and
+Flow SDKs once (`modules/godot_physx/misc/build_physx.py --gpu --blast --flow`,
+pinned to `ovphysx-0.5.11`, in a `physx-sdk` folder next to the repository)
+and writes their paths into `custom.py` (not tracked). SCons reads
+`custom.py` on every run, so a build needs no SDK arguments:
 
 ```
-python -m SCons -k platform=windows target=editor physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes blast_sdk="C:\REPO\Godot\physx-sdk\blast\_build\windows-x86_64\release\blast-sdk" flow_sdk="C:\REPO\Godot\physx-sdk\flow"
+devtools\build\build.ps1 -KeepGoing
+:: or directly
+python -m SCons -k platform=windows target=editor production=yes
 ```
+
+`scons` is not on PATH; use `python -m SCons`. Rebuild the SDKs (delete
+`physx-sdk` and run the setup again) only when the module's `build_physx.py`
+pin, patches or presets change.
 
 - Output: `bin\godot.windows.editor.x86_64.exe` and `.console.exe`. `PhysXGpu_64.dll`,
   the four `NvBlast*.dll` and `nvflow.dll`/`nvflowext.dll` are copied next to it
@@ -177,20 +212,17 @@ Releases on GitHub name the Godot base and the own version:
 
 ## Release packages (Windows)
 
-Both editors use `production=yes`. With MSVC that means the static CRT and no
+All builds use `production=yes`. With MSVC that means the static CRT and no
 debug symbols; LTO stays off on purpose (the platform script says it doesn't
-help with MSVC), so an incremental build is quick.
+help with MSVC), so an incremental build is quick. The release steps are in
+[devtools/README.md](devtools/README.md#release):
 
 ```
-# Standard editor
-python -m SCons platform=windows target=editor production=yes physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes blast_sdk="C:\REPO\Godot\physx-sdk\blast\_build\windows-x86_64\release\blast-sdk" flow_sdk="C:\REPO\Godot\physx-sdk\flow"
-powershell -File misc/scripts/package_editor_win64.ps1
-
-# .NET (mono) editor; needs the .NET SDK
-python -m SCons platform=windows target=editor production=yes module_mono_enabled=yes physx_sdk="C:\REPO\Godot\physx-sdk\physx\install\vc17win64-godot-gpu\PhysX" physx_gpu=yes blast_sdk="C:\REPO\Godot\physx-sdk\blast\_build\windows-x86_64\release\blast-sdk" flow_sdk="C:\REPO\Godot\physx-sdk\flow"
-bin\godot.windows.editor.x86_64.mono.console.exe --headless --generate-mono-glue modules\mono\glue
-python modules/mono/build_scripts/build_assemblies.py --godot-output-dir=./bin --godot-platform=windows
-powershell -File misc/scripts/package_editor_win64.ps1 -Mono
+devtools\build\build.ps1 -Target release      # both editors, all four templates, C# assemblies
+devtools\test\smoke.ps1
+devtools\test\smoke.ps1 -Mono
+powershell -File devtools/package/package_editor_win64.ps1
+powershell -File devtools/package/package_editor_win64.ps1 -Mono
 ```
 
 The zips land in `dist/` (gitignored). The script bundles the editor exes,
@@ -204,19 +236,13 @@ Streamline DLLs are bundled only with `-WithNvidiaRuntime` (private use; never
 
 ### Export templates
 
-Four builds, each followed by the packaging script (`.tpz` in `dist/`,
-installed with Editor > Manage Export Templates > Install from File):
+Four builds (`devtools\build\build.ps1 -Target templates`, and again with
+`-Mono`), packaged as `.tpz` in `dist/` and installed with Editor > Manage
+Export Templates > Install from File:
 
 ```
-# Standard templates
-python -m SCons platform=windows target=template_release production=yes <physx_sdk/blast_sdk/flow_sdk as above>
-python -m SCons platform=windows target=template_debug production=yes <physx_sdk/blast_sdk/flow_sdk as above>
-powershell -File misc/scripts/package_templates_win64.ps1
-
-# .NET templates
-python -m SCons platform=windows target=template_release production=yes module_mono_enabled=yes <...>
-python -m SCons platform=windows target=template_debug production=yes module_mono_enabled=yes <...>
-powershell -File misc/scripts/package_templates_win64.ps1 -Mono
+powershell -File devtools/package/package_templates_win64.ps1
+powershell -File devtools/package/package_templates_win64.ps1 -Mono
 ```
 
 The `.tpz` holds the templates (release, debug and their console wrappers),
@@ -233,12 +259,15 @@ DLSS, but the public editor and template downloads never contain it.
 
 ## Test
 
-Use the console exe. A pass means exit code 0, no `ERROR:` lines, and the expected log line.
+`devtools\test\smoke.ps1` (and `-Mono` for the .NET editor) runs all of them
+with the console exe. A pass means exit code 0, no `ERROR:` lines, and the
+expected log line.
 
 | Check | Command | Expect |
 | --- | --- | --- |
-| PhysX GPU, D3D12 | `--verbose --path C:\REPO\Godot\godot-physx-example --quit-after 600` (and again with `--editor`) | `PhysX 5.10.0 initialized [GPU]` |
-| Path tracer, Vulkan | A Forward+ 3D scene with `Environment.pathtracing_enabled = true`, run with `--rendering-driver vulkan` | Noisy path-traced image; no "Raytracing not supported" warning |
+| PhysX GPU, D3D12 | `--verbose --path <godot-physx-example> --quit-after 600` (and again with `--editor`) | `PhysX 5.10.0 initialized [GPU]` |
+| Path tracer, Vulkan | The DDGI test project's room with `--pt=1`, `--rendering-driver vulkan` | Noisy path-traced image; no "Raytracing not supported" warning |
+| DDGI | The DDGI test project's interior with `--measure` | Renders and measures without errors |
 
 ## Known limitations
 

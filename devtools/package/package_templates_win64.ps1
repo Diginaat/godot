@@ -11,8 +11,8 @@
 # Build the templates first (see "Export templates" in CUSTOM_BUILD.md).
 #
 # Usage (from the repo root):
-#   powershell -File misc/scripts/package_templates_win64.ps1          # standard
-#   powershell -File misc/scripts/package_templates_win64.ps1 -Mono    # .NET
+#   powershell -File devtools/package/package_templates_win64.ps1          # standard
+#   powershell -File devtools/package/package_templates_win64.ps1 -Mono    # .NET
 param(
 	[switch]$Mono
 )
