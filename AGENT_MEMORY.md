@@ -43,6 +43,19 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   utf8`: it adds a BOM, and a BOM in a `.glsl` include made the editor crash
   at startup (exit code 116).
 
+## Class reference
+
+- Every fork class, property, method, constant and project setting needs a
+  description in `doc/classes/` or `modules/godot_physx/doc_classes/`; the
+  editor's help and inspector tooltips come from there.
+- Update with `bin\godot...console.exe --headless --doctool .`, then check
+  the diff: it deletes docs of classes this build doesn't compile in (restore
+  them) and touches unrelated upstream files (revert those). PhysX classes
+  must be listed in `modules/godot_physx/config.py` `get_doc_classes()`, or
+  their docs land in `doc/classes/`; that list is compiled in, so rebuild
+  before running doctool again.
+- Validate with `python doc/tools/make_rst.py --dry-run doc/classes modules/ platform/`.
+
 ## Releases
 
 - Public zips must **not** contain NVIDIA Streamline/DLSS/Reflex runtime DLLs

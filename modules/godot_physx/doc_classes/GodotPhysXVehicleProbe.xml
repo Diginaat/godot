@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GodotPhysXVehicleProbe" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Internal test bridge for a PhysX four-wheel vehicle.
+	</brief_description>
+	<description>
+		Creates a four-wheel direct-drive PxVehicle2 vehicle in a PhysX physics space and drives it from a script, for the module's tests. For games use [PhysXVehicle3D].
+		[b]Note:[/b] This is an internal test class of the PhysX module, not a stable API: it may change or be removed without notice.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_actor_position" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the world position of the chassis actor's origin.
+			</description>
+		</method>
+		<method name="get_forward_speed" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the speed along the chassis's forward axis, in m/s (negative when reversing).
+			</description>
+		</method>
+		<method name="get_linear_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's linear velocity in world space.
+			</description>
+		</method>
+		<method name="get_position" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis position in world space.
+			</description>
+		</method>
+		<method name="get_wheel_jounce" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="wheel" type="int" />
+			<description>
+				Returns how far the suspension of wheel [param wheel] (0 front left, 1 front right, 2 rear left, 3 rear right) is compressed: 0 at full droop, the suspension travel when bottomed out.
+			</description>
+		</method>
+		<method name="get_wheel_position" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="wheel" type="int" />
+			<description>
+				Returns the world position of the hub center of wheel [param wheel].
+			</description>
+		</method>
+		<method name="get_wheel_separation" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="wheel" type="int" />
+			<description>
+				Returns the distance between wheel [param wheel] and the ground. Negative values mean the wheel penetrates the ground even at full compression.
+			</description>
+		</method>
+		<method name="initialize">
+			<return type="bool" />
+			<param index="0" name="space" type="RID" />
+			<param index="1" name="position" type="Vector3" />
+			<param index="2" name="wheel_radius" type="float" default="-1.0" />
+			<description>
+				Creates the vehicle at [param position] in the PhysX physics [param space]. [param wheel_radius] sets the wheel radius in meters; 0 or less uses the default (0.35). Returns [code]true[/code] on success.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="throttle" type="float" />
+			<param index="2" name="brake" type="float" />
+			<param index="3" name="steer" type="float" />
+			<description>
+				Runs the vehicle simulation for [param dt] seconds with [param throttle] and [param brake] in [code][0, 1][/code] and [param steer] in [code][-1, 1][/code]. Call it before each physics step; the space's own step moves the chassis.
+			</description>
+		</method>
+	</methods>
+</class>

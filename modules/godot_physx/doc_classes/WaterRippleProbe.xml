@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WaterRippleProbe" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Internal test bridge for the GPU water solver.
+	</brief_description>
+	<description>
+		Runs the water solver (ripples and the FFT ocean layer) from a script without a scene node, and reads its height field back, for the module's tests. For games use [PhysXWaterSurface3D].
+		[b]Note:[/b] This is an internal test class of the PhysX module, not a stable API: it may change or be removed without notice.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="clear_sphere">
+			<return type="void" />
+			<param index="0" name="owner" type="int" />
+			<description>
+				Removes the sphere that [param owner] submitted with [method submit_sphere].
+			</description>
+		</method>
+		<method name="configure">
+			<return type="void" />
+			<param index="0" name="grid_resolution" type="int" />
+			<param index="1" name="domain_size" type="Vector2" />
+			<param index="2" name="depth" type="float" />
+			<param index="3" name="damping" type="float" />
+			<param index="4" name="gravity" type="float" />
+			<param index="5" name="water_level" type="float" />
+			<description>
+				Sets up the ripple simulation: [param grid_resolution] cells per side over [param domain_size] meters, water [param depth], wave [param damping], [param gravity] and the [param water_level] height. Building happens on the render thread; wait for [method is_available].
+			</description>
+		</method>
+		<method name="configure_ocean">
+			<return type="void" />
+			<param index="0" name="ocean_grid_resolution" type="int" />
+			<param index="1" name="ocean_domain_size" type="Vector2" />
+			<param index="2" name="wind_speed" type="float" />
+			<param index="3" name="wind_direction" type="Vector2" />
+			<param index="4" name="wave_amplitude" type="float" />
+			<description>
+				Sets up the FFT ocean layer: [param ocean_grid_resolution] cells per side over [param ocean_domain_size] meters, with [param wind_speed], [param wind_direction] and [param wave_amplitude]. Call it before the first [method step].
+			</description>
+		</method>
+		<method name="get_ocean_height_array" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<description>
+				Returns the ocean height field from the last [method refresh_ocean_height_grid].
+			</description>
+		</method>
+		<method name="get_ocean_imag_array" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<description>
+				Returns the ocean's horizontal (choppy) displacement from the last [method refresh_ocean_height_grid].
+			</description>
+		</method>
+		<method name="get_ocean_slope_x_array" qualifiers="const">
+			<return type="PackedFloat32Array" />
+			<description>
+				Returns the ocean's slope along X from the last [method refresh_ocean_height_grid].
+			</description>
+		</method>
+		<method name="has_device" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if a [RenderingDevice] is available to run the solver on.
+			</description>
+		</method>
+		<method name="is_available" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] once the solver is configured and ready to [method step]. This can take a frame or two after [method configure].
+			</description>
+		</method>
+		<method name="refresh_height_grid">
+			<return type="void" />
+			<description>
+				Reads the ripple height field back from the GPU for [method sample_height]. This waits for the GPU.
+			</description>
+		</method>
+		<method name="refresh_ocean_height_grid">
+			<return type="void" />
+			<description>
+				Reads the ocean layer back from the GPU for the [code]get_ocean_*_array()[/code] methods. This waits for the GPU.
+			</description>
+		</method>
+		<method name="sample_height" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="world_x" type="float" />
+			<param index="1" name="world_z" type="float" />
+			<description>
+				Returns the water height at the world position ([param world_x], [param world_z]), interpolated from the last [method refresh_height_grid].
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Advances the simulation by [param delta] seconds.
+			</description>
+		</method>
+		<method name="submit_impulse">
+			<return type="void" />
+			<param index="0" name="world_pos" type="Vector3" />
+			<param index="1" name="radius" type="float" />
+			<param index="2" name="strength" type="float" />
+			<description>
+				Pushes the water surface once at [param world_pos], over [param radius] meters with [param strength].
+			</description>
+		</method>
+		<method name="submit_sphere">
+			<return type="void" />
+			<param index="0" name="owner" type="int" />
+			<param index="1" name="world_pos" type="Vector3" />
+			<param index="2" name="radius" type="float" />
+			<param index="3" name="strength" type="float" />
+			<description>
+				Adds or moves a sphere (identified by [param owner]) at [param world_pos] with [param radius] that displaces the water every step with [param strength], like a floating object.
+			</description>
+		</method>
+	</methods>
+</class>

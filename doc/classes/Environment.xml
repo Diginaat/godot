@@ -82,6 +82,9 @@
 		<member name="background_mode" type="int" setter="set_background" getter="get_background" enum="Environment.BGMode" default="0">
 			The background mode.
 		</member>
+		<member name="ddgi_bounce_energy" type="float" setter="set_ddgi_bounce_energy" getter="get_ddgi_bounce_energy" default="1.0">
+			Multiplier for the light passed on from bounce to bounce inside the DDGI probes. Above [code]1.0[/code], indirectly lit rooms get brighter. See [member DDGIVolume.bounce_energy].
+		</member>
 		<member name="ddgi_cascades" type="int" setter="set_ddgi_cascades" getter="get_ddgi_cascades" default="3">
 			The number of probe grids (cascades) centered on the camera. Each cascade has twice the probe spacing of the previous one, so it covers twice the distance with the same number of probes. Use more cascades for large outdoor scenes.
 		</member>
@@ -94,9 +97,6 @@
 			[b]Note:[/b] Requires the Forward+ renderer with the Vulkan rendering driver on hardware with ray tracing support. Elsewhere DDGI is disabled with a warning and the scene renders as if it were off.
 			[b]Note:[/b] When [member pathtracing_enabled] is [code]true[/code], the path tracer computes all indirect light and DDGI is not used.
 			[b]Note:[/b] The workload (rays per probe, probes updated per frame, probe resolution) is set in [member ProjectSettings.rendering/global_illumination/ddgi/quality].
-		</member>
-		<member name="ddgi_bounce_energy" type="float" setter="set_ddgi_bounce_energy" getter="get_ddgi_bounce_energy" default="1.0">
-			Multiplier for the light passed on from bounce to bounce inside the DDGI probes. Above [code]1.0[/code], indirectly lit rooms get brighter. See [member DDGIVolume.bounce_energy].
 		</member>
 		<member name="ddgi_energy" type="float" setter="set_ddgi_energy" getter="get_ddgi_energy" default="1.0">
 			Multiplier for the indirect light DDGI adds to surfaces.

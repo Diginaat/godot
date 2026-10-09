@@ -4,7 +4,7 @@
 		Ray traced dynamic diffuse global illumination (DDGI) for the scene.
 	</brief_description>
 	<description>
-			Adds dynamic diffuse global illumination (DDGI) to the scene: grids of irradiance probes that trace rays every frame with hardware ray tracing. Opaque surfaces get their diffuse indirect light from the probes. Lights, emissive materials, the sky and geometry can all change at runtime; the indirect light follows over a few frames.
+		Adds dynamic diffuse global illumination (DDGI) to the scene: grids of irradiance probes that trace rays every frame with hardware ray tracing. Opaque surfaces get their diffuse indirect light from the probes. Lights, emissive materials, the sky and geometry can all change at runtime; the indirect light follows over a few frames.
 			The node drives the [code]ddgi_*[/code] properties of the [Environment] of its [World3D] (the [WorldEnvironment]), and turns DDGI off when it leaves the scene. Use one [DDGIVolume] per scene; with several, the last one that changed wins.
 			By default the probes fill the box given by [member size], centered on the node. With [member follow_camera], they follow the camera instead and the box only sets how many probes there are.
 			The workload (rays per probe, probes updated per frame, probe resolution) is set in [member ProjectSettings.rendering/global_illumination/ddgi/quality].
