@@ -48,6 +48,7 @@ class DDGIVolumeEditorPlugin : public EditorPlugin {
 	EditorFileDialog *probe_file = nullptr;
 
 	static EditorProgress *tmp_progress;
+	static int paused_update_modes[4]; // Update modes of the editor's 3D views while a bake runs.
 	static void bake_func_begin();
 	static bool bake_func_step(int p_progress, const String &p_description);
 	static void bake_func_end();

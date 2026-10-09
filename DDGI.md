@@ -59,8 +59,8 @@ RTXGI 2.x (NRC, SHaRC) is a different technique and isn't used.
    fork), a GPU with ray tracing.
 2. A `WorldEnvironment` with an `Environment`, and a `DDGIVolume` node in
    the same scene (Add Node > `DDGIVolume`).
-3. Place and size the volume with its box gizmo, or turn on
-   `follow_camera` to let the probes follow the camera (any area).
+3. Place and size the volume with its box gizmo (or set `probe_count`), or
+   turn on `infinite_world` to let the probes follow the camera (any area).
 4. Pick the workload in `Project Settings > Rendering > Global Illumination >
    DDGI > Quality` (Low, Medium, High, Ultra or Custom). It can be changed at
    runtime with `ProjectSettings.set_setting()`.
@@ -73,9 +73,10 @@ RTXGI 2.x (NRC, SHaRC) is a different technique and isn't used.
 | --- | --- | --- |
 | `enabled` | on | DDGI on/off |
 | `size` | 24 x 12 x 24 m | Box filled with probes, centered on the node; probes per axis = size / spacing + 1 (at most 64) |
+| `probe_count` | 25 x 13 x 25 | Probes per axis (width, height, depth) of each cascade, 2 to 64; linked to `size` (size = (count - 1) x spacing), not saved |
 | `probe_spacing` | 1.0 m | Spacing of the finest grid |
 | `cascades` | 3 | Probe grids; each one has twice the spacing of the previous |
-| `follow_camera` | off | Grids follow the camera and scroll; `size` then only sets the probe count |
+| `infinite_world` | off | Unlimited world: the grids are centered on the camera and scroll with it; `probe_count` (or `size`) then only sets the probes per cascade. Can't be baked. (Called `follow_camera` in earlier dev builds; old scenes still load.) |
 | `bounce_energy` | 1.0 | Multiplier for the light passed on from bounce to bounce inside the probes; above 1, indirectly lit rooms get brighter (0 to 2) |
 | `bake_mode` | Dynamic | Dynamic: traced at runtime. Baked: only the baked probes, no rays (also without ray tracing hardware). Baked + Dynamic: start from the bake, then update |
 | `probe_data` | | The baked probes (`DDGIProbeData`) |
@@ -117,12 +118,15 @@ Project settings (`rendering/global_illumination/ddgi/`):
 ### Baking
 
 Select the `DDGIVolume` and press **Bake DDGI** in the 3D editor toolbar
-(or call `DDGIVolume.bake()` from a script). The bake renders a small
-offscreen view until every probe has been updated about 128 times (the
-second half with a longer average, so the result has less noise than the
-running probes), reads the atlases back and saves them as a `DDGIProbeData`
-resource (`<scene>.<node>.ddgi.res`, compressed). The interior test scene
-(4968 probes, Medium) bakes in about a second into 4.7 MB.
+(or call `DDGIVolume.bake()` from a script). The bake runs on the GPU (the
+same hardware ray tracing as at runtime). It renders a tiny offscreen view
+and traces up to 16384 probes per frame, not the realtime budget, until
+every probe has been updated about 96 times: a third with hysteresis 0.85
+so the bounced light builds up, then a running average (weight 1/n). The
+editor's 3D views pause meanwhile. Then it reads the atlases back and
+saves them as a `DDGIProbeData` resource (`<scene>.<node>.ddgi.res`,
+compressed). The interior test scene (4968 probes, Medium) bakes in about
+0.5 s into 3.6 MB; 20736 probes (3 cascades of 25 x 13 x 25) in 1.2 s.
 
 | Bake mode | At runtime |
 | --- | --- |
@@ -138,7 +142,7 @@ the quality setting at bake time) is kept at runtime; rays and probes per
 frame still come from the current quality. `bounce_energy` changes what the
 probes see, so bake again after changing it. Baking needs ray tracing
 (Vulkan, a GPU with ray tracing pipelines) and a fixed volume
-(`follow_camera` off).
+(`infinite_world` off).
 
 ### Dark interiors
 
@@ -319,6 +323,7 @@ those texels instead of blending with them.
 | 10 | Validation: test scenes, benchmarks, this document | Open |
 | 11 | Interiors: flicker in dark rooms, bounce energy | Done |
 | 12 | Baking: `DDGIProbeData`, bake modes, editor button, baked-only without ray tracing | Done |
+| 14 | Probe count per axis, infinite world toggle, faster bake | Done |
 
 ## Test project
 
@@ -432,6 +437,22 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-09: Step 14. `DDGIVolume.probe_count` (probes per axis, linked to
+  `size`; the spacing stays the same on every axis, so the shaders didn't
+  change) and `infinite_world` (the former `follow_camera`, never
+  released; `_set()` still accepts the old name). Bake speed: the bake was
+  bound by the fixed cost per frame, not by ray tracing. With the realtime
+  budget (2048 probes per frame at Medium) a 20736 probe volume took 1296
+  frames: 2.39 s at Medium, 1.78 s at Ultra (RTX 3060, no editor views). Now
+  it traces up to 16384 probes per frame (a temporary Custom quality with
+  the preset's rays and texels), 96 updates instead of 128 with a running
+  average, a 16x16 view, and the editor's 3D views paused: 1.16 s and
+  1.52 s, now bound by the rays. Interior: 895 to 535 ms, and closer to a
+  converged Ultra reference (mean difference 3.21 to 2.33 levels, pixels
+  off by more than 4 levels 20% to 11%). Also found: probes per frame above
+  16384 couldn't work (one ray data row per probe, textures stop at 16384);
+  the setting now stops there.
 
 - 2026-10-09: Two errors while baking in the editor. (1) "Failed to call
   streamline slSetConstants. Result: sl::eErrorDuplicatedConstants": the
