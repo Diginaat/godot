@@ -110,6 +110,19 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   a cache. Don't bind buffers you free later through a linear-pool uniform
   set; use a persistent set (freed with the buffer).
 
+## Native denoiser
+
+- Plan, design, test suite and measurements:
+  docs/renderer/native_ray_reconstruction.md. Measure every change with
+  `misc/denoiser_test_project/run_suite.py` before keeping it; look at `bias`
+  as well as RMSE.
+- Anything that weights history by the current samples (same-frame change
+  detection, feeding filtered results back into the history, luminance
+  edge-stopping on raw 1 spp data) darkens path tracing noise, which is
+  skewed. It showed up as -7% to -30% brightness in the suite.
+- Before blaming the engine for a black or wrong test frame, check the test
+  scene (an emitter moving through an opaque object hides the only light).
+
 ## In-editor DLSS installer
 
 - `editor/settings/streamline_installer.cpp`. Pinned to Streamline SDK 2.10.0

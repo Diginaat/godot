@@ -11,8 +11,10 @@
 // Passes (one shader, one mode each):
 //   MODE_TEMPORAL  demodulate, reproject, validate and accumulate history
 //   MODE_VARIANCE  per-pixel variance (spatial estimate for short history)
-//   MODE_ATROUS    one edge-aware a-trous iteration; the first one feeds the
-//                  history, the last one composes the final image
+//   MODE_ATROUS    one edge-aware a-trous iteration; the last one composes
+//                  the final image
+//   MODE_REFERENCE debug: plain running average of the path tracer's image
+//                  while nothing moves (a converged reference for testing)
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -43,8 +45,8 @@ layout(push_constant, std430) uniform PushConstant {
 }
 pc;
 
-#define PC_FLAG_FEEDBACK 1u // Write this iteration's result into the history.
 #define PC_FLAG_COMPOSE 2u // Last iteration: write the final image.
+#define PC_FLAG_RESET 4u // Reference mode: start a new average.
 
 #define DEBUG_NONE 0u
 #define DEBUG_CLEAN 1u
@@ -54,6 +56,7 @@ pc;
 #define DEBUG_HISTORY_LENGTH 5u
 #define DEBUG_VARIANCE 6u
 #define DEBUG_SPLIT 7u
+#define DEBUG_REFERENCE 8u
 
 // Shared helpers ------------------------------------------------------------
 
@@ -128,8 +131,9 @@ layout(rgba32ui, set = 1, binding = 2) uniform restrict readonly uimage2D guide_
 layout(r32f, set = 1, binding = 3) uniform restrict readonly image2D depth_image;
 layout(rg16f, set = 1, binding = 4) uniform restrict readonly image2D velocity_image;
 
-layout(rgba16f, set = 1, binding = 5) uniform restrict readonly image2D prev_diffuse_history;
-layout(rgba16f, set = 1, binding = 6) uniform restrict readonly image2D prev_specular_history;
+// Sampled (linear, clamped) for the Catmull-Rom resampling of the colors.
+layout(set = 1, binding = 5) uniform sampler2D prev_diffuse_history;
+layout(set = 1, binding = 6) uniform sampler2D prev_specular_history;
 layout(rgba16f, set = 1, binding = 7) uniform restrict readonly image2D prev_moments_history;
 layout(rg32ui, set = 1, binding = 8) uniform restrict readonly uimage2D prev_surface;
 
@@ -179,13 +183,36 @@ float reproject_virtual(vec3 p_view_pos, vec3 p_view_normal, vec3 p_normal, floa
 		if (abs(dot(p_view_normal, in_current - p_view_pos)) > plane_tolerance) {
 			continue;
 		}
-		r_specular += w * imageLoad(prev_specular_history, p);
+		r_specular += w * texelFetch(prev_specular_history, p, 0);
 		weight_sum += w;
 	}
 	if (weight_sum > 1e-3) {
 		r_specular /= weight_sum;
 	}
 	return weight_sum;
+}
+
+// Catmull-Rom resampling with five bilinear taps. Bilinear resampling blurs
+// the history a little every frame, which adds up while the camera moves.
+vec3 sample_catmull_rom(sampler2D p_tex, vec2 p_uv) {
+	vec2 sample_pos = p_uv * params.size.xy;
+	vec2 p1 = floor(sample_pos - 0.5) + 0.5;
+	vec2 f = sample_pos - p1;
+	vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+	vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+	vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+	vec2 w3 = f * f * (-0.5 + 0.5 * f);
+	vec2 w12 = w1 + w2;
+	vec2 p12 = (p1 + w2 / w12) * params.size.zw;
+	vec2 p0 = (p1 - 1.0) * params.size.zw;
+	vec2 p3 = (p1 + 2.0) * params.size.zw;
+	vec3 r = textureLod(p_tex, vec2(p12.x, p0.y), 0.0).rgb * (w12.x * w0.y);
+	r += textureLod(p_tex, vec2(p0.x, p12.y), 0.0).rgb * (w0.x * w12.y);
+	r += textureLod(p_tex, p12, 0.0).rgb * (w12.x * w12.y);
+	r += textureLod(p_tex, vec2(p3.x, p12.y), 0.0).rgb * (w3.x * w12.y);
+	r += textureLod(p_tex, vec2(p12.x, p3.y), 0.0).rgb * (w12.x * w3.y);
+	float w = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+	return r / w;
 }
 
 void main() {
@@ -227,8 +254,14 @@ void main() {
 	vec4 prev_moments = vec4(0.0);
 	float prev_hit = 0.0;
 	float weight_sum = 0.0;
+	int valid_taps = 0;
+	vec3 d_min = vec3(1e30);
+	vec3 d_max = vec3(0.0);
+	vec3 s_min = vec3(1e30);
+	vec3 s_max = vec3(0.0);
+	vec2 prev_uv = uv;
 	if (params.history.w > 0.5) {
-		vec2 prev_uv = uv + imageLoad(velocity_image, pos).xy;
+		prev_uv = uv + imageLoad(velocity_image, pos).xy;
 		vec2 prev_pixel = prev_uv * params.size.xy - 0.5;
 		ivec2 base = ivec2(floor(prev_pixel));
 		vec2 f = prev_pixel - vec2(base);
@@ -255,11 +288,18 @@ void main() {
 			if (pd <= 0.0 || abs(pd - expected_depth) > depth_tolerance || dot(pn, normal) < 0.9) {
 				continue;
 			}
-			prev_diffuse += w * imageLoad(prev_diffuse_history, p);
-			prev_specular += w * imageLoad(prev_specular_history, p);
+			vec4 dh = texelFetch(prev_diffuse_history, p, 0);
+			vec4 sh = texelFetch(prev_specular_history, p, 0);
+			prev_diffuse += w * dh;
+			prev_specular += w * sh;
 			prev_moments += w * imageLoad(prev_moments_history, p);
 			prev_hit += w * imageLoad(prev_specular_hit_history, p).r;
 			weight_sum += w;
+			valid_taps++;
+			d_min = min(d_min, dh.rgb);
+			d_max = max(d_max, dh.rgb);
+			s_min = min(s_min, sh.rgb);
+			s_max = max(s_max, sh.rgb);
 		}
 	}
 
@@ -272,6 +312,46 @@ void main() {
 		prev_hit /= weight_sum;
 		diffuse_length = prev_diffuse.a;
 		specular_length = prev_specular.a;
+		// All four taps on the same surface: resample the colors sharper,
+		// clamped to the taps against ringing.
+		if (valid_taps == 4) {
+			prev_diffuse.rgb = clamp(sample_catmull_rom(prev_diffuse_history, prev_uv), d_min, d_max);
+			prev_specular.rgb = clamp(sample_catmull_rom(prev_specular_history, prev_uv), s_min, s_max);
+		}
+	}
+
+	// Lighting changes (moving lights and emitters, shadows): compare the
+	// history with this frame's 3x3 neighborhood mean (demodulated luminance).
+	// Where it is further away than the neighborhood's noise explains, the
+	// history is shortened in proportion, from the next frame on: shortening
+	// it now would weigh this frame's samples by their own value (they decide
+	// whether the history looks wrong), which darkens skewed path tracing
+	// noise by several percent.
+	float diffuse_keep = 1.0;
+	float specular_keep = 1.0;
+	if (diffuse_length > 1.0 || specular_length > 1.0) {
+		float d_sum = 0.0;
+		float d_sq = 0.0;
+		float s_sum = 0.0;
+		float s_sq = 0.0;
+		for (int y = -1; y <= 1; y++) {
+			for (int x = -1; x <= 1; x++) {
+				ivec2 p = clamp(pos + ivec2(x, y), ivec2(0), size - 1);
+				uvec4 gq = imageLoad(guide_image, p);
+				float ld = luminance(sanitize(imageLoad(diffuse_image, p).rgb) / guide_diffuse_albedo(gq));
+				float ls = luminance(sanitize(imageLoad(specular_image, p).rgb) / guide_specular_albedo(gq));
+				d_sum += ld;
+				d_sq += ld * ld;
+				s_sum += ls;
+				s_sq += ls * ls;
+			}
+		}
+		float d_mean = d_sum / 9.0;
+		float s_mean = s_sum / 9.0;
+		float d_tolerance = sqrt(max(d_sq / 9.0 - d_mean * d_mean, 0.0)) + 0.05 * d_mean + 1e-4;
+		float s_tolerance = sqrt(max(s_sq / 9.0 - s_mean * s_mean, 0.0)) + 0.05 * s_mean + 1e-4;
+		diffuse_keep = min(1.0, d_tolerance / max(abs(luminance(prev_diffuse.rgb) - d_mean), 1e-6));
+		specular_keep = min(1.0, s_tolerance / max(abs(luminance(prev_specular.rgb) - s_mean), 1e-6));
 	}
 
 	// Specular hit distance: traced along the mirror direction on smooth
@@ -322,8 +402,8 @@ void main() {
 	moments.xy = mix(prev_moments.xy, moments.xy, diffuse_moment_alpha);
 	moments.zw = mix(prev_moments.zw, moments.zw, specular_moment_alpha);
 
-	imageStore(diffuse_history, pos, vec4(mix(prev_diffuse.rgb, diffuse, diffuse_alpha), diffuse_length));
-	imageStore(specular_history, pos, vec4(mix(prev_specular.rgb, specular, specular_alpha), specular_length));
+	imageStore(diffuse_history, pos, vec4(mix(prev_diffuse.rgb, diffuse, diffuse_alpha), max(1.0, diffuse_length * diffuse_keep)));
+	imageStore(specular_history, pos, vec4(mix(prev_specular.rgb, specular, specular_alpha), max(1.0, specular_length * specular_keep)));
 	imageStore(moments_history, pos, moments);
 }
 
@@ -443,9 +523,9 @@ layout(rgba16f, set = 1, binding = 1) uniform restrict readonly image2D diffuse_
 layout(rgba16f, set = 1, binding = 2) uniform restrict readonly image2D specular_in;
 layout(rgba16f, set = 1, binding = 3) uniform restrict writeonly image2D diffuse_out;
 layout(rgba16f, set = 1, binding = 4) uniform restrict writeonly image2D specular_out;
-// Feedback into the history (first iteration) keeps the history length in alpha.
-layout(rgba16f, set = 1, binding = 5) uniform restrict image2D diffuse_history;
-layout(rgba16f, set = 1, binding = 6) uniform restrict image2D specular_history;
+// History (debug view of the history length).
+layout(rgba16f, set = 1, binding = 5) uniform restrict readonly image2D diffuse_history;
+layout(rgba16f, set = 1, binding = 6) uniform restrict readonly image2D specular_history;
 // Compose (last iteration).
 layout(rgba16f, set = 1, binding = 7) uniform restrict readonly image2D base_image;
 layout(rgba32ui, set = 1, binding = 8) uniform restrict readonly uimage2D guide_image;
@@ -505,54 +585,76 @@ void main() {
 				(pc.iteration == 0 || sqrt(s_center.a) > SKIP_RELATIVE_NOISE * (ls + 1e-3));
 
 		const float kernel[2] = float[](1.0, 0.5);
-		vec3 d_sum = d_center.rgb;
-		float d_var = d_center.a;
-		float d_w = 1.0;
-		vec3 s_sum = s_center.rgb;
-		float s_var = s_center.a;
-		float s_w = 1.0;
-
-		for (int y = -1; y <= 1 && (filter_diffuse || filter_specular); y++) {
-			for (int x = -1; x <= 1; x++) {
-				if (x == 0 && y == 0) {
-					continue;
-				}
-				ivec2 p = pos + ivec2(x, y) * pc.step_size;
-				if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, size))) {
-					continue;
-				}
-				Surface q = load_surface(p);
-				float wg = geometry_weight(c, cvn, q, float(pc.step_size) * length(vec2(x, y)));
-				if (wg <= 1e-4) {
-					continue;
-				}
-				float k = kernel[abs(x)] * kernel[abs(y)];
-
-				if (filter_diffuse) {
-					vec4 dq = imageLoad(diffuse_in, p);
-					float wd = k * wg * exp(-abs(luminance(dq.rgb) - ld) / d_sigma);
-					d_sum += wd * dq.rgb;
-					d_var += wd * wd * dq.a;
-					d_w += wd;
-				}
-
-				if (filter_specular) {
-					vec4 sq = imageLoad(specular_in, p);
-					float w_rough = exp(-abs(q.roughness - c.roughness) * 10.0);
-					float ws = k * wg * w_rough * exp(-abs(luminance(sq.rgb) - ls) / s_sigma);
-					s_sum += ws * sq.rgb;
-					s_var += ws * ws * sq.a;
-					s_w += ws;
+		// Gather the 3x3 taps once: geometry weights and colors.
+		vec4 dq[9];
+		vec4 sq[9];
+		float wgeo[9];
+		float wspec[9];
+		for (int i = 0; i < 9; i++) {
+			ivec2 o = ivec2(i % 3 - 1, i / 3 - 1);
+			wgeo[i] = 0.0;
+			wspec[i] = 0.0;
+			dq[i] = d_center;
+			sq[i] = s_center;
+			if (i == 4) {
+				wgeo[i] = 1.0;
+				wspec[i] = 1.0;
+			} else if (filter_diffuse || filter_specular) {
+				ivec2 p = pos + o * pc.step_size;
+				if (all(greaterThanEqual(p, ivec2(0))) && all(lessThan(p, size))) {
+					Surface q = load_surface(p);
+					float wg = geometry_weight(c, cvn, q, float(pc.step_size) * length(vec2(o)));
+					if (wg > 1e-4) {
+						float k = kernel[abs(o.x)] * kernel[abs(o.y)];
+						if (filter_diffuse) {
+							wgeo[i] = k * wg;
+							dq[i] = imageLoad(diffuse_in, p);
+						}
+						if (filter_specular) {
+							wspec[i] = k * wg * exp(-abs(q.roughness - c.roughness) * 10.0);
+							sq[i] = imageLoad(specular_in, p);
+						}
+					}
 				}
 			}
+		}
+		// The first iteration (3x3) uses geometry only: comparing luminance on
+		// the noisiest data favors the darker samples of skewed path tracing
+		// noise and darkens the image.
+		if (pc.iteration == 0) {
+			d_sigma = 1e6;
+			s_sigma = 1e6;
+		}
+
+		vec3 d_sum = vec3(0.0);
+		float d_var = 0.0;
+		float d_w = 0.0;
+		vec3 s_sum = vec3(0.0);
+		float s_var = 0.0;
+		float s_w = 0.0;
+		for (int i = 0; i < 9; i++) {
+			float wd = wgeo[i] * exp(-abs(luminance(dq[i].rgb) - ld) / d_sigma);
+			d_sum += wd * dq[i].rgb;
+			d_var += wd * wd * dq[i].a;
+			d_w += wd;
+			float ws = wspec[i] * exp(-abs(luminance(sq[i].rgb) - ls) / s_sigma);
+			s_sum += ws * sq[i].rgb;
+			s_var += ws * ws * sq[i].a;
+			s_w += ws;
+		}
+		if (d_w <= 1e-6) {
+			d_sum = d_center.rgb;
+			d_var = d_center.a;
+			d_w = 1.0;
+		}
+		if (s_w <= 1e-6) {
+			s_sum = s_center.rgb;
+			s_var = s_center.a;
+			s_w = 1.0;
 		}
 		d_result = vec4(d_sum / d_w, d_var / (d_w * d_w));
 		s_result = vec4(s_sum / s_w, s_var / (s_w * s_w));
 
-		if ((pc.flags & PC_FLAG_FEEDBACK) != 0u) {
-			imageStore(diffuse_history, pos, vec4(d_result.rgb, imageLoad(diffuse_history, pos).a));
-			imageStore(specular_history, pos, vec4(s_result.rgb, imageLoad(specular_history, pos).a));
-		}
 	}
 
 	if ((pc.flags & PC_FLAG_COMPOSE) == 0u) {
@@ -609,3 +711,26 @@ void main() {
 }
 
 #endif // MODE_ATROUS
+
+#ifdef MODE_REFERENCE
+
+layout(rgba16f, set = 1, binding = 0) uniform restrict readonly image2D base_image;
+layout(rgba16f, set = 1, binding = 1) uniform restrict readonly image2D diffuse_image;
+layout(rgba16f, set = 1, binding = 2) uniform restrict readonly image2D specular_image;
+layout(rgba32f, set = 1, binding = 3) uniform restrict image2D accumulator;
+layout(rgba16f, set = 1, binding = 4) uniform restrict writeonly image2D output_image;
+
+void main() {
+	ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pos, ivec2(params.size.xy)))) {
+		return;
+	}
+	vec3 color = sanitize(imageLoad(base_image, pos).rgb + imageLoad(diffuse_image, pos).rgb + imageLoad(specular_image, pos).rgb);
+	vec4 acc = (pc.flags & PC_FLAG_RESET) != 0u ? vec4(0.0) : imageLoad(accumulator, pos);
+	acc.a += 1.0;
+	acc.rgb += (color - acc.rgb) / acc.a;
+	imageStore(accumulator, pos, acc);
+	imageStore(output_image, pos, vec4(acc.rgb, 1.0));
+}
+
+#endif // MODE_REFERENCE
