@@ -59,6 +59,8 @@ protected:
 	virtual void _ddgi_debug_draw(RenderDataRD *p_render_data) override;
 
 public:
+	virtual Dictionary ddgi_get_probe_data(const Ref<RenderSceneBuffers> &p_render_buffers) override;
+
 	RenderForwardClusteredPT();
 	~RenderForwardClusteredPT();
 };

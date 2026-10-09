@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GodotPhysXTankProbe" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Internal test bridge for a PhysX tracked vehicle.
+	</brief_description>
+	<description>
+		Creates a tracked (skid-steer) PxVehicle2 vehicle with any number of road wheels and drives it from a script, for the module's tests. For games use [PhysXTank3D].
+		[b]Note:[/b] This is an internal test class of the PhysX module, not a stable API: it may change or be removed without notice.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_actor_position" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the world position of the chassis actor's origin.
+			</description>
+		</method>
+		<method name="get_angular_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's angular velocity in world space.
+			</description>
+		</method>
+		<method name="get_forward" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's forward direction in world space.
+			</description>
+		</method>
+		<method name="get_forward_speed" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the speed along the chassis's forward axis, in m/s.
+			</description>
+		</method>
+		<method name="get_linear_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's linear velocity in world space.
+			</description>
+		</method>
+		<method name="get_position" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis position in world space.
+			</description>
+		</method>
+		<method name="get_up" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's up direction in world space.
+			</description>
+		</method>
+		<method name="get_wheel_jounce" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="wheel" type="int" />
+			<description>
+				Returns how far the suspension of road wheel [param wheel] is compressed.
+			</description>
+		</method>
+		<method name="get_wheel_separation" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="wheel" type="int" />
+			<description>
+				Returns the distance between road wheel [param wheel] and the ground; negative when it penetrates the ground.
+			</description>
+		</method>
+		<method name="initialize">
+			<return type="bool" />
+			<param index="0" name="space" type="RID" />
+			<param index="1" name="position" type="Vector3" />
+			<param index="2" name="wheel_positions_local" type="PackedVector3Array" />
+			<description>
+				Creates the tank at [param position] in the PhysX physics [param space]. [param wheel_positions_local] has one entry per road wheel in the chassis's local space: negative X is the left track, positive X the right track (2 or more wheels). Returns [code]true[/code] on success.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="left_ratio" type="float" />
+			<param index="2" name="right_ratio" type="float" />
+			<param index="3" name="brake" type="float" />
+			<description>
+				Runs the vehicle simulation for [param dt] seconds. [param left_ratio] and [param right_ratio] in [code][-1, 1][/code] set each track's speed and direction (opposite signs turn on the spot), [param brake] in [code][0, 1][/code].
+			</description>
+		</method>
+	</methods>
+</class>

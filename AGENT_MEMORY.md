@@ -15,6 +15,9 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 - **Branches.** New work goes on `dev` first. `nvidia-pt-dlss` (published as
   `nvidia-dlss-physx`) only gets tested work: build plus smoke tests passing,
   and the maintainer's OK. After publishing, fast-forward `dev` and push both.
+- **Path tracer work goes on `dev-pt`**, so `dev` stays clean. Merge it into
+  `dev` only when a step is finished and tested. Merge `dev` into `dev-pt`
+  after every sync.
 - **Never push to `origin`** (NVIDIA-RTX). Publish only through the `fork` remote.
 - **The fork is public.** Before every push, check tracked files for private
   paths and private project names (`git grep`).
@@ -39,6 +42,19 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 - Never write source files with Windows PowerShell 5.1 `Set-Content -Encoding
   utf8`: it adds a BOM, and a BOM in a `.glsl` include made the editor crash
   at startup (exit code 116).
+
+## Class reference
+
+- Every fork class, property, method, constant and project setting needs a
+  description in `doc/classes/` or `modules/godot_physx/doc_classes/`; the
+  editor's help and inspector tooltips come from there.
+- Update with `bin\godot...console.exe --headless --doctool .`, then check
+  the diff: it deletes docs of classes this build doesn't compile in (restore
+  them) and touches unrelated upstream files (revert those). PhysX classes
+  must be listed in `modules/godot_physx/config.py` `get_doc_classes()`, or
+  their docs land in `doc/classes/`; that list is compiled in, so rebuild
+  before running doctool again.
+- Validate with `python doc/tools/make_rst.py --dry-run doc/classes modules/ platform/`.
 
 ## Releases
 
@@ -106,6 +122,23 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   `RenderingDevice::acceleration_structure_is_valid()` before freeing one from
   a cache. Don't bind buffers you free later through a linear-pool uniform
   set; use a persistent set (freed with the buffer).
+
+## DDGI
+
+- Notes, test project and findings: DDGI.md. Work on `dev-ddgi`.
+- Measure flicker before guessing: the test project's `--measure` with
+  `--stdmap` (where) and `--trace_px` (how it moves over time). The probe
+  RNG is deterministic, so a spike repeats at the same frame in every run.
+- Any rule that adapts the blend weight to the sampled value (like "lower
+  the hysteresis when the light changed") biases the result and turns ray
+  noise into flicker. Require the change to stand out of the noise and to
+  repeat before acting on it.
+- Code that renders extra frames with `RenderingServer::draw()` inside one
+  main loop iteration (baking, previews) must not break per-frame state:
+  the Streamline frame token advances once per iteration, so DLSS gets a
+  new token when its constants were already set for the current one.
+- Opening a test project in the editor rewrites its `project.godot` (drops
+  values equal to the defaults) and adds `.uid` files: revert those.
 
 ## In-editor DLSS installer
 

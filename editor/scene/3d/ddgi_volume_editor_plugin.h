@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  editor_zoom_widget.h                                                  */
+/*  ddgi_volume_editor_plugin.h                                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,40 +30,37 @@
 
 #pragma once
 
-#include "scene/gui/box_container.h"
-#include "scene/gui/button.h"
+#include "editor/plugins/editor_plugin.h"
+#include "scene/3d/ddgi_volume.h"
 
-class EditorZoomWidget : public HBoxContainer {
-	GDCLASS(EditorZoomWidget, HBoxContainer);
+class EditorFileDialog;
+struct EditorProgress;
+class HBoxContainer;
 
-	Button *zoom_minus = nullptr;
-	Button *zoom_reset = nullptr;
-	Button *zoom_plus = nullptr;
+class DDGIVolumeEditorPlugin : public EditorPlugin {
+	GDCLASS(DDGIVolumeEditorPlugin, EditorPlugin);
 
-	float zoom = 1.0;
-	float min_zoom = 1.0 / 128;
-	float max_zoom = 128.0;
-	void _update_zoom_label();
-	void _button_zoom_by(int p_direction);
-	void _button_zoom_minus();
-	void _button_zoom_reset();
-	void _button_zoom_plus();
+	DDGIVolume *volume = nullptr;
 
-protected:
-	void _notification(int p_what);
-	static void _bind_methods();
+	HBoxContainer *bake_hb = nullptr;
+	Button *bake = nullptr;
+
+	EditorFileDialog *probe_file = nullptr;
+
+	static EditorProgress *tmp_progress;
+	static int paused_update_modes[4]; // Update modes of the editor's 3D views while a bake runs.
+	static void bake_func_begin();
+	static bool bake_func_step(int p_progress, const String &p_description);
+	static void bake_func_end();
+
+	void _bake();
+	void _bake_and_save(const String &p_path);
 
 public:
-	EditorZoomWidget();
+	virtual String get_plugin_name() const override { return "DDGIVolume"; }
+	virtual void edit(Object *p_object) override;
+	virtual bool handles(Object *p_object) const override;
+	virtual void make_visible(bool p_visible) override;
 
-	float get_zoom();
-	void set_zoom(float p_zoom);
-	void set_zoom_by_increments(int p_increment_count, bool p_integer_only = false);
-
-	float get_min_zoom();
-	float get_max_zoom();
-	// It's best to setup simultaneously, so min < max can be checked easily.
-	void setup_zoom_limits(float p_min, float p_max);
-	// Sets the shortcut context for the zoom buttons. By default their context is this EditorZoomWidget control.
-	void set_shortcut_context(Node *p_node) const;
+	DDGIVolumeEditorPlugin();
 };

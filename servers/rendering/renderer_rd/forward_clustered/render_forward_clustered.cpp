@@ -1605,10 +1605,9 @@ void RenderForwardClustered::_process_sscs(Ref<RenderSceneBuffersRD> p_render_bu
 		Transform3D light_transform = light_storage->light_instance_get_base_transform(light_instance);
 		Vector3 light_direction = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(0, 0, 1))).normalized();
 
-		float opacity = light_storage->light_get_param(base, RSE::LIGHT_PARAM_CONTACT_SHADOW_OPACITY);
 		float blur = light_storage->light_get_param(base, RSE::LIGHT_PARAM_CONTACT_SHADOW_BLUR);
 
-		ss_effects->screen_space_contact_shadows(p_render_buffers, rb_data->ss_effects_data.sscs, settings, p_projections, light_direction, i, opacity, blur, p_taa_frame_count);
+		ss_effects->screen_space_contact_shadows(p_render_buffers, rb_data->ss_effects_data.sscs, settings, p_projections, light_direction, i, blur, p_taa_frame_count);
 	}
 }
 
@@ -5294,7 +5293,10 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::_free_procedural_
 		return;
 	}
 	if (rt_procedural->blas.is_valid()) {
-		RD::get_singleton()->free_rid(rt_procedural->blas);
+		RD *rd = RD::get_singleton();
+		if (rd->acceleration_structure_is_valid(rt_procedural->blas)) {
+			rd->free_rid(rt_procedural->blas);
+		}
 	}
 	if (rt_procedural->gpu_buffer.is_valid()) {
 		RD::get_singleton()->free_rid(rt_procedural->gpu_buffer);

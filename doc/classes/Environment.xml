@@ -82,6 +82,9 @@
 		<member name="background_mode" type="int" setter="set_background" getter="get_background" enum="Environment.BGMode" default="0">
 			The background mode.
 		</member>
+		<member name="ddgi_bounce_energy" type="float" setter="set_ddgi_bounce_energy" getter="get_ddgi_bounce_energy" default="1.0">
+			Multiplier for the light passed on from bounce to bounce inside the DDGI probes. Above [code]1.0[/code], indirectly lit rooms get brighter. See [member DDGIVolume.bounce_energy].
+		</member>
 		<member name="ddgi_cascades" type="int" setter="set_ddgi_cascades" getter="get_ddgi_cascades" default="3">
 			The number of probe grids (cascades) centered on the camera. Each cascade has twice the probe spacing of the previous one, so it covers twice the distance with the same number of probes. Use more cascades for large outdoor scenes.
 		</member>
@@ -118,6 +121,9 @@
 		</member>
 		<member name="ddgi_probe_spacing" type="float" setter="set_ddgi_probe_spacing" getter="get_ddgi_probe_spacing" default="1.0">
 			The distance between probes in the finest cascade, in meters. Smaller values capture smaller lighting details (and leak less) at the cost of a smaller covered area.
+		</member>
+		<member name="ddgi_realtime_updates" type="bool" setter="set_ddgi_realtime_updates" getter="is_ddgi_realtime_updates_enabled" default="false">
+			If [code]true[/code], DDGI updates every probe every frame. See [member DDGIVolume.realtime_updates].
 		</member>
 		<member name="ddgi_view_bias" type="float" setter="set_ddgi_view_bias" getter="get_ddgi_view_bias" default="0.3">
 			Moves the point where probes are sampled toward the camera, as a fraction of the probe spacing. Reduces self shadowing and light leaks at grazing angles.

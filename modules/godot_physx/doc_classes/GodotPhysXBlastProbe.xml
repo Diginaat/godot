@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GodotPhysXBlastProbe" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Internal test bridge for NVIDIA Blast runtime fracture.
+	</brief_description>
+	<description>
+		Drives the Blast damage, fracture, split and rigid body spawn path directly from a script, without a scene node. It loads a raw [code]NvBlastAsset[/code] dump and a per-chunk mesh dump, applies radial damage and spawns a physics body for every chunk that breaks off. Used by the module's headless tests; for games use [PhysXDestructible3D].
+		[b]Note:[/b] This is an internal test class of the PhysX module, not a stable API: it may change or be removed without notice.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="apply_radial_damage">
+			<return type="int" />
+			<param index="0" name="position" type="Vector3" />
+			<param index="1" name="damage" type="float" />
+			<param index="2" name="min_radius" type="float" />
+			<param index="3" name="max_radius" type="float" />
+			<description>
+				Applies radial damage at [param position] to every live actor: full [param damage] within [param min_radius], falling off to zero at [param max_radius]. Actors that fracture are split, and a rigid body is spawned for each newly separated chunk. Returns the number of bodies spawned by this call.
+			</description>
+		</method>
+		<method name="get_body" qualifiers="const">
+			<return type="RID" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns the physics body [RID] of the spawned chunk at [param index] (0 to [method get_body_count] - 1).
+			</description>
+		</method>
+		<method name="get_body_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of chunk bodies spawned so far.
+			</description>
+		</method>
+		<method name="get_live_actor_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of Blast actors (connected groups of chunks) currently alive.
+			</description>
+		</method>
+		<method name="load">
+			<return type="bool" />
+			<param index="0" name="asset_path" type="String" />
+			<param index="1" name="chunks_path" type="String" />
+			<description>
+				Loads a raw [code]NvBlastAsset[/code] file ([param asset_path]) and the matching plain text per-chunk triangle dump ([param chunks_path]). Any path [FileAccess] can open works. Returns [code]true[/code] on success.
+			</description>
+		</method>
+		<method name="set_base_transform">
+			<return type="void" />
+			<param index="0" name="transform" type="Transform3D" />
+			<description>
+				Sets the world transform of the unbroken object; spawned chunk bodies are placed relative to it.
+			</description>
+		</method>
+		<method name="set_base_velocity">
+			<return type="void" />
+			<param index="0" name="velocity" type="Vector3" />
+			<description>
+				Sets the linear velocity given to newly spawned chunk bodies.
+			</description>
+		</method>
+		<method name="set_space">
+			<return type="void" />
+			<param index="0" name="space" type="RID" />
+			<description>
+				Sets the physics space (for example [code]get_world_3d().space[/code]) that spawned chunk bodies are added to. The space must use the PhysX backend.
+			</description>
+		</method>
+	</methods>
+</class>

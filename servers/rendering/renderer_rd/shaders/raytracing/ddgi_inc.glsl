@@ -20,6 +20,10 @@
 #define DDGI_PROBE_ACTIVE 1u
 #define DDGI_PROBE_INACTIVE 2u // No surface nearby: traced with the fixed rays only.
 #define DDGI_PROBE_INSIDE 3u // Inside geometry: never sampled.
+// Brought into the volume by scrolling, not traced yet. Sampled with the
+// atlas texels left by the probe that scrolled out (stale, but better than
+// nothing); the first update replaces them instead of blending with them.
+#define DDGI_PROBE_SCROLLED 4u
 
 #define DDGI_VOLUME_FLAG_RELOCATION 1
 #define DDGI_VOLUME_FLAG_CLASSIFICATION 2
@@ -42,7 +46,7 @@ struct DDGIProbe {
 	float urgency; // Scheduler credit; the probe is traced when it reaches 1.
 	float variability; // Moving average of the relative change per update.
 	uint last_update_frame;
-	float luminance; // Mean irradiance luminance after the last update.
+	float pending_change; // Signed relative change of the last update above the noise, not applied yet.
 };
 
 struct DDGIDataBlock {
@@ -54,8 +58,9 @@ struct DDGIDataBlock {
 	uvec4 counts; // x: volume count, y: rays per probe, z: fixed rays per probe, w: update capacity.
 	uvec4 atlas; // x: irradiance texels, y: distance texels, z: probes per atlas row, w: frame.
 	vec4 atlas_inv_size; // xy: irradiance atlas, zw: distance atlas.
-	vec4 schedule; // x: base update rate, y: total probes, z: max radiance per ray, w: unused.
+	vec4 schedule; // x: base update rate, y: total probes, z: max radiance per ray, w: bounce energy.
 	vec4 miss_color; // rgb: radiance of rays that miss when there is no sky, w: 1 = use the sky.
+	vec4 smoothing; // x: share of the gap the display irradiance closes per frame.
 };
 
 vec3 ddgi_xform(vec4 rows[3], vec3 p) {

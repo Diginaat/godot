@@ -5,7 +5,8 @@ handle PBR materials, lights, emission, custom shaders and fog natively. This
 file is the shared memory for humans and agents working on it: read it before
 starting, and update the step table and the findings log as you go.
 
-Work happens on the `dev` branch (see [CUSTOM_BUILD.md](CUSTOM_BUILD.md)).
+Work happens on the `dev-pt` branch. A finished step (build, smoke tests,
+screenshots) is merged into `dev`; see [CUSTOM_BUILD.md](CUSTOM_BUILD.md).
 
 ## How to run the test scene
 
@@ -121,6 +122,15 @@ Other notes:
 ## Findings log
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
+
+- 2026-10-08: After syncing upstream `65e8d16951`, the fog path tracer smoke
+  initially exited with `Attempted to free invalid ID` after saving the
+  screenshot. Cause: several BLAS cleanup paths still freed stale acceleration
+  structure RIDs directly; those BLAS objects may already be gone when their
+  backing buffers are freed. Guarded the remaining BLAS frees with
+  `RenderingDevice::acceleration_structure_is_valid()` in static, deformed,
+  procedural and merged MultiMesh paths. Verified two fog PT screenshot runs
+  exit with no `ERROR:`.
 
 - 2026-10-08: Step 9 done. Alpha blended and refractive StandardMaterial3D
   surfaces are path traced instead of drawn by the raster overlay.

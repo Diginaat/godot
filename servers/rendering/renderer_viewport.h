@@ -295,6 +295,7 @@ public:
 	void viewport_set_measure_render_time(RID p_viewport, bool p_enable);
 	float viewport_get_measured_render_time_cpu(RID p_viewport) const;
 	float viewport_get_measured_render_time_gpu(RID p_viewport) const;
+	Dictionary viewport_get_ddgi_probe_data(RID p_viewport);
 
 	void viewport_set_snap_2d_transforms_to_pixel(RID p_viewport, bool p_enabled);
 	void viewport_set_snap_2d_vertices_to_pixel(RID p_viewport, bool p_enabled);
