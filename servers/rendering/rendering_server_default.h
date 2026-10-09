@@ -815,6 +815,7 @@ public:
 	FUNC2(viewport_set_measure_render_time, RID, bool)
 	FUNC1RC(double, viewport_get_measured_render_time_cpu, RID)
 	FUNC1RC(double, viewport_get_measured_render_time_gpu, RID)
+	FUNC1R(Dictionary, viewport_get_ddgi_probe_data, RID)
 	FUNC1RC(RID, viewport_find_from_screen_attachment, DisplayServerEnums::WindowID)
 
 	FUNC2(call_set_vsync_mode, DisplayServerEnums::VSyncMode, DisplayServerEnums::WindowID)
@@ -902,6 +903,8 @@ public:
 	FUNC6(environment_set_pathtracing, RID, bool, int, int, int, RSE::PathtracingDenoiser)
 	FUNC13(environment_set_ddgi, RID, bool, int, float, const Vector3i &, float, float, float, float, bool, bool, bool, int)
 	FUNC4(environment_set_ddgi_volume, RID, bool, const Vector3 &, const Vector3 &)
+	FUNC2(environment_set_ddgi_bounce_energy, RID, float)
+	FUNC3(environment_set_ddgi_baked_data, RID, int, const Dictionary &)
 
 	FUNC3R(Ref<Image>, environment_bake_panorama, RID, bool, const Size2i &)
 

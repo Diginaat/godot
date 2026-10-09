@@ -112,7 +112,7 @@ void main() {
 		pd.urgency = 0.0;
 		pd.variability = 1.0;
 		pd.last_update_frame = 0u;
-		pd.luminance = 0.0;
+		pd.pending_change = 0.0;
 	} else if (scroll_reset) {
 		// Keep the atlas texels as a fallback until the first trace. They belong
 		// to the probe that scrolled out at the far side, so they are stale, but
@@ -123,17 +123,23 @@ void main() {
 		pd.urgency = max(pd.urgency, 1.0);
 		pd.variability = 1.0;
 		pd.last_update_frame = 0u;
+		pd.pending_change = 0.0;
 	}
 
 	bool new_pass = params.schedule_new_only != 0u;
-	bool priority_probe = pd.state == DDGI_PROBE_NEW || pd.last_update_frame == 0u;
+	// A pending change is confirmed (or dropped) by the next update: don't
+	// make the light change wait for the probe's usual turn. (Inside probes
+	// are never blended, so their pending change would never clear.)
+	bool pending = pd.state != DDGI_PROBE_INSIDE && abs(pd.pending_change) > 0.05;
+	bool priority_probe = pd.state == DDGI_PROBE_NEW || pd.last_update_frame == 0u || pending;
 	if (new_pass) {
 		if (!priority_probe) {
 			ddgi_probes[probe] = pd;
 			return;
 		}
 	} else if (priority_probe) {
-		// New/full-reset probes and scrolled probes were offered the budget first.
+		// New/full-reset probes, scrolled probes and probes with a pending
+		// change were offered the budget first.
 		// If the budget was exhausted by them, keep them due for the next frame
 		// instead of letting older probes jump the queue.
 		ddgi_probes[probe] = pd;
@@ -188,8 +194,10 @@ shared vec3 shared_dirs[MAX_RAYS];
 // Up to 16x16 texels per tile.
 shared vec3 shared_result[256];
 shared vec3 shared_previous[256];
+shared float shared_noise[256]; // Relative noise of each texel, remembered over updates.
 shared vec3 shared_sum_result[64];
 shared vec3 shared_sum_previous[64];
+shared vec3 shared_ray_stats[64]; // Luminance sum, squared sum and count of the usable rays.
 shared float shared_hysteresis;
 #else
 #define TILE_TEXELS ddgi.atlas.y
@@ -224,6 +232,7 @@ void main() {
 #ifdef MODE_BLEND_IRRADIANCE
 	vec3 sum_result = vec3(0.0);
 	vec3 sum_previous = vec3(0.0);
+	vec3 ray_stats = vec3(0.0);
 #endif
 
 	uint ray_count = min(ray_end - ray_begin, uint(MAX_RAYS));
@@ -241,7 +250,12 @@ void main() {
 		if (lum > ddgi.schedule.z) {
 			radiance *= ddgi.schedule.z / lum;
 		}
-		shared_rays[i] = usable ? vec4(radiance, 1.0) : vec4(0.0);
+		// a: luminance, or -1 for rays that add nothing.
+		float l = ddgi_luminance(radiance);
+		shared_rays[i] = usable ? vec4(radiance, l) : vec4(0.0, 0.0, 0.0, -1.0);
+		if (usable) {
+			ray_stats += vec3(l, l * l, 1.0);
+		}
 #else
 		float d = ray.a;
 		bool usable = !isnan(d) && !isinf(d);
@@ -260,16 +274,35 @@ void main() {
 #ifdef MODE_BLEND_IRRADIANCE
 			vec3 sum = vec3(0.0);
 			float weight_sum = 0.0;
+			float lum_sq_sum = 0.0;
+			float weight_sq_sum = 0.0;
 			for (uint i = 0u; i < ray_count; i++) {
 				vec4 ray = shared_rays[i];
-				float w = max(0.0, dot(texel_dir, shared_dirs[i])) * ray.a;
+				float w = ray.a >= 0.0 ? max(0.0, dot(texel_dir, shared_dirs[i])) : 0.0;
 				sum += ray.rgb * w;
 				weight_sum += w;
+				lum_sq_sum += ray.a * ray.a * w;
+				weight_sq_sum += w * w;
 			}
-			vec3 previous = imageLoad(ddgi_atlas, origin + texel).rgb;
-			if (any(isnan(previous))) {
+			// Standard error of this texel's mean, relative to it: high when a
+			// few rays carry most of its light (a window, a small lamp).
+			float texel_noise = 0.0;
+			if (weight_sum > 0.0) {
+				float mean_l = ddgi_luminance(sum) / weight_sum;
+				float variance = max(lum_sq_sum / weight_sum - mean_l * mean_l, 0.0);
+				float effective_rays = weight_sum * weight_sum / max(weight_sq_sum, 1e-8);
+				texel_noise = sqrt(variance / effective_rays) / max(mean_l, 1e-4);
+			}
+			vec4 previous_texel = imageLoad(ddgi_atlas, origin + texel);
+			vec3 previous = previous_texel.rgb;
+			if (any(isnan(previous_texel))) {
 				previous = vec3(0.0);
+				previous_texel.a = 0.0;
 			}
+			// The estimate is itself noisy: in an update where none of the few
+			// rays toward the bright source hit it, it reads low just when the
+			// value is most off. Alpha keeps a slowly decaying maximum instead.
+			shared_noise[ty * texels + tx] = first_update ? texel_noise : max(texel_noise, previous_texel.a * 0.9);
 			vec3 result = weight_sum > 0.0 ? sum / weight_sum : previous;
 			shared_result[ty * texels + tx] = result;
 			shared_previous[ty * texels + tx] = previous;
@@ -304,6 +337,7 @@ void main() {
 #ifdef MODE_BLEND_IRRADIANCE
 	shared_sum_result[local_index] = sum_result;
 	shared_sum_previous[local_index] = sum_previous;
+	shared_ray_stats[local_index] = ray_stats;
 	barrier();
 
 	// How much the whole probe changed: the tile average is far less noisy
@@ -311,25 +345,53 @@ void main() {
 	if (local_index == 0u) {
 		vec3 total_result = vec3(0.0);
 		vec3 total_previous = vec3(0.0);
+		vec3 stats = vec3(0.0);
 		for (uint i = 0u; i < 64u; i++) {
 			total_result += shared_sum_result[i];
 			total_previous += shared_sum_previous[i];
+			stats += shared_ray_stats[i];
 		}
-		float change = length(total_result - total_previous) / max(length(total_previous), 0.02 * float(texels * texels));
+		float floor_value = 0.02 * float(texels * texels);
+		float change = length(total_result - total_previous) / max(length(total_previous), floor_value);
+		// Part of every change is ray noise: in a dark room lit by a small
+		// bright patch (sunlight through a window), a few rays carry most of
+		// the light, and the tile average jumps by more than the old
+		// threshold from one update to the next with the light unchanged.
+		// Counted as a lighting change, that noise lowered the hysteresis and
+		// the indirect light flickered. Only the change above about two
+		// standard errors of this update's mean counts.
+		float n = max(stats.z, 1.0);
+		float mean_lum = stats.x / n;
+		float std_error = sqrt(max(stats.y / n - mean_lum * mean_lum, 0.0) / n);
+		float tile_lum = max(ddgi_luminance(total_previous), ddgi_luminance(total_result)) / float(texels * texels);
+		float noise = 2.0 * std_error / max(max(tile_lum, mean_lum), floor_value / float(texels * texels));
+		float signal = max(change - noise, 0.0);
+		// A few rays that hit something much brighter than the rest (a
+		// sunlit patch seen from a dark room) still pass that test now and
+		// then. They don't repeat; a real light change does. So the change
+		// only counts when the previous update changed the same way too; the
+		// scheduler traces a probe with a pending change again next frame.
+		float direction = ddgi_luminance(total_result) >= ddgi_luminance(total_previous) ? 1.0 : -1.0;
+		float confirmed = pd.pending_change * direction > 0.0 ? min(signal, abs(pd.pending_change)) : 0.0;
+		ddgi_probes[probe].pending_change = first_update ? 0.0 : signal * direction;
 		// Adapt faster when the light changed a lot (lights switched, doors
-		// opened), so the GI doesn't lag behind.
-		float h = hysteresis * clamp(1.0 - (change - 0.15) * 1.5, 0.4, 1.0);
-		shared_hysteresis = first_update ? 0.0 : h;
+		// opened), so the GI doesn't lag behind. 1 when it didn't.
+		shared_hysteresis = first_update ? 0.0 : clamp(1.0 - (confirmed - 0.1) * 1.5, 0.4, 1.0);
 		// Moving average of how much this probe's light changes per update.
-		ddgi_probes[probe].variability = first_update ? 1.0 : mix(pd.variability, min(change, 4.0), 0.3);
+		ddgi_probes[probe].variability = first_update ? 1.0 : mix(pd.variability, min(signal, 4.0), 0.3);
 	}
 	barrier();
 
-	float h = shared_hysteresis;
+	float change_factor = shared_hysteresis;
 	for (int ty = int(gl_LocalInvocationID.y); ty < texels; ty += 8) {
 		for (int tx = int(gl_LocalInvocationID.x); tx < texels; tx += 8) {
 			int i = ty * texels + tx;
-			imageStore(ddgi_atlas, origin + ivec2(tx, ty), vec4(mix(shared_result[i], shared_previous[i], h), 1.0));
+			// Noisy texels blend each update in with down to half the weight:
+			// less flicker, at the cost of a slower response to light changes
+			// too small to be told from the noise.
+			float steady = hysteresis > 0.0 ? mix(hysteresis, 1.0 - (1.0 - hysteresis) * 0.5, clamp(shared_noise[i] * 2.0, 0.0, 1.0)) : 0.0;
+			float h = steady * change_factor;
+			imageStore(ddgi_atlas, origin + ivec2(tx, ty), vec4(mix(shared_result[i], shared_previous[i], h), min(shared_noise[i], 8.0)));
 		}
 	}
 #endif

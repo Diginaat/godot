@@ -53,6 +53,13 @@ public:
 		Vector3 volume_center;
 		Vector3 volume_size = Vector3(24, 12, 24);
 		int debug_mode = 0;
+		float bounce_energy = 1.0; // Multiplier for the light bounced between surfaces inside the probes.
+		// Baked probes (see DDGIProbeData): 0 dynamic (ignored), 1 baked only,
+		// 2 baked as the start for dynamic updates. The version changes with
+		// every new set of data, so the renderer knows when to upload it.
+		int bake_mode = 0;
+		Dictionary baked_data;
+		uint64_t baked_version = 0;
 	};
 
 	union TonemapParameters {
@@ -365,6 +372,8 @@ public:
 	// DDGI
 	void environment_set_ddgi(RID p_env, bool p_enable, int p_cascades, float p_probe_spacing, const Vector3i &p_probe_grid, float p_energy, float p_normal_bias, float p_view_bias, float p_hysteresis, bool p_probe_relocation, bool p_probe_classification, bool p_follow_camera, int p_debug_mode);
 	void environment_set_ddgi_volume(RID p_env, bool p_node_volume, const Vector3 &p_center, const Vector3 &p_size);
+	void environment_set_ddgi_bounce_energy(RID p_env, float p_energy);
+	void environment_set_ddgi_baked_data(RID p_env, int p_mode, const Dictionary &p_data);
 	bool environment_get_ddgi_enabled(RID p_env) const;
 	DDGISettings environment_get_ddgi(RID p_env) const;
 

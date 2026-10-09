@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  render_forward_clustered_pt.h                                         */
+/*  ddgi_volume_editor_plugin.h                                           */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,39 +30,36 @@
 
 #pragma once
 
-#include "servers/rendering/renderer_rd/forward_clustered/render_ddgi.h"
-#include "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
-#include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
+#include "editor/plugins/editor_plugin.h"
+#include "scene/3d/ddgi_volume.h"
 
-namespace RendererSceneRenderImplementation {
+class EditorFileDialog;
+struct EditorProgress;
+class HBoxContainer;
 
-// Path-tracing / DLSS variant of the clustered renderer. Inherits all of the
-// raster setup and resource management from RenderForwardClustered and overrides
-// only the scene render entry points to add the raytraced opaque path, DLSS Ray
-// Reconstruction, and the associated debug visualizations.
-class RenderForwardClusteredPT : public RenderForwardClustered {
-	/* Raytracing */
+class DDGIVolumeEditorPlugin : public EditorPlugin {
+	GDCLASS(DDGIVolumeEditorPlugin, EditorPlugin);
 
-	RenderRaytracing *raytracing = nullptr;
-	RenderDDGI *ddgi = nullptr;
+	DDGIVolume *volume = nullptr;
 
-	bool _setup_rt();
-	void _age_out_motion_vectors(const RenderDataRD *p_render_data);
+	HBoxContainer *bake_hb = nullptr;
+	Button *bake = nullptr;
 
-protected:
-	virtual void _render_scene(RenderDataRD *p_render_data, const Color &p_default_bg_color) override;
-	virtual void _render_buffers_debug_draw(const RenderDataRD *p_render_data) override;
-	virtual void _free_rt_viewport_state(RenderSceneBuffersRD *p_render_buffers) override;
+	EditorFileDialog *probe_file = nullptr;
 
-	virtual bool _ddgi_begin_frame(RenderDataRD *p_render_data) override;
-	virtual void _ddgi_process(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) override;
-	virtual void _ddgi_debug_draw(RenderDataRD *p_render_data) override;
+	static EditorProgress *tmp_progress;
+	static void bake_func_begin();
+	static bool bake_func_step(int p_progress, const String &p_description);
+	static void bake_func_end();
+
+	void _bake();
+	void _bake_and_save(const String &p_path);
 
 public:
-	virtual Dictionary ddgi_get_probe_data(const Ref<RenderSceneBuffers> &p_render_buffers) override;
+	virtual String get_plugin_name() const override { return "DDGIVolume"; }
+	virtual void edit(Object *p_object) override;
+	virtual bool handles(Object *p_object) const override;
+	virtual void make_visible(bool p_visible) override;
 
-	RenderForwardClusteredPT();
-	~RenderForwardClusteredPT();
+	DDGIVolumeEditorPlugin();
 };
-
-} // namespace RendererSceneRenderImplementation

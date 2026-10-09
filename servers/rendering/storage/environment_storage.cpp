@@ -965,6 +965,21 @@ void RendererEnvironmentStorage::environment_set_ddgi_volume(RID p_env, bool p_n
 	env->ddgi.volume_size = p_size.maxf(0.1f);
 }
 
+void RendererEnvironmentStorage::environment_set_ddgi_bounce_energy(RID p_env, float p_energy) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi.bounce_energy = CLAMP(p_energy, 0.0f, 2.0f);
+}
+
+void RendererEnvironmentStorage::environment_set_ddgi_baked_data(RID p_env, int p_mode, const Dictionary &p_data) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	static uint64_t version = 0;
+	env->ddgi.bake_mode = CLAMP(p_mode, 0, 2);
+	env->ddgi.baked_data = p_data;
+	env->ddgi.baked_version = ++version;
+}
+
 bool RendererEnvironmentStorage::environment_get_ddgi_enabled(RID p_env) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, false);

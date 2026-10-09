@@ -570,7 +570,8 @@ bool RenderForwardClusteredPT::_ddgi_begin_frame(RenderDataRD *p_render_data) {
 		}
 		return false;
 	}
-	if (!_setup_rt() || !raytracing->get_shader()) {
+	// Baked probes only: sampling is plain compute, no ray tracing needed.
+	if (!RenderDDGI::is_baked_only(p_render_data) && (!_setup_rt() || !raytracing->get_shader())) {
 		return false;
 	}
 	if (!ddgi) {
@@ -589,13 +590,25 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 	rt_flags &= ~uint32_t(SceneShaderRaytracing::RT_FLAG_DEBUG_VIS_ENABLED | SceneShaderRaytracing::RT_FLAG_DLSS_RR_ENABLED);
 
 	RD::get_singleton()->draw_command_begin_label("DDGI");
-	RENDER_TIMESTAMP("DDGI Build Acceleration Structures");
-	RTViewportState *rt_state = raytracing->build_tlas(p_render_data, rt_flags);
-	if (rt_state) {
-		ddgi->update_probes(p_render_data, raytracing, rt_state, rt_flags);
+	if (RenderDDGI::is_baked_only(p_render_data)) {
+		ddgi->update_baked(p_render_data);
+	} else {
+		RENDER_TIMESTAMP("DDGI Build Acceleration Structures");
+		RTViewportState *rt_state = raytracing->build_tlas(p_render_data, rt_flags);
+		if (rt_state) {
+			ddgi->update_probes(p_render_data, raytracing, rt_state, rt_flags);
+		}
 	}
 	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution);
 	RD::get_singleton()->draw_command_end_label();
+}
+
+Dictionary RenderForwardClusteredPT::ddgi_get_probe_data(const Ref<RenderSceneBuffers> &p_render_buffers) {
+	Ref<RenderSceneBuffersRD> rb = p_render_buffers;
+	if (!ddgi || rb.is_null()) {
+		return Dictionary();
+	}
+	return ddgi->get_probe_data(rb.ptr());
 }
 
 void RenderForwardClusteredPT::_ddgi_debug_draw(RenderDataRD *p_render_data) {

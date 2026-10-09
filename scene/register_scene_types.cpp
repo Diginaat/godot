@@ -675,6 +675,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(ReflectionProbe);
 	GDREGISTER_CLASS(Decal);
 	GDREGISTER_CLASS(DDGIVolume);
+	GDREGISTER_CLASS(DDGIProbeData);
 	GDREGISTER_CLASS(VoxelGI);
 	GDREGISTER_CLASS(VoxelGIData);
 	GDREGISTER_CLASS(LightmapGI);

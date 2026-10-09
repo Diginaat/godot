@@ -8,13 +8,30 @@
 			The node drives the [code]ddgi_*[/code] properties of the [Environment] of its [World3D] (the [WorldEnvironment]), and turns DDGI off when it leaves the scene. Use one [DDGIVolume] per scene; with several, the last one that changed wins.
 			By default the probes fill the box given by [member size], centered on the node. With [member follow_camera], they follow the camera instead and the box only sets how many probes there are.
 			The workload (rays per probe, probes updated per frame, probe resolution) is set in [member ProjectSettings.rendering/global_illumination/ddgi/quality].
-			[b]Note:[/b] Needs the Forward+ renderer and the Vulkan rendering driver on a GPU with ray tracing. Elsewhere (D3D12, Mobile, Compatibility) DDGI does nothing and the scene renders as without it.
+			The probes can be baked (Bake DDGI in the 3D editor toolbar, or [method bake]): with [member bake_mode] set to [constant BAKE_MODE_BAKED_DYNAMIC] the game starts with finished indirect light instead of converging over the first seconds, with [constant BAKE_MODE_BAKED] it traces no rays at all.
+			[b]Note:[/b] Updating the probes needs the Forward+ renderer and the Vulkan rendering driver on a GPU with ray tracing. Elsewhere (D3D12, GPUs without ray tracing) only [constant BAKE_MODE_BAKED] with baked probes works; otherwise DDGI does nothing and the scene renders as without it. Mobile and Compatibility don't support DDGI.
 			[b]Note:[/b] SDFGI and [VoxelGI] are skipped for views that use DDGI, so indirect light isn't counted twice. Objects with a [LightmapGI] lightmap keep it.
 			[b]Note:[/b] The probe grid is always aligned with the world axes; the node's rotation and scale are ignored.
 	</description>
 	<tutorials>
 	</tutorials>
+	<methods>
+		<method name="bake">
+			<return type="DDGIProbeData" />
+			<param index="0" name="updates_per_probe" type="int" default="0" />
+			<description>
+				Traces the probes until they converge and returns the result, which is also assigned to [member probe_data]. Every probe is updated about [param updates_per_probe] times (with [code]0[/code], 128); the second half of the updates averages over a longer time, so the result is less noisy than the running probes. Blocks until it is done; in the editor a progress dialog shows (and can cancel) it. Returns [code]null[/code] when cancelled or when DDGI can't run.
+				The volume must be fixed ([member follow_camera] off) and in a scene with a [WorldEnvironment], and the renderer must support DDGI updates (Forward+, Vulkan, ray tracing). Save the result with [ResourceSaver] to keep it; the editor's Bake DDGI button does that.
+			</description>
+		</method>
+	</methods>
 	<members>
+		<member name="bake_mode" type="int" setter="set_bake_mode" getter="get_bake_mode" enum="DDGIVolume.BakeMode" default="0">
+			How the probes use [member probe_data]. See [enum BakeMode]. When the baked data doesn't fit the volume (it was moved, resized, or its probe spacing or cascades changed), the probes are updated dynamically until baked again, and a configuration warning says so.
+		</member>
+		<member name="bounce_energy" type="float" setter="set_bounce_energy" getter="get_bounce_energy" default="1.0">
+			Multiplier for the light passed on from one bounce to the next inside the probes. Above [code]1.0[/code], rooms lit indirectly (interiors behind a window, corridors) get brighter, more than surfaces lit directly; the result is averaged over time like all probe light, so it doesn't flicker. [code]1.0[/code] is physically based; at most [code]2.0[/code]. Unlike [member energy], it changes the light the probes see, so baked probes must be baked again.
+		</member>
 		<member name="cascades" type="int" setter="set_cascades" getter="get_cascades" default="3">
 			The number of probe grids. Each cascade has twice the probe spacing of the previous one and covers twice the distance, so far surfaces get coarser indirect light.
 		</member>
@@ -31,13 +48,16 @@
 			If [code]true[/code], the probe grids follow the camera and scroll as it moves, so DDGI covers any area. [member size] and [member probe_spacing] then only set the number of probes per axis. If [code]false[/code], the probes stay in the box around the node.
 		</member>
 		<member name="hysteresis" type="float" setter="set_hysteresis" getter="get_hysteresis" default="0.95">
-			How much of a probe's previous light is kept at each update. Higher values give less noise but slower reaction to light changes. Large changes lower it automatically for a while.
+			How much of a probe's previous light is kept at each update. Higher values give less noise but slower reaction to light changes. A light change that two updates in a row agree on lowers it for a while; ray noise doesn't. Probe directions whose light comes from a few bright rays (a window, a small lamp) keep more of their previous light.
 		</member>
 		<member name="normal_bias" type="float" setter="set_normal_bias" getter="get_normal_bias" default="0.1">
 			Offset of the probe lookup along the surface normal, as a fraction of the probe spacing. Raise it against dark blotches near corners (self shadowing).
 		</member>
 		<member name="probe_classification" type="bool" setter="set_probe_classification" getter="is_probe_classification_enabled" default="true">
 			If [code]true[/code], probes inside geometry are switched off and probes with no surface nearby are updated less often. Saves ray tracing time.
+		</member>
+		<member name="probe_data" type="DDGIProbeData" setter="set_probe_data" getter="get_probe_data">
+			The baked probes, made by [method bake]. Used according to [member bake_mode].
 		</member>
 		<member name="probe_relocation" type="bool" setter="set_probe_relocation" getter="is_probe_relocation_enabled" default="true">
 			If [code]true[/code], probes that end up inside or too close to geometry are moved away from it (by at most half a cell), which reduces light leaks and dark spots.
@@ -52,4 +72,15 @@
 			Offset of the probe lookup toward the camera, as a fraction of the probe spacing. Raise it against dark blotches and leaks.
 		</member>
 	</members>
+	<constants>
+		<constant name="BAKE_MODE_DYNAMIC" value="0" enum="BakeMode">
+			The probes are traced at runtime; [member probe_data] isn't used.
+		</constant>
+		<constant name="BAKE_MODE_BAKED" value="1" enum="BakeMode">
+			The probes are taken from [member probe_data] and never updated: no rays are traced, so the indirect light doesn't react to changes, but it costs only the lookup and also works without ray tracing hardware (D3D12 driver, older GPUs).
+		</constant>
+		<constant name="BAKE_MODE_BAKED_DYNAMIC" value="2" enum="BakeMode">
+			The probes start from [member probe_data] and are then updated at runtime like [constant BAKE_MODE_DYNAMIC]: the indirect light is right from the first frame and still follows lights and objects that change.
+		</constant>
+	</constants>
 </class>
