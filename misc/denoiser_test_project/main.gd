@@ -32,6 +32,12 @@ var frozen := false
 var frame := 0
 var animated: Array[Callable] = []
 var capturing := false
+# Fly camera (F, or --fly): right mouse looks, WASD moves, Q/E down/up,
+# Shift faster, mouse wheel changes the speed. The scene keeps animating.
+var flying := false
+var fly_yaw := 0.0
+var fly_pitch := 0.0
+var fly_speed := 3.0
 
 
 func _ready() -> void:
@@ -52,6 +58,7 @@ func _ready() -> void:
 	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(rect)
 
 	var root := Node3D.new()
@@ -79,6 +86,8 @@ func _ready() -> void:
 
 	_apply_args()
 	_update_scene()
+	if args.has("fly") and not capturing:
+		_set_flying(true)
 	if capturing:
 		hud.visible = false
 		_run_capture()
@@ -116,9 +125,12 @@ func _process(delta: float) -> void:
 		sim_time += DT if capturing else delta
 		frame += 1
 	_update_scene()
+	if flying:
+		_fly(delta)
 	if not capturing:
-		hud.text = "view: %s   denoiser: %d   debug: %d   t=%.1f\n1-8 views   R denoiser   D debug view   P path tracing" % [
-			view, env.pathtracing_denoiser, int(ProjectSettings.get_setting("rendering/ray_reconstruction/debug_mode")), sim_time]
+		var fly_help := "   fly speed %.1f: RMB look, WASD move, Q/E down/up, Shift fast, wheel speed" % fly_speed if flying else ""
+		hud.text = "view: %s   denoiser: %d   debug: %d   t=%.1f%s\n1-8 views   R denoiser   V debug view   P path tracing   F fly camera" % [
+			view, env.pathtracing_denoiser, int(ProjectSettings.get_setting("rendering/ray_reconstruction/debug_mode")), sim_time, fly_help]
 
 
 # Camera and animation for the current simulation time.
@@ -161,7 +173,8 @@ func _update_scene() -> void:
 	if args.has("teleport") and (frame / int(args["teleport"])) % 2 == 1:
 		eye = Vector3(-eye.x, eye.y, -eye.z)
 		target = Vector3(-target.x, target.y, -target.z)
-	camera.look_at_from_position(origin + eye, origin + target)
+	if not flying:
+		camera.look_at_from_position(origin + eye, origin + target)
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -170,12 +183,68 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if key.keycode >= KEY_1 and key.keycode <= KEY_8:
 		view = VIEW_KEYS[key.keycode - KEY_1]
+		if flying:
+			# Jump to the view's own camera, then keep flying from there.
+			_set_flying(false)
+			_update_scene()
+			_set_flying(true)
+	elif key.keycode == KEY_F:
+		_set_flying(not flying)
 	elif key.keycode == KEY_R:
 		env.pathtracing_denoiser = 2 if env.pathtracing_denoiser == 0 else 0
-	elif key.keycode == KEY_D:
+	elif key.keycode == KEY_V:
 		_set_rr_debug((int(ProjectSettings.get_setting("rendering/ray_reconstruction/debug_mode")) + 1) % 9)
 	elif key.keycode == KEY_P:
 		env.pathtracing_enabled = not env.pathtracing_enabled
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if not flying:
+		return
+	var button := event as InputEventMouseButton
+	if button:
+		if button.button_index == MOUSE_BUTTON_RIGHT:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if button.pressed else Input.MOUSE_MODE_VISIBLE
+		elif button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_UP:
+			fly_speed = minf(fly_speed * 1.25, 100.0)
+		elif button.pressed and button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			fly_speed = maxf(fly_speed / 1.25, 0.1)
+	var motion := event as InputEventMouseMotion
+	if motion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		fly_yaw -= motion.relative.x * 0.003
+		fly_pitch = clampf(fly_pitch - motion.relative.y * 0.003, -1.5, 1.5)
+		camera.rotation = Vector3(fly_pitch, fly_yaw, 0.0)
+
+
+func _set_flying(p_on: bool) -> void:
+	flying = p_on
+	if flying:
+		# Start from where the view's camera is now.
+		fly_yaw = camera.rotation.y
+		fly_pitch = camera.rotation.x
+		camera.rotation = Vector3(fly_pitch, fly_yaw, 0.0)
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _fly(p_delta: float) -> void:
+	var dir := Vector3.ZERO
+	if Input.is_physical_key_pressed(KEY_W):
+		dir.z -= 1.0
+	if Input.is_physical_key_pressed(KEY_S):
+		dir.z += 1.0
+	if Input.is_physical_key_pressed(KEY_A):
+		dir.x -= 1.0
+	if Input.is_physical_key_pressed(KEY_D):
+		dir.x += 1.0
+	var up := 0.0
+	if Input.is_physical_key_pressed(KEY_E):
+		up += 1.0
+	if Input.is_physical_key_pressed(KEY_Q):
+		up -= 1.0
+	var speed := fly_speed * (4.0 if Input.is_physical_key_pressed(KEY_SHIFT) else 1.0)
+	var move := camera.global_transform.basis * dir.normalized() + Vector3.UP * up
+	camera.global_position += move * speed * p_delta
 
 
 # --- Capture -------------------------------------------------------------------

@@ -335,7 +335,7 @@ scenes from code. Every view is a pure function of the simulation time (fixed
 | `dark` | Dark room, one small bright light and tiny emitters (high contrast) |
 
 ```
-godot --path misc/denoiser_test_project -- --view=mirror                  # interactive: 1-8 views, R denoiser, D debug view
+godot --path misc/denoiser_test_project -- --view=mirror                  # interactive: 1-8 views, R denoiser, V debug view, F fly camera (--fly starts in it)
 godot --path misc/denoiser_test_project -- --view=pan --tonemap=linear --sequence=30 --out=out/denoised
 godot --path misc/denoiser_test_project -- --view=pan --tonemap=linear --sequence=30 --reference=256 --out=out/reference
 python misc/denoiser_test_project/metrics.py out/denoised out/reference --prefix=pan
