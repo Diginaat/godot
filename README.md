@@ -40,9 +40,28 @@ adapts it; all the PhysX work is theirs.
 
 <br clear="left">
 
+## DDGI global illumination: before and after
+
+The same frames rendered four ways with this build's ray traced DDGI
+(Forward+, Vulkan, quality High, 1280x720, RTX 3060). Rows: an outdoor street
+in sun and sky, a closed house lit only through one window (exposure 6, DDGI
+bounce energy 1.5), and the classic color bleeding test room. Without GI the
+sky ambient lights every surface the same, even inside the closed house;
+DDGI lights it from the window and the sunlit floor, and carries the red and
+green walls onto the floor and ceiling.
+
+| No GI | DDGI | DDGI + SSAO, SSIL, SSR | + DLSS Quality |
+| --- | --- | --- | --- |
+| ![Outdoor street, no GI](docs/images/ddgi/outdoor_off.jpg) | ![Outdoor street, DDGI](docs/images/ddgi/outdoor_ddgi.jpg) | ![Outdoor street, DDGI, SSAO, SSIL and SSR](docs/images/ddgi/outdoor_ddgi_fx.jpg) | ![Outdoor street, DDGI, screen-space effects and DLSS Quality](docs/images/ddgi/outdoor_ddgi_fx_dlss.jpg) |
+| ![Interior lit through one window, no GI](docs/images/ddgi/interior_off.jpg) | ![Interior lit through one window, DDGI](docs/images/ddgi/interior_ddgi.jpg) | ![Interior lit through one window, DDGI, SSAO, SSIL and SSR](docs/images/ddgi/interior_ddgi_fx.jpg) | ![Interior lit through one window, DDGI, screen-space effects and DLSS Quality](docs/images/ddgi/interior_ddgi_fx_dlss.jpg) |
+| ![Test room, no GI](docs/images/ddgi/room_off.jpg) | ![Test room, DDGI](docs/images/ddgi/room_ddgi.jpg) | ![Test room, DDGI, SSAO, SSIL and SSR](docs/images/ddgi/room_ddgi_fx.jpg) | ![Test room, DDGI, screen-space effects and DLSS Quality](docs/images/ddgi/room_ddgi_fx_dlss.jpg) |
+
+The scenes come from [`misc/ddgi_test_project`](misc/ddgi_test_project);
+each row shares one exposure. Details and benchmarks: [DDGI.md](DDGI.md).
+
 ## Downloads
 
-Prebuilt Windows editors (standard and .NET) are on the
+Prebuilt Windows editors and export templates (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
 Each release names the Godot version it's based on and this build's own
 version: `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.1` is build 0.5.1, on Godot
