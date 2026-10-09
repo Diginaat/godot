@@ -192,7 +192,7 @@ traceRays (1 spp)                     compute, internal resolution
 | 3 | Core SVGF: `PT_DENOISER_NATIVE`, history resources, reprojection with depth/normal tests, moments, variance, a-trous, compose, timestamps | Done |
 | 4 | Specular reconstruction: roughness-aware history and kernel, hit distance, virtual-hit reprojection for glossy surfaces | Done |
 | 5 | Anti-ghosting: history clipping, confidence, firefly clamp, NaN guards, disocclusion fallback | Done (heuristic change detection; see 5b) |
-| 5b | A-SVGF temporal gradients (Schied et al. 2018) in place of the heuristic change detection | Open |
+| 5b | A-SVGF temporal gradients (Schied et al. 2018) in place of the heuristic change detection | Done |
 | 6 | Test harness: accumulated reference, metrics (error vs reference, temporal flicker, ghost trails, edge sharpness), moving scenes, thin geometry, mirrors, moving emitters | Done |
 | 7 | Settings and debug views: `rendering/ray_reconstruction/*`, presets measured against each other, debug views, editor exposure | Open |
 | 8 | History invalidation and upscaler integration: camera cuts (also FSR2/DLSS reset), resize, mode switches, viewport create/destroy; FSR2/TAA/DLSS SR combinations; zero-jitter debug | Open |
@@ -414,9 +414,86 @@ better:
 Sharpness is low on cornell, emissive and dark because their references
 still have visible noise on the strongest gradients (bright, small lights).
 
+## Temporal gradients, A-SVGF (step 5b)
+
+After Schied, Peters, Dachsbacher, "Gradient Estimation for Real-Time
+Adaptive Temporal Filtering" (HPG 2018). Its reference code is BSD-3-Clause
+(Copyright (c) 2018 Christoph Schied, KIT); the notice is in `COPYRIGHT.txt`
+and `THIRD_PARTY_LICENSES.md`. The authors ask for a short note when it ships
+in a product.
+
+Per frame:
+
+1. **Forward projection** (`RR Forward Project`, before the trace, one thread
+   per 3x3 tile of the last frame): a random pixel of the tile takes its
+   surface point (last frame's linear depth and view ray), moves it into this
+   frame's view (camera motion) and claims the tile it lands in
+   (`imageAtomicCompSwap` on `gradient_claim`). The tile's entry
+   (`gradient_sample`, `gradient_target`, bindings 44-45 of the path tracer)
+   holds the pixel in the tile, last frame's pixel index and seed key, and the
+   projected point.
+2. **Replay** (raygen, native variant): every pixel writes its seed key to
+   `rr_seed` (binding 43; `rng_seed_key()`, `init_rng_from_key()` give the
+   same numbers as before). The claimed pixel of a tile instead uses last
+   frame's seed key and shoots its primary ray at the projected point. If it
+   hits within 1% of the expected distance, the sample is a valid gradient
+   sample (`w` = 1). Its result is also this pixel's normal sample.
+3. **Gradient** (`RR Gradient`, per tile): replayed luminance minus last
+   frame's luminance of the same pixel (`raw_luminance_*`, written by the
+   temporal pass), for diffuse and specular, plus the larger of the two. Then
+   three a-trous iterations over the tiles (steps 1, 2, 4), weighted by depth
+   similarity, average the change and the brightness separately.
+4. **Temporal pass**: lambda = |change| / brightness; the blend weight is
+   mix(1 / history length, 1, lambda), and the stored history length follows
+   it. Where a still scene's light doesn't change, the replay gives exactly
+   the old value (same point, same random numbers): lambda is 0 and nothing
+   is lost to noise.
+
+The heuristic neighborhood detection of step 5 stays, but only where the
+pixel moves on screen (more than a quarter pixel): under camera motion the
+history can be stale in ways a gradient at a fixed point doesn't see
+(resampling, reflections that change with the view). Without it the moving
+camera views got worse (pan RMSE 0.0074 to 0.0098, mirror 0.0199 to 0.0301).
+
+Not done (A-SVGF does it with a visibility buffer): forward projection of
+moving objects. The projection only knows camera motion, so on moving
+geometry the replayed ray usually misses the expected distance and gives no
+gradient there.
+
+Suite (same setup as step 5):
+
+| View | RMSE step 5 | RMSE step 5b | Bias step 5 | Bias step 5b |
+| --- | --- | --- | --- | --- |
+| cornell | 0.0277 | 0.0228 | -7.3% | -2.1% |
+| pan | 0.0074 | 0.0076 | -0.3% | -0.4% |
+| emissive | 0.0218 | 0.0127 | -16.8% | -2.9% |
+| skinned | 0.0072 | 0.0066 | -0.6% | -0.6% |
+| thin | 0.0187 | 0.0202 | -0.9% | -0.9% |
+| mirror | 0.0199 | 0.0201 | -0.7% | -0.7% |
+| lights | 0.0419 | 0.0256 | +1.7% | +0.4% |
+| dark | 0.0054 | 0.0054 | -0.9% | -0.8% |
+
+Moving light: error in moving regions on the lights view 0.046 to 0.028.
+The thin view is slightly worse: one pixel in nine repeats an old sample
+(the replay), which costs a little where every frame's new information
+counts.
+
+Cost at 1920x1080 (RTX 3060, lights view): forward projection 0.04 ms,
+gradients and their filter 0.17 ms. Denoiser total 3.58 ms (temporal 0.52,
+variance 0.21, five a-trous iterations 2.64). The native path tracer variant
+costs 3.50 ms against 2.86 ms for the plain one here (step 10).
+
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-10: Step 5b (A-SVGF) done. The still-scene darkening is mostly
+  gone (cornell -7.3% to -2.1%, emissive -16.8% to -2.9%) and moving light
+  is much better (lights RMSE 0.042 to 0.026). Specular gradients under
+  camera motion are partly noise (the replayed specular lobe sample uses the
+  new view direction), but measured, dropping them made the mirror view
+  worse; kept. Timestamp note: `RR Forward Project` must come before the
+  `Pathtracer` timestamp, or the trace time is counted as the projection's.
 
 - 2026-10-10: Steps 5 and 6 done (6 first, to measure 5). The emissive room
   went black for 8 frames in the first suite run: the ball's orbit passed

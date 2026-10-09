@@ -264,6 +264,11 @@ void RenderRaytracing::native_rr_ensure_buffers(RenderSceneBuffersRD *p_render_b
 	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1);
 	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SPECULAR, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1);
 	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GUIDE, RD::DATA_FORMAT_R32G32B32A32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1);
+	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SEED, RD::DATA_FORMAT_R32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1);
+	// A-SVGF gradient samples, one per 3x3 tile (cleared by the denoiser before first use).
+	const Size2i tiles = (p_render_buffers->get_internal_size() + Size2i(2, 2)) / 3;
+	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GRADIENT_SAMPLE, RD::DATA_FORMAT_R32G32B32A32_UINT, usage_bits, RD::TEXTURE_SAMPLES_1, tiles);
+	p_render_buffers->create_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GRADIENT_TARGET, RD::DATA_FORMAT_R32G32B32A32_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, tiles);
 }
 
 void RenderRaytracing::native_rr_free_buffers(RenderSceneBuffersRD *p_render_buffers) {
@@ -3675,6 +3680,9 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 40, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE)));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 41, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SPECULAR)));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 42, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GUIDE)));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 43, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SEED)));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 44, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GRADIENT_SAMPLE)));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 45, rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GRADIENT_TARGET)));
 	}
 
 	// Bindings 34-39: DDGI (raytracing_ddgi_inc.glsl).

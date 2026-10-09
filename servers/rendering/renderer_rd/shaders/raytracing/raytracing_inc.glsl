@@ -200,6 +200,17 @@ uint pcg_hash(uint seed) {
 	return (word >> 22u) ^ word;
 }
 
+/// Seed key of a pixel and frame (before the sample index is added and the
+/// key hashed). The native denoiser stores it per pixel, so a later frame can
+/// replay a pixel's random numbers (A-SVGF gradient samples).
+uint rng_seed_key(uvec2 pixel, uint frame) {
+	return pixel.x + pixel.y * 65536u + frame * 1000000u;
+}
+
+uint init_rng_from_key(uint key, uint sample_idx) {
+	return pcg_hash(key + sample_idx * 100000000u);
+}
+
 /// Initialize RNG state with improved mixing to eliminate patterns
 uint init_rng(uvec2 pixel, uint frame, uint sample_idx) {
 	// Use Wang hash for better mixing - eliminates linear patterns
