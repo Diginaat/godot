@@ -146,7 +146,17 @@ void RendererViewport::_configure_3d_render_buffers(Viewport *p_viewport) {
 			const float EPSILON = 0.0001;
 			float scaling_3d_scale = p_viewport->scaling_3d_scale;
 			RSE::ViewportScaling3DMode scaling_3d_mode = p_viewport->scaling_3d_mode;
-			bool upscaler_available = p_viewport->fsr_enabled || p_viewport->dlss_enabled;
+			// DLSS counts as available only when Streamline loaded and supports DLSS on
+			// this GPU. Otherwise the camera would be jittered for an upscaler that never
+			// runs, and the raw jittered frames would shake on screen.
+			bool upscaler_available = p_viewport->fsr_enabled;
+			if (scaling_3d_mode == RSE::VIEWPORT_SCALING_3D_MODE_DLSS) {
+#ifdef STREAMLINE_ENABLED
+				upscaler_available = p_viewport->dlss_enabled && StreamlineContext::get().slDLSSSetOptions != nullptr && StreamlineContext::get().streamline_capabilities.dlss_available;
+#else
+				upscaler_available = false;
+#endif
+			}
 			RSE::ViewportScaling3DType scaling_type = RSE::scaling_3d_mode_type(scaling_3d_mode);
 
 			if ((!upscaler_available || (scaling_type == RSE::VIEWPORT_SCALING_3D_TYPE_SPATIAL)) && scaling_3d_scale >= (1.0 - EPSILON) && scaling_3d_scale <= (1.0 + EPSILON)) {
