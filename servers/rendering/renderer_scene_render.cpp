@@ -622,8 +622,25 @@ void RendererSceneRender::environment_set_ddgi_volume(RID p_env, bool p_node_vol
 	environment_storage.environment_set_ddgi_volume(p_env, p_node_volume, p_center, p_size);
 }
 
+void RendererSceneRender::environment_set_ddgi_bounce_energy(RID p_env, float p_energy) {
+	environment_storage.environment_set_ddgi_bounce_energy(p_env, p_energy);
+}
+
+void RendererSceneRender::environment_set_ddgi_realtime_updates(RID p_env, bool p_enable) {
+	environment_storage.environment_set_ddgi_realtime_updates(p_env, p_enable);
+}
+
+void RendererSceneRender::environment_set_ddgi_baked_data(RID p_env, int p_mode, const Dictionary &p_data) {
+	environment_storage.environment_set_ddgi_baked_data(p_env, p_mode, p_data);
+}
+
 bool RendererSceneRender::environment_get_ddgi_enabled(RID p_env) const {
 	return environment_storage.environment_get_ddgi_enabled(p_env);
+}
+
+bool RendererSceneRender::environment_get_ddgi_baked_only(RID p_env) const {
+	RendererEnvironmentStorage::DDGISettings s = environment_storage.environment_get_ddgi(p_env);
+	return s.enabled && s.bake_mode == 1 && !s.baked_data.is_empty();
 }
 
 void RendererSceneRender::environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction) {

@@ -1381,6 +1381,41 @@
 				Configures dynamic diffuse global illumination (DDGI) for the environment. See [member Environment.ddgi_enabled] and the other [code]ddgi_*[/code] properties of [Environment] for details.
 			</description>
 		</method>
+		<method name="environment_set_ddgi_baked_data">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="mode" type="int" />
+			<param index="2" name="data" type="Dictionary" />
+			<description>
+				Sets baked DDGI probes for the environment: [param data] as returned by [method viewport_get_ddgi_probe_data], [param mode] as [enum DDGIVolume.BakeMode] ([code]0[/code] ignores the data). The data is only used while it fits the environment's fixed DDGI volume (see [method environment_set_ddgi_volume]). Used by [DDGIVolume].
+			</description>
+		</method>
+		<method name="environment_set_ddgi_bounce_energy">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="energy" type="float" />
+			<description>
+				Sets the multiplier for the light passed on from bounce to bounce inside the DDGI probes (0 to 2). See [member Environment.ddgi_bounce_energy].
+			</description>
+		</method>
+		<method name="environment_set_ddgi_realtime_updates">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<description>
+				If [param enable] is [code]true[/code], DDGI updates every probe of the environment every frame. See [member Environment.ddgi_realtime_updates].
+			</description>
+		</method>
+		<method name="environment_set_ddgi_volume">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="node_volume" type="bool" />
+			<param index="2" name="center" type="Vector3" />
+			<param index="3" name="size" type="Vector3" />
+			<description>
+				Places the environment's DDGI probes in a fixed box instead of around the camera. If [param node_volume] is [code]true[/code], the finest cascade is centered at [param center] (world space); moving the center resets the probes. [param size] is informative: the probe grid comes from [method environment_set_ddgi]. Used by [DDGIVolume].
+			</description>
+		</method>
 		<method name="environment_set_fog">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
@@ -1436,6 +1471,7 @@
 			<param index="4" name="max_bounces" type="int" />
 			<param index="5" name="denoiser" type="int" enum="RenderingServer.PathtracingDenoiser" />
 			<description>
+				Configures the path tracer for the specified environment RID. See the [code]pathtracing_*[/code] properties in [Environment] for more information. [param debug_mode] is an [enum Environment.PathtracingDebugMode] value.
 			</description>
 		</method>
 		<method name="environment_set_sdfgi">
@@ -4210,6 +4246,13 @@
 				Creates an empty viewport and adds it to the RenderingServer. It can be accessed with the RID that is returned. This RID will be used in all [code]viewport_*[/code] RenderingServer functions.
 				Once finished with your RID, you will want to free the RID using the RenderingServer's [method free_rid] method.
 				[b]Note:[/b] The equivalent node is [Viewport].
+			</description>
+		</method>
+		<method name="viewport_get_ddgi_probe_data">
+			<return type="Dictionary" />
+			<param index="0" name="viewport" type="RID" />
+			<description>
+				Returns the DDGI probes the [param viewport] has traced for a fixed DDGI volume: the irradiance and distance atlases (as [Image]s), the probe offsets and states, and the volume layout. Returns an empty dictionary if the viewport doesn't use DDGI. Reads from the GPU, so it stalls. Used by [method DDGIVolume.bake].
 			</description>
 		</method>
 		<method name="viewport_get_measured_render_time_cpu" qualifiers="const">

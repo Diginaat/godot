@@ -36,6 +36,7 @@
 #include "servers/rendering/renderer_rd/shaders/raytracing/ddgi_update.glsl.gen.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_buffer_custom_data_rd.h"
 #include "servers/rendering/rendering_device.h"
+#include "servers/rendering/storage/environment_storage.h"
 
 #define RB_SCOPE_DDGI SNAME("ddgi")
 
@@ -70,10 +71,11 @@ struct DDGIDataGPU {
 	uint32_t counts[4]; // Volumes, rays per probe, fixed rays per probe, update capacity.
 	uint32_t atlas[4]; // Irradiance texels, distance texels, probes per row, frame.
 	float atlas_inv_size[4];
-	float schedule[4]; // Base update rate, total probes, max radiance per ray, unused.
+	float schedule[4]; // Base update rate, total probes, max radiance per ray, bounce energy.
 	float miss_color[4];
+	float smoothing[4]; // x: blend of the display irradiance toward the probes' per frame, yzw: unused.
 };
-static_assert(sizeof(DDGIDataGPU) == 1616, "DDGIDataGPU must match the std140 layout of DDGIDataBlock");
+static_assert(sizeof(DDGIDataGPU) == 1632, "DDGIDataGPU must match the std140 layout of DDGIDataBlock");
 
 // std430, 32 bytes.
 struct DDGIProbeGPU {
@@ -82,7 +84,7 @@ struct DDGIProbeGPU {
 	float urgency;
 	float variability;
 	uint32_t last_update_frame;
-	float luminance;
+	float pending_change;
 };
 static_assert(sizeof(DDGIProbeGPU) == 32, "DDGIProbeGPU must match DDGIProbe");
 
@@ -153,8 +155,15 @@ public:
 		RID update_list;
 		RID stats_buffer;
 		RID ray_data;
-		RID irradiance_atlas;
+		RID irradiance_atlas; // What the probe updates write.
+		// What surfaces sample: eases toward irradiance_atlas every frame, so a
+		// probe's update never shows as a jump (see DDGI.md, "Smooth light changes").
+		RID irradiance_display;
 		RID distance_atlas;
+
+		bool node_volume = false; // The volumes were set up for a DDGIVolume node (fixed), not the camera.
+		uint32_t realtime_offset = 0; // Realtime updates: first probe of the next frame's chunk.
+		uint64_t baked_version = 0; // Baked data uploaded into the atlases, 0 for none.
 
 		struct VolumeState {
 			Vector3i origin; // World probe index of logical probe (0,0,0).
@@ -179,6 +188,7 @@ private:
 		UPDATE_BLEND_IRRADIANCE,
 		UPDATE_BLEND_DISTANCE,
 		UPDATE_RELOCATE_CLASSIFY,
+		UPDATE_SMOOTH,
 		UPDATE_MODE_MAX,
 	};
 
@@ -191,7 +201,8 @@ private:
 	struct UpdatePushConstant {
 		uint32_t total_probes;
 		uint32_t schedule_new_only;
-		uint32_t pad[2];
+		uint32_t realtime; // Every probe in turn, in chunks of the update capacity.
+		uint32_t realtime_offset;
 	};
 
 	struct ApplyPushConstant {
@@ -215,14 +226,36 @@ private:
 
 	Ref<ViewportData> _get_viewport_data(RenderSceneBuffersRD *p_render_buffers);
 	void _allocate(ViewportData *p_data, int p_cascades, const Vector3i &p_grid, const Quality &p_quality);
+	/// The buffers that depend on rays per probe and probes per frame only:
+	/// changing those (realtime updates on or off) keeps the probes' light.
+	void _allocate_rays(ViewportData *p_data, const Quality &p_quality);
 	uint32_t _setup_volumes(ViewportData *p_data, const RenderDataRD *p_render_data, DDGIDataGPU &r_gpu);
+	/// Allocates (or reallocates) the viewport's resources for the current
+	/// settings and uploads baked probes when needed. Null on failure.
+	Ref<ViewportData> _prepare_viewport(RenderDataRD *p_render_data, Quality &r_quality);
+	/// Fills the frame's uniform data (volumes, atlas layout, schedule).
+	void _write_frame_data(ViewportData *p_data, const RenderDataRD *p_render_data, const Quality &p_quality, uint32_t p_capacity, DDGIDataGPU &r_gpu);
+	bool _upload_baked(ViewportData *p_data, const RendererEnvironmentStorage::DDGISettings &p_settings);
 
 public:
 	void initialize();
 
-	/// True when DDGI should run for this view (enabled, Forward+ RT available,
-	/// not a reflection probe, path tracing off).
+	/// True when DDGI should run for this view (enabled, Forward+ RT available
+	/// or baked probes only, not a reflection probe, path tracing off).
 	static bool is_enabled_for(const RenderDataRD *p_render_data);
+
+	/// Baked probe data (DDGIProbeData) that fits the environment's volume.
+	static bool baked_data_matches(const RendererEnvironmentStorage::DDGISettings &p_settings);
+	/// True when the view only samples baked probes: no ray tracing at all.
+	static bool is_baked_only(const RenderDataRD *p_render_data);
+
+	/// Uploads baked probes if needed and fills the frame data, without
+	/// tracing (baked only mode).
+	void update_baked(RenderDataRD *p_render_data);
+
+	/// The probes of a viewport (atlases, offsets, states and the volume they
+	/// belong to) for DDGIProbeData, or an empty dictionary.
+	Dictionary get_probe_data(RenderSceneBuffersRD *p_render_buffers);
 
 	/// Updates the probes: schedule, trace (with the given RT scene uniform
 	/// set setup callback), blend, relocate and classify. Called after the TLAS

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GodotPhysXMotorcycleProbe" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Internal test bridge for a PhysX two-wheel vehicle.
+	</brief_description>
+	<description>
+		Creates a two-wheel direct-drive PxVehicle2 vehicle and drives it from a script, so a script-side lean controller can be tested. PhysX has no built-in balance for two-wheelers; [method apply_torque_impulse] and [method set_angular_velocity] let a script keep the bike upright. For games use [PhysXMotorcycle3D].
+		[b]Note:[/b] This is an internal test class of the PhysX module, not a stable API: it may change or be removed without notice.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="apply_torque_impulse">
+			<return type="void" />
+			<param index="0" name="impulse" type="Vector3" />
+			<description>
+				Applies a torque [param impulse] in world space to the chassis this tick.
+			</description>
+		</method>
+		<method name="get_actor_position" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the world position of the chassis actor's origin.
+			</description>
+		</method>
+		<method name="get_angular_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's angular velocity in world space.
+			</description>
+		</method>
+		<method name="get_forward" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's forward direction in world space.
+			</description>
+		</method>
+		<method name="get_forward_speed" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the speed along the chassis's forward axis, in m/s.
+			</description>
+		</method>
+		<method name="get_linear_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's linear velocity in world space.
+			</description>
+		</method>
+		<method name="get_position" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis position in world space.
+			</description>
+		</method>
+		<method name="get_roll_angle" qualifiers="const">
+			<return type="float" />
+			<description>
+				Returns the lean angle around the forward axis, in radians; positive when leaning right.
+			</description>
+		</method>
+		<method name="get_up" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				Returns the chassis's up direction in world space.
+			</description>
+		</method>
+		<method name="get_wheel_jounce" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="wheel" type="int" />
+			<description>
+				Returns how far the suspension of wheel [param wheel] (0 front, 1 rear) is compressed.
+			</description>
+		</method>
+		<method name="get_wheel_separation" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="wheel" type="int" />
+			<description>
+				Returns the distance between wheel [param wheel] and the ground; negative when it penetrates the ground.
+			</description>
+		</method>
+		<method name="initialize">
+			<return type="bool" />
+			<param index="0" name="space" type="RID" />
+			<param index="1" name="position" type="Vector3" />
+			<description>
+				Creates the motorcycle at [param position] in the PhysX physics [param space]. Returns [code]true[/code] on success.
+			</description>
+		</method>
+		<method name="set_angular_velocity">
+			<return type="void" />
+			<param index="0" name="angular_velocity" type="Vector3" />
+			<description>
+				Overrides the chassis's angular velocity. A lean controller that blends the roll component toward a target stays stable where torque impulses can diverge.
+			</description>
+		</method>
+		<method name="step">
+			<return type="void" />
+			<param index="0" name="dt" type="float" />
+			<param index="1" name="throttle" type="float" />
+			<param index="2" name="brake" type="float" />
+			<param index="3" name="steer" type="float" />
+			<description>
+				Runs the vehicle simulation for [param dt] seconds with [param throttle] and [param brake] in [code][0, 1][/code] and [param steer] in [code][-1, 1][/code]. Call it before each physics step.
+			</description>
+		</method>
+	</methods>
+</class>

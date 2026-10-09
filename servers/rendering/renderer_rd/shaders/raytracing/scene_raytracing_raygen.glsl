@@ -242,7 +242,14 @@ void main() {
 		if (ddgi.miss_color.w > 0.5) {
 			mat3 probe_world_to_sky = scene_data_block.data.radiance_inverse_xform * mat3(scene_data_block.data.inv_view_matrix);
 			vec2 probe_border = vec2(scene_data_block.data.radiance_border_size, 1.0 - scene_data_block.data.radiance_border_size * 2.0);
-			miss_radiance = radiance_octmap_sample(vec3_to_oct_with_border(probe_world_to_sky * gl_WorldRayDirectionEXT, probe_border), 0.0) * scene_data_block.data.IBL_exposure_normalization;
+			// Each probe ray stands for about 4 pi / N steradians of the sky, so
+			// it reads a blurred mip that matches that footprint. Read sharp, a
+			// ray that hits the sun disk (tiny and very bright) returned a huge
+			// value now and then; through a window, that made indirect light
+			// flash. The mips average the sky, so the energy stays the same.
+			float footprint = 12.566 / float(max(ddgi.counts.y, 1u));
+			float sky_roughness = clamp(sqrt(sqrt(footprint)), 0.3, 0.8);
+			miss_radiance = radiance_octmap_sample(vec3_to_oct_with_border(probe_world_to_sky * gl_WorldRayDirectionEXT, probe_border), sky_roughness) * scene_data_block.data.IBL_exposure_normalization;
 		}
 		ps.radiance += ps.throughput * miss_radiance;
 		path_pack(payload, ps);
