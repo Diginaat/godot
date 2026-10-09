@@ -3109,6 +3109,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi", "env", "enable", "cascades", "probe_spacing", "probe_grid", "energy", "normal_bias", "view_bias", "hysteresis", "probe_relocation", "probe_classification", "follow_camera", "debug_mode"), &RenderingServer::environment_set_ddgi);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_volume", "env", "node_volume", "center", "size"), &RenderingServer::environment_set_ddgi_volume);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_bounce_energy", "env", "energy"), &RenderingServer::environment_set_ddgi_bounce_energy);
+	ClassDB::bind_method(D_METHOD("environment_set_ddgi_ao", "env", "enable", "strength", "radius"), &RenderingServer::environment_set_ddgi_ao);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_baked_data", "env", "mode", "data"), &RenderingServer::environment_set_ddgi_baked_data);
 	ClassDB::bind_method(D_METHOD("environment_set_volumetric_fog", "env", "enable", "density", "albedo", "emission", "emission_energy", "anisotropy", "length", "detail_spread", "gi_inject", "temporal_reprojection", "temporal_reprojection_amount", "ambient_inject", "sky_affect"), &RenderingServer::environment_set_volumetric_fog);
 

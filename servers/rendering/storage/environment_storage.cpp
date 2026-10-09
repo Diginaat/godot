@@ -971,6 +971,14 @@ void RendererEnvironmentStorage::environment_set_ddgi_bounce_energy(RID p_env, f
 	env->ddgi.bounce_energy = CLAMP(p_energy, 0.0f, 2.0f);
 }
 
+void RendererEnvironmentStorage::environment_set_ddgi_ao(RID p_env, bool p_enable, float p_strength, float p_radius) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi.ao_enabled = p_enable;
+	env->ddgi.ao_strength = CLAMP(p_strength, 0.0f, 1.0f);
+	env->ddgi.ao_radius = MAX(0.01f, p_radius);
+}
+
 void RendererEnvironmentStorage::environment_set_ddgi_baked_data(RID p_env, int p_mode, const Dictionary &p_data) {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL(env);

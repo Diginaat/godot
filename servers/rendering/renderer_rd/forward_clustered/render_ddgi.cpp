@@ -217,7 +217,7 @@ bool RenderDDGI::debug_shows_gi_buffer(const RenderDataRD *p_render_data) {
 		return false;
 	}
 	int mode = RendererEnvironmentStorage::get_singleton()->environment_get_ddgi(p_render_data->environment).debug_mode;
-	return mode == DEBUG_INDIRECT_LIGHT || mode == DEBUG_CASCADES;
+	return mode == DEBUG_INDIRECT_LIGHT || mode == DEBUG_CASCADES || mode == DEBUG_AMBIENT_OCCLUSION;
 }
 
 Ref<RenderDDGI::ViewportData> RenderDDGI::_get_viewport_data(RenderSceneBuffersRD *p_render_buffers) {
@@ -513,6 +513,9 @@ void RenderDDGI::_write_frame_data(ViewportData *p_data, const RenderDataRD *p_r
 	r_gpu.schedule[1] = float(p_data->total_probes);
 	r_gpu.schedule[2] = DDGI_MAX_RAY_RADIANCE;
 	r_gpu.schedule[3] = s.bounce_energy;
+	// The AO debug view shows the occlusion even with AO off (at full strength).
+	r_gpu.ao[0] = s.debug_mode == DEBUG_AMBIENT_OCCLUSION ? 1.0f : (s.ao_enabled ? s.ao_strength : 0.0f);
+	r_gpu.ao[1] = s.ao_radius;
 
 	// What rays that leave the scene see: the sky, or the ambient color when
 	// there is no sky to sample.

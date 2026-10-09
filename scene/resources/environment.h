@@ -112,6 +112,7 @@ public:
 		DDGI_DEBUG_PROBE_STATES,
 		DDGI_DEBUG_PROBE_PRIORITY,
 		DDGI_DEBUG_CASCADES,
+		DDGI_DEBUG_AMBIENT_OCCLUSION,
 		DDGI_DEBUG_MAX
 	};
 
@@ -216,6 +217,10 @@ private:
 	Vector3i ddgi_probe_grid = Vector3i(24, 12, 24);
 	float ddgi_energy = 1.0;
 	float ddgi_bounce_energy = 1.0;
+	bool ddgi_ao_enabled = false;
+	float ddgi_ao_strength = 0.75;
+	float ddgi_ao_radius = 1.0;
+	void _update_ddgi_ao();
 	float ddgi_normal_bias = 0.1;
 	float ddgi_view_bias = 0.3;
 	float ddgi_hysteresis = 0.95;
@@ -440,6 +445,12 @@ public:
 	float get_ddgi_energy() const;
 	void set_ddgi_bounce_energy(float p_energy);
 	float get_ddgi_bounce_energy() const;
+	void set_ddgi_ao_enabled(bool p_enabled);
+	bool is_ddgi_ao_enabled() const;
+	void set_ddgi_ao_strength(float p_strength);
+	float get_ddgi_ao_strength() const;
+	void set_ddgi_ao_radius(float p_radius);
+	float get_ddgi_ao_radius() const;
 	void set_ddgi_normal_bias(float p_bias);
 	float get_ddgi_normal_bias() const;
 	void set_ddgi_view_bias(float p_bias);

@@ -73,8 +73,9 @@ struct DDGIDataGPU {
 	float atlas_inv_size[4];
 	float schedule[4]; // Base update rate, total probes, max radiance per ray, bounce energy.
 	float miss_color[4];
+	float ao[4]; // Ambient occlusion: strength (0 = off), radius (m), unused, unused.
 };
-static_assert(sizeof(DDGIDataGPU) == 1616, "DDGIDataGPU must match the std140 layout of DDGIDataBlock");
+static_assert(sizeof(DDGIDataGPU) == 1632, "DDGIDataGPU must match the std140 layout of DDGIDataBlock");
 
 // std430, 32 bytes.
 struct DDGIProbeGPU {
@@ -121,6 +122,7 @@ public:
 		DEBUG_PROBE_STATES,
 		DEBUG_PROBE_PRIORITY,
 		DEBUG_CASCADES,
+		DEBUG_AMBIENT_OCCLUSION,
 	};
 
 	/// Workload settings from rendering/global_illumination/ddgi/*.

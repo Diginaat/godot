@@ -95,6 +95,15 @@
 			[b]Note:[/b] When [member pathtracing_enabled] is [code]true[/code], the path tracer computes all indirect light and DDGI is not used.
 			[b]Note:[/b] The workload (rays per probe, probes updated per frame, probe resolution) is set in [member ProjectSettings.rendering/global_illumination/ddgi/quality].
 		</member>
+		<member name="ddgi_ao_enabled" type="bool" setter="set_ddgi_ao_enabled" getter="is_ddgi_ao_enabled" default="false">
+			If [code]true[/code], DDGI darkens its indirect light with ambient occlusion computed from the probe distances. See [member DDGIVolume.ao_enabled].
+		</member>
+		<member name="ddgi_ao_radius" type="float" setter="set_ddgi_ao_radius" getter="get_ddgi_ao_radius" default="1.0">
+			The DDGI ambient occlusion radius in meters, at most the probe spacing. See [member DDGIVolume.ao_radius].
+		</member>
+		<member name="ddgi_ao_strength" type="float" setter="set_ddgi_ao_strength" getter="get_ddgi_ao_strength" default="0.75">
+			How much the DDGI ambient occlusion darkens the indirect light. See [member DDGIVolume.ao_strength].
+		</member>
 		<member name="ddgi_bounce_energy" type="float" setter="set_ddgi_bounce_energy" getter="get_ddgi_bounce_energy" default="1.0">
 			Multiplier for the light passed on from bounce to bounce inside the DDGI probes. Above [code]1.0[/code], indirectly lit rooms get brighter. See [member DDGIVolume.bounce_energy].
 		</member>
@@ -613,7 +622,10 @@
 		<constant name="DDGI_DEBUG_CASCADES" value="6" enum="DDGIDebugMode">
 			Colors surfaces by the finest probe cascade that covers them.
 		</constant>
-		<constant name="DDGI_DEBUG_MAX" value="7" enum="DDGIDebugMode">
+		<constant name="DDGI_DEBUG_AMBIENT_OCCLUSION" value="7" enum="DDGIDebugMode">
+			Shows the DDGI ambient occlusion (white = open), at full strength even when [member ddgi_ao_enabled] is off.
+		</constant>
+		<constant name="DDGI_DEBUG_MAX" value="8" enum="DDGIDebugMode">
 			Represents the size of the [enum DDGIDebugMode] enum.
 		</constant>
 		<constant name="FOG_MODE_EXPONENTIAL" value="0" enum="FogMode">
