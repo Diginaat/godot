@@ -6,9 +6,18 @@
 
 // Native ray reconstruction (path tracer denoiser), an independent
 // implementation of spatiotemporal variance-guided filtering (Schied et al.
-// 2017). See docs/renderer/native_ray_reconstruction.md.
+// 2017) with temporal gradients for adaptive history (A-SVGF, Schied, Peters,
+// Dachsbacher 2018; reference code BSD-3-Clause, Copyright (c) 2018 Christoph
+// Schied, see COPYRIGHT.txt). See docs/renderer/native_ray_reconstruction.md.
 //
 // Passes (one shader, one mode each):
+//   MODE_GRADIENT_CLEAR    empties the gradient sample tiles (new buffers)
+//   MODE_FORWARD_PROJECT   before the trace: one random pixel per 3x3 tile of
+//                          the last frame is projected into this frame; the
+//                          path tracer replays it there (same random numbers)
+//   MODE_GRADIENT          after the trace: replayed result minus last frame's
+//                          result, per tile
+//   MODE_GRADIENT_FILTER   a-trous over the tile gradients
 //   MODE_TEMPORAL  demodulate, reproject, validate and accumulate history
 //   MODE_VARIANCE  per-pixel variance (spatial estimate for short history)
 //   MODE_ATROUS    one edge-aware a-trous iteration; the last one composes
@@ -144,6 +153,11 @@ layout(rg32ui, set = 1, binding = 12) uniform restrict writeonly uimage2D surfac
 // Specular hit distance (0 = unknown), accumulated like the colors.
 layout(r16f, set = 1, binding = 13) uniform restrict readonly image2D prev_specular_hit_history;
 layout(r16f, set = 1, binding = 14) uniform restrict writeonly image2D specular_hit_history;
+// Filtered temporal gradients per 3x3 tile: (diffuse change, diffuse max,
+// specular change, specular max); max < 0 where no gradient is known.
+layout(rgba16f, set = 1, binding = 15) uniform restrict readonly image2D gradient_image;
+// This frame's raw luminance (diffuse, specular), for the next frame's gradients.
+layout(rg16f, set = 1, binding = 16) uniform restrict writeonly image2D raw_luminance;
 
 // Last frame's specular history at the place where the reflection seen at this
 // pixel was: the virtual image of the hit point, p_hit_distance behind the
@@ -230,6 +244,7 @@ void main() {
 		imageStore(moments_history, pos, vec4(0.0));
 		imageStore(surface, pos, uvec4(0u));
 		imageStore(specular_hit_history, pos, vec4(0.0));
+		imageStore(raw_luminance, pos, vec4(0.0));
 		return;
 	}
 
@@ -320,16 +335,24 @@ void main() {
 		}
 	}
 
-	// Lighting changes (moving lights and emitters, shadows): compare the
-	// history with this frame's 3x3 neighborhood mean (demodulated luminance).
-	// Where it is further away than the neighborhood's noise explains, the
-	// history is shortened in proportion, from the next frame on: shortening
-	// it now would weigh this frame's samples by their own value (they decide
-	// whether the history looks wrong), which darkens skewed path tracing
-	// noise by several percent.
+	// Lighting changes (moving lights and emitters, shadows): the temporal
+	// gradient measured by replaying samples (A-SVGF) gives the fraction of
+	// the history that is outdated (lambda: change / brightness). Without a
+	// gradient (no replayed sample nearby) the history is trusted.
+	vec4 gradient = imageLoad(gradient_image, pos / 3);
+	float diffuse_lambda = gradient.y > 1e-5 ? clamp(abs(gradient.x) / gradient.y, 0.0, 1.0) : 0.0;
+	float specular_lambda = gradient.w > 1e-5 ? clamp(abs(gradient.z) / gradient.w, 0.0, 1.0) : 0.0;
+
+	// Under camera or object motion the history can also be stale in ways a
+	// gradient at a fixed surface point doesn't see (resampling, view
+	// dependent reflections). There, the history is also compared with this
+	// frame's 3x3 neighborhood mean: further away than the neighborhood's
+	// noise explains shortens it in proportion, from the next frame on (in
+	// the same frame it would weigh samples by their own value). Still pixels
+	// skip this: on skewed path tracing noise it darkens by several percent.
 	float diffuse_keep = 1.0;
 	float specular_keep = 1.0;
-	if (diffuse_length > 1.0 || specular_length > 1.0) {
+	if (length((prev_uv - uv) * params.size.xy) > 0.25 && (diffuse_length > 1.0 || specular_length > 1.0)) {
 		float d_sum = 0.0;
 		float d_sq = 0.0;
 		float s_sum = 0.0;
@@ -353,6 +376,7 @@ void main() {
 		diffuse_keep = min(1.0, d_tolerance / max(abs(luminance(prev_diffuse.rgb) - d_mean), 1e-6));
 		specular_keep = min(1.0, s_tolerance / max(abs(luminance(prev_specular.rgb) - s_mean), 1e-6));
 	}
+	imageStore(raw_luminance, pos, vec4(luminance(sanitize(imageLoad(diffuse_image, pos).rgb)), luminance(sanitize(imageLoad(specular_image, pos).rgb)), 0.0, 0.0));
 
 	// Specular hit distance: traced along the mirror direction on smooth
 	// surfaces, sampled (noisy, only when the specular lobe was picked) on
@@ -391,10 +415,10 @@ void main() {
 	diffuse_length = min(diffuse_length + 1.0, params.history.x);
 	specular_length = min(specular_length + 1.0, max_specular);
 
-	float diffuse_alpha = 1.0 / diffuse_length;
-	float specular_alpha = 1.0 / specular_length;
-	float diffuse_moment_alpha = 1.0 / min(diffuse_length, params.history.z);
-	float specular_moment_alpha = 1.0 / min(specular_length, params.history.z);
+	float diffuse_alpha = mix(1.0 / diffuse_length, 1.0, diffuse_lambda);
+	float specular_alpha = mix(1.0 / specular_length, 1.0, specular_lambda);
+	float diffuse_moment_alpha = max(diffuse_alpha, 1.0 / min(diffuse_length, params.history.z));
+	float specular_moment_alpha = max(specular_alpha, 1.0 / min(specular_length, params.history.z));
 
 	float ld = luminance(diffuse);
 	float ls = luminance(specular);
@@ -402,8 +426,9 @@ void main() {
 	moments.xy = mix(prev_moments.xy, moments.xy, diffuse_moment_alpha);
 	moments.zw = mix(prev_moments.zw, moments.zw, specular_moment_alpha);
 
-	imageStore(diffuse_history, pos, vec4(mix(prev_diffuse.rgb, diffuse, diffuse_alpha), max(1.0, diffuse_length * diffuse_keep)));
-	imageStore(specular_history, pos, vec4(mix(prev_specular.rgb, specular, specular_alpha), max(1.0, specular_length * specular_keep)));
+	// The history length follows the blend weight actually used.
+	imageStore(diffuse_history, pos, vec4(mix(prev_diffuse.rgb, diffuse, diffuse_alpha), max(1.0, diffuse_keep / diffuse_alpha)));
+	imageStore(specular_history, pos, vec4(mix(prev_specular.rgb, specular, specular_alpha), max(1.0, specular_keep / specular_alpha)));
 	imageStore(moments_history, pos, moments);
 }
 
@@ -734,3 +759,181 @@ void main() {
 }
 
 #endif // MODE_REFERENCE
+
+// --- Temporal gradients (A-SVGF) ----------------------------------------------
+
+#if defined(MODE_GRADIENT_CLEAR) || defined(MODE_FORWARD_PROJECT) || defined(MODE_GRADIENT) || defined(MODE_GRADIENT_FILTER)
+
+#define GRADIENT_TILE 3
+
+ivec2 gradient_tiles() {
+	return (ivec2(params.size.xy) + GRADIENT_TILE - 1) / GRADIENT_TILE;
+}
+
+#endif
+
+#ifdef MODE_GRADIENT_CLEAR
+
+layout(r32ui, set = 1, binding = 0) uniform restrict writeonly uimage2D gradient_claim;
+layout(rgba32ui, set = 1, binding = 1) uniform restrict writeonly uimage2D gradient_sample;
+
+void main() {
+	ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(tile, gradient_tiles()))) {
+		return;
+	}
+	imageStore(gradient_claim, tile, uvec4(0u));
+	imageStore(gradient_sample, tile, uvec4(0u));
+}
+
+#endif // MODE_GRADIENT_CLEAR
+
+#ifdef MODE_FORWARD_PROJECT
+
+layout(rg32ui, set = 1, binding = 0) uniform restrict readonly uimage2D prev_surface;
+layout(r32ui, set = 1, binding = 1) uniform restrict readonly uimage2D seed_image; // Last frame's seeds.
+layout(r32ui, set = 1, binding = 2) uniform restrict uimage2D gradient_claim;
+layout(rgba32ui, set = 1, binding = 3) uniform restrict writeonly uimage2D gradient_sample;
+layout(rgba32f, set = 1, binding = 4) uniform restrict writeonly image2D gradient_target;
+
+uint hash(uint x) {
+	x ^= x >> 16u;
+	x *= 0x7feb352du;
+	x ^= x >> 15u;
+	x *= 0x846ca68bu;
+	x ^= x >> 16u;
+	return x;
+}
+
+// One thread per tile of the last frame: a random pixel of it moves to where
+// its surface point is now (camera motion), and claims that tile.
+void main() {
+	ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = ivec2(params.size.xy);
+	if (any(greaterThanEqual(tile, gradient_tiles()))) {
+		return;
+	}
+	uint h = hash(uint(tile.x) + uint(tile.y) * 4099u + uint(pc.iteration) * 16777619u);
+	ivec2 q = tile * GRADIENT_TILE + ivec2(h % 3u, (h / 3u) % 3u);
+	if (any(greaterThanEqual(q, size))) {
+		return;
+	}
+	float depth;
+	vec3 normal;
+	float roughness;
+	unpack_surface(imageLoad(prev_surface, q).xy, depth, normal, roughness);
+	if (depth <= 0.0) {
+		return;
+	}
+	vec2 quv = (vec2(q) + 0.5) * params.size.zw;
+	vec3 prev_view = vec3(quv * params.previous_view_ray.xy + params.previous_view_ray.zw, -1.0) * depth;
+	vec3 view = (params.previous_to_current_view * vec4(prev_view, 1.0)).xyz;
+	if (view.z > -1e-3) {
+		return;
+	}
+	vec2 uv = project_uv(params.projection_unjittered, view);
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThanEqual(uv, vec2(1.0)))) {
+		return;
+	}
+	ivec2 p = ivec2(uv * params.size.xy);
+	ivec2 target_tile = p / GRADIENT_TILE;
+	ivec2 in_tile = p % GRADIENT_TILE;
+	if (imageAtomicCompSwap(gradient_claim, target_tile, 0u, 1u) == 0u) {
+		uint packed = (1u << 31u) | uint(in_tile.x + GRADIENT_TILE * in_tile.y);
+		imageStore(gradient_sample, target_tile, uvec4(packed, uint(q.x + q.y * size.x), imageLoad(seed_image, q).x, 0u));
+		imageStore(gradient_target, target_tile, vec4(view, length(view)));
+	}
+}
+
+#endif // MODE_FORWARD_PROJECT
+
+#ifdef MODE_GRADIENT
+
+layout(r32ui, set = 1, binding = 0) uniform restrict writeonly uimage2D gradient_claim;
+layout(rgba32ui, set = 1, binding = 1) uniform restrict uimage2D gradient_sample;
+layout(rgba16f, set = 1, binding = 2) uniform restrict readonly image2D diffuse_image;
+layout(rgba16f, set = 1, binding = 3) uniform restrict readonly image2D specular_image;
+layout(rg16f, set = 1, binding = 4) uniform restrict readonly image2D prev_raw_luminance;
+layout(rgba16f, set = 1, binding = 5) uniform restrict writeonly image2D gradient_out;
+
+void main() {
+	ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = ivec2(params.size.xy);
+	if (any(greaterThanEqual(tile, gradient_tiles()))) {
+		return;
+	}
+	uvec4 gs = imageLoad(gradient_sample, tile);
+	vec4 result = vec4(0.0, -1.0, 0.0, -1.0);
+	// Only samples whose replayed ray hit the projected point (w = 1).
+	if ((gs.x >> 31u) != 0u && gs.w == 1u) {
+		uint offset = gs.x & 0xFu;
+		ivec2 p = tile * GRADIENT_TILE + ivec2(offset % 3u, offset / 3u);
+		ivec2 q = ivec2(gs.y % uint(size.x), gs.y / uint(size.x));
+		vec2 prev = imageLoad(prev_raw_luminance, q).xy;
+		float d = luminance(sanitize(imageLoad(diffuse_image, p).rgb));
+		float s = luminance(sanitize(imageLoad(specular_image, p).rgb));
+		result = vec4(d - prev.x, max(d, prev.x), s - prev.y, max(s, prev.y));
+	}
+	imageStore(gradient_out, tile, result);
+	// Empty the tile for the next frame's forward projection.
+	imageStore(gradient_sample, tile, uvec4(0u));
+	imageStore(gradient_claim, tile, uvec4(0u));
+}
+
+#endif // MODE_GRADIENT
+
+#ifdef MODE_GRADIENT_FILTER
+
+layout(rgba16f, set = 1, binding = 0) uniform restrict readonly image2D gradient_in;
+layout(rgba16f, set = 1, binding = 1) uniform restrict writeonly image2D gradient_out;
+layout(r32f, set = 1, binding = 2) uniform restrict readonly image2D depth_image;
+
+float tile_depth(ivec2 p_tile) {
+	ivec2 p = min(p_tile * GRADIENT_TILE + 1, ivec2(params.size.xy) - 1);
+	float ndc = imageLoad(depth_image, p).r;
+	return ndc > 0.0 ? -view_position((vec2(p) + 0.5) * params.size.zw, ndc).z : 0.0;
+}
+
+// The gradient samples are sparse (one per tile, where one could be replayed)
+// and noisy; the change and the brightness are averaged separately over
+// neighboring tiles of similar depth.
+void main() {
+	ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 tiles = gradient_tiles();
+	if (any(greaterThanEqual(tile, tiles))) {
+		return;
+	}
+	float z = tile_depth(tile);
+	vec4 sum = vec4(0.0);
+	vec2 weight = vec2(0.0);
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			ivec2 t = tile + ivec2(x, y) * pc.step_size;
+			if (any(lessThan(t, ivec2(0))) || any(greaterThanEqual(t, tiles))) {
+				continue;
+			}
+			vec4 g = imageLoad(gradient_in, t);
+			float k = (x == 0 ? 1.0 : 0.5) * (y == 0 ? 1.0 : 0.5);
+			float zt = tile_depth(t);
+			k *= (z > 0.0 && zt > 0.0) ? exp(-abs(zt - z) / (0.05 * z)) : (z == zt ? 1.0 : 0.0);
+			if (g.y >= 0.0) {
+				sum.xy += k * g.xy;
+				weight.x += k;
+			}
+			if (g.w >= 0.0) {
+				sum.zw += k * g.zw;
+				weight.y += k;
+			}
+		}
+	}
+	vec4 result = vec4(0.0, -1.0, 0.0, -1.0);
+	if (weight.x > 1e-4) {
+		result.xy = sum.xy / weight.x;
+	}
+	if (weight.y > 1e-4) {
+		result.zw = sum.zw / weight.y;
+	}
+	imageStore(gradient_out, tile, result);
+}
+
+#endif // MODE_GRADIENT_FILTER

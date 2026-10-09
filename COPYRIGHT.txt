@@ -180,6 +180,13 @@ Comment: Temporal Anti-Aliasing resolve implementation
 Copyright: 2016, Panos Karabelas
 License: Expat
 
+Files: servers/rendering/renderer_rd/shaders/effects/ray_reconstruction.glsl
+Comment: Temporal gradient estimation for adaptive temporal filtering (A-SVGF),
+ after the reference code of Schied, Peters, Dachsbacher 2018
+Copyright: 2018, Christoph Schied
+ 2014-present, Godot Engine contributors.
+License: BSD-3-clause and Expat
+
 Files: servers/rendering/renderer_rd/shaders/effects/smaa_blending.glsl
  servers/rendering/renderer_rd/shaders/effects/smaa_weight_calculation.glsl
  servers/rendering/renderer_rd/shaders/effects/smaa_edge_detection.glsl

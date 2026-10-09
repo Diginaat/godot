@@ -28,6 +28,7 @@ repository** and the **editor builds on the Releases page**.
 | NVIDIA DLSS / NGX, Reflex, Streamline runtime DLLs | **Not included**, download from NVIDIA | NVIDIA RTX SDKs License, NVIDIA SDK License, MIT (Streamline core) | Shipped inside the Streamline SDK download |
 | Microsoft DirectX Agility SDK (`D3D12Core.dll`, `d3d12SDKLayers.dll`) | Release zips only | Microsoft DirectX license (distributable files) | [`misc/dist/licenses/`](misc/dist/licenses/) |
 | Mesa NIR (SPIR-V to DXIL, via [godot-nir-static](https://github.com/godotengine/godot-nir-static)) | Linked into the editor | MIT | [Mesa licenses](https://docs.mesa3d.org/license.html) |
+| Native path tracer denoiser, temporal gradients (A-SVGF, Schied et al. 2018) | `servers/rendering/renderer_rd/shaders/effects/ray_reconstruction.glsl` | BSD-3-Clause (reference code, Copyright (c) 2018 Christoph Schied, Karlsruhe Institute of Technology), with MIT for this fork's code | [`COPYRIGHT.txt`](COPYRIGHT.txt) |
 | GodotSharp (.NET editor only) | `GodotSharp/` in the .NET release | MIT (part of Godot) | [`LICENSE.txt`](LICENSE.txt) |
 
 ## Details

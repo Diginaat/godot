@@ -54,6 +54,9 @@
 #define RB_TEX_NATIVE_RR_DIFFUSE SNAME("diffuse")
 #define RB_TEX_NATIVE_RR_SPECULAR SNAME("specular")
 #define RB_TEX_NATIVE_RR_GUIDE SNAME("guide")
+#define RB_TEX_NATIVE_RR_SEED SNAME("seed")
+#define RB_TEX_NATIVE_RR_GRADIENT_SAMPLE SNAME("gradient_sample") // One texel per 3x3 tile.
+#define RB_TEX_NATIVE_RR_GRADIENT_TARGET SNAME("gradient_target") // One texel per 3x3 tile.
 
 class RenderDataRD;
 class RenderSceneBuffersRD;

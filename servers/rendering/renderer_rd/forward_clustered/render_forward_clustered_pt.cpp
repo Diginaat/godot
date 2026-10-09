@@ -347,6 +347,41 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 		// Ensure raytracing output textures exist.
 		raytracing->rt_ensure_textures(rb.ptr());
 
+		// Native ray reconstruction: inputs, and the gradient samples the
+		// trace replays (begin_frame) before it.
+		const bool native_rr = (rt_flags & SceneShaderRaytracing::RT_FLAG_NATIVE_RR_ENABLED) && raytracing->native_rr_has_buffers(rb.ptr());
+		RendererRD::RayReconstruction::Inputs rr_inputs;
+		if (native_rr) {
+			if (!ray_reconstruction) {
+				ray_reconstruction = memnew(RendererRD::RayReconstruction);
+			}
+			rr_inputs.base = raytracing->rt_get_texture(rb.ptr());
+			rr_inputs.diffuse = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE);
+			rr_inputs.specular = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SPECULAR);
+			rr_inputs.guide = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GUIDE);
+			rr_inputs.depth = raytracing->rt_get_depth_texture(rb.ptr());
+			rr_inputs.velocity = rb->get_velocity_buffer(false);
+			rr_inputs.size = rb->get_internal_size();
+			{
+				const RenderSceneDataRD *sd = p_render_data->scene_data;
+				Projection correction;
+				correction.set_depth_correction(sd->flip_y);
+				Projection prev_correction = correction;
+				prev_correction.add_jitter_offset(sd->prev_taa_jitter);
+				rr_inputs.projection = sd->get_cam_projection();
+				rr_inputs.prev_projection = prev_correction * sd->prev_cam_projection;
+				rr_inputs.projection_unjittered = correction * sd->cam_projection;
+				rr_inputs.prev_projection_unjittered = correction * sd->prev_cam_projection;
+			}
+			rr_inputs.cam_transform = p_render_data->scene_data->cam_transform;
+			rr_inputs.prev_cam_transform = p_render_data->scene_data->prev_cam_transform;
+			rr_inputs.output = rb->get_internal_texture(0);
+			rr_inputs.seed = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SEED);
+			rr_inputs.gradient_sample = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GRADIENT_SAMPLE);
+			rr_inputs.gradient_target = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GRADIENT_TARGET);
+			ray_reconstruction->begin_frame(rb, rr_inputs);
+		}
+
 		RENDER_TIMESTAMP("Pathtracer");
 
 		// rt_flags was computed at TLAS-build time above and matches what
@@ -384,34 +419,7 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 			RD::get_singleton()->draw_command_end_label();
 		}
 
-		if ((rt_flags & SceneShaderRaytracing::RT_FLAG_NATIVE_RR_ENABLED) && raytracing->native_rr_has_buffers(rb.ptr())) {
-			// Native ray reconstruction writes the internal color texture.
-			if (!ray_reconstruction) {
-				ray_reconstruction = memnew(RendererRD::RayReconstruction);
-			}
-			RendererRD::RayReconstruction::Inputs rr_inputs;
-			rr_inputs.base = raytracing->rt_get_texture(rb.ptr());
-			rr_inputs.diffuse = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_DIFFUSE);
-			rr_inputs.specular = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_SPECULAR);
-			rr_inputs.guide = rb->get_texture(RB_SCOPE_NATIVE_RR, RB_TEX_NATIVE_RR_GUIDE);
-			rr_inputs.depth = raytracing->rt_get_depth_texture(rb.ptr());
-			rr_inputs.velocity = rb->get_velocity_buffer(false);
-			rr_inputs.size = rb->get_internal_size();
-			{
-				const RenderSceneDataRD *sd = p_render_data->scene_data;
-				Projection correction;
-				correction.set_depth_correction(sd->flip_y);
-				Projection prev_correction = correction;
-				prev_correction.add_jitter_offset(sd->prev_taa_jitter);
-				rr_inputs.projection = sd->get_cam_projection();
-				rr_inputs.prev_projection = prev_correction * sd->prev_cam_projection;
-				rr_inputs.projection_unjittered = correction * sd->cam_projection;
-				rr_inputs.prev_projection_unjittered = correction * sd->prev_cam_projection;
-			}
-			rr_inputs.cam_transform = p_render_data->scene_data->cam_transform;
-			rr_inputs.prev_cam_transform = p_render_data->scene_data->prev_cam_transform;
-			// The path tracer traces one view; other views get a copy.
-			rr_inputs.output = rb->get_internal_texture(0);
+		if (native_rr) {
 			ray_reconstruction->process(rb, rr_inputs);
 			for (uint32_t v = 1; v < rb->get_view_count(); v++) {
 				copy_effects->copy_to_rect(rb->get_internal_texture(0), rb->get_internal_texture(v), Rect2i(Point2i(), rr_inputs.size), false, false, false, false, false, true);

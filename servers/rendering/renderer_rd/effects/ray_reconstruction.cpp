@@ -48,6 +48,10 @@ RayReconstruction::RayReconstruction() {
 	modes.push_back("\n#define MODE_VARIANCE\n");
 	modes.push_back("\n#define MODE_ATROUS\n");
 	modes.push_back("\n#define MODE_REFERENCE\n");
+	modes.push_back("\n#define MODE_GRADIENT_CLEAR\n");
+	modes.push_back("\n#define MODE_FORWARD_PROJECT\n");
+	modes.push_back("\n#define MODE_GRADIENT\n");
+	modes.push_back("\n#define MODE_GRADIENT_FILTER\n");
 	shader.initialize(modes);
 	shader_version = shader.version_create();
 	for (int i = 0; i < MODE_MAX; i++) {
@@ -95,7 +99,10 @@ bool RayReconstruction::_ensure_history(Ref<RenderSceneBuffersRD> p_render_buffe
 		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("specular_hit_" + n), RD::DATA_FORMAT_R16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
 		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("filter_diffuse_" + n), RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
 		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("filter_specular_" + n), RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
+		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("raw_luminance_" + n), RD::DATA_FORMAT_R16G16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, Size2i(), 1);
+		p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, StringName("gradient_" + n), RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage, RD::TEXTURE_SAMPLES_1, (p_render_buffers->get_internal_size() + Size2i(2, 2)) / 3, 1);
 	}
+	p_render_buffers->create_texture(RB_SCOPE_RR_HISTORY, SNAME("gradient_claim"), RD::DATA_FORMAT_R32_UINT, usage, RD::TEXTURE_SAMPLES_1, (p_render_buffers->get_internal_size() + Size2i(2, 2)) / 3, 1);
 	return false;
 }
 
@@ -138,35 +145,7 @@ void RayReconstruction::_process_reference(Ref<RenderSceneBuffersRD> p_render_bu
 	RENDER_TIMESTAMP("RR Done");
 }
 
-void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs) {
-	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
-	ERR_FAIL_NULL(uniform_set_cache);
-	RD *rd = RD::get_singleton();
-
-	ViewportState &vs = viewports[p_render_buffers.ptr()];
-	if (vs.params_buffer.is_null()) {
-		vs.params_buffer = rd->uniform_buffer_create(sizeof(ParamsUBO));
-	}
-
-	const uint32_t debug_mode = uint32_t(int(GLOBAL_GET_CACHED(int, "rendering/ray_reconstruction/debug_mode")));
-	if (debug_mode == DEBUG_REFERENCE) {
-		ParamsUBO ubo = {};
-		ubo.size[0] = p_inputs.size.x;
-		ubo.size[1] = p_inputs.size.y;
-		rd->buffer_update(vs.params_buffer, 0, sizeof(ParamsUBO), &ubo);
-		_process_reference(p_render_buffers, p_inputs, vs);
-		return;
-	}
-	vs.reference_active = false;
-	const bool history_valid = _ensure_history(p_render_buffers) && vs.frame > 0;
-	const uint32_t cur = vs.frame & 1;
-	const uint32_t prev = cur ^ 1;
-	vs.frame++;
-
-	auto tex = [&](const char *p_name, uint32_t p_index) -> RID {
-		return p_render_buffers->get_texture(RB_SCOPE_RR_HISTORY, StringName(String(p_name) + itos(p_index)));
-	};
-
+void RayReconstruction::_update_params(ViewportState &r_state, const Inputs &p_inputs, bool p_history_valid) {
 	ParamsUBO ubo = {};
 	MaterialStorage::store_camera(p_inputs.projection.inverse(), ubo.inv_projection);
 	MaterialStorage::store_transform(Transform3D(p_inputs.cam_transform.basis, Vector3()), ubo.view_to_world_rotation);
@@ -178,7 +157,7 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 	ubo.history[0] = 32.0f; // Max diffuse history (frames).
 	ubo.history[1] = 24.0f; // Max specular history (rough surfaces).
 	ubo.history[2] = 8.0f; // Max moment history.
-	ubo.history[3] = history_valid ? 1.0f : 0.0f;
+	ubo.history[3] = p_history_valid ? 1.0f : 0.0f;
 	ubo.filter_params[0] = 4.0f; // Luminance sigma (in standard deviations).
 	ubo.filter_params[1] = 128.0f; // Normal power.
 	ubo.filter_params[2] = 1.0f; // Plane distance sigma (in pixel footprints).
@@ -203,7 +182,100 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 	MaterialStorage::store_camera(p_inputs.prev_projection_unjittered, ubo.previous_projection_unjittered);
 	MaterialStorage::store_transform(p_inputs.cam_transform.affine_inverse() * p_inputs.prev_cam_transform, ubo.previous_to_current_view);
 	ubo.specular_params[0] = 0.4f; // Virtual (reflection) reprojection blends to surface motion up to this roughness.
-	rd->buffer_update(vs.params_buffer, 0, sizeof(ParamsUBO), &ubo);
+	RD::get_singleton()->buffer_update(r_state.params_buffer, 0, sizeof(ParamsUBO), &ubo);
+}
+
+void RayReconstruction::begin_frame(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs) {
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL(uniform_set_cache);
+	RD *rd = RD::get_singleton();
+
+	ViewportState &vs = viewports[p_render_buffers.ptr()];
+	if (vs.params_buffer.is_null()) {
+		vs.params_buffer = rd->uniform_buffer_create(sizeof(ParamsUBO));
+	}
+	vs.begun = false;
+	if (uint32_t(int(GLOBAL_GET_CACHED(int, "rendering/ray_reconstruction/debug_mode"))) == DEBUG_REFERENCE) {
+		return;
+	}
+	vs.history_valid = _ensure_history(p_render_buffers) && vs.frame > 0;
+	_update_params(vs, p_inputs, vs.history_valid);
+	vs.begun = true;
+
+	const Size2i tiles = (p_inputs.size + Size2i(2, 2)) / 3;
+	RID claim = p_render_buffers->get_texture(RB_SCOPE_RR_HISTORY, SNAME("gradient_claim"));
+	RD::Uniform u_params(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vs.params_buffer);
+	PushConstant pc = {};
+
+	RENDER_TIMESTAMP("RR Forward Project");
+	RD::ComputeListID cl = rd->compute_list_begin();
+	if (vs.cleared_gradient_sample != p_inputs.gradient_sample) {
+		// New buffers: no tile is claimed yet.
+		RID s = _get_shader(MODE_GRADIENT_CLEAR);
+		rd->compute_list_bind_compute_pipeline(cl, pipelines[MODE_GRADIENT_CLEAR]);
+		rd->compute_list_bind_uniform_set(cl, uniform_set_cache->get_cache(s, 0, u_params), 0);
+		rd->compute_list_bind_uniform_set(cl, uniform_set_cache->get_cache(s, 1, RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 0, claim), RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, p_inputs.gradient_sample)), 1);
+		rd->compute_list_set_push_constant(cl, &pc, sizeof(PushConstant));
+		rd->compute_list_dispatch_threads(cl, tiles.x, tiles.y, 1);
+		rd->compute_list_add_barrier(cl);
+		vs.cleared_gradient_sample = p_inputs.gradient_sample;
+	}
+	if (vs.history_valid) {
+		// Last frame's surface records are in the copy the next process() overwrites.
+		const uint32_t last = (vs.frame & 1) ^ 1;
+		RID s = _get_shader(MODE_FORWARD_PROJECT);
+		rd->compute_list_bind_compute_pipeline(cl, pipelines[MODE_FORWARD_PROJECT]);
+		rd->compute_list_bind_uniform_set(cl, uniform_set_cache->get_cache(s, 0, u_params), 0);
+		RID set = uniform_set_cache->get_cache(s, 1,
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 0, p_render_buffers->get_texture(RB_SCOPE_RR_HISTORY, StringName("surface_" + itos(last)))),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, p_inputs.seed),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, claim),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 3, p_inputs.gradient_sample),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 4, p_inputs.gradient_target));
+		rd->compute_list_bind_uniform_set(cl, set, 1);
+		pc.iteration = int32_t(vs.frame);
+		rd->compute_list_set_push_constant(cl, &pc, sizeof(PushConstant));
+		rd->compute_list_dispatch_threads(cl, tiles.x, tiles.y, 1);
+	}
+	rd->compute_list_end();
+}
+
+void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs) {
+	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
+	ERR_FAIL_NULL(uniform_set_cache);
+	RD *rd = RD::get_singleton();
+
+	ViewportState &vs = viewports[p_render_buffers.ptr()];
+	if (vs.params_buffer.is_null()) {
+		vs.params_buffer = rd->uniform_buffer_create(sizeof(ParamsUBO));
+	}
+
+	const uint32_t debug_mode = uint32_t(int(GLOBAL_GET_CACHED(int, "rendering/ray_reconstruction/debug_mode")));
+	if (debug_mode == DEBUG_REFERENCE) {
+		ParamsUBO ubo = {};
+		ubo.size[0] = p_inputs.size.x;
+		ubo.size[1] = p_inputs.size.y;
+		rd->buffer_update(vs.params_buffer, 0, sizeof(ParamsUBO), &ubo);
+		_process_reference(p_render_buffers, p_inputs, vs);
+		return;
+	}
+	vs.reference_active = false;
+	if (!vs.begun) {
+		// begin_frame() didn't run (the mode changed in between): no gradients.
+		vs.history_valid = _ensure_history(p_render_buffers) && vs.frame > 0;
+		_update_params(vs, p_inputs, vs.history_valid);
+	}
+	vs.begun = false;
+	const uint32_t cur = vs.frame & 1;
+	const uint32_t prev = cur ^ 1;
+	vs.frame++;
+	// Without valid history the gradient pass sees no claimed tiles (begin_frame
+	// skipped the projection), so every lambda is 0 and nothing is lost.
+
+	auto tex = [&](const char *p_name, uint32_t p_index) -> RID {
+		return p_render_buffers->get_texture(RB_SCOPE_RR_HISTORY, StringName(String(p_name) + itos(p_index)));
+	};
+
 
 	PushConstant pc = {};
 	pc.debug_mode = debug_mode;
@@ -211,6 +283,47 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 	RD::Uniform u_params(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vs.params_buffer);
 
 	rd->draw_command_begin_label("Ray Reconstruction");
+
+	// 0. Temporal gradients of the replayed samples, filtered over the tiles.
+	const Size2i tiles = (p_inputs.size + Size2i(2, 2)) / 3;
+	RENDER_TIMESTAMP("RR Gradient");
+	{
+		RD::ComputeListID cl = rd->compute_list_begin();
+		RID s = _get_shader(MODE_GRADIENT);
+		rd->compute_list_bind_compute_pipeline(cl, pipelines[MODE_GRADIENT]);
+		rd->compute_list_bind_uniform_set(cl, uniform_set_cache->get_cache(s, 0, u_params), 0);
+		RID set = uniform_set_cache->get_cache(s, 1,
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 0, p_render_buffers->get_texture(RB_SCOPE_RR_HISTORY, SNAME("gradient_claim"))),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, p_inputs.gradient_sample),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, p_inputs.diffuse),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 3, p_inputs.specular),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 4, tex("raw_luminance_", prev)),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 5, tex("gradient_", 0)));
+		rd->compute_list_bind_uniform_set(cl, set, 1);
+		rd->compute_list_set_push_constant(cl, &pc, sizeof(PushConstant));
+		rd->compute_list_dispatch_threads(cl, tiles.x, tiles.y, 1);
+		rd->compute_list_add_barrier(cl);
+
+		s = _get_shader(MODE_GRADIENT_FILTER);
+		rd->compute_list_bind_compute_pipeline(cl, pipelines[MODE_GRADIENT_FILTER]);
+		rd->compute_list_bind_uniform_set(cl, uniform_set_cache->get_cache(s, 0, u_params), 0);
+		for (int i = 0; i < GRADIENT_FILTER_ITERATIONS; i++) {
+			set = uniform_set_cache->get_cache(s, 1,
+					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 0, tex("gradient_", i & 1)),
+					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 1, tex("gradient_", (i & 1) ^ 1)),
+					RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 2, p_inputs.depth));
+			rd->compute_list_bind_uniform_set(cl, set, 1);
+			PushConstant gpc = pc;
+			gpc.step_size = 1 << i;
+			rd->compute_list_set_push_constant(cl, &gpc, sizeof(PushConstant));
+			rd->compute_list_dispatch_threads(cl, tiles.x, tiles.y, 1);
+			if (i < GRADIENT_FILTER_ITERATIONS - 1) {
+				rd->compute_list_add_barrier(cl);
+			}
+		}
+		rd->compute_list_end();
+	}
+	const RID gradient = tex("gradient_", GRADIENT_FILTER_ITERATIONS & 1);
 
 	// 1. Temporal accumulation.
 	RENDER_TIMESTAMP("RR Temporal");
@@ -235,7 +348,9 @@ void RayReconstruction::process(Ref<RenderSceneBuffersRD> p_render_buffers, cons
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, tex("moments_", cur)),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, tex("surface_", cur)),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, tex("specular_hit_", prev)),
-				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 14, tex("specular_hit_", cur)));
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 14, tex("specular_hit_", cur)),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 15, gradient),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 16, tex("raw_luminance_", cur)));
 		rd->compute_list_bind_uniform_set(cl, set, 1);
 		rd->compute_list_set_push_constant(cl, &pc, sizeof(PushConstant));
 		rd->compute_list_dispatch_threads(cl, p_inputs.size.x, p_inputs.size.y, 1);

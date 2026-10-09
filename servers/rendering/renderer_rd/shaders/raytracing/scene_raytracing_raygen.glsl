@@ -113,6 +113,25 @@ void main() {
 	// Sample count from specialization constant, frame index from uniform
 	const uint samples_per_pixel = RT_GET_SAMPLE_COUNT();
 	uint frame_index = uint(get_rt_param(RT_PARAM_FRAME_INDEX));
+	uint seed_key = rng_seed_key(pixel, frame_index);
+
+#ifdef NATIVE_RR_ENABLED
+	// A-SVGF gradient sample: one pixel per 3x3 tile replays a pixel of the
+	// last frame: same surface point (forward projected) and same random
+	// numbers, so the difference of the two results is the change of the
+	// lighting, without noise.
+	const ivec2 rr_tile = ivec2(pixel / RR_GRADIENT_TILE);
+	uvec4 rr_gs = imageLoad(rr_gradient_sample, rr_tile);
+	const uvec2 rr_in_tile = pixel % RR_GRADIENT_TILE;
+	const bool rr_gradient = (rr_gs.x >> 31u) != 0u && (rr_gs.x & 0xFu) == rr_in_tile.x + RR_GRADIENT_TILE * rr_in_tile.y;
+	vec4 rr_target = vec4(0.0);
+	if (rr_gradient) {
+		rr_target = imageLoad(rr_gradient_target, rr_tile);
+		seed_key = rr_gs.z;
+		direction = inv_view * vec4(normalize(rr_target.xyz), 0.0);
+	}
+	imageStore(rr_seed, ivec2(pixel), uvec4(seed_key));
+#endif
 
 	// Accumulate multiple samples per pixel
 	vec3 total_radiance = vec3(0.0);
@@ -136,7 +155,7 @@ void main() {
 		ps.radiance = vec3(0.0);
 		ps.throughput = vec3(1.0);
 		ps.packed_bounces_flags = (sample_idx == 0u) ? set_sample_zero(0u) : 0u;
-		ps.rng_state = init_rng(pixel, frame_index, sample_idx);
+		ps.rng_state = init_rng_from_key(seed_key, sample_idx);
 
 		vec3 ray_origin = origin.xyz;
 		vec3 ray_dir = direction.xyz;
@@ -174,6 +193,12 @@ void main() {
 
 			ps = path_unpack(payload);
 #ifdef NATIVE_RR_ENABLED
+			if (bounce == 0u && rr_gradient && sample_idx == 0u) {
+				// Valid only when the replayed ray hit the projected point.
+				bool hit_same = abs(ps.hit_t - rr_target.w) < 0.01 * rr_target.w + 0.01;
+				rr_gs.w = hit_same ? 1u : 0u;
+				imageStore(rr_gradient_sample, rr_tile, rr_gs);
+			}
 			if (bounce == 0u && is_rr_primary_split(ps.packed_bounces_flags)) {
 				rr_split = true;
 				rr_diffuse_lobe = get_diffuse_bounces(ps.packed_bounces_flags) > 0u;

@@ -51,6 +51,9 @@ public:
 		RID depth; // NDC depth, 0 for sky (r32f).
 		RID velocity; // prev_uv - curr_uv (rg16f).
 		RID output; // Internal color texture (rgba16f).
+		RID seed; // Random seed key per pixel (r32ui); last frame's until the trace.
+		RID gradient_sample; // A-SVGF gradient sample per 3x3 tile (rgba32ui).
+		RID gradient_target; // Projected surface point per 3x3 tile (rgba32f).
 		Size2i size;
 		Projection projection; // As the path tracer's primary rays use it (depth correction and jitter included).
 		Projection prev_projection; // Same for the previous frame.
@@ -63,6 +66,10 @@ public:
 	RayReconstruction();
 	~RayReconstruction();
 
+	// Before the trace: parameters, and the forward projection of last
+	// frame's gradient samples (the path tracer replays them).
+	void begin_frame(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs);
+	// After the trace: gradients, temporal accumulation, filters, compose.
 	void process(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs);
 	// Drops the per-viewport state (history parity, parameter buffer).
 	void free_viewport(RenderSceneBuffersRD *p_render_buffers);
@@ -73,8 +80,14 @@ private:
 		MODE_VARIANCE,
 		MODE_ATROUS,
 		MODE_REFERENCE,
+		MODE_GRADIENT_CLEAR,
+		MODE_FORWARD_PROJECT,
+		MODE_GRADIENT,
+		MODE_GRADIENT_FILTER,
 		MODE_MAX,
 	};
+
+	static constexpr int GRADIENT_FILTER_ITERATIONS = 3;
 
 	enum {
 		FLAG_COMPOSE = 2,
@@ -116,6 +129,10 @@ private:
 		// Reference mode: restarts when the camera moves or the mode is entered.
 		bool reference_active = false;
 		Transform3D reference_cam_transform;
+		// The gradient sample buffer last cleared (new buffers start empty).
+		RID cleared_gradient_sample;
+		bool begun = false; // begin_frame() ran for this frame.
+		bool history_valid = false;
 	};
 
 	RayReconstructionShaderRD shader;
@@ -125,6 +142,7 @@ private:
 
 	RID _get_shader(Mode p_mode);
 	bool _ensure_history(Ref<RenderSceneBuffersRD> p_render_buffers);
+	void _update_params(ViewportState &r_state, const Inputs &p_inputs, bool p_history_valid);
 	void _process_reference(Ref<RenderSceneBuffersRD> p_render_buffers, const Inputs &p_inputs, ViewportState &r_state);
 };
 

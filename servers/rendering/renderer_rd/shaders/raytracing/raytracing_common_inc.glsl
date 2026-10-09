@@ -77,6 +77,17 @@ layout(set = 0, binding = 12, r16f) uniform image2D dlss_rr_specular_hit_dist;
 layout(set = 0, binding = 40, rgba16f) uniform image2D rr_diffuse;
 layout(set = 0, binding = 41, rgba16f) uniform image2D rr_specular;
 layout(set = 0, binding = 42, rgba32ui) uniform uimage2D rr_guide;
+// A-SVGF gradient samples (Schied et al. 2018). rr_seed: the random seed key
+// each pixel used (read by the next frame's forward projection).
+// rr_gradient_sample (one texel per 3x3 tile): x = bit 31 claimed, bits 0-3
+// the pixel in the tile (x + 3 * y); y = previous pixel index; z = previous
+// seed key; w = 1 when the replayed sample hit the projected surface.
+// rr_gradient_target (one texel per tile): xyz = the projected surface point in
+// view space, w = its distance from the camera.
+layout(set = 0, binding = 43, r32ui) uniform uimage2D rr_seed;
+layout(set = 0, binding = 44, rgba32ui) uniform uimage2D rr_gradient_sample;
+layout(set = 0, binding = 45, rgba32f) uniform image2D rr_gradient_target;
+#define RR_GRADIENT_TILE 3u
 
 #define RR_MISS_DISTANCE 10000.0
 #define RR_GUIDE_FLAG_TRANSMISSIVE 1u
