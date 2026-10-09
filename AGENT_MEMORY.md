@@ -120,6 +120,10 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   the hysteresis when the light changed") biases the result and turns ray
   noise into flicker. Require the change to stand out of the noise and to
   repeat before acting on it.
+- Code that renders extra frames with `RenderingServer::draw()` inside one
+  main loop iteration (baking, previews) must not break per-frame state:
+  the Streamline frame token advances once per iteration, so DLSS gets a
+  new token when its constants were already set for the current one.
 - Opening a test project in the editor rewrites its `project.godot` (drops
   values equal to the defaults) and adds `.uid` files: revert those.
 
