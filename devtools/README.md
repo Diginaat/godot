@@ -27,7 +27,8 @@ build (`bin/`) and the packages (`dist/`).
    the "Desktop development with C++" workload. For PhysX GPU dynamics also
    the CUDA Toolkit 12.8 (`winget install Nvidia.CUDA --version 12.8`), for
    the C# editor the .NET SDK 8 or newer.
-2. Clone and run the setup:
+2. Clone into a short folder (MSVC can't handle paths over 260 characters,
+   and the build's deepest files add about 150), then run the setup:
    ```
    git clone -b nvidia-dlss-physx https://github.com/Diginaat/godot.git godot-rtx
    cd godot-rtx

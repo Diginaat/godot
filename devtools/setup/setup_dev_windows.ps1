@@ -38,6 +38,12 @@ function Have($command) { return [bool](Get-Command $command -ErrorAction Silent
 
 # 1. Tools.
 Step "Checking the tools"
+# MSVC can't write object files whose full path is longer than 260
+# characters, and Godot's longest one adds about 150 to the repository path.
+if ($root.Length -gt 80) {
+	Fail "The repository path is too long for the build ($($root.Length) characters: $root). Clone it into a short folder, for example C:\dev\godot-rtx."
+}
+Ok "Repository path: $root"
 if (-not (Have git)) { Fail "Git is missing. Install it: winget install Git.Git" }
 Ok (git --version)
 if (-not (Have python)) { Fail "Python 3 is missing. Install it: winget install Python.Python.3.12" }
