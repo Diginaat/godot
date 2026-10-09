@@ -171,6 +171,7 @@ Releases on GitHub name the Godot base and the own version:
 | 0.2.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.2.0` | In-editor DLSS installer |
 | 0.3.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.3.0` | Blast and Flow in releases; path tracer: volumetric fog, glass |
 | 0.4.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.4.0` | DDGI Forward+ global illumination and `DDGIVolume` node |
+| 0.5.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.0` | DDGI baking, realtime updates, smooth light changes, bounce energy, probe count |
 
 ## Release packages (Windows)
 
