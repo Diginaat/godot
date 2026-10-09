@@ -54,6 +54,15 @@ def get_doc_classes():
         "PhysXBoat3D",
         "PhysXWaterWake3D",
         "PhysXWaterSpray3D",
+        "PhysXGranular3D",
+        "PhysXGas3D",
+        "PhysXGasEmitter3D",
+        "PhysXBlastAuthoring",
+        "WaterRippleProbe",
+        "GodotPhysXVehicleProbe",
+        "GodotPhysXMotorcycleProbe",
+        "GodotPhysXTankProbe",
+        "GodotPhysXBlastProbe",
     ]
 
 

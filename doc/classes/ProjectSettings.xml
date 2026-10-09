@@ -2857,6 +2857,24 @@
 			Number of solver velocity iterations. The greater the number of iterations, the more accurate the simulation will be, at the cost of CPU performance.
 			[b]Note:[/b] This needs to be at least [code]2[/code] in order for friction to work, as friction is applied using the non-penetration impulse from the previous iteration.
 		</member>
+		<member name="physics/physx_3d/simulation/allow_sleep" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], PhysX bodies that come to rest go to sleep and stop simulating until something touches or moves them. Turn it off only to debug; it costs performance.
+		</member>
+		<member name="physics/physx_3d/simulation/cpu_worker_threads" type="int" setter="" getter="" default="0">
+			Number of CPU threads PhysX simulates on. [code]0[/code] picks automatically: most of the cores for CPU simulation, 2 to 4 when GPU dynamics run (the CPU then mostly waits for the GPU).
+		</member>
+		<member name="physics/physx_3d/simulation/enhanced_determinism" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], PhysX gives the same results for the same inputs regardless of thread count and call order, with the same binary on the same platform (not across platforms). GPU dynamics are turned off in this mode, because the GPU solver is not deterministic.
+		</member>
+		<member name="physics/physx_3d/simulation/solver_type" type="int" setter="" getter="" default="0">
+			The PhysX constraint solver. [b]PGS[/b] (projected Gauss-Seidel) is the default and behaves like the other physics engines in large rigid body scenes. [b]TGS[/b] (temporal Gauss-Seidel) keeps joint chains steadier under constant forces such as wind, at a higher cost.
+		</member>
+		<member name="physics/physx_3d/simulation/stabilization" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], PhysX damps light bodies in stacks and piles toward rest, so they settle and fall asleep instead of jittering.
+		</member>
+		<member name="physics/physx_3d/soft_body/mode" type="int" setter="" getter="" default="0">
+			Where PhysX soft bodies are simulated. [b]Auto[/b] uses the GPU when available and falls back to the CPU; [b]CPU[/b] and [b]GPU[/b] force one. A node can override it with the [code]physx_soft_mode[/code] metadata ([code]"cpu"[/code] or [code]"gpu"[/code]).
+		</member>
 		<member name="rendering/2d/batching/item_buffer_size" type="int" setter="" getter="" default="16384">
 			Maximum number of canvas item commands that can be batched into a single draw call.
 		</member>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PhysXBlastAuthoring" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Fractures meshes into Blast assets for [PhysXDestructible3D].
+	</brief_description>
+	<description>
+		Breaks a mesh into chunks with NVIDIA Blast's authoring tools and cooks their collision hulls, producing a [PhysXBlastAsset]. Create one with [code]PhysXBlastAuthoring.new()[/code] and call [method fracture_mesh].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="fracture_mesh">
+			<return type="PhysXBlastAsset" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="site_count" type="int" />
+			<param index="2" name="seed" type="int" />
+			<param index="3" name="pattern" type="int" enum="PhysXBlastAuthoring.FracturePattern" default="0" />
+			<param index="4" name="cutout_pattern" type="Texture2D" default="null" />
+			<description>
+				Fractures surface 0 of [param mesh] and returns the result, or [code]null[/code] on failure. [param pattern] picks the algorithm (see [enum FracturePattern]). [param site_count] is about how many pieces to make (approximate for [constant PATTERN_SLICING], ignored for [constant PATTERN_CUTOUT]); [param seed] makes the result repeatable. [param cutout_pattern] is the grayscale crack image [constant PATTERN_CUTOUT] needs: every crack line must reach the image border.
+			</description>
+		</method>
+	</methods>
+	<constants>
+		<constant name="PATTERN_VORONOI" value="0" enum="FracturePattern">
+			Random Voronoi cells: organic, rock-like chunks.
+		</constant>
+		<constant name="PATTERN_SLICING" value="1" enum="FracturePattern">
+			Cuts along planes on all three axes: regular, brick-like pieces for crates, walls and other man-made objects.
+		</constant>
+		<constant name="PATTERN_CUTOUT" value="2" enum="FracturePattern">
+			Extrudes a 2D crack pattern (the [code]cutout_pattern[/code] texture) through the mesh, for glass panes, brick walls or any authored break-up shape.
+		</constant>
+	</constants>
+</class>

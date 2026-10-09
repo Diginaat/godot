@@ -33,7 +33,7 @@
 			When [code]true[/code], [member mass] is recomputed from the intact mesh's real volume (times its node scale) every time the asset (re)loads, and shown read-only in the Inspector -- "here's what this object would actually weigh." Uncheck it for a true, freely-editable override that survives reloads; checking it again immediately recomputes fresh and discards that override.
 		</member>
 		<member name="blast_asset" type="PhysXBlastAsset" setter="set_blast_asset" getter="get_blast_asset">
-			The fractured mesh data to use, saved by the in-editor fracture dialog (or [code]PhysXBlastAuthoring[/code] directly). Preferred over [member asset_path] / [member chunks_path] when set.
+			The fractured mesh data to use, saved by the in-editor fracture dialog (or [PhysXBlastAuthoring] directly). Preferred over [member asset_path] / [member chunks_path] when set.
 		</member>
 		<member name="cast_shadow" type="int" setter="set_cast_shadow" getter="get_cast_shadow" enum="PhysXDestructible3D.ShadowCastingSetting" default="1">
 			Shadow-casting behavior for every piece's render mesh, the same four settings as [member GeometryInstance3D.cast_shadow]. Applies uniformly, intact or fractured -- changing it re-pushes to every already-existing piece immediately.
@@ -88,6 +88,9 @@
 		</member>
 		<member name="shatter_speed" type="float" setter="set_shatter_speed" getter="get_shatter_speed" default="8.0">
 			Speed (m/s, before falloff) each newly detached piece is kicked away from the damage origin -- see [method apply_radial_damage]'s own note on the exact direction/falloff shape. Purely a "how violently does debris scatter on break" feel knob, not a physically derived value.
+		</member>
+		<member name="transparency" type="float" setter="set_transparency" getter="get_transparency" default="0.0">
+			Transparency of the rendered chunks, from [code]0.0[/code] (opaque) to [code]1.0[/code] (invisible), like [member GeometryInstance3D.transparency].
 		</member>
 		<member name="visibility_range_begin" type="float" setter="set_visibility_range_begin" getter="get_visibility_range_begin" default="0.0">
 			Distance from the camera at which every piece starts being visible, the same as [member GeometryInstance3D.visibility_range_begin]. [code]0.0[/code] disables the near limit.
