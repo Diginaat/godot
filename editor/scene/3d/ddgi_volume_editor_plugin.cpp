@@ -37,6 +37,9 @@
 #include "editor/editor_string_names.h"
 #include "editor/editor_undo_redo_manager.h"
 #include "editor/gui/editor_file_dialog.h"
+#include "editor/scene/3d/node_3d_editor_plugin.h"
+#include "editor/scene/3d/node_3d_editor_viewport.h"
+#include "scene/main/viewport.h"
 #include "scene/main/scene_tree.h"
 
 void DDGIVolumeEditorPlugin::_bake() {
@@ -113,10 +116,21 @@ void DDGIVolumeEditorPlugin::make_visible(bool p_visible) {
 }
 
 EditorProgress *DDGIVolumeEditorPlugin::tmp_progress = nullptr;
+int DDGIVolumeEditorPlugin::paused_update_modes[4] = { -1, -1, -1, -1 };
 
 void DDGIVolumeEditorPlugin::bake_func_begin() {
 	ERR_FAIL_COND(tmp_progress != nullptr);
 	tmp_progress = memnew(EditorProgress("bake_ddgi", TTR("Bake DDGI"), 1000, true));
+	// The editor's 3D views would render (and trace their own DDGI probes)
+	// in every bake frame; pause them.
+	for (int i = 0; i < 4; i++) {
+		paused_update_modes[i] = -1;
+		Node3DEditorViewport *v = Node3DEditor::get_singleton() ? Node3DEditor::get_singleton()->get_editor_viewport(i) : nullptr;
+		if (v && v->get_viewport_node()) {
+			paused_update_modes[i] = v->get_viewport_node()->get_update_mode();
+			v->get_viewport_node()->set_update_mode(SubViewport::UPDATE_DISABLED);
+		}
+	}
 }
 
 bool DDGIVolumeEditorPlugin::bake_func_step(int p_progress, const String &p_description) {
@@ -125,6 +139,12 @@ bool DDGIVolumeEditorPlugin::bake_func_step(int p_progress, const String &p_desc
 }
 
 void DDGIVolumeEditorPlugin::bake_func_end() {
+	for (int i = 0; i < 4; i++) {
+		Node3DEditorViewport *v = Node3DEditor::get_singleton() ? Node3DEditor::get_singleton()->get_editor_viewport(i) : nullptr;
+		if (v && v->get_viewport_node() && paused_update_modes[i] >= 0) {
+			v->get_viewport_node()->set_update_mode(SubViewport::UpdateMode(paused_update_modes[i]));
+		}
+	}
 	ERR_FAIL_NULL(tmp_progress);
 	memdelete(tmp_progress);
 	tmp_progress = nullptr;

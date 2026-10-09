@@ -101,7 +101,8 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 		q.distance_texels = GLOBAL_GET_CACHED(int, "rendering/global_illumination/ddgi/custom_distance_texels");
 	}
 	q.rays_per_probe = CLAMP(q.rays_per_probe, 32u, 512u);
-	q.probes_per_frame = CLAMP(q.probes_per_frame, 64u, 65536u);
+	// One row of the ray data texture per probe: 16384 is the texture limit.
+	q.probes_per_frame = CLAMP(q.probes_per_frame, 64u, 16384u);
 	q.irradiance_texels = CLAMP(q.irradiance_texels, 4u, 16u);
 	q.distance_texels = CLAMP(q.distance_texels, 8u, 32u);
 	q.gpu_time_budget_ms = MAX(0.0f, GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/gpu_time_budget_ms"));

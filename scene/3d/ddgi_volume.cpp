@@ -89,10 +89,12 @@ DDGIVolume::BakeStepFunc DDGIVolume::bake_step_function = nullptr;
 DDGIVolume::BakeEndFunc DDGIVolume::bake_end_function = nullptr;
 
 Vector3i DDGIVolume::_grid_from_size() const {
+	// The small tolerance keeps a size set from a probe count (an exact
+	// multiple of the spacing) from rounding up to one probe more.
 	return Vector3i(
-			CLAMP(int(Math::ceil(size.x / probe_spacing)) + 1, 2, 64),
-			CLAMP(int(Math::ceil(size.y / probe_spacing)) + 1, 2, 64),
-			CLAMP(int(Math::ceil(size.z / probe_spacing)) + 1, 2, 64));
+			CLAMP(int(Math::ceil(size.x / probe_spacing - 0.001f)) + 1, 2, 64),
+			CLAMP(int(Math::ceil(size.y / probe_spacing - 0.001f)) + 1, 2, 64),
+			CLAMP(int(Math::ceil(size.z / probe_spacing - 0.001f)) + 1, 2, 64));
 }
 
 Ref<Environment> DDGIVolume::_get_environment() const {
@@ -131,9 +133,9 @@ void DDGIVolume::_apply_to_environment() {
 	env->set_ddgi_probe_classification(probe_classification);
 	// Following the camera, the size only sets the probe grid; the cascades
 	// scroll with the camera instead of staying in this box.
-	env->set_ddgi_follow_camera(follow_camera);
+	env->set_ddgi_follow_camera(infinite_world);
 	env->set_ddgi_debug_mode(debug_mode);
-	env->set_ddgi_volume(enabled && !follow_camera, get_global_position(), size);
+	env->set_ddgi_volume(enabled && !infinite_world, get_global_position(), size);
 	if (new_environment) {
 		_apply_baked_data();
 	}
@@ -146,7 +148,7 @@ void DDGIVolume::_apply_baked_data() {
 	}
 	// The renderer checks that the data fits the volume every frame, so a
 	// moved or resized volume falls back to dynamic updates until rebaked.
-	bool use = bake_mode != BAKE_MODE_DYNAMIC && probe_data.is_valid() && !follow_camera;
+	bool use = bake_mode != BAKE_MODE_DYNAMIC && probe_data.is_valid() && !infinite_world;
 	applied_environment->set_ddgi_baked_data(use ? int(bake_mode) : 0, use ? probe_data->get_data() : Dictionary());
 }
 
@@ -168,6 +170,15 @@ void DDGIVolume::_notification(int p_what) {
 	}
 }
 
+bool DDGIVolume::_set(const StringName &p_name, const Variant &p_value) {
+	// Scenes saved by development builds, before the rename to infinite_world.
+	if (p_name == SNAME("follow_camera")) {
+		set_infinite_world(p_value);
+		return true;
+	}
+	return false;
+}
+
 void DDGIVolume::set_enabled(bool p_enabled) {
 	enabled = p_enabled;
 	_apply_to_environment();
@@ -185,6 +196,15 @@ void DDGIVolume::set_size(const Vector3 &p_size) {
 
 Vector3 DDGIVolume::get_size() const {
 	return size;
+}
+
+void DDGIVolume::set_probe_count(const Vector3i &p_count) {
+	Vector3i count = p_count.clampi(2, 64);
+	set_size(Vector3(count - Vector3i(1, 1, 1)) * probe_spacing);
+}
+
+Vector3i DDGIVolume::get_probe_count() const {
+	return _grid_from_size();
 }
 
 void DDGIVolume::set_probe_spacing(float p_spacing) {
@@ -268,14 +288,14 @@ bool DDGIVolume::is_probe_classification_enabled() const {
 	return probe_classification;
 }
 
-void DDGIVolume::set_follow_camera(bool p_enabled) {
-	follow_camera = p_enabled;
+void DDGIVolume::set_infinite_world(bool p_enabled) {
+	infinite_world = p_enabled;
 	_apply_to_environment();
 	_apply_baked_data();
 }
 
-bool DDGIVolume::is_following_camera() const {
-	return follow_camera;
+bool DDGIVolume::is_infinite_world() const {
+	return infinite_world;
 }
 
 void DDGIVolume::set_debug_mode(Environment::DDGIDebugMode p_mode) {
@@ -310,21 +330,51 @@ Ref<DDGIProbeData> DDGIVolume::get_probe_data() const {
 Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 	ERR_FAIL_COND_V_MSG(!is_inside_tree(), Ref<DDGIProbeData>(), "DDGIVolume must be inside the scene tree to bake.");
 	ERR_FAIL_COND_V_MSG(!enabled, Ref<DDGIProbeData>(), "DDGIVolume is disabled; enable it to bake.");
-	ERR_FAIL_COND_V_MSG(follow_camera, Ref<DDGIProbeData>(), "A DDGIVolume that follows the camera can't be baked. Turn off follow_camera.");
+	ERR_FAIL_COND_V_MSG(infinite_world, Ref<DDGIProbeData>(), "An infinite world DDGIVolume (probes following the camera) can't be baked. Turn off infinite_world.");
 	Ref<Environment> env = _get_environment();
 	ERR_FAIL_COND_V_MSG(env.is_null(), Ref<DDGIProbeData>(), "DDGIVolume needs a WorldEnvironment with an Environment to bake.");
 	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
 	ERR_FAIL_COND_V_MSG(!rd || !rd->has_feature(RD::SUPPORTS_RAYTRACING_PIPELINE), Ref<DDGIProbeData>(), "Baking DDGI needs hardware ray tracing: the Forward+ renderer, the Vulkan driver and a GPU with ray tracing pipelines.");
 
-	// Every probe is updated about this many times. The probes traced per
-	// frame come from the quality setting (see RenderDDGI::get_quality()).
-	const int updates = p_updates_per_probe > 0 ? p_updates_per_probe : 128;
-	static const int preset_probes_per_frame[4] = { 1024, 2048, 4096, 8192 };
-	int quality = GLOBAL_GET("rendering/global_illumination/ddgi/quality");
-	int probes_per_frame = (quality >= 0 && quality < 4) ? preset_probes_per_frame[quality] : int(GLOBAL_GET("rendering/global_illumination/ddgi/custom_probes_per_frame"));
+	// Every probe is updated about this many times.
+	const int updates = p_updates_per_probe > 0 ? p_updates_per_probe : 96;
 	const Vector3i grid = _grid_from_size();
 	const int64_t total_probes = int64_t(grid.x) * grid.y * grid.z * cascades;
-	const int frames = (int)CLAMP(int64_t(updates) * total_probes / MAX(probes_per_frame, 64), int64_t(120), int64_t(20000));
+
+	// The bake traces with the largest probe budget the renderer allows
+	// (16384 probes per frame), not the realtime one: with the realtime
+	// budget it needed hundreds of frames, and the fixed cost of each frame
+	// (drawing the views, the editor) was most of the bake time. Rays per
+	// probe and the atlas resolution stay those of the quality setting, so
+	// the bake matches it at runtime. The settings are restored afterwards.
+	ProjectSettings *ps = ProjectSettings::get_singleton();
+	static const char *quality_keys[5] = {
+		"rendering/global_illumination/ddgi/quality",
+		"rendering/global_illumination/ddgi/custom_rays_per_probe",
+		"rendering/global_illumination/ddgi/custom_probes_per_frame",
+		"rendering/global_illumination/ddgi/custom_irradiance_texels",
+		"rendering/global_illumination/ddgi/custom_distance_texels",
+	};
+	Variant saved_quality[5];
+	for (int k = 0; k < 5; k++) {
+		saved_quality[k] = ps->get_setting(quality_keys[k]);
+	}
+	// Rays, irradiance and distance texels of the presets (RenderDDGI::get_quality()).
+	static const int presets[4][3] = { { 64, 6, 12 }, { 128, 6, 14 }, { 192, 8, 14 }, { 256, 8, 16 } };
+	const int quality = saved_quality[0];
+	const bool preset = quality >= 0 && quality < 4;
+	const int per_frame = (int)MIN(total_probes, int64_t(16384));
+	ps->set_setting(quality_keys[0], 4); // Custom.
+	ps->set_setting(quality_keys[1], preset ? presets[quality][0] : int(saved_quality[1]));
+	ps->set_setting(quality_keys[2], per_frame);
+	ps->set_setting(quality_keys[3], preset ? presets[quality][1] : int(saved_quality[3]));
+	ps->set_setting(quality_keys[4], preset ? presets[quality][2] : int(saved_quality[4]));
+
+	// Frames per round of updates (all probes once), and a few rounds for the
+	// scheduler to reach the full budget.
+	const int rounds = (int)((total_probes + per_frame - 1) / per_frame);
+	const int warmup = 8;
+	const int frames = (updates + warmup) * rounds;
 
 	// Trace from scratch, not from an older bake.
 	env->set_ddgi_baked_data(0, Dictionary());
@@ -333,7 +383,7 @@ Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 	// A small offscreen view of the same world: the probes of a fixed volume
 	// don't depend on the camera, and the view keeps them updating.
 	SubViewport *vp = memnew(SubViewport);
-	vp->set_size(Size2i(64, 64));
+	vp->set_size(Size2i(16, 16));
 	vp->set_update_mode(SubViewport::UPDATE_ALWAYS);
 	vp->set_world_3d(get_world_3d());
 	Camera3D *camera = memnew(Camera3D);
@@ -346,11 +396,21 @@ Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 		bake_begin_function();
 	}
 	bool cancelled = false;
+	const int fast_updates = updates / 3;
+	float hysteresis = -1.0f;
 	for (int i = 0; i < frames; i++) {
-		// The second half averages over more updates (a higher hysteresis):
-		// less noise in the result.
-		if (i == frames / 2) {
-			env->set_ddgi_hysteresis(MAX(saved_hysteresis, 0.98f));
+		// First a low hysteresis, so the bounced light builds up quickly, then
+		// a running average (the weight of update n is 1 / n): the least
+		// noise for the number of updates.
+		const int update = MAX(i / rounds - warmup, 0);
+		float h = 0.85f;
+		if (update >= fast_updates) {
+			const int n = update - fast_updates + 1;
+			h = CLAMP(1.0f - 1.0f / float(n + 1), 0.85f, 0.99f);
+		}
+		if (h != hysteresis) {
+			hysteresis = h;
+			env->set_ddgi_hysteresis(h);
 		}
 		RS::get_singleton()->draw(false);
 		if (bake_step_function && (i % 8) == 0 && bake_step_function(int(int64_t(i) * 1000 / frames), vformat(RTR("Tracing probes (%d / %d frames)"), i, frames))) {
@@ -364,6 +424,9 @@ Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 		data = RS::get_singleton()->viewport_get_ddgi_probe_data(vp->get_viewport_rid());
 	}
 	env->set_ddgi_hysteresis(saved_hysteresis);
+	for (int k = 0; k < 5; k++) {
+		ps->set_setting(quality_keys[k], saved_quality[k]);
+	}
 	remove_child(vp);
 	memdelete(vp);
 	if (bake_end_function) {
@@ -393,7 +456,7 @@ PackedStringArray DDGIVolume::get_configuration_warnings() const {
 		warnings.push_back(RTR("DDGIVolume needs a WorldEnvironment with an Environment resource in the same World3D."));
 	}
 	// Sampling baked probes needs no ray tracing; updating them does.
-	const bool baked_only = bake_mode == BAKE_MODE_BAKED && _probe_data_matches() && !follow_camera;
+	const bool baked_only = bake_mode == BAKE_MODE_BAKED && _probe_data_matches() && !infinite_world;
 	if (RenderingServer::get_singleton()->get_current_rendering_method() != "forward_plus") {
 		warnings.push_back(RTR("DDGI needs the Forward+ renderer."));
 	} else if (!baked_only && OS::get_singleton()->get_current_rendering_driver_name() == "d3d12") {
@@ -404,12 +467,12 @@ PackedStringArray DDGIVolume::get_configuration_warnings() const {
 			warnings.push_back(RTR("DDGI needs a GPU and driver with Vulkan ray tracing pipelines; this one has none. Bake the probes on a machine with ray tracing and set Bake Mode to Baked."));
 		}
 	}
-	if (!follow_camera && is_inside_tree() && !get_global_basis().orthonormalized().is_equal_approx(Basis())) {
+	if (!infinite_world && is_inside_tree() && !get_global_basis().orthonormalized().is_equal_approx(Basis())) {
 		warnings.push_back(RTR("DDGIVolume ignores rotation: the probe grid is always aligned with the world axes."));
 	}
 	if (bake_mode != BAKE_MODE_DYNAMIC) {
-		if (follow_camera) {
-			warnings.push_back(RTR("Baked probes need a fixed volume: turn off Follow Camera."));
+		if (infinite_world) {
+			warnings.push_back(RTR("Baked probes need a fixed volume: turn off Infinite World."));
 		} else if (probe_data.is_null()) {
 			warnings.push_back(RTR("No baked probe data: select the DDGIVolume and use Bake DDGI in the 3D editor toolbar. Until then the probes are updated dynamically."));
 		} else if (!_probe_data_matches()) {
@@ -424,6 +487,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_enabled"), &DDGIVolume::is_enabled);
 	ClassDB::bind_method(D_METHOD("set_size", "size"), &DDGIVolume::set_size);
 	ClassDB::bind_method(D_METHOD("get_size"), &DDGIVolume::get_size);
+	ClassDB::bind_method(D_METHOD("set_probe_count", "count"), &DDGIVolume::set_probe_count);
+	ClassDB::bind_method(D_METHOD("get_probe_count"), &DDGIVolume::get_probe_count);
 	ClassDB::bind_method(D_METHOD("set_probe_spacing", "spacing"), &DDGIVolume::set_probe_spacing);
 	ClassDB::bind_method(D_METHOD("get_probe_spacing"), &DDGIVolume::get_probe_spacing);
 	ClassDB::bind_method(D_METHOD("set_cascades", "cascades"), &DDGIVolume::set_cascades);
@@ -442,8 +507,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_probe_relocation_enabled"), &DDGIVolume::is_probe_relocation_enabled);
 	ClassDB::bind_method(D_METHOD("set_probe_classification", "enabled"), &DDGIVolume::set_probe_classification);
 	ClassDB::bind_method(D_METHOD("is_probe_classification_enabled"), &DDGIVolume::is_probe_classification_enabled);
-	ClassDB::bind_method(D_METHOD("set_follow_camera", "enabled"), &DDGIVolume::set_follow_camera);
-	ClassDB::bind_method(D_METHOD("is_following_camera"), &DDGIVolume::is_following_camera);
+	ClassDB::bind_method(D_METHOD("set_infinite_world", "enabled"), &DDGIVolume::set_infinite_world);
+	ClassDB::bind_method(D_METHOD("is_infinite_world"), &DDGIVolume::is_infinite_world);
 	ClassDB::bind_method(D_METHOD("set_debug_mode", "mode"), &DDGIVolume::set_debug_mode);
 	ClassDB::bind_method(D_METHOD("get_debug_mode"), &DDGIVolume::get_debug_mode);
 	ClassDB::bind_method(D_METHOD("set_bake_mode", "mode"), &DDGIVolume::set_bake_mode);
@@ -453,8 +518,11 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("bake", "updates_per_probe"), &DDGIVolume::bake, DEFVAL(0));
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "enabled"), "set_enabled", "is_enabled");
-	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "size", PROPERTY_HINT_NONE, "suffix:m"), "set_size", "get_size");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "probe_spacing", PROPERTY_HINT_RANGE, "0.05,16,0.01,or_greater,suffix:m"), "set_probe_spacing", "get_probe_spacing");
+	// Size, spacing and probe count are linked: editing one updates the others in the inspector.
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "size", PROPERTY_HINT_NONE, "suffix:m", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED), "set_size", "get_size");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "probe_spacing", PROPERTY_HINT_RANGE, "0.05,16,0.01,or_greater,suffix:m", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED), "set_probe_spacing", "get_probe_spacing");
+	// Not stored: it follows from size and spacing.
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3I, "probe_count", PROPERTY_HINT_RANGE, "2,64,1", PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED), "set_probe_count", "get_probe_count");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cascades", PROPERTY_HINT_RANGE, "1,4,1"), "set_cascades", "get_cascades");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "energy", PROPERTY_HINT_RANGE, "0,8,0.01,or_greater"), "set_energy", "get_energy");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bounce_energy", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_bounce_energy", "get_bounce_energy");
@@ -463,7 +531,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "hysteresis", PROPERTY_HINT_RANGE, "0,0.999,0.001"), "set_hysteresis", "get_hysteresis");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_relocation"), "set_probe_relocation", "is_probe_relocation_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_classification"), "set_probe_classification", "is_probe_classification_enabled");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "follow_camera"), "set_follow_camera", "is_following_camera");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "infinite_world"), "set_infinite_world", "is_infinite_world");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades"), "set_debug_mode", "get_debug_mode");
 	ADD_GROUP("Baking", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "bake_mode", PROPERTY_HINT_ENUM, "Dynamic,Baked,Baked + Dynamic"), "set_bake_mode", "get_bake_mode");

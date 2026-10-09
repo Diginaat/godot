@@ -3117,7 +3117,7 @@
 			Irradiance map resolution per probe side when [member rendering/global_illumination/ddgi/quality] is Custom.
 		</member>
 		<member name="rendering/global_illumination/ddgi/custom_probes_per_frame" type="int" setter="" getter="" default="2048">
-			The most probes traced per frame when [member rendering/global_illumination/ddgi/quality] is Custom. With more probes per frame, indirect light reacts faster to changes; the ray tracing cost grows linearly.
+			The most probes traced per frame when [member rendering/global_illumination/ddgi/quality] is Custom (64 to 16384). With more probes per frame, indirect light reacts faster to changes; the ray tracing cost grows linearly.
 		</member>
 		<member name="rendering/global_illumination/ddgi/custom_rays_per_probe" type="int" setter="" getter="" default="128">
 			Rays traced per probe update when [member rendering/global_illumination/ddgi/quality] is Custom. More rays give less noisy indirect light; the ray tracing cost grows linearly.

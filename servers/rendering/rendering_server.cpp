@@ -3857,7 +3857,7 @@ void RenderingServer::init() {
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/quality", PROPERTY_HINT_ENUM, "Low (Fastest),Medium,High,Ultra (Slowest),Custom"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_rays_per_probe", PROPERTY_HINT_RANGE, "32,512,32"), 128);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_probes_per_frame", PROPERTY_HINT_RANGE, "64,65536,64"), 2048);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_probes_per_frame", PROPERTY_HINT_RANGE, "64,16384,64"), 2048);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_irradiance_texels", PROPERTY_HINT_RANGE, "4,16,1"), 6);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/custom_distance_texels", PROPERTY_HINT_RANGE, "8,32,1"), 14);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/gpu_time_budget_ms", PROPERTY_HINT_RANGE, "0,16,0.1,or_greater,suffix:ms"), 0.0);

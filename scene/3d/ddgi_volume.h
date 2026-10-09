@@ -86,7 +86,7 @@ private:
 	float hysteresis = 0.95f;
 	bool probe_relocation = true;
 	bool probe_classification = true;
-	bool follow_camera = false;
+	bool infinite_world = false;
 	Environment::DDGIDebugMode debug_mode = Environment::DDGI_DEBUG_DISABLED;
 	BakeMode bake_mode = BAKE_MODE_DYNAMIC;
 	Ref<DDGIProbeData> probe_data;
@@ -100,6 +100,7 @@ private:
 
 protected:
 	void _notification(int p_what);
+	bool _set(const StringName &p_name, const Variant &p_value);
 	static void _bind_methods();
 
 public:
@@ -108,6 +109,10 @@ public:
 
 	void set_size(const Vector3 &p_size);
 	Vector3 get_size() const;
+
+	/// Probes per axis of each cascade; linked to size (size = (count - 1) * spacing).
+	void set_probe_count(const Vector3i &p_count);
+	Vector3i get_probe_count() const;
 
 	void set_probe_spacing(float p_spacing);
 	float get_probe_spacing() const;
@@ -136,8 +141,8 @@ public:
 	void set_probe_classification(bool p_enabled);
 	bool is_probe_classification_enabled() const;
 
-	void set_follow_camera(bool p_enabled);
-	bool is_following_camera() const;
+	void set_infinite_world(bool p_enabled);
+	bool is_infinite_world() const;
 
 	void set_debug_mode(Environment::DDGIDebugMode p_mode);
 	Environment::DDGIDebugMode get_debug_mode() const;
