@@ -26,6 +26,19 @@ It is written from published papers, not from SDK source:
 NVIDIA NRD is a comparison target only. No NRD source, binary or shader is
 used.
 
+### Other research and code, and what may be used
+
+Checked on 2026-10-10. Only permissive code may be ported, with its notice
+kept (`COPYRIGHT.txt`, `THIRD_PARTY_LICENSES.md`); GPL code can only inform an
+independent implementation from the paper.
+
+| Work | Code license | Use here |
+| --- | --- | --- |
+| A-SVGF: Schied, Peters, Dachsbacher, "Gradient Estimation for Real-Time Adaptive Temporal Filtering", HPG 2018 (cg.ivd.kit.edu/atf.php) | BSD-3-Clause (reference shaders, Falcor/OpenGL) | Step 5b: temporal gradients from re-shading forward projected samples with last frame's random seed, in place of the heuristic change detection. The authors ask for a short notice when it ships in a product. |
+| merian (github.com/LDAP/merian): Vulkan framework with SVGF, accumulation with percentile firefly clamping and adaptive alpha, TAA, SSMM guiding, hashed irradiance cache | BSD-3-Clause | Ideas and code may be ported: firefly clamp at median + k x interquartile range of a screen tile (robust to the heavy tails that made a 4-sigma clamp useless), history shortening when the history leaves the tile's interquartile band, stochastic bilinear reprojection, a wider search after disocclusion |
+| Real-Time Markov Chain Path Guiding (Alber, Hanika, Dachsbacher, I3D 2025), in merian-quake (github.com/LDAP/merian-quake) | GPL-2.0 (built on Quake) | Not portable. Path guiding lowers the noise of the input (vMF mixtures in adaptive and hash grids); an independent implementation from the paper is a possible later step for the path tracer, separate from the denoiser |
+| Optimized and Aligned Anisotropic Monte Carlo Sampling Patterns (Werner, Hanika, Dachsbacher, EGSR 2026), github.com/MircoWerner/AnisotropicSampling | GPL-3.0 | Not portable. Targets offline sampling; at 1 spp per frame the matching real-time technique is spatiotemporal blue noise sampling (later step) |
+
 ## Audit (step 1)
 
 Audited on 2026-10-09 at commit `dc1790d9af` (`dev-ddgi`). GPU: RTX 3060,
@@ -186,6 +199,7 @@ traceRays (1 spp)                     compute, internal resolution
 | 9 | DDGI review: probe validity and generation, transitions, whether a screen-space pass helps (only if measured) | Open |
 | 10 | Performance: per-pass timing, half-resolution diffuse, adaptive a-trous iterations, FP16 storage, pass fusion; 1080p/1440p/4K, native and upscaled | Open |
 | 11 | Optional, later: ray traced shadows/reflections for raster mode with their own denoisers | Not planned yet |
+| 11b | Optional, later: lower input noise in the path tracer: spatiotemporal blue noise sample sequences; path guiding (independent implementation of Markov chain path guiding) | Not planned yet |
 | 12 | Documentation, cleanup, merge into `dev` | Open |
 
 ## Signal split (step 2)
