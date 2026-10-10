@@ -1,4 +1,4 @@
-# Godot Engine with NVIDIA DLSS, path tracing and PhysX 5
+# Godot Engine with NVIDIA DLSS, DDGI, path tracing and PhysX 5
 
 <p align="center">
   <a href="https://godotengine.org">
