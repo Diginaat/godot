@@ -210,6 +210,7 @@ Releases on GitHub name the Godot base and the own version:
 | 0.5.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.0` | DDGI baking, realtime updates, smooth light changes, bounce energy, probe count |
 | 0.5.1 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.1` | Windows export templates (standard and .NET); exported games get the PhysX, Blast, Flow and DLSS DLLs |
 | 0.5.2 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.2` | Fixes: exported games with an embedded PCK crashed at startup; viewport jitter when DLSS is selected but not installed |
+| 0.5.3 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.3` | Same build as 0.5.2; the editor zips no longer put the files in a `.` folder |
 
 ## Release packages (Windows)
 

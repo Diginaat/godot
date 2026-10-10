@@ -123,8 +123,14 @@ if ($Mono) {
 
 $zip = "$stage.zip"
 if (Test-Path $zip) { Remove-Item -Force $zip }
-& tar.exe -a -cf $zip -C $stage .
-if ($LASTEXITCODE -ne 0) { throw "tar failed" }
+# Files go at the root of the zip. Written with Python: `tar -C $stage .`
+# prefixes every entry with "./", which 7-Zip and others show as a folder
+# named ".", and Compress-Archive can store backslashes in the entry names.
+$py = "import os, sys, zipfile`nstage, out = sys.argv[1], sys.argv[2]`nwith zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:`n    for d, _, files in os.walk(stage):`n        for f in files:`n            p = os.path.join(d, f)`n            z.write(p, os.path.relpath(p, stage).replace(os.sep, '/'))`n"
+python -c $py $stage $zip
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $zip)) { throw "Writing $zip failed." }
+$bad = python -c "import sys, zipfile; print('\n'.join(n for n in zipfile.ZipFile(sys.argv[1]).namelist() if n.startswith(('.', '/')) or '\\' in n))" $zip
+if ($bad) { throw "Bad entry names in ${zip}: $bad" }
 Remove-Item -Recurse -Force $stage
 Get-Item $zip | Select-Object Name, @{n = "MB"; e = { [math]::Round($_.Length / 1MB, 1) } }
 Write-Host "Engine version: $version"
