@@ -115,6 +115,30 @@ public:
 		DDGI_DEBUG_MAX
 	};
 
+	enum DDGIAOQuality {
+		DDGI_AO_QUALITY_LOW,
+		DDGI_AO_QUALITY_MEDIUM,
+		DDGI_AO_QUALITY_HIGH,
+		DDGI_AO_QUALITY_ULTRA,
+	};
+
+	enum DDGIAOResolution {
+		DDGI_AO_RESOLUTION_AUTO,
+		DDGI_AO_RESOLUTION_FULL,
+		DDGI_AO_RESOLUTION_HALF,
+	};
+
+	enum DDGIAODebugMode {
+		DDGI_AO_DEBUG_DISABLED,
+		DDGI_AO_DEBUG_RAW_AO,
+		DDGI_AO_DEBUG_FINAL_AO,
+		DDGI_AO_DEBUG_DEPTH,
+		DDGI_AO_DEBUG_NORMALS,
+		DDGI_AO_DEBUG_BENT_NORMALS,
+		DDGI_AO_DEBUG_EDGES,
+		DDGI_AO_DEBUG_MAX
+	};
+
 	enum FogMode {
 		FOG_MODE_EXPONENTIAL,
 		FOG_MODE_DEPTH,
@@ -228,6 +252,16 @@ private:
 	Vector3 ddgi_volume_size = Vector3(24, 12, 24);
 	DDGIDebugMode ddgi_debug_mode = DDGI_DEBUG_DISABLED;
 	void _update_ddgi();
+
+	// DDGI ambient occlusion (XeGTAO)
+	bool ddgi_ao_enabled = false;
+	DDGIAOQuality ddgi_ao_quality = DDGI_AO_QUALITY_HIGH;
+	DDGIAOResolution ddgi_ao_resolution = DDGI_AO_RESOLUTION_AUTO;
+	float ddgi_ao_radius = 0.5;
+	float ddgi_ao_intensity = 1.0;
+	bool ddgi_ao_bent_normals = false;
+	DDGIAODebugMode ddgi_ao_debug_mode = DDGI_AO_DEBUG_DISABLED;
+	void _update_ddgi_ao();
 
 	// Glow
 	bool glow_enabled = false;
@@ -461,6 +495,21 @@ public:
 	// Baked probes from DDGIProbeData::get_data() (set by DDGIVolume, not stored).
 	void set_ddgi_baked_data(int p_mode, const Dictionary &p_data);
 
+	void set_ddgi_ao_enabled(bool p_enabled);
+	bool is_ddgi_ao_enabled() const;
+	void set_ddgi_ao_quality(DDGIAOQuality p_quality);
+	DDGIAOQuality get_ddgi_ao_quality() const;
+	void set_ddgi_ao_resolution(DDGIAOResolution p_resolution);
+	DDGIAOResolution get_ddgi_ao_resolution() const;
+	void set_ddgi_ao_radius(float p_radius);
+	float get_ddgi_ao_radius() const;
+	void set_ddgi_ao_intensity(float p_intensity);
+	float get_ddgi_ao_intensity() const;
+	void set_ddgi_ao_bent_normals(bool p_enabled);
+	bool is_ddgi_ao_bent_normals_enabled() const;
+	void set_ddgi_ao_debug_mode(DDGIAODebugMode p_mode);
+	DDGIAODebugMode get_ddgi_ao_debug_mode() const;
+
 	// Glow
 	void set_glow_enabled(bool p_enabled);
 	bool is_glow_enabled() const;
@@ -573,4 +622,7 @@ VARIANT_ENUM_CAST(Environment::SDFGIYScale)
 VARIANT_ENUM_CAST(Environment::GlowBlendMode)
 VARIANT_ENUM_CAST(Environment::PathtracingDebugMode)
 VARIANT_ENUM_CAST(Environment::DDGIDebugMode)
+VARIANT_ENUM_CAST(Environment::DDGIAOQuality)
+VARIANT_ENUM_CAST(Environment::DDGIAOResolution)
+VARIANT_ENUM_CAST(Environment::DDGIAODebugMode)
 VARIANT_ENUM_CAST(Environment::FogMode)

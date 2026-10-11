@@ -906,6 +906,7 @@ public:
 	FUNC2(environment_set_ddgi_bounce_energy, RID, float)
 	FUNC2(environment_set_ddgi_realtime_updates, RID, bool)
 	FUNC3(environment_set_ddgi_baked_data, RID, int, const Dictionary &)
+	FUNC8(environment_set_ddgi_ao, RID, bool, int, int, float, float, bool, int)
 
 	FUNC3R(Ref<Image>, environment_bake_panorama, RID, bool, const Size2i &)
 

@@ -820,6 +820,73 @@ void Environment::_update_ddgi() {
 	RS::get_singleton()->environment_set_ddgi_realtime_updates(environment, ddgi_realtime_updates);
 }
 
+void Environment::set_ddgi_ao_enabled(bool p_enabled) {
+	ddgi_ao_enabled = p_enabled;
+	_update_ddgi_ao();
+}
+
+bool Environment::is_ddgi_ao_enabled() const {
+	return ddgi_ao_enabled;
+}
+
+void Environment::set_ddgi_ao_quality(DDGIAOQuality p_quality) {
+	ddgi_ao_quality = p_quality;
+	_update_ddgi_ao();
+}
+
+Environment::DDGIAOQuality Environment::get_ddgi_ao_quality() const {
+	return ddgi_ao_quality;
+}
+
+void Environment::set_ddgi_ao_resolution(DDGIAOResolution p_resolution) {
+	ddgi_ao_resolution = p_resolution;
+	_update_ddgi_ao();
+}
+
+Environment::DDGIAOResolution Environment::get_ddgi_ao_resolution() const {
+	return ddgi_ao_resolution;
+}
+
+void Environment::set_ddgi_ao_radius(float p_radius) {
+	ddgi_ao_radius = CLAMP(p_radius, 0.01f, 100.0f);
+	_update_ddgi_ao();
+}
+
+float Environment::get_ddgi_ao_radius() const {
+	return ddgi_ao_radius;
+}
+
+void Environment::set_ddgi_ao_intensity(float p_intensity) {
+	ddgi_ao_intensity = CLAMP(p_intensity, 0.0f, 4.0f);
+	_update_ddgi_ao();
+}
+
+float Environment::get_ddgi_ao_intensity() const {
+	return ddgi_ao_intensity;
+}
+
+void Environment::set_ddgi_ao_bent_normals(bool p_enabled) {
+	ddgi_ao_bent_normals = p_enabled;
+	_update_ddgi_ao();
+}
+
+bool Environment::is_ddgi_ao_bent_normals_enabled() const {
+	return ddgi_ao_bent_normals;
+}
+
+void Environment::set_ddgi_ao_debug_mode(DDGIAODebugMode p_mode) {
+	ddgi_ao_debug_mode = p_mode;
+	_update_ddgi_ao();
+}
+
+Environment::DDGIAODebugMode Environment::get_ddgi_ao_debug_mode() const {
+	return ddgi_ao_debug_mode;
+}
+
+void Environment::_update_ddgi_ao() {
+	RS::get_singleton()->environment_set_ddgi_ao(environment, ddgi_ao_enabled, (int)ddgi_ao_quality, (int)ddgi_ao_resolution, ddgi_ao_radius, ddgi_ao_intensity, ddgi_ao_bent_normals, (int)ddgi_ao_debug_mode);
+}
+
 // Glow
 
 void Environment::set_glow_enabled(bool p_enabled) {
@@ -1719,6 +1786,29 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_follow_camera"), "set_ddgi_follow_camera", "is_ddgi_following_camera");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades"), "set_ddgi_debug_mode", "get_ddgi_debug_mode");
 
+	ClassDB::bind_method(D_METHOD("set_ddgi_ao_enabled", "enabled"), &Environment::set_ddgi_ao_enabled);
+	ClassDB::bind_method(D_METHOD("is_ddgi_ao_enabled"), &Environment::is_ddgi_ao_enabled);
+	ClassDB::bind_method(D_METHOD("set_ddgi_ao_quality", "quality"), &Environment::set_ddgi_ao_quality);
+	ClassDB::bind_method(D_METHOD("get_ddgi_ao_quality"), &Environment::get_ddgi_ao_quality);
+	ClassDB::bind_method(D_METHOD("set_ddgi_ao_resolution", "resolution"), &Environment::set_ddgi_ao_resolution);
+	ClassDB::bind_method(D_METHOD("get_ddgi_ao_resolution"), &Environment::get_ddgi_ao_resolution);
+	ClassDB::bind_method(D_METHOD("set_ddgi_ao_radius", "radius"), &Environment::set_ddgi_ao_radius);
+	ClassDB::bind_method(D_METHOD("get_ddgi_ao_radius"), &Environment::get_ddgi_ao_radius);
+	ClassDB::bind_method(D_METHOD("set_ddgi_ao_intensity", "intensity"), &Environment::set_ddgi_ao_intensity);
+	ClassDB::bind_method(D_METHOD("get_ddgi_ao_intensity"), &Environment::get_ddgi_ao_intensity);
+	ClassDB::bind_method(D_METHOD("set_ddgi_ao_bent_normals", "enabled"), &Environment::set_ddgi_ao_bent_normals);
+	ClassDB::bind_method(D_METHOD("is_ddgi_ao_bent_normals_enabled"), &Environment::is_ddgi_ao_bent_normals_enabled);
+	ClassDB::bind_method(D_METHOD("set_ddgi_ao_debug_mode", "mode"), &Environment::set_ddgi_ao_debug_mode);
+	ClassDB::bind_method(D_METHOD("get_ddgi_ao_debug_mode"), &Environment::get_ddgi_ao_debug_mode);
+
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_ao_enabled"), "set_ddgi_ao_enabled", "is_ddgi_ao_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_ao_quality", PROPERTY_HINT_ENUM, "Low,Medium,High,Ultra"), "set_ddgi_ao_quality", "get_ddgi_ao_quality");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_ao_resolution", PROPERTY_HINT_ENUM, "Auto,Full,Half"), "set_ddgi_ao_resolution", "get_ddgi_ao_resolution");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_ao_radius", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), "set_ddgi_ao_radius", "get_ddgi_ao_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_ao_intensity", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_ddgi_ao_intensity", "get_ddgi_ao_intensity");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_ao_bent_normals"), "set_ddgi_ao_bent_normals", "is_ddgi_ao_bent_normals_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_ao_debug_mode", PROPERTY_HINT_ENUM, "Disabled,Raw AO,Final AO,Depth,Normals,Bent Normals,Edges"), "set_ddgi_ao_debug_mode", "get_ddgi_ao_debug_mode");
+
 	// Glow
 
 	ClassDB::bind_method(D_METHOD("set_glow_enabled", "enabled"), &Environment::set_glow_enabled);
@@ -1948,6 +2038,24 @@ void Environment::_bind_methods() {
 	BIND_ENUM_CONSTANT(DDGI_DEBUG_CASCADES);
 	BIND_ENUM_CONSTANT(DDGI_DEBUG_MAX);
 
+	BIND_ENUM_CONSTANT(DDGI_AO_QUALITY_LOW);
+	BIND_ENUM_CONSTANT(DDGI_AO_QUALITY_MEDIUM);
+	BIND_ENUM_CONSTANT(DDGI_AO_QUALITY_HIGH);
+	BIND_ENUM_CONSTANT(DDGI_AO_QUALITY_ULTRA);
+
+	BIND_ENUM_CONSTANT(DDGI_AO_RESOLUTION_AUTO);
+	BIND_ENUM_CONSTANT(DDGI_AO_RESOLUTION_FULL);
+	BIND_ENUM_CONSTANT(DDGI_AO_RESOLUTION_HALF);
+
+	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_DISABLED);
+	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_RAW_AO);
+	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_FINAL_AO);
+	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_DEPTH);
+	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_NORMALS);
+	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_BENT_NORMALS);
+	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_EDGES);
+	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_MAX);
+
 	BIND_ENUM_CONSTANT(FOG_MODE_EXPONENTIAL);
 	BIND_ENUM_CONSTANT(FOG_MODE_DEPTH);
 
@@ -1978,6 +2086,7 @@ Environment::Environment() {
 	_update_sdfgi();
 	_update_pathtracing();
 	_update_ddgi();
+	_update_ddgi_ao();
 	_update_glow();
 	_update_fog();
 	_update_adjustment();

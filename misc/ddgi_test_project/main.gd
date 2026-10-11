@@ -88,6 +88,7 @@ func _ready() -> void:
 
 	_apply_args()
 	_setup_volume()
+	_setup_ao()
 
 	if args.has("shot") or args.has("bench") or args.has("measure") or args.has("weather"):
 		hud.visible = false
@@ -255,7 +256,42 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		move_camera = not move_camera
 	elif key.keycode == KEY_P:
 		env.pathtracing_enabled = not env.pathtracing_enabled
+	elif key.keycode == KEY_O:
+		if volume:
+			volume.ao_enabled = not volume.ao_enabled
+		else:
+			env.ddgi_ao_enabled = not env.ddgi_ao_enabled
 	_update_hud()
+
+
+# --ao=1 turns on the DDGIVolume ambient occlusion (XeGTAO): on the --volume
+# node, or without one on the Environment. --ao_quality=0..3 (low..ultra),
+# --ao_res=0|1|2 (auto, full, half), --ao_radius=m, --ao_intensity=,
+# --ao_bent=1 (bent normals), --ao_debug=0..6 (see DDGIVolume.ao_debug_view).
+func _setup_ao() -> void:
+	var on: bool = args.get("ao", "0") == "1"
+	var quality := int(args.get("ao_quality", "2"))
+	var res := int(args.get("ao_res", "0"))
+	var radius := float(args.get("ao_radius", "0.5"))
+	var intensity := float(args.get("ao_intensity", "1.0"))
+	var bent: bool = args.get("ao_bent", "0") == "1"
+	var debug := int(args.get("ao_debug", "0"))
+	if volume:
+		volume.ao_quality = quality
+		volume.ao_resolution = res
+		volume.ao_radius = radius
+		volume.ao_intensity = intensity
+		volume.ao_bent_normals = bent
+		volume.ao_debug_view = debug
+		volume.ao_enabled = on
+	else:
+		env.ddgi_ao_quality = quality
+		env.ddgi_ao_resolution = res
+		env.ddgi_ao_radius = radius
+		env.ddgi_ao_intensity = intensity
+		env.ddgi_ao_bent_normals = bent
+		env.ddgi_ao_debug_mode = debug
+		env.ddgi_ao_enabled = on
 
 
 # --volume=cx,cy,cz,sx,sy,sz adds a DDGIVolume (center and size) with
@@ -320,9 +356,14 @@ func _run_capture() -> void:
 		var wall_ms := (Time.get_ticks_usec() - start) / 1000.0 / frames
 		var pass_text := ""
 		var ddgi_total := 0.0
+		var ao_total := 0.0
 		for k in passes:
 			pass_text += "  %s=%.3f" % [k, passes[k] / frames]
-			ddgi_total += passes[k] / frames
+			if k.begins_with("ao_"):
+				ao_total += passes[k] / frames
+			else:
+				ddgi_total += passes[k] / frames
+		pass_text += "  ao_ms=%.3f" % ao_total
 		var vram := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0
 		var tex_mem := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED) / 1048576.0
 		var buf_mem := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED) / 1048576.0
@@ -491,6 +532,9 @@ func _ddgi_pass_times() -> Dictionary:
 		elif name.begins_with("DDGI "):
 			in_as = false
 			key = name.trim_prefix("DDGI ").to_snake_case()
+		elif name.begins_with("XeGTAO ") and name != "XeGTAO Done":
+			in_as = false
+			key = "ao_" + name.trim_prefix("XeGTAO ").to_snake_case()
 		else:
 			in_as = false
 		if key != "":

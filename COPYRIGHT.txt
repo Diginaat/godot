@@ -175,6 +175,16 @@ Comment: Intel ASSAO and related files
 Copyright: 2016, Intel Corporation
 License: Expat
 
+Files: servers/rendering/renderer_rd/effects/xegtao.cpp
+ servers/rendering/renderer_rd/effects/xegtao.h
+ servers/rendering/renderer_rd/shaders/effects/xegtao_denoise.glsl
+ servers/rendering/renderer_rd/shaders/effects/xegtao_inc.glsl
+ servers/rendering/renderer_rd/shaders/effects/xegtao_main.glsl
+ servers/rendering/renderer_rd/shaders/effects/xegtao_prefilter.glsl
+Comment: Intel XeGTAO (ground truth ambient occlusion), ported to GLSL
+Copyright: 2016-2021, Intel Corporation
+License: Expat
+
 Files: servers/rendering/renderer_rd/shaders/effects/taa_resolve.glsl
 Comment: Temporal Anti-Aliasing resolve implementation
 Copyright: 2016, Panos Karabelas

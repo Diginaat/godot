@@ -139,8 +139,23 @@ void DDGIVolume::_apply_to_environment() {
 	env->set_ddgi_volume(enabled && !infinite_world, get_global_position(), size);
 	if (new_environment) {
 		_apply_baked_data();
+		_apply_ao();
 	}
 	update_configuration_warnings();
+}
+
+void DDGIVolume::_apply_ao() {
+	if (applied_environment.is_null()) {
+		return;
+	}
+	// Only the AO settings: the probes and the baked data stay as they are.
+	applied_environment->set_ddgi_ao_quality(ao_quality);
+	applied_environment->set_ddgi_ao_resolution(ao_resolution);
+	applied_environment->set_ddgi_ao_radius(ao_radius);
+	applied_environment->set_ddgi_ao_intensity(ao_intensity);
+	applied_environment->set_ddgi_ao_bent_normals(ao_bent_normals);
+	applied_environment->set_ddgi_ao_debug_mode(ao_debug_view);
+	applied_environment->set_ddgi_ao_enabled(enabled && ao_enabled);
 }
 
 void DDGIVolume::_apply_baked_data() {
@@ -165,6 +180,9 @@ void DDGIVolume::_notification(int p_what) {
 				applied_environment->set_ddgi_enabled(false);
 				applied_environment->set_ddgi_volume(false, Vector3(), Vector3(1, 1, 1));
 				applied_environment->set_ddgi_baked_data(0, Dictionary());
+				// Back to the Environment's own SSAO setting.
+				applied_environment->set_ddgi_ao_enabled(false);
+				applied_environment->set_ddgi_ao_debug_mode(Environment::DDGI_AO_DEBUG_DISABLED);
 				applied_environment.unref();
 			}
 		} break;
@@ -183,6 +201,7 @@ bool DDGIVolume::_set(const StringName &p_name, const Variant &p_value) {
 void DDGIVolume::set_enabled(bool p_enabled) {
 	enabled = p_enabled;
 	_apply_to_environment();
+	_apply_ao();
 }
 
 bool DDGIVolume::is_enabled() const {
@@ -337,6 +356,70 @@ Ref<DDGIProbeData> DDGIVolume::get_probe_data() const {
 	return probe_data;
 }
 
+void DDGIVolume::set_ao_enabled(bool p_enabled) {
+	ao_enabled = p_enabled;
+	_apply_ao();
+	update_configuration_warnings();
+}
+
+bool DDGIVolume::is_ao_enabled() const {
+	return ao_enabled;
+}
+
+void DDGIVolume::set_ao_quality(Environment::DDGIAOQuality p_quality) {
+	ao_quality = p_quality;
+	_apply_ao();
+}
+
+Environment::DDGIAOQuality DDGIVolume::get_ao_quality() const {
+	return ao_quality;
+}
+
+void DDGIVolume::set_ao_resolution(Environment::DDGIAOResolution p_resolution) {
+	ao_resolution = p_resolution;
+	_apply_ao();
+}
+
+Environment::DDGIAOResolution DDGIVolume::get_ao_resolution() const {
+	return ao_resolution;
+}
+
+void DDGIVolume::set_ao_radius(float p_radius) {
+	ao_radius = CLAMP(p_radius, 0.01f, 100.0f);
+	_apply_ao();
+}
+
+float DDGIVolume::get_ao_radius() const {
+	return ao_radius;
+}
+
+void DDGIVolume::set_ao_intensity(float p_intensity) {
+	ao_intensity = CLAMP(p_intensity, 0.0f, 4.0f);
+	_apply_ao();
+}
+
+float DDGIVolume::get_ao_intensity() const {
+	return ao_intensity;
+}
+
+void DDGIVolume::set_ao_bent_normals(bool p_enabled) {
+	ao_bent_normals = p_enabled;
+	_apply_ao();
+}
+
+bool DDGIVolume::is_ao_bent_normals_enabled() const {
+	return ao_bent_normals;
+}
+
+void DDGIVolume::set_ao_debug_view(Environment::DDGIAODebugMode p_mode) {
+	ao_debug_view = p_mode;
+	_apply_ao();
+}
+
+Environment::DDGIAODebugMode DDGIVolume::get_ao_debug_view() const {
+	return ao_debug_view;
+}
+
 Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 	ERR_FAIL_COND_V_MSG(!is_inside_tree(), Ref<DDGIProbeData>(), "DDGIVolume must be inside the scene tree to bake.");
 	ERR_FAIL_COND_V_MSG(!enabled, Ref<DDGIProbeData>(), "DDGIVolume is disabled; enable it to bake.");
@@ -470,8 +553,16 @@ AABB DDGIVolume::get_aabb() const {
 
 PackedStringArray DDGIVolume::get_configuration_warnings() const {
 	PackedStringArray warnings = VisualInstance3D::get_configuration_warnings();
-	if (_get_environment().is_null()) {
+	Ref<Environment> env = _get_environment();
+	if (env.is_null()) {
 		warnings.push_back(RTR("DDGIVolume needs a WorldEnvironment with an Environment resource in the same World3D."));
+	}
+	if (ao_enabled && enabled) {
+		if (RenderingServer::get_singleton()->get_current_rendering_method() != "forward_plus") {
+			warnings.push_back(RTR("Ambient Occlusion (XeGTAO) needs the Forward+ renderer; it is off with this renderer."));
+		} else if (env.is_valid() && env->is_ssao_enabled()) {
+			warnings.push_back(RTR("The Environment's SSAO is replaced by this node's Ambient Occlusion (XeGTAO) while it is on. The SSAO settings are kept and come back when Ambient Occlusion is turned off or the node is removed."));
+		}
 	}
 	// Sampling baked probes needs no ray tracing; updating them does.
 	const bool baked_only = bake_mode == BAKE_MODE_BAKED && _probe_data_matches() && !infinite_world;
@@ -536,6 +627,20 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_probe_data", "data"), &DDGIVolume::set_probe_data);
 	ClassDB::bind_method(D_METHOD("get_probe_data"), &DDGIVolume::get_probe_data);
 	ClassDB::bind_method(D_METHOD("bake", "updates_per_probe"), &DDGIVolume::bake, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("set_ao_enabled", "enabled"), &DDGIVolume::set_ao_enabled);
+	ClassDB::bind_method(D_METHOD("is_ao_enabled"), &DDGIVolume::is_ao_enabled);
+	ClassDB::bind_method(D_METHOD("set_ao_quality", "quality"), &DDGIVolume::set_ao_quality);
+	ClassDB::bind_method(D_METHOD("get_ao_quality"), &DDGIVolume::get_ao_quality);
+	ClassDB::bind_method(D_METHOD("set_ao_resolution", "resolution"), &DDGIVolume::set_ao_resolution);
+	ClassDB::bind_method(D_METHOD("get_ao_resolution"), &DDGIVolume::get_ao_resolution);
+	ClassDB::bind_method(D_METHOD("set_ao_radius", "radius"), &DDGIVolume::set_ao_radius);
+	ClassDB::bind_method(D_METHOD("get_ao_radius"), &DDGIVolume::get_ao_radius);
+	ClassDB::bind_method(D_METHOD("set_ao_intensity", "intensity"), &DDGIVolume::set_ao_intensity);
+	ClassDB::bind_method(D_METHOD("get_ao_intensity"), &DDGIVolume::get_ao_intensity);
+	ClassDB::bind_method(D_METHOD("set_ao_bent_normals", "enabled"), &DDGIVolume::set_ao_bent_normals);
+	ClassDB::bind_method(D_METHOD("is_ao_bent_normals_enabled"), &DDGIVolume::is_ao_bent_normals_enabled);
+	ClassDB::bind_method(D_METHOD("set_ao_debug_view", "mode"), &DDGIVolume::set_ao_debug_view);
+	ClassDB::bind_method(D_METHOD("get_ao_debug_view"), &DDGIVolume::get_ao_debug_view);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "enabled"), "set_enabled", "is_enabled");
 	// Size, spacing and probe count are linked: editing one updates the others in the inspector.
@@ -554,6 +659,14 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_classification"), "set_probe_classification", "is_probe_classification_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "infinite_world"), "set_infinite_world", "is_infinite_world");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades"), "set_debug_mode", "get_debug_mode");
+	ADD_GROUP("Ambient Occlusion", "ao_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ao_enabled"), "set_ao_enabled", "is_ao_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ao_quality", PROPERTY_HINT_ENUM, "Low,Medium,High,Ultra"), "set_ao_quality", "get_ao_quality");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ao_resolution", PROPERTY_HINT_ENUM, "Auto,Full,Half"), "set_ao_resolution", "get_ao_resolution");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ao_radius", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), "set_ao_radius", "get_ao_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ao_intensity", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_ao_intensity", "get_ao_intensity");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ao_bent_normals"), "set_ao_bent_normals", "is_ao_bent_normals_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "ao_debug_view", PROPERTY_HINT_ENUM, "Disabled,Raw AO,Final AO,Depth,Normals,Bent Normals,Edges"), "set_ao_debug_view", "get_ao_debug_view");
 	ADD_GROUP("Baking", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "bake_mode", PROPERTY_HINT_ENUM, "Dynamic,Baked,Baked + Dynamic"), "set_bake_mode", "get_bake_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "probe_data", PROPERTY_HINT_RESOURCE_TYPE, DDGIProbeData::get_class_static()), "set_probe_data", "get_probe_data");

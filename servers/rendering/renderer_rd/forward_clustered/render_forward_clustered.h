@@ -38,6 +38,7 @@
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
+#include "servers/rendering/renderer_rd/effects/xegtao.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -794,6 +795,7 @@ protected:
 	RendererRD::FSR2Effect *fsr2_effect = nullptr;
 	RendererRD::DLSSEffect *dlss_effect = nullptr;
 	RendererRD::SSEffects *ss_effects = nullptr;
+	RendererRD::XeGTAO *xegtao = nullptr;
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;
@@ -887,6 +889,15 @@ protected:
 	// The probe resources of this view, for volumetric fog. False when there are none.
 	virtual bool _ddgi_get_fog_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) { return false; }
 	bool ddgi_active_this_frame = false;
+
+	// XeGTAO (DDGIVolume ambient occlusion): replaces SSAO as the producer of
+	// the AO texture the scene shader reads. Set while it is processed this
+	// frame (_pre_opaque_render), and while its output is valid for the
+	// opaque pass (until the next render_scene()).
+	bool xegtao_active_this_frame = false;
+	bool xegtao_used = false;
+	RendererRD::XeGTAO::Settings xegtao_settings;
+	void _process_xegtao(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices);
 
 	virtual void _render_material(const Transform3D &p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region, float p_exposure_normalization) override;
 	virtual void _render_uv2(const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region) override;

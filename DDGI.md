@@ -419,6 +419,7 @@ noise of the first updates doesn't linger.
 | 18 | Black surfaces: custom-shader geometry in the TLAS while its hit group compiles; inactive probes sampled | Done |
 | 19 | Dark areas on par with the path tracer: DDGI occludes sky reflections | Done |
 | 20 | Performance: bounce light lookup moved out of the ray tracing pipeline | Done |
+| 21 | Ambient occlusion: XeGTAO, controlled by the DDGIVolume (settings, compute passes, Forward+ AO texture, debug views) | In progress (branch `dev-ddgi-ao`) |
 
 ## Test project
 

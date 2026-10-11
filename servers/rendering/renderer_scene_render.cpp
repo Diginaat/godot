@@ -634,6 +634,10 @@ void RendererSceneRender::environment_set_ddgi_baked_data(RID p_env, int p_mode,
 	environment_storage.environment_set_ddgi_baked_data(p_env, p_mode, p_data);
 }
 
+void RendererSceneRender::environment_set_ddgi_ao(RID p_env, bool p_enable, int p_quality, int p_resolution, float p_radius, float p_intensity, bool p_bent_normals, int p_debug_mode) {
+	environment_storage.environment_set_ddgi_ao(p_env, p_enable, p_quality, p_resolution, p_radius, p_intensity, p_bent_normals, p_debug_mode);
+}
+
 bool RendererSceneRender::environment_get_ddgi_enabled(RID p_env) const {
 	return environment_storage.environment_get_ddgi_enabled(p_env);
 }

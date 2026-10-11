@@ -779,11 +779,12 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
 		scene_state.ubo.ss_effects_flags = 0;
 	} else if (p_render_data->reflection_probe.is_null() && is_environment(p_render_data->environment)) {
-		scene_state.ubo.ssao_ao_affect = environment_get_ssao_ao_channel_affect(p_render_data->environment);
-		scene_state.ubo.ssao_light_affect = environment_get_ssao_direct_light_affect(p_render_data->environment);
+		const bool use_xegtao = xegtao_used && p_opaque_render_buffers;
+		scene_state.ubo.ssao_ao_affect = use_xegtao ? 0.0f : environment_get_ssao_ao_channel_affect(p_render_data->environment);
+		scene_state.ubo.ssao_light_affect = use_xegtao ? 0.0f : environment_get_ssao_direct_light_affect(p_render_data->environment);
 		uint32_t ss_flags = 0;
 		if (p_opaque_render_buffers) {
-			ss_flags |= environment_get_ssao_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO : 0;
+			ss_flags |= (use_xegtao || environment_get_ssao_enabled(p_render_data->environment)) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO : 0;
 			ss_flags |= environment_get_ssil_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSIL : 0;
 			ss_flags |= environment_get_ssr_enabled(p_render_data->environment) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR : 0;
 			ss_flags |= bool(GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/enabled")) ? SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS : 0;
@@ -1517,6 +1518,15 @@ void RenderForwardClustered::_process_ssao(Ref<RenderSceneBuffersRD> p_render_bu
 	}
 }
 
+void RenderForwardClustered::_process_xegtao(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) {
+	ERR_FAIL_NULL(xegtao);
+	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	ERR_FAIL_COND(rb.is_null());
+
+	RENDER_TIMESTAMP("Process XeGTAO");
+	xegtao->process(rb, p_normal_roughness_slices, p_render_data->scene_data->view_projection, xegtao_settings);
+}
+
 void RenderForwardClustered::_process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform) {
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
@@ -1755,6 +1765,10 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 		if (p_use_ssil || p_use_ssr) {
 			ss_effects->allocate_last_frame_buffer(rb, p_use_ssil, p_use_ssr);
+		}
+
+		if (xegtao_active_this_frame) {
+			_process_xegtao(p_render_data, p_normal_roughness_slices);
 		}
 
 		if (p_use_ssao || p_use_ssil) {
@@ -2105,6 +2119,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	bool using_upscaling = scale_type != SCALE_3D_NONE;
 
+	// Temporal accumulation averages XeGTAO's per-frame noise.
+	xegtao_settings.temporal = using_taa || using_upscaling;
+	xegtao_settings.frame = RSG::rasterizer->get_frame_number();
+
 	// check if we need motion vectors
 	bool motion_vectors_required;
 	if (using_debug_mvs) {
@@ -2141,6 +2159,23 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_ddgi = false;
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
+
+	// XeGTAO, from the DDGIVolume: needs the depth prepass (checked below)
+	// and a view large enough for its depth MIPs.
+	xegtao_used = false;
+	bool xegtao_requested = false;
+	if (xegtao && !is_reflection_probe && rb_data.is_valid() && p_render_data->environment.is_valid()) {
+		RendererEnvironmentStorage::DDGISettings ddgi_settings = RendererEnvironmentStorage::get_singleton()->environment_get_ddgi(p_render_data->environment);
+		if (ddgi_settings.ao_enabled) {
+			xegtao_settings.quality = ddgi_settings.ao_quality;
+			xegtao_settings.resolution = ddgi_settings.ao_resolution;
+			xegtao_settings.radius = ddgi_settings.ao_radius;
+			xegtao_settings.intensity = ddgi_settings.ao_intensity;
+			xegtao_settings.bent_normals = ddgi_settings.ao_bent_normals;
+			xegtao_settings.debug_mode = ddgi_settings.ao_debug_mode;
+			xegtao_requested = RendererRD::XeGTAO::get_ao_size(rb->get_internal_size(), xegtao_settings) != Size2i();
+		}
+	}
 	bool using_motion_pass = rb_data.is_valid() && using_upscaling;
 
 	if (is_reflection_probe) {
@@ -2246,6 +2281,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			if (using_ssr ||
 					using_sdfgi ||
 					using_ddgi ||
+					xegtao_requested ||
 					environment_get_ssao_enabled(p_render_data->environment) ||
 					using_ssil ||
 					using_sscs ||
@@ -2434,7 +2470,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	SceneShaderForwardClustered::ShaderSpecialization base_specialization = scene_shader.default_specialization;
 	base_specialization.use_depth_fog = p_render_data->environment.is_valid() && environment_get_fog_mode(p_render_data->environment) == RSE::EnvironmentFogMode::ENV_FOG_MODE_DEPTH;
 
-	bool using_ssao = depth_pre_pass && !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssao_enabled(p_render_data->environment);
+	// XeGTAO replaces SSAO for this view: SSAO is not run.
+	bool using_xegtao = depth_pre_pass && xegtao_requested;
+	bool using_ssao = depth_pre_pass && !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssao_enabled(p_render_data->environment) && !using_xegtao;
 
 	if (depth_pre_pass) { //depth pre pass
 		bool needs_pre_resolve = _needs_post_prepass_render(p_render_data, using_sdfgi || using_voxelgi);
@@ -2455,7 +2493,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index);
 
-		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
+		bool finish_depth = using_ssao || using_xegtao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 
@@ -2499,8 +2537,11 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		}
 	}
 	ddgi_active_this_frame = using_ddgi;
+	xegtao_active_this_frame = using_xegtao;
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
 	ddgi_active_this_frame = false;
+	xegtao_active_this_frame = false;
+	xegtao_used = using_xegtao;
 
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
@@ -2826,7 +2867,16 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 
 	RID render_target = rb->get_render_target();
 
-	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSAO && rb->has_texture(RB_SCOPE_SSAO, RB_FINAL)) {
+	if (xegtao_used) {
+		RID debug = xegtao_settings.debug_mode != 0 ? RendererRD::XeGTAO::get_debug_texture(rb) : RID();
+		if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSAO) {
+			debug = RendererRD::XeGTAO::get_visibility_texture(rb).is_valid() ? rb->get_texture_slice(RB_SCOPE_XEGTAO, SNAME("visibility"), 0, 0) : RID();
+		}
+		if (debug.is_valid()) {
+			Size2i rtsize = texture_storage->render_target_get_size(render_target);
+			copy_effects->copy_to_fb_rect(debug, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSAO);
+		}
+	} else if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SSAO && rb->has_texture(RB_SCOPE_SSAO, RB_FINAL)) {
 		RID final = rb->get_texture_slice(RB_SCOPE_SSAO, RB_FINAL, 0, 0);
 		Size2i rtsize = texture_storage->render_target_get_size(render_target);
 		copy_effects->copy_to_fb_rect(final, texture_storage->render_target_get_rd_framebuffer(render_target), Rect2(Vector2(), rtsize), false, true);
@@ -3881,6 +3931,12 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.binding = 27;
 		u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 		RID aot = rb.is_valid() && rb->has_texture(RB_SCOPE_SSAO, RB_FINAL) ? rb->get_texture(RB_SCOPE_SSAO, RB_FINAL) : RID();
+		if (xegtao_used && rb.is_valid()) {
+			RID xegtao_visibility = RendererRD::XeGTAO::get_visibility_texture(rb);
+			if (xegtao_visibility.is_valid()) {
+				aot = xegtao_visibility;
+			}
+		}
 		RID texture = aot.is_valid() ? aot : texture_storage->texture_rd_get_default(is_multiview ? RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK : RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
 		u.append_id(texture);
 		uniforms.push_back(u);
@@ -5608,6 +5664,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	fsr2_effect = memnew(RendererRD::FSR2Effect);
 	dlss_effect = memnew(RendererRD::DLSSEffect);
 	ss_effects = memnew(RendererRD::SSEffects);
+	xegtao = memnew(RendererRD::XeGTAO);
 	motion_vectors_store = memnew(RendererRD::MotionVectorsStore);
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	mfx_temporal_effect = memnew(RendererRD::MFXTemporalEffect);
@@ -5620,6 +5677,11 @@ RenderForwardClustered::~RenderForwardClustered() {
 	if (ss_effects != nullptr) {
 		memdelete(ss_effects);
 		ss_effects = nullptr;
+	}
+
+	if (xegtao != nullptr) {
+		memdelete(xegtao);
+		xegtao = nullptr;
 	}
 
 	if (taa != nullptr) {

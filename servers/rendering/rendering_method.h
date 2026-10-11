@@ -327,6 +327,7 @@ public:
 	virtual void environment_set_ddgi_bounce_energy(RID p_env, float p_energy) = 0;
 	virtual void environment_set_ddgi_realtime_updates(RID p_env, bool p_enable) = 0;
 	virtual void environment_set_ddgi_baked_data(RID p_env, int p_mode, const Dictionary &p_data) = 0;
+	virtual void environment_set_ddgi_ao(RID p_env, bool p_enable, int p_quality, int p_resolution, float p_radius, float p_intensity, bool p_bent_normals, int p_debug_mode) = 0;
 	virtual Dictionary ddgi_get_probe_data(const Ref<RenderSceneBuffers> &p_render_buffers) = 0;
 	virtual bool environment_get_ddgi_enabled(RID p_env) const = 0;
 	virtual int environment_get_pathtracing_debug_mode(RID p_env) const = 0;

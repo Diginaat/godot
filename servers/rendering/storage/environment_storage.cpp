@@ -986,6 +986,18 @@ void RendererEnvironmentStorage::environment_set_ddgi_baked_data(RID p_env, int 
 	env->ddgi.baked_version = ++version;
 }
 
+void RendererEnvironmentStorage::environment_set_ddgi_ao(RID p_env, bool p_enable, int p_quality, int p_resolution, float p_radius, float p_intensity, bool p_bent_normals, int p_debug_mode) {
+	Environment *env = environment_owner.get_or_null(p_env);
+	ERR_FAIL_NULL(env);
+	env->ddgi.ao_enabled = p_enable;
+	env->ddgi.ao_quality = CLAMP(p_quality, 0, 3);
+	env->ddgi.ao_resolution = CLAMP(p_resolution, 0, 2);
+	env->ddgi.ao_radius = CLAMP(p_radius, 0.01f, 100.0f);
+	env->ddgi.ao_intensity = CLAMP(p_intensity, 0.0f, 4.0f);
+	env->ddgi.ao_bent_normals = p_bent_normals;
+	env->ddgi.ao_debug_mode = CLAMP(p_debug_mode, 0, 6);
+}
+
 bool RendererEnvironmentStorage::environment_get_ddgi_enabled(RID p_env) const {
 	Environment *env = environment_owner.get_or_null(p_env);
 	ERR_FAIL_NULL_V(env, false);
