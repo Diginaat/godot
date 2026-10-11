@@ -62,6 +62,12 @@ layout(set = 0, binding = 4, rgba16f) uniform restrict coherent image2D ddgi_atl
 // The first update of a probe also replaces what surfaces see, instead of
 // easing in from stale or empty texels.
 layout(set = 0, binding = 6, rgba16f) uniform restrict writeonly image2D ddgi_display;
+// Luminance and hit distance of each probe's fixed rays at its previous
+// update, packed as two halfs (the ray data is half precision anyway),
+// DDGI_MAX_FIXED_RAYS per probe, for the temporal gradient.
+layout(set = 0, binding = 7, std430) restrict buffer DDGIFixedHistory {
+	uint ddgi_fixed_history[];
+};
 #endif
 #ifdef MODE_SMOOTH
 layout(set = 0, binding = 4, rgba16f) uniform restrict readonly image2D ddgi_atlas;
@@ -124,17 +130,22 @@ void main() {
 		pd.variability = 1.0;
 		pd.last_update_frame = 0u;
 		pd.pending_change = 0.0;
+		pd.updates = 0u;
+		pd.guide = vec4(0.0);
+		pd.guide_next = vec4(0.0);
 	} else if (scroll_reset) {
-		// Keep the atlas texels as a fallback until the first trace. They belong
-		// to the probe that scrolled out at the far side, so they are stale, but
-		// stale lighting is less visible than sampling no probe at all (black
-		// flicker) while the camera moves.
+		// Not sampled until its first trace (its atlas texels belong to the
+		// probe that scrolled out at the far side); a coarser cascade covers
+		// it meanwhile. It is traced first.
 		pd.offset = vec3(0.0);
 		pd.state = DDGI_PROBE_SCROLLED;
 		pd.urgency = max(pd.urgency, 1.0);
 		pd.variability = 1.0;
 		pd.last_update_frame = 0u;
 		pd.pending_change = 0.0;
+		pd.updates = 0u;
+		pd.guide = vec4(0.0);
+		pd.guide_next = vec4(0.0);
 	}
 
 	// Realtime updates: no credit, no priorities. Each frame traces the next
@@ -185,6 +196,12 @@ void main() {
 	} else {
 		// Probes whose lighting changes get more updates, stable ones fewer.
 		rate *= mix(0.5, 3.0, clamp(pd.variability * 4.0, 0.0, 1.0));
+		// Young probes (just scrolled in) are noisy until a few updates are
+		// averaged (see the blend): update them sooner, so moving the camera
+		// doesn't leave blotches behind the scrolling edge.
+		if (pd.updates < 8u) {
+			rate *= 4.0;
+		}
 
 		// Probes in view (and close to the camera) matter most, but probes
 		// off screen still update so turning around doesn't show stale light.
@@ -228,6 +245,12 @@ shared vec3 shared_sum_result[64];
 shared vec3 shared_sum_previous[64];
 shared vec3 shared_ray_stats[64]; // Luminance sum, squared sum and count of the usable rays.
 shared float shared_hysteresis;
+// Temporal gradient (after A-SVGF, Schied et al. 2018): the fixed rays point
+// the same way every update, so comparing their light with the previous
+// update tells which directions really changed, free of the direction noise
+// of the rotated rays. x: luminance now, y: at the previous update.
+shared vec2 shared_fixed[DDGI_MAX_FIXED_RAYS];
+shared vec3 shared_fixed_dirs[DDGI_MAX_FIXED_RAYS];
 #else
 #define TILE_TEXELS ddgi.atlas.y
 #endif
@@ -254,7 +277,12 @@ void main() {
 	ivec2 origin = ddgi_tile_origin(probe, uint(texels), ddgi.atlas.z);
 	// New and scrolled-in probes have no data of their own yet: replace it.
 	bool first_update = pd.state == DDGI_PROBE_NEW || pd.state == DDGI_PROBE_SCROLLED;
-	float hysteresis = first_update ? 0.0 : vol.params.y;
+	// A young probe averages its first updates (weight 1/n, as the bake does)
+	// instead of keeping its first, noisy update at the full hysteresis: probes
+	// scrolled in while the camera moves settle in a few updates instead of
+	// showing colored blotches for dozens.
+	float young_limit = first_update ? 0.0 : float(pd.updates) / float(pd.updates + 1u);
+	float hysteresis = min(vol.params.y, young_limit);
 	float max_distance = vol.spacing.w;
 
 	uint local_index = gl_LocalInvocationIndex;
@@ -262,13 +290,22 @@ void main() {
 	vec3 sum_result = vec3(0.0);
 	vec3 sum_previous = vec3(0.0);
 	vec3 ray_stats = vec3(0.0);
+	vec4 guide_sum = vec4(0.0); // Radiance weighted directions (xyz) and radiance (w), for the next guide.
 #endif
 
 	uint ray_count = min(ray_end - ray_begin, uint(MAX_RAYS));
 	for (uint i = local_index; i < ray_count; i += 64u) {
 		uint r = ray_begin + i;
 		vec4 ray = imageLoad(ddgi_ray_data, ivec2(r, slot));
-		shared_dirs[i] = ddgi_probe_ray_direction(r);
+		// Guided rays count with their pdf weight (ddgi_sample_inc.glsl).
+		vec4 dir_weight = ddgi_probe_ray_direction_weighted(r, pd.guide);
+#ifdef MODE_BLEND_IRRADIANCE
+		// The weight is folded into the direction: the cosine weight of a
+		// texel, dot(texel_dir, shared_dirs[i]), comes out already weighted.
+		shared_dirs[i] = dir_weight.xyz * dir_weight.w;
+#else
+		shared_dirs[i] = dir_weight.xyz;
+#endif
 #ifdef MODE_BLEND_IRRADIANCE
 		// Back faces (the inside of geometry) add no light; a single NaN would
 		// stay in the probe forever (hysteresis).
@@ -283,17 +320,59 @@ void main() {
 		float l = ddgi_luminance(radiance);
 		shared_rays[i] = usable ? vec4(radiance, l) : vec4(0.0, 0.0, 0.0, -1.0);
 		if (usable) {
-			ray_stats += vec3(l, l * l, 1.0);
+			ray_stats += vec3(l, l * l, 1.0) * dir_weight.w;
+			guide_sum += vec4(dir_weight.xyz, 1.0) * (l * dir_weight.w);
 		}
 #else
 		float d = ray.a;
 		bool usable = !isnan(d) && !isinf(d);
 		// Back faces count as very close: points past them are occluded.
 		d = d < 0.0 ? -d * 0.2 : min(d, max_distance);
-		shared_rays[i] = usable ? vec4(d, d * d, 1.0, 0.0) : vec4(0.0);
+		// z: the ray's weight (0 when unusable).
+		shared_rays[i] = usable ? vec4(d, d * d, dir_weight.w, 0.0) : vec4(0.0);
 #endif
 	}
+#ifdef MODE_BLEND_IRRADIANCE
+	// Fixed rays: compare this update with the previous one, then remember
+	// this one. A ray changed when it hits something at another distance:
+	// geometry moved. That is exact (same direction, same origin), so static
+	// scenes never see a change. (Also counting rays whose light changed by
+	// half or more was tried: soft shadow edges and small bright patches flip
+	// that often, and the static interior flickered on 3.6% of its pixels
+	// instead of 0.03%. Light changes keep the tile-wide rule below.) The
+	// history only counts when it was written with the same fixed ray count
+	// (directions), and not across a reset.
+	uint fixed_count = min(ddgi.counts.z, uint(DDGI_MAX_FIXED_RAYS));
+	bool has_history = !first_update && pd.history_rays == fixed_count;
+	uint history_base = probe * uint(DDGI_MAX_FIXED_RAYS);
+	for (uint i = local_index; i < fixed_count; i += 64u) {
+		vec4 ray = imageLoad(ddgi_ray_data, ivec2(i, slot));
+		bool usable = !any(isnan(ray)) && !any(isinf(ray));
+		float l = usable && ray.a >= 0.0 ? min(ddgi_luminance(ray.rgb), ddgi.schedule.z) : 0.0;
+		float d = usable ? ray.a : 0.0; // Negative: back face.
+		vec2 prev = has_history ? unpackHalf2x16(ddgi_fixed_history[history_base + i]) : vec2(l, d);
+		float moved = abs(d - prev.y) > 0.05 * max(abs(d), abs(prev.y)) + 0.02 ? 1.0 : 0.0;
+		// x: the ray's light (the brighter of both updates), y: 1 if it moved.
+		shared_fixed[i] = vec2(max(l, prev.x), moved);
+		shared_fixed_dirs[i] = ddgi_probe_ray_direction(i);
+		ddgi_fixed_history[history_base + i] = packHalf2x16(vec2(l, d));
+	}
+#endif
 	barrier();
+
+#ifdef MODE_BLEND_IRRADIANCE
+	// Share of the whole probe's light from rays that moved. Without any, as
+	// for nearly every probe of a static scene, the texels skip the gradient.
+	vec2 probe_light = vec2(0.0); // x: changed, y: total.
+	if (has_history) {
+		for (uint i = 0u; i < fixed_count; i++) {
+			vec2 f = shared_fixed[i];
+			probe_light += vec2(f.x * f.y, f.x);
+		}
+	}
+	bool any_moved = probe_light.x > 0.0;
+	float probe_share = probe_light.x / max(probe_light.y, 1e-6);
+#endif
 
 	for (int ty = int(gl_LocalInvocationID.y); ty < texels; ty += 8) {
 		for (int tx = int(gl_LocalInvocationID.x); tx < texels; tx += 8) {
@@ -368,6 +447,9 @@ void main() {
 	shared_sum_previous[local_index] = sum_previous;
 	shared_ray_stats[local_index] = ray_stats;
 	barrier();
+	// The texels are done with the rays: their storage holds the guide sums.
+	shared_rays[local_index] = guide_sum;
+	barrier();
 
 	// How much the whole probe changed: the tile average is far less noisy
 	// than single texels, so noise doesn't count as a lighting change.
@@ -375,11 +457,23 @@ void main() {
 		vec3 total_result = vec3(0.0);
 		vec3 total_previous = vec3(0.0);
 		vec3 stats = vec3(0.0);
+		vec4 guide_total = vec4(0.0);
 		for (uint i = 0u; i < 64u; i++) {
 			total_result += shared_sum_result[i];
 			total_previous += shared_sum_previous[i];
 			stats += shared_ray_stats[i];
+			guide_total += shared_rays[i];
 		}
+		// Next guide: a moving average of where the light comes from. A dark
+		// update (no light at all) lets the old guide fade instead.
+		vec4 guide = pd.guide;
+		if (guide_total.w > 0.0) {
+			vec3 mean_dir = guide_total.xyz / guide_total.w;
+			guide = (first_update || guide.w == 0.0) ? vec4(mean_dir, 1.0) : vec4(mix(guide.xyz, mean_dir, 0.25), 1.0);
+		} else {
+			guide.xyz *= 0.75;
+		}
+		ddgi_probes[probe].guide_next = guide;
 		float floor_value = 0.02 * float(texels * texels);
 		float change = length(total_result - total_previous) / max(length(total_previous), floor_value);
 		// Part of every change is ray noise: in a dark room lit by a small
@@ -411,6 +505,8 @@ void main() {
 		shared_hysteresis = first_update ? 0.0 : clamp(1.0 - (confirmed - 0.1) * 1.5, 0.4, 1.0);
 		// Moving average of how much this probe's light changes per update.
 		ddgi_probes[probe].variability = first_update ? 1.0 : mix(pd.variability, min(signal, 4.0), 0.3);
+		ddgi_probes[probe].updates = min(pd.updates + 1u, 255u);
+		ddgi_probes[probe].history_rays = fixed_count;
 	}
 	barrier();
 
@@ -422,7 +518,24 @@ void main() {
 			// less flicker, at the cost of a slower response to light changes
 			// too small to be told from the noise.
 			float steady = hysteresis > 0.0 ? mix(hysteresis, 1.0 - (1.0 - hysteresis) * 0.5, clamp(shared_noise[i] * 2.0, 0.0, 1.0)) : 0.0;
-			float h = steady * change_factor;
+
+			// Temporal gradient of this texel: the share of its light (cosine
+			// weighted, as the fixed rays see it) that comes from rays that
+			// moved, or the share of the whole probe's light, if larger: the
+			// few fixed rays miss most of a small moving object, but the probe's
+			// light around it changed too. Where it shows a change, the old
+			// light gives way (A-SVGF: the accumulation weight rises toward 1).
+			float gradient = 0.0;
+			if (any_moved) {
+				vec3 texel_dir = ddgi_texel_direction(ivec2(tx, ty), uint(texels));
+				vec2 texel_light = vec2(0.0); // x: changed, y: total.
+				for (uint r = 0u; r < fixed_count; r++) {
+					vec2 f = shared_fixed[r];
+					texel_light += vec2(f.x * f.y, f.x) * max(0.0, dot(texel_dir, shared_fixed_dirs[r]));
+				}
+				gradient = smoothstep(0.05, 0.3, max(texel_light.x / max(texel_light.y, 1e-6), probe_share));
+			}
+			float h = min(steady * change_factor, young_limit) * (1.0 - gradient);
 			vec4 value = vec4(mix(shared_result[i], shared_previous[i], h), min(shared_noise[i], 8.0));
 			imageStore(ddgi_atlas, origin + ivec2(tx, ty), value);
 			if (first_update) {
@@ -567,6 +680,9 @@ void main() {
 
 	ddgi_probes[probe].offset = pd.offset;
 	ddgi_probes[probe].state = pd.state;
+	// The next frame's rays follow the guide this frame's blend measured
+	// (committed here, after both blends used the one the rays were traced with).
+	ddgi_probes[probe].guide = pd.guide_next;
 }
 
 #endif // MODE_RELOCATE_CLASSIFY

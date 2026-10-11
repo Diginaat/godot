@@ -15,14 +15,16 @@
 // the functions that read the DDGI resources. Requires oct_inc.glsl.
 
 #define DDGI_MAX_VOLUMES 8
+// Most fixed rays per probe (DDGIDataBlock counts.z); keep in sync with render_ddgi.cpp.
+#define DDGI_MAX_FIXED_RAYS 32
 
 #define DDGI_PROBE_NEW 0u // Never updated: skipped when sampling, updated first.
 #define DDGI_PROBE_ACTIVE 1u
 #define DDGI_PROBE_INACTIVE 2u // No surface nearby: traced with the fixed rays only.
 #define DDGI_PROBE_INSIDE 3u // Inside geometry: never sampled.
-// Brought into the volume by scrolling, not traced yet. Sampled with the
-// atlas texels left by the probe that scrolled out (stale, but better than
-// nothing); the first update replaces them instead of blending with them.
+// Brought into the volume by scrolling, not traced yet. Not sampled (it
+// still holds the atlas texels of the probe that scrolled out, from the far
+// side of the grid); the first update replaces them instead of blending.
 #define DDGI_PROBE_SCROLLED 4u
 
 #define DDGI_VOLUME_FLAG_RELOCATION 1
@@ -47,6 +49,16 @@ struct DDGIProbe {
 	float variability; // Moving average of the relative change per update.
 	uint last_update_frame;
 	float pending_change; // Signed relative change of the last update above the noise, not applied yet.
+	uint updates; // Updates since the probe was new or scrolled in (at most 255).
+	uint history_rays; // Fixed rays in its DDGIFixedHistory entry (0: none yet).
+	uint pad1;
+	uint pad2;
+	// Guided rays: xyz the mean direction of the light arriving at the probe
+	// (radiance weighted; its length is the mean resultant length, 0 to 1),
+	// w 1 once set. The trace and the blends of a frame use guide; the
+	// irradiance blend writes guide_next and the relocate pass commits it.
+	vec4 guide;
+	vec4 guide_next;
 };
 
 struct DDGIDataBlock {

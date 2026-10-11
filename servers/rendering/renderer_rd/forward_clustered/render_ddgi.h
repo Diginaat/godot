@@ -77,7 +77,7 @@ struct DDGIDataGPU {
 };
 static_assert(sizeof(DDGIDataGPU) == 1632, "DDGIDataGPU must match the std140 layout of DDGIDataBlock");
 
-// std430, 32 bytes.
+// std430, 80 bytes.
 struct DDGIProbeGPU {
 	float offset[3];
 	uint32_t state;
@@ -85,8 +85,13 @@ struct DDGIProbeGPU {
 	float variability;
 	uint32_t last_update_frame;
 	float pending_change;
+	uint32_t updates;
+	uint32_t history_rays;
+	uint32_t pad[2];
+	float guide[4];
+	float guide_next[4];
 };
-static_assert(sizeof(DDGIProbeGPU) == 32, "DDGIProbeGPU must match DDGIProbe");
+static_assert(sizeof(DDGIProbeGPU) == 80, "DDGIProbeGPU must match DDGIProbe");
 
 /// Resources the ray tracing scene set binds at 34-39 (raytracing_ddgi_inc.glsl).
 struct RTDDGIBindings {
@@ -112,6 +117,7 @@ public:
 	enum {
 		MAX_VOLUMES = 8,
 		MAX_CASCADES = 4,
+		MAX_FIXED_RAYS = 32, // DDGI_MAX_FIXED_RAYS in ddgi_inc.glsl.
 	};
 
 	enum DebugMode {
@@ -154,6 +160,7 @@ public:
 		RID probe_buffer;
 		RID update_list;
 		RID stats_buffer;
+		RID fixed_history; // Luminance and hit distance (two halfs) of each fixed ray at the previous update, MAX_FIXED_RAYS per probe.
 		RID ray_data;
 		RID irradiance_atlas; // What the probe updates write.
 		// What surfaces sample: eases toward irradiance_atlas every frame, so a
@@ -256,6 +263,11 @@ public:
 	/// The probes of a viewport (atlases, offsets, states and the volume they
 	/// belong to) for DDGIProbeData, or an empty dictionary.
 	Dictionary get_probe_data(RenderSceneBuffersRD *p_render_buffers);
+
+	/// What sampling the probes needs (as ddgi_sample_inc.glsl does), for
+	/// other passes such as volumetric fog. False when the viewport has no
+	/// probes yet.
+	bool get_sampling_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas);
 
 	/// Updates the probes: schedule, trace (with the given RT scene uniform
 	/// set setup callback), blend, relocate and classify. Called after the TLAS

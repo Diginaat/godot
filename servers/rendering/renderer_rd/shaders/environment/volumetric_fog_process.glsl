@@ -149,6 +149,29 @@ layout(set = 1, binding = 2) uniform texture3D sdfgi_occlusion_texture;
 
 #endif //SDFGI
 
+#ifdef ENABLE_DDGI
+
+// DDGI probes on set 1: they replace the unoccluded sky ambient light, so fog
+// in caves and interiors only scatters the light that reaches it.
+#include "../raytracing/ddgi_inc.glsl"
+
+layout(set = 1, binding = 0, std140) uniform DDGIUniforms {
+	DDGIDataBlock ddgi;
+};
+
+layout(set = 1, binding = 1, std430) restrict readonly buffer DDGIProbes {
+	DDGIProbe ddgi_probes[];
+};
+
+layout(set = 1, binding = 2) uniform texture2D ddgi_irradiance_atlas;
+layout(set = 1, binding = 3) uniform texture2D ddgi_distance_atlas;
+
+#define DDGI_SAMPLER linear_sampler
+#define DDGI_SAMPLING
+#include "../raytracing/ddgi_sample_inc.glsl"
+
+#endif // ENABLE_DDGI
+
 layout(set = 0, binding = 15, std140) uniform Params {
 	vec2 fog_frustum_size_begin;
 	vec2 fog_frustum_size_end;
@@ -456,7 +479,16 @@ void main() {
 #endif //USE_RADIANCE_OCTMAP_ARRAY
 			}
 
-			total_light += mix(params.ambient_color, mix(isotropic, anisotropic, abs(params.phase_g)), params.sky_contribution) * params.ambient_inject;
+			vec3 ambient = mix(params.ambient_color, mix(isotropic, anisotropic, abs(params.phase_g)), params.sky_contribution);
+#ifdef ENABLE_DDGI
+			// Where probes cover the fog, they tell how much light gets there
+			// (the sky only where it is visible, bounced light, darkness in
+			// caves); the environment's ambient light is used outside them.
+			vec3 ddgi_world_pos = ddgi.camera_position.xyz + mat3(params.cam_rotation) * view_pos;
+			vec4 ddgi_light = ddgi_sample_fog_radiance(ddgi_world_pos);
+			ambient = mix(ambient, ddgi_light.rgb * ddgi.volumes[0].params.x, ddgi_light.a);
+#endif
+			total_light += ambient * params.ambient_inject;
 		}
 
 		//compute lights from cluster

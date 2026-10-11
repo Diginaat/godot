@@ -180,6 +180,44 @@ of its final value after the storm ends; RTX 3060, 1080p for the costs):
 | Realtime (64 rays) + transition | 3.61 | 58 / 36 frames, even | 3.5% |
 | Realtime, 128 rays | 6.39 | | 0.12% |
 
+### Moving objects and noise (temporal gradient, guided rays)
+
+Two additions to the probe update, both written from papers (no code taken
+from their GPL / unknown-license implementations):
+
+- **Temporal gradient** (after A-SVGF, Schied, Peters, Dachsbacher 2018).
+  The fixed rays point the same way every update, so each probe remembers
+  their light and hit distance (`DDGIFixedHistory`, two halfs per ray). A
+  fixed ray whose hit distance changed saw geometry move; the share of a
+  texel's light (or of the whole probe's, if larger) carried by such rays
+  lowers that texel's hysteresis. Static scenes never trigger it (distances
+  are exact), so it adds no flicker. Moving objects' bounce light and
+  shadows follow about twice as fast.
+- **Guided rays** (after Real-Time Markov Chain Path Guiding, Alber,
+  Hanika, Dachsbacher 2025). Each probe keeps a moving average of where its
+  light comes from (`DDGIProbe.guide`). When the light comes mostly from one
+  side (a window, a sunlit patch, an emitter), up to half of the rotated
+  rays are sampled from a von Mises-Fisher lobe around it; every ray is
+  weighted by uniform pdf / mixture pdf, so the result stays unbiased. Light
+  from all around (open sky) isn't guided.
+
+Measured (RTX 3060, 1080p, Medium; ghost test: an emitter in front of a
+wall is moved away, frames until its light on the wall is half gone /
+settled):
+
+| | Before | Gradient | Gradient + guiding |
+| --- | --- | --- | --- |
+| Ghost, budgeted | 28 / 82 frames | 15 / 54 | 15 / 55 |
+| Ghost, realtime | 25 / 61 | 17 / 51 | 16 / 49 |
+| Interior flicker std (budgeted) | 0.214 | 0.216 | 0.177 |
+| Interior flicker pixels (realtime) | 3.5% | 3.53% | 1.73% |
+| DDGI ms outdoor, budgeted / realtime | 1.87 / 3.71 | 1.91 / 3.85 | 1.97 / 4.03 |
+
+Getting the guiding's noise reduction from more rays instead would take
+about 1.5 times the rays (+0.36 ms of tracing at Medium); guiding costs
++0.06 ms. It doesn't replace a quality level: Low with guiding is still
+noisier than Medium without (interior std 0.255).
+
 ### Dark interiors
 
 DDGI is physically based: a room lit through one window is dark. The
@@ -202,7 +240,12 @@ brighter without flicker:
 - **Environment ambient light**: DDGI replaces it where probes cover the
   surface (probe rays that miss see the sky, or the ambient color when the
   ambient source is a color). Outside all cascades the normal ambient light
-  is used, blended over the outermost probe.
+  is used, blended over the outermost probe. A point inside a cascade whose
+  surrounding probes are all inside geometry (a cave or tunnel narrower
+  than the probe spacing) counts as dark, never as the ambient light.
+- **Volumetric fog**: where probes cover it, its ambient light
+  (`volumetric_fog_ambient_inject`) comes from the probes instead of the
+  unoccluded sky, so fog in caves and interiors stays dark.
 - **Reflections** (sky, reflection probes, SSR) are unchanged: DDGI is diffuse
   only.
 - **SSAO / SSIL** still apply on top.
@@ -319,9 +362,12 @@ when the camera moves by whole probes only the newly covered slab is reset;
 a jump larger than the grid resets the cascade. Each cascade snaps to its
 own spacing, so coarse cascades scroll less often. Probes in the new slab
 get the state "scrolled": the scheduler gives them update slots first, and
-until they are traced the sampler uses the atlas texels left by the probes
-that scrolled out (stale, but no black holes). Their first update replaces
-those texels instead of blending with them.
+until they are traced they aren't sampled (their atlas texels belong to the
+probes that scrolled out, at the far side of the grid); the next coarser
+cascade covers them. Their first update replaces those texels instead of
+blending with them, and their next updates are averaged (weight 1/n, up to
+the hysteresis) and come four times as often until the probe has 8, so the
+noise of the first updates doesn't linger.
 
 ## Known limitations
 
@@ -361,6 +407,8 @@ those texels instead of blending with them.
 | 12 | Baking: `DDGIProbeData`, bake modes, editor button, baked-only without ray tracing | Done |
 | 14 | Probe count per axis, infinite world toggle, faster bake | Done |
 | 15 | Smooth light changes: light transition, realtime updates | Done |
+| 16 | Dark caves (no sky ambient fallback, DDGI-lit volumetric fog), scrolling blotches | Done |
+| 17 | Moving objects: temporal gradient from the fixed rays; guided probe rays | Done |
 
 ## Test project
 
@@ -477,6 +525,47 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-11: Step 17. Report: GI around moving objects lags (bridge scene
+  with a moving sphere, rotating cube, realtime updates). New ghost test
+  (emitter moved away from a wall, DDGI indirect view): half the light
+  gone after 28 frames, settled after 82. Forcing the hysteresis to 0 where
+  probes had history gave 11 / 33, the floor set by the display easing.
+  Temporal gradient, three tries: (1) relative change of the fixed rays'
+  light minus twice the texel noise: no effect, the noise estimate of a
+  texel lit by a small bright source is high exactly when the change is.
+  (2) Without the noise term: static interior flicker 0.03% to 4.2%; the
+  fixed rays carry shading noise between updates (soft shadow edges). (3)
+  Per ray "moved" from the hit distance, weighted by the ray's light, per
+  texel and per probe: 15 / 54 frames, flicker unchanged. Cost: blend +0.03
+  ms budgeted, +0.14 ms realtime; packing the history into halfs and
+  skipping the texel loop when nothing moved didn't change that much (the
+  cost is mostly the history traffic). Guided rays: interior noise -18%,
+  realtime interior flicker pixels halved, +0.06 ms (+0.18 ms realtime),
+  mean brightness unchanged (no bias). `DDGIProbe` grew to 80 bytes
+  (`updates`, `history_rays`, `guide`, `guide_next`).
+
+- 2026-10-11: Step 16. Report: in a voxel world, dark caves turned blue,
+  and lighting popped while moving with `infinite_world`. Reproduced with a
+  2 x 3 m dead-end tunnel through a solid block, auto exposure on. Two
+  leaks: (1) volumetric fog injected the unoccluded sky ambient light into
+  every froxel, so the tunnel filled with blue haze (the main one); (2) when
+  all 8 probes around a point were inside the rock, the volume returned
+  alpha 0 and the scene shader fell back to the environment's sky ambient.
+  Fixes: such points count as black at the volume's weight (probes never
+  traced still leave the point uncovered); a `DENSITY_WITH_DDGI` volumetric
+  fog variant samples the probes isotropically (up + down irradiance, same
+  visibility weights) and replaces the ambient light where they cover the
+  froxel. After: no haze in the tunnel, the probes' indirect light there is
+  black. Popping: the scroll test showed colored blotches near the moving
+  edge. The first update of a scrolled-in probe was kept at 0.95 hysteresis
+  for dozens of updates. Added `DDGIProbe.updates` (struct 32 to 48 bytes):
+  young probes average their first updates and get 4x the update rate
+  until 8. Scrolled-in probes are no longer sampled before their first
+  trace. Scroll test (outdoor, 8 m/s): mean error 3.2 to 2.9, pixels off by
+  more than 16 levels 3.4% to 2.75%. Static interior flicker 0.01%. In a
+  voxel world, far terrain past the last cascade gets the plain ambient
+  light: use enough cascades to cover the view distance.
 
 - 2026-10-09: Step 15, smooth light changes. Report: switching a weather
   system to a storm showed the probes updating one by one, blotchy, and

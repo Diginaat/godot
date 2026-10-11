@@ -111,7 +111,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 
 void RenderDDGI::ViewportData::free_data() {
 	RD *rd = RD::get_singleton();
-	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &ray_data, &irradiance_atlas, &irradiance_display, &distance_atlas };
+	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &ray_data, &irradiance_atlas, &irradiance_display, &distance_atlas };
 	for (RID *r : rids) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
@@ -265,6 +265,11 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 		zeros.fill(0);
 		p_data->probe_buffer = rd->storage_buffer_create(zeros.size(), zeros);
 		rd->set_resource_name(p_data->probe_buffer, "DDGI Probes");
+	}
+	{
+		// Read only for probes whose history_rays says it's filled.
+		p_data->fixed_history = rd->storage_buffer_create(p_data->total_probes * MAX_FIXED_RAYS * sizeof(uint32_t));
+		rd->set_resource_name(p_data->fixed_history, "DDGI Fixed Ray History");
 	}
 	{
 		float stats[4] = { 1.0f, 0, 0, 0 }; // rate_scale starts at 1.
@@ -486,6 +491,7 @@ bool RenderDDGI::_upload_baked(ViewportData *p_data, const RendererEnvironmentSt
 		w[i].offset[2] = r[i * 4 + 2];
 		w[i].state = uint32_t(r[i * 4 + 3]);
 		w[i].last_update_frame = 1;
+		w[i].updates = 255; // Converged: dynamic updates use the full hysteresis.
 	}
 	rd->buffer_update(p_data->probe_buffer, 0, gpu_probes.size() * sizeof(DDGIProbeGPU), gpu_probes.ptr());
 
@@ -517,7 +523,9 @@ void RenderDDGI::_write_frame_data(ViewportData *p_data, const RenderDataRD *p_r
 			rot = Quaternion();
 		}
 		rot.normalize();
-		Transform3D t = Transform3D(Basis(rot), Vector3());
+		// The origin (the w of the rows) carries two random offsets for the
+		// guided rays' sample lattice (ddgi_probe_ray_direction_weighted()).
+		Transform3D t = Transform3D(Basis(rot), Vector3(p_data->rng.randf(), p_data->rng.randf(), 0.0f));
 		RendererRD::MaterialStorage::store_transform_transposed_3x4(t, r_gpu.ray_rotation);
 	}
 
@@ -532,7 +540,7 @@ void RenderDDGI::_write_frame_data(ViewportData *p_data, const RenderDataRD *p_r
 		r_gpu.camera_position[2] = cam_pos.z;
 	}
 
-	const uint32_t fixed_rays = MIN(32u, q.rays_per_probe / 4);
+	const uint32_t fixed_rays = MIN(uint32_t(MAX_FIXED_RAYS), q.rays_per_probe / 4);
 	r_gpu.counts[0] = volume_count;
 	r_gpu.counts[1] = q.rays_per_probe;
 	r_gpu.counts[2] = fixed_rays;
@@ -589,6 +597,23 @@ void RenderDDGI::update_baked(RenderDataRD *p_render_data) {
 	DDGIDataGPU gpu = {};
 	_write_frame_data(vd.ptr(), p_render_data, q, 0, gpu);
 	RD::get_singleton()->buffer_update(vd->data_buffer, 0, sizeof(DDGIDataGPU), &gpu);
+}
+
+bool RenderDDGI::get_sampling_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) {
+	ERR_FAIL_NULL_V(p_render_buffers, false);
+	if (!p_render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
+		return false;
+	}
+	Ref<ViewportData> vd = p_render_buffers->get_custom_data(RB_SCOPE_DDGI);
+	if (!vd->data_buffer.is_valid() || !vd->probe_buffer.is_valid() || !vd->irradiance_display.is_valid() || !vd->distance_atlas.is_valid()) {
+		return false;
+	}
+	r_data_buffer = vd->data_buffer;
+	r_probe_buffer = vd->probe_buffer;
+	// Surfaces read the display atlas (eased toward the probes' light).
+	r_irradiance_atlas = vd->irradiance_display;
+	r_distance_atlas = vd->distance_atlas;
+	return true;
 }
 
 Dictionary RenderDDGI::get_probe_data(RenderSceneBuffersRD *p_render_buffers) {
@@ -691,6 +716,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	RD::Uniform u_irradiance(RD::UNIFORM_TYPE_IMAGE, 4, vd->irradiance_atlas);
 	RD::Uniform u_display(RD::UNIFORM_TYPE_IMAGE, 6, vd->irradiance_display);
 	RD::Uniform u_distance(RD::UNIFORM_TYPE_IMAGE, 4, vd->distance_atlas);
+	RD::Uniform u_history(RD::UNIFORM_TYPE_STORAGE_BUFFER, 7, vd->fixed_history);
 
 	UpdatePushConstant push = {};
 	push.total_probes = vd->total_probes;
@@ -757,7 +783,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 
 		RID shader = update_shader.version_get_shader(update_shader_version, UPDATE_BLEND_IRRADIANCE);
 		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_BLEND_IRRADIANCE]);
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_irradiance, u_stats, u_display), 0);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_irradiance, u_stats, u_display, u_history), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		// One group per list slot; groups past the list count exit at once.
 		// (An indirect dispatch from the list count didn't see this frame's

@@ -1452,6 +1452,10 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 		settings.sky = &sky;
 		settings.gi = &gi;
 
+		if (ddgi_active_this_frame) {
+			_ddgi_get_fog_resources(p_render_buffers.ptr(), settings.ddgi_data_buffer, settings.ddgi_probe_buffer, settings.ddgi_irradiance_atlas, settings.ddgi_distance_atlas);
+		}
+
 		RendererRD::Fog::get_singleton()->volumetric_fog_update(settings, p_cam_projection, p_cam_transform, p_prev_cam_inv_transform, p_shadow_atlas, p_directional_light_count, p_use_directional_shadows, p_positional_light_count, p_voxel_gi_count, p_fog_volumes);
 	}
 }

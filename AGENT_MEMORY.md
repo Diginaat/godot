@@ -147,6 +147,22 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   new token when its constants were already set for the current one.
 - Opening a test project in the editor rewrites its `project.godot` (drops
   values equal to the defaults) and adds `.uid` files: revert those.
+- A change signal for the probes must be exact, not just "less noisy": the
+  fixed rays' light still flickers between updates (soft shadows), but their
+  hit distance only changes when geometry moves. Check every new adaptive
+  rule against the static interior flicker test (0.00-0.03% budgeted).
+- `DDGIProbe` (ddgi_inc.glsl) and `DDGIProbeGPU` (render_ddgi.h) must match;
+  a static_assert checks the size. The schedule pass resets fields on
+  scroll/reset; the relocate pass only writes what it owns.
+- Probe ray directions must be reproducible: the trace and both blends of a
+  frame have to compute the same direction for a ray. State they depend on
+  (the guide) is written by the blend as `guide_next` and committed in the
+  relocate pass, after both blends.
+- Papers from KIT and others often ship GPL code (Markov chain path guiding:
+  GPLv3; A-SVGF code: unclear). This fork is MIT: implement from the paper,
+  never copy that code (same rule as the RTXGI SDK).
+- Measure GPU cost with the test project's `--gpu-profile ... --bench=300`
+  before and after; per pass times are in the BENCH line.
 
 ## In-editor DLSS installer
 

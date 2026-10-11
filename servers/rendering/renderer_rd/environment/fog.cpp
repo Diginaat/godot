@@ -34,6 +34,7 @@
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+#include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_server_default.h"
 
 using namespace RendererRD;
@@ -317,6 +318,7 @@ ALBEDO = vec3(1.0);
 				volumetric_fog_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_FILTER\n", false));
 				volumetric_fog_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_FOG\n", false));
 				volumetric_fog_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_COPY\n", false));
+				volumetric_fog_modes.push_back(ShaderRD::VariantDefine(shader_group, base_define + "\n#define MODE_DENSITY\n#define ENABLE_DDGI\n", false));
 				shader_group++;
 			}
 		}
@@ -1173,12 +1175,28 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
-	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[using_sdfgi ? VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_SDFGI : VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY].get_rid());
+	// DDGI and SDFGI never run in the same view (DDGI skips SDFGI).
+	bool using_ddgi = !using_sdfgi && p_settings.ddgi_data_buffer.is_valid() && p_settings.ddgi_probe_buffer.is_valid() && p_settings.ddgi_irradiance_atlas.is_valid() && p_settings.ddgi_distance_atlas.is_valid();
+	int density_variant = VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY;
+	if (using_sdfgi) {
+		density_variant = VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_SDFGI;
+	} else if (using_ddgi) {
+		density_variant = VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_DDGI;
+	}
+
+	RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, volumetric_fog.process_pipelines[density_variant].get_rid());
 
 	RD::get_singleton()->compute_list_bind_uniform_set(compute_list, fog->gi_dependent_sets.process_uniform_set_density, 0);
 
 	if (using_sdfgi) {
 		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, fog->sdfgi_uniform_set, 1);
+	} else if (using_ddgi) {
+		RID shader = volumetric_fog.process_shader.version_get_shader(volumetric_fog.process_shader_version, _get_fog_process_variant(VolumetricFogShader::VOLUMETRIC_FOG_PROCESS_SHADER_DENSITY_WITH_DDGI));
+		RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, p_settings.ddgi_data_buffer);
+		RD::Uniform u_probes(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, p_settings.ddgi_probe_buffer);
+		RD::Uniform u_irradiance(RD::UNIFORM_TYPE_TEXTURE, 2, p_settings.ddgi_irradiance_atlas);
+		RD::Uniform u_distance(RD::UNIFORM_TYPE_TEXTURE, 3, p_settings.ddgi_distance_atlas);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache(shader, 1, u_data, u_probes, u_irradiance, u_distance), 1);
 	}
 	RD::get_singleton()->compute_list_dispatch_threads(compute_list, fog->width, fog->height, fog->depth);
 	RD::get_singleton()->compute_list_add_barrier(compute_list);

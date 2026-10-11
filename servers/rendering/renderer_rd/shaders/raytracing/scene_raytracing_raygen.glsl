@@ -56,7 +56,7 @@ void ddgi_trace_probe_rays() {
 	}
 	DDGIVolume vol = ddgi.volumes[volume];
 	vec3 ray_origin = ddgi_probe_world_position(vol, ddgi_probe_logical(vol, probe), pd.offset);
-	vec3 ray_dir = ddgi_probe_ray_direction(ray);
+	vec3 ray_dir = ddgi_probe_ray_direction_weighted(ray, pd.guide).xyz;
 
 	PathState ps;
 	ps.radiance = vec3(0.0);

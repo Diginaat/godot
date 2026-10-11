@@ -884,6 +884,8 @@ protected:
 	virtual bool _ddgi_begin_frame(RenderDataRD *p_render_data) { return false; }
 	virtual void _ddgi_process(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) {}
 	virtual void _ddgi_debug_draw(RenderDataRD *p_render_data) {}
+	// The probe resources of this view, for volumetric fog. False when there are none.
+	virtual bool _ddgi_get_fog_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) { return false; }
 	bool ddgi_active_this_frame = false;
 
 	virtual void _render_material(const Transform3D &p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region, float p_exposure_normalization) override;

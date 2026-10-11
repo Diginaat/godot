@@ -57,6 +57,7 @@ protected:
 	virtual bool _ddgi_begin_frame(RenderDataRD *p_render_data) override;
 	virtual void _ddgi_process(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices) override;
 	virtual void _ddgi_debug_draw(RenderDataRD *p_render_data) override;
+	virtual bool _ddgi_get_fog_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) override;
 
 public:
 	virtual Dictionary ddgi_get_probe_data(const Ref<RenderSceneBuffers> &p_render_buffers) override;
