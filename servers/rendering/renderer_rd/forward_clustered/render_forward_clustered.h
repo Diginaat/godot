@@ -896,6 +896,7 @@ protected:
 	// opaque pass (until the next render_scene()).
 	bool xegtao_active_this_frame = false;
 	bool xegtao_used = false;
+	bool xegtao_bent_normals_ready = false; // Processed this frame, with bent normals (for DDGI apply).
 	RendererRD::XeGTAO::Settings xegtao_settings;
 	void _process_xegtao(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices);
 

@@ -35,6 +35,8 @@ layout(set = 0, binding = 5) uniform texture2D depth_buffer;
 layout(set = 0, binding = 6) uniform texture2D normal_roughness_buffer;
 layout(rgba16f, set = 0, binding = 7) uniform restrict writeonly image2D ambient_buffer;
 layout(rgba16f, set = 0, binding = 8) uniform restrict writeonly image2D reflection_buffer;
+// XeGTAO bent normals (Godot view space, xyz * 0.5 + 0.5), internal resolution.
+layout(set = 0, binding = 9) uniform texture2D bent_normal_buffer;
 #endif
 
 #ifdef MODE_DEBUG_PROBES
@@ -45,7 +47,7 @@ layout(push_constant, std430) uniform Params {
 	mat4 inv_projection; // Includes the depth correction used by the depth buffer.
 	vec4 cam_rotation[3]; // Rows of the camera-to-world 3x4 transform.
 	ivec2 screen_size; // Internal (full) resolution.
-	uint flags; // FLAG_HALF_RES: the GI buffer has half the resolution.
+	uint flags; // FLAG_HALF_RES: the GI buffer has half the resolution. FLAG_BENT_NORMALS: read the irradiance along the XeGTAO bent normal.
 	uint debug_mode; // Environment.DDGIDebugMode.
 }
 params;
@@ -62,6 +64,7 @@ params;
 #define DEBUG_CASCADES 6u
 
 #define FLAG_HALF_RES 1u
+#define FLAG_BENT_NORMALS 2u
 
 vec3 view_position(ivec2 p_pixel, float p_depth) {
 	vec4 pos = vec4((vec2(p_pixel) + 0.5) / vec2(params.screen_size) * 2.0 - 1.0, p_depth, 1.0);
@@ -104,7 +107,17 @@ void main() {
 		if (params.debug_mode == DEBUG_CASCADES) {
 			ambient = vec4(cascade_color(ddgi_volume_at(world_pos)), 1.0);
 		} else {
-			ambient = ddgi_sample_irradiance(world_pos, normal, to_camera);
+			// Directional occlusion: the light arriving along the mean
+			// unoccluded direction (XeGTAO's scalar AO is applied separately,
+			// once, by the scene shader).
+			vec3 lookup = normal;
+			if ((params.flags & FLAG_BENT_NORMALS) != 0u) {
+				vec3 bent = texelFetch(sampler2D(bent_normal_buffer, linear_sampler), pixel, 0).xyz * 2.0 - 1.0;
+				if (dot(bent, bent) > 0.25) {
+					lookup = normalize(ddgi_xform_dir(params.cam_rotation, normalize(bent)));
+				}
+			}
+			ambient = ddgi_sample_irradiance(world_pos, normal, lookup, to_camera);
 			ambient.rgb *= ddgi.volumes[0].params.x; // Energy.
 			if (any(isnan(ambient)) || any(isinf(ambient))) {
 				ambient = vec4(0.0);

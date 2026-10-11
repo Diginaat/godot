@@ -82,6 +82,27 @@
 		<member name="background_mode" type="int" setter="set_background" getter="get_background" enum="Environment.BGMode" default="0">
 			The background mode.
 		</member>
+		<member name="ddgi_ao_bent_normals" type="bool" setter="set_ddgi_ao_bent_normals" getter="is_ddgi_ao_bent_normals_enabled" default="false">
+			If [code]true[/code], the XeGTAO ambient occlusion also computes bent normals, and DDGI reads its indirect light along them. Set by [member DDGIVolume.ao_bent_normals].
+		</member>
+		<member name="ddgi_ao_debug_mode" type="int" setter="set_ddgi_ao_debug_mode" getter="get_ddgi_ao_debug_mode" enum="Environment.DDGIAODebugMode" default="0">
+			Ambient occlusion debug view. Set by [member DDGIVolume.ao_debug_view].
+		</member>
+		<member name="ddgi_ao_enabled" type="bool" setter="set_ddgi_ao_enabled" getter="is_ddgi_ao_enabled" default="false">
+			If [code]true[/code], XeGTAO screen-space ambient occlusion replaces SSAO ([member ssao_enabled] is not run meanwhile). Works with or without DDGI. Set by [member DDGIVolume.ao_enabled]; Forward+ only.
+		</member>
+		<member name="ddgi_ao_intensity" type="float" setter="set_ddgi_ao_intensity" getter="get_ddgi_ao_intensity" default="1.0">
+			Strength of the XeGTAO ambient occlusion (0 to 4). Set by [member DDGIVolume.ao_intensity].
+		</member>
+		<member name="ddgi_ao_quality" type="int" setter="set_ddgi_ao_quality" getter="get_ddgi_ao_quality" enum="Environment.DDGIAOQuality" default="2">
+			XeGTAO quality preset. Set by [member DDGIVolume.ao_quality].
+		</member>
+		<member name="ddgi_ao_radius" type="float" setter="set_ddgi_ao_radius" getter="get_ddgi_ao_radius" default="0.5">
+			XeGTAO radius in meters. Set by [member DDGIVolume.ao_radius].
+		</member>
+		<member name="ddgi_ao_resolution" type="int" setter="set_ddgi_ao_resolution" getter="get_ddgi_ao_resolution" enum="Environment.DDGIAOResolution" default="0">
+			XeGTAO resolution. Set by [member DDGIVolume.ao_resolution].
+		</member>
 		<member name="ddgi_bounce_energy" type="float" setter="set_ddgi_bounce_energy" getter="get_ddgi_bounce_energy" default="1.0">
 			Multiplier for the light passed on from bounce to bounce inside the DDGI probes. Above [code]1.0[/code], indirectly lit rooms get brighter. See [member DDGIVolume.bounce_energy].
 		</member>
@@ -615,6 +636,51 @@
 		</constant>
 		<constant name="DDGI_DEBUG_CASCADES" value="6" enum="DDGIDebugMode">
 			Colors surfaces by the finest probe cascade that covers them.
+		</constant>
+		<constant name="DDGI_AO_QUALITY_LOW" value="0" enum="DDGIAOQuality">
+			1 slice, 2 samples per side: the fastest; noisier, needs temporal anti-aliasing to look smooth.
+		</constant>
+		<constant name="DDGI_AO_QUALITY_MEDIUM" value="1" enum="DDGIAOQuality">
+			2 slices, 2 samples per side.
+		</constant>
+		<constant name="DDGI_AO_QUALITY_HIGH" value="2" enum="DDGIAOQuality">
+			3 slices, 3 samples per side: clear contacts, stable without temporal anti-aliasing.
+		</constant>
+		<constant name="DDGI_AO_QUALITY_ULTRA" value="3" enum="DDGIAOQuality">
+			9 slices, 3 samples per side: the least noise, about twice the cost of High.
+		</constant>
+		<constant name="DDGI_AO_RESOLUTION_AUTO" value="0" enum="DDGIAOResolution">
+			Full resolution up to about 2560×1600 internal pixels, half resolution above (4K).
+		</constant>
+		<constant name="DDGI_AO_RESOLUTION_FULL" value="1" enum="DDGIAOResolution">
+			Computed at the 3D (internal) resolution.
+		</constant>
+		<constant name="DDGI_AO_RESOLUTION_HALF" value="2" enum="DDGIAOResolution">
+			Computed at half width and height, then upscaled guided by depth: about a quarter of the main pass cost, softer and slightly noisier contacts.
+		</constant>
+		<constant name="DDGI_AO_DEBUG_DISABLED" value="0" enum="DDGIAODebugMode">
+			No debug view.
+		</constant>
+		<constant name="DDGI_AO_DEBUG_RAW_AO" value="1" enum="DDGIAODebugMode">
+			The visibility before the denoiser (white = unoccluded).
+		</constant>
+		<constant name="DDGI_AO_DEBUG_FINAL_AO" value="2" enum="DDGIAODebugMode">
+			The visibility the renderer applies to ambient light.
+		</constant>
+		<constant name="DDGI_AO_DEBUG_DEPTH" value="3" enum="DDGIAODebugMode">
+			The view-space depth XeGTAO works on: red bands every four AO radii, green fading with distance, dark blue background.
+		</constant>
+		<constant name="DDGI_AO_DEBUG_NORMALS" value="4" enum="DDGIAODebugMode">
+			The view-space normals XeGTAO reads.
+		</constant>
+		<constant name="DDGI_AO_DEBUG_BENT_NORMALS" value="5" enum="DDGIAODebugMode">
+			The view-space bent normals (black unless [member ddgi_ao_bent_normals] is on).
+		</constant>
+		<constant name="DDGI_AO_DEBUG_EDGES" value="6" enum="DDGIAODebugMode">
+			The depth edges the denoiser doesn't blur across (white = no edge).
+		</constant>
+		<constant name="DDGI_AO_DEBUG_MAX" value="7" enum="DDGIAODebugMode">
+			Represents the size of the [enum DDGIAODebugMode] enum.
 		</constant>
 		<constant name="DDGI_DEBUG_MAX" value="7" enum="DDGIDebugMode">
 			Represents the size of the [enum DDGIDebugMode] enum.

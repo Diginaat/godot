@@ -100,7 +100,10 @@ float ddgi_volume_weight(DDGIVolume vol, vec3 p_local) {
 // inside geometry (a narrow cave or tunnel between probes), returns
 // black with the negated volume weight: no light is known to reach the point.
 // Probes not traced yet (new or scrolled in) leave the point uncovered (a = 0).
-vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
+// p_lookup: the direction the irradiance is read in, normally p_normal; a bent
+// normal (the mean unoccluded direction) for directional occlusion. The bias
+// and probe weights always use the surface normal.
+vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_lookup, vec3 p_view) {
 	DDGIVolume vol = ddgi.volumes[p_volume];
 
 	// Bias the lookup position off the surface, mostly toward the viewer, so
@@ -181,7 +184,7 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 			weight *= 0.05;
 		}
 
-		vec3 irradiance = textureLod(sampler2D(ddgi_irradiance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, p_normal, irr_texels, per_row, ddgi.atlas_inv_size.xy), 0.0).rgb;
+		vec3 irradiance = textureLod(sampler2D(ddgi_irradiance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, p_lookup, irr_texels, per_row, ddgi.atlas_inv_size.xy), 0.0).rgb;
 		// Blend in a perceptual (square root) space: smoother transitions
 		// between bright and dark probes.
 		sum += sqrt(max(irradiance, vec3(0.0))) * weight;
@@ -198,11 +201,11 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 // Irradiance from all volumes. Volumes are sorted finest first; each one
 // covers what the previous ones left, so overlaps blend without double
 // counting. Returns rgb (normalized) and the total coverage in a.
-vec4 ddgi_sample_irradiance(vec3 p_pos, vec3 p_normal, vec3 p_view) {
+vec4 ddgi_sample_irradiance(vec3 p_pos, vec3 p_normal, vec3 p_lookup, vec3 p_view) {
 	vec3 sum = vec3(0.0);
 	float remaining = 1.0;
 	for (uint v = 0u; v < ddgi.counts.x && v < uint(DDGI_MAX_VOLUMES); v++) {
-		vec4 s = ddgi_sample_volume(v, p_pos, p_normal, p_view);
+		vec4 s = ddgi_sample_volume(v, p_pos, p_normal, p_lookup, p_view);
 		if (s.a == 0.0) {
 			continue;
 		}
@@ -218,6 +221,10 @@ vec4 ddgi_sample_irradiance(vec3 p_pos, vec3 p_normal, vec3 p_view) {
 	}
 	float coverage = 1.0 - remaining;
 	return coverage > 0.0 ? vec4(sum / coverage, coverage) : vec4(0.0);
+}
+
+vec4 ddgi_sample_irradiance(vec3 p_pos, vec3 p_normal, vec3 p_view) {
+	return ddgi_sample_irradiance(p_pos, p_normal, p_normal, p_view);
 }
 
 // Mean radiance arriving at a point in the air (no surface, so no normal),

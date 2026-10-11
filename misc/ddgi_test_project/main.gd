@@ -90,7 +90,7 @@ func _ready() -> void:
 	_setup_volume()
 	_setup_ao()
 
-	if args.has("shot") or args.has("bench") or args.has("measure") or args.has("weather"):
+	if args.has("shot") or args.has("bench") or args.has("measure") or args.has("weather") or args.has("ao_test"):
 		hud.visible = false
 		_run_capture()
 
@@ -141,6 +141,8 @@ func _apply_args() -> void:
 		# 0 bilinear, 1 FSR1, 2 FSR2, 6 DLSS (see Viewport.Scaling3DMode).
 		vp.scaling_3d_mode = int(args["scale3d"])
 		vp.scaling_3d_scale = float(args.get("scale", "0.67"))
+	if args.has("taa"):
+		vp.use_taa = args["taa"] == "1"
 	if args.has("linear"):
 		env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 		env.tonemap_exposure = float(args.get("exposure", "1.0"))
@@ -294,6 +296,76 @@ func _setup_ao() -> void:
 		env.ddgi_ao_enabled = on
 
 
+# --ao_test=1: switches every ambient occlusion setting at runtime, resizes
+# the view, disables and removes the volume, and checks that the probes
+# (the renderer's and the baked resource) didn't change. Use with --volume
+# and --baked=path --bake_mode=1, so the probes don't change by themselves.
+# Prints "AO_TEST ..." lines; errors show as ERROR lines in the log.
+func _ao_test() -> void:
+	if volume == null or volume.probe_data == null:
+		print("AO_TEST needs --volume and --baked")
+		return
+	var resource_hash := var_to_bytes(volume.probe_data.get_data()).hash()
+	var probes_before := _probe_hash()
+	var steps: Array[Callable] = [
+		func(): volume.ao_enabled = true,
+		func(): volume.ao_quality = Environment.DDGI_AO_QUALITY_LOW,
+		func(): volume.ao_quality = Environment.DDGI_AO_QUALITY_MEDIUM,
+		func(): volume.ao_quality = Environment.DDGI_AO_QUALITY_ULTRA,
+		func(): volume.ao_quality = Environment.DDGI_AO_QUALITY_HIGH,
+		func(): volume.ao_resolution = Environment.DDGI_AO_RESOLUTION_HALF,
+		func(): volume.ao_bent_normals = true,
+		func(): volume.ao_resolution = Environment.DDGI_AO_RESOLUTION_FULL,
+		func(): volume.ao_radius = 2.0,
+		func(): volume.ao_intensity = 2.0,
+		func(): volume.ao_intensity = 0.0,
+		func(): volume.ao_debug_view = Environment.DDGI_AO_DEBUG_RAW_AO,
+		func(): volume.ao_debug_view = Environment.DDGI_AO_DEBUG_BENT_NORMALS,
+		func(): volume.ao_debug_view = Environment.DDGI_AO_DEBUG_DISABLED,
+		func(): volume.ao_bent_normals = false,
+		func(): vp.use_taa = not vp.use_taa,
+		func(): vp.use_taa = not vp.use_taa,
+		func(): env.ssao_enabled = true,
+		func(): volume.ao_enabled = false,
+		func(): volume.ao_enabled = true,
+		func(): _resize_view(Vector2i(37, 23)),
+		func(): _resize_view(Vector2i(1023, 577)),
+		func(): _resize_view(Vector2i(640, 360)),
+	]
+	for step in steps:
+		step.call()
+		for i in 5:
+			await RenderingServer.frame_post_draw
+	var probes_after := _probe_hash()
+	print("AO_TEST renderer_probes_unchanged=%s resource_unchanged=%s" % [probes_before == probes_after, var_to_bytes(volume.probe_data.get_data()).hash() == resource_hash])
+	# Without DDGI, and with the volume gone: back to the Environment's SSAO.
+	volume.enabled = false
+	for i in 5:
+		await RenderingServer.frame_post_draw
+	print("AO_TEST volume disabled: env ddgi_ao_enabled=%s ssao_enabled=%s" % [env.ddgi_ao_enabled, env.ssao_enabled])
+	volume.enabled = true
+	remove_child(volume)
+	for i in 5:
+		await RenderingServer.frame_post_draw
+	print("AO_TEST volume removed: env ddgi_ao_enabled=%s" % env.ddgi_ao_enabled)
+	add_child(volume)
+	for i in 5:
+		await RenderingServer.frame_post_draw
+	print("AO_TEST volume added again: env ddgi_ao_enabled=%s" % env.ddgi_ao_enabled)
+	print("AO_TEST done")
+
+
+func _probe_hash() -> int:
+	return var_to_bytes(RenderingServer.viewport_get_ddgi_probe_data(vp.get_viewport_rid())).hash()
+
+
+func _resize_view(p_size: Vector2i) -> void:
+	if vp is SubViewport:
+		(vp as SubViewport).size = p_size
+	else:
+		get_window().size = p_size
+
+
 # --volume=cx,cy,cz,sx,sy,sz adds a DDGIVolume (center and size) with
 # --vspacing= and --vcascades= (default 1 m, 1 cascade). --bake=path bakes it
 # before the capture and saves the DDGIProbeData; --baked=path loads one with
@@ -374,6 +446,9 @@ func _run_capture() -> void:
 
 	if args.has("measure"):
 		await _measure(int(args["measure"]))
+
+	if args.has("ao_test"):
+		await _ao_test()
 
 	# --weather=dir: a storm rolls in over --weather_frames (default 120)
 	# frames: the sun dims to a cold light and the sky darkens. Every frame
@@ -535,6 +610,10 @@ func _ddgi_pass_times() -> Dictionary:
 		elif name.begins_with("XeGTAO ") and name != "XeGTAO Done":
 			in_as = false
 			key = "ao_" + name.trim_prefix("XeGTAO ").to_snake_case()
+		elif name == "Prepare Depth for SSAO/SSIL" or name == "Process SSAO":
+			# Godot's SSAO, for comparison (counted in ao_ms too).
+			in_as = false
+			key = "ao_ssao_depth" if name.begins_with("Prepare") else "ao_ssao"
 		else:
 			in_as = false
 		if key != "":

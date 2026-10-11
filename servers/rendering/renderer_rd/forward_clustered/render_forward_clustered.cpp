@@ -1730,6 +1730,13 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		RENDER_TIMESTAMP("Render GI");
 	}
 
+	// XeGTAO first: DDGI reads its bent normals.
+	xegtao_bent_normals_ready = false;
+	if (xegtao_active_this_frame && rb_data.is_valid()) {
+		_process_xegtao(p_render_data, p_normal_roughness_slices);
+		xegtao_bent_normals_ready = xegtao_settings.bent_normals;
+	}
+
 	//prepare shadow rendering
 	if (render_shadows) {
 		_render_shadow_begin();
@@ -1765,10 +1772,6 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 		if (p_use_ssil || p_use_ssr) {
 			ss_effects->allocate_last_frame_buffer(rb, p_use_ssil, p_use_ssr);
-		}
-
-		if (xegtao_active_this_frame) {
-			_process_xegtao(p_render_data, p_normal_roughness_slices);
 		}
 
 		if (p_use_ssao || p_use_ssil) {
@@ -2541,6 +2544,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
 	ddgi_active_this_frame = false;
 	xegtao_active_this_frame = false;
+	xegtao_bent_normals_ready = false;
 	xegtao_used = using_xegtao;
 
 	if (current_cluster_builder) {

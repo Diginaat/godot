@@ -182,6 +182,24 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   (reflections, sky, sun, bounce energy). With auto exposure the noisy path
   tracer image and the smooth DDGI image get different exposures.
 
+## Ambient occlusion (XeGTAO)
+
+- XeGTAO (`effects/xegtao.*`, `shaders/effects/xegtao_*.glsl`) is ported
+  from Intel's MIT code; keep the notice in COPYRIGHT.txt when adding
+  files. Its view space is x right, y up, z forward: Godot normals and bent
+  normals get z negated at the boundary.
+- It produces the texture the scene shader already reads as SSAO (binding
+  27, `SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO`), so AO is applied once, to
+  ambient light only. Never add a second AO multiplication.
+- `RD::capture_timestamp()` (`RENDER_TIMESTAMP`) fails inside a compute
+  list that already dispatched: give every timed pass its own list.
+- The material storage's default samplers carry the mipmap LOD bias (TAA
+  and upscalers lower it), and Vulkan adds it to explicit `textureLod()`
+  levels too. Passes that pick depth MIPs need their own sampler.
+- `--gpu-validation` only validates when the Khronos validation layer is
+  installed (Vulkan SDK). Check the log for `VK_LAYER_KHRONOS_validation`
+  before reporting a clean validation run.
+
 ## In-editor DLSS installer
 
 - `editor/settings/streamline_installer.cpp`. Pinned to Streamline SDK 2.10.0

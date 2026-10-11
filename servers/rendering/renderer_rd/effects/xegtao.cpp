@@ -438,6 +438,16 @@ RID XeGTAO::get_visibility_texture(Ref<RenderSceneBuffersRD> p_render_buffers) {
 	return p_render_buffers->get_texture(RB_SCOPE_XEGTAO, XEGTAO_VISIBILITY);
 }
 
+bool XeGTAO::get_bent_normal_slices(Ref<RenderSceneBuffersRD> p_render_buffers, RID *r_slices) {
+	if (p_render_buffers.is_null() || !p_render_buffers->has_texture(RB_SCOPE_XEGTAO, XEGTAO_BENT)) {
+		return false;
+	}
+	for (uint32_t v = 0; v < p_render_buffers->get_view_count(); v++) {
+		r_slices[v] = p_render_buffers->get_texture_slice(RB_SCOPE_XEGTAO, XEGTAO_BENT, v, 0);
+	}
+	return true;
+}
+
 RID XeGTAO::get_debug_texture(Ref<RenderSceneBuffersRD> p_render_buffers) {
 	if (p_render_buffers.is_null() || !p_render_buffers->has_texture(RB_SCOPE_XEGTAO, XEGTAO_DEBUG)) {
 		return RID();
