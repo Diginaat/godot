@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-10-12 (mistakes and successes)
+
+* **Added**: [mistakes](/mistakes/) (7) and [successes](/successes/) (6)
+  sections, the `Mistake` and `Success` types, and rule 8 in
+  [the howto](/kb-howto.md): record both as they happen.
+
 ## 2026-10-12 (later)
 
 * **Added**: [DDGI test protocol](/tooling/ddgi-test-protocol.md), from

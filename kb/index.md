@@ -26,3 +26,5 @@ what doesn't fit a runbook: research, findings, decisions and ideas.
 * [XeGTAO](/xegtao/) - screen-space ambient occlusion on the Environment
 * [Research](/research/) - papers and talks read, with what they mean for this fork
 * [Tooling](/tooling/) - testing, measuring and debugging techniques that worked
+* [Mistakes](/mistakes/) - what agents got wrong and the rule that prevents it; read before testing
+* [Successes](/successes/) - approaches that worked and when to reuse them
