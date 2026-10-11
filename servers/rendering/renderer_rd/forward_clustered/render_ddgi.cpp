@@ -111,7 +111,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 
 void RenderDDGI::ViewportData::free_data() {
 	RD *rd = RD::get_singleton();
-	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &ray_data, &irradiance_atlas, &irradiance_display, &distance_atlas };
+	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas };
 	for (RID *r : rids) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
@@ -138,6 +138,7 @@ void RenderDDGI::initialize() {
 		modes.push_back("\n#define MODE_BLEND_DISTANCE\n");
 		modes.push_back("\n#define MODE_RELOCATE_CLASSIFY\n");
 		modes.push_back("\n#define MODE_SMOOTH\n");
+		modes.push_back("\n#define MODE_BOUNCE\n");
 		update_shader.initialize(modes);
 		update_shader_version = update_shader.version_create();
 		for (int i = 0; i < UPDATE_MODE_MAX; i++) {
@@ -303,7 +304,7 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 
 void RenderDDGI::_allocate_rays(ViewportData *p_data, const Quality &p_quality) {
 	RD *rd = RD::get_singleton();
-	for (RID *r : { &p_data->ray_data, &p_data->update_list }) {
+	for (RID *r : { &p_data->ray_data, &p_data->ray_bounce, &p_data->update_list }) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
 			*r = RID();
@@ -331,6 +332,10 @@ void RenderDDGI::_allocate_rays(ViewportData *p_data, const Quality &p_quality) 
 	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 	p_data->ray_data = rd->texture_create(tf, RD::TextureView());
 	rd->set_resource_name(p_data->ray_data, "DDGI Ray Data");
+
+	p_data->ray_bounce = rd->storage_buffer_create(p_quality.rays_per_probe * p_data->capacity * 16);
+	rd->buffer_clear(p_data->ray_bounce, 0, p_quality.rays_per_probe * p_data->capacity * 16);
+	rd->set_resource_name(p_data->ray_bounce, "DDGI Ray Bounce");
 }
 
 uint32_t RenderDDGI::_setup_volumes(ViewportData *p_data, const RenderDataRD *p_render_data, DDGIDataGPU &r_gpu) {
@@ -758,6 +763,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		bindings.probe_buffer = vd->probe_buffer;
 		bindings.ray_data = vd->ray_data;
 		bindings.update_list = vd->update_list;
+		bindings.ray_bounce = vd->ray_bounce;
 		bindings.trace = true;
 
 		RID rt_set = p_raytracing->update_uniform_set(p_rt_state, p_render_data, p_rt_flags, &bindings);
@@ -776,7 +782,26 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		}
 	}
 
-	// 3. Blend the rays into the probes, then relocate and classify them.
+	// 3. Add the light the probes pass on (bounce light) at the rays' hits.
+	// The trace leaves the lookup to this pass: inside the ray tracing
+	// pipeline it took about 70% of the trace time.
+	{
+		_ddgi_timestamp("DDGI Bounce Light", false);
+		RD::ComputeListID list = rd->compute_list_begin();
+		RID shader = update_shader.version_get_shader(update_shader_version, UPDATE_BOUNCE);
+		RID linear_sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+		RD::Uniform u_bounce(RD::UNIFORM_TYPE_STORAGE_BUFFER, 4, vd->ray_bounce);
+		RD::Uniform u_display_texture(RD::UNIFORM_TYPE_TEXTURE, 6, vd->irradiance_display);
+		RD::Uniform u_distance_texture(RD::UNIFORM_TYPE_TEXTURE, 8, vd->distance_atlas);
+		RD::Uniform u_sampler(RD::UNIFORM_TYPE_SAMPLER, 9, linear_sampler);
+		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_BOUNCE]);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_bounce, u_stats, u_display_texture, u_distance_texture, u_sampler), 0);
+		rd->compute_list_set_push_constant(list, &push, sizeof(push));
+		rd->compute_list_dispatch_threads(list, q.rays_per_probe, capacity, 1);
+		rd->compute_list_end();
+	}
+
+	// 4. Blend the rays into the probes, then relocate and classify them.
 	{
 		_ddgi_timestamp("DDGI Blend Probes", false);
 		RD::ComputeListID list = rd->compute_list_begin();
@@ -795,6 +820,10 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		// half the blend cost, and moving objects still update within a few
 		// frames.
 		if (!realtime || (vd->frame & 3u) == 0u) {
+			// Own list, so the profiler shows the distance blend separately.
+			rd->compute_list_end();
+			_ddgi_timestamp("DDGI Blend Distance", false);
+			list = rd->compute_list_begin();
 			shader = update_shader.version_get_shader(update_shader_version, UPDATE_BLEND_DISTANCE);
 			rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_BLEND_DISTANCE]);
 			rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_distance, u_stats), 0);
@@ -816,7 +845,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 
 		rd->compute_list_end();
 
-		// 4. Ease the display irradiance (what surfaces sample) toward the
+		// 5. Ease the display irradiance (what surfaces sample) toward the
 		// probes', every texel every frame.
 		_ddgi_timestamp("DDGI Smooth", false);
 		list = rd->compute_list_begin();

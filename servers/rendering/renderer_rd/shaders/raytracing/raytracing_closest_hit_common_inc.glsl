@@ -462,11 +462,13 @@ void debug_visualize(
 // DDGI PROBE RAY HIT
 // ============================================================================
 
-/// Radiance leaving a surface toward a DDGI probe: emission, direct light from
-/// analytic lights (NEE), and indirect light from the previous frame's probes
-/// (this gives infinite bounces over time). Emissive meshes are not sampled
-/// with NEE here: their light already reaches the surface through the probes,
-/// which see emitters directly. Ends the path.
+/// Radiance leaving a surface toward a DDGI probe: emission and direct light
+/// from analytic lights (NEE). The indirect light from the previous frame's
+/// probes (this gives infinite bounces over time) is added after the trace,
+/// in a compute pass (DDGI_BOUNCE_FLAG): looking the probes up here took most
+/// of the trace time. Emissive meshes are not sampled with NEE here: their
+/// light already reaches the surface through the probes, which see emitters
+/// directly. Ends the path.
 void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout PathState ps) {
 	ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
 
@@ -499,15 +501,9 @@ void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout Pat
 
 	vec3 diffuse_reflectance = baseColorToDiffuseReflectance(m.albedo, m.metalness);
 	if (luminance(diffuse_reflectance) > 0.0) {
-		vec4 irradiance = ddgi_sample_irradiance(h.hit_pos, N, V);
-		// Bounce energy (DDGIVolume.bounce_energy) scales the light passed on
-		// from bounce to bounce: above 1, rooms lit indirectly get brighter.
-		// The feedback stays below 1, or the bounces would add up forever.
-		vec3 feedback = diffuse_reflectance * ddgi.schedule.w;
-		if (ddgi.schedule.w > 1.0) {
-			feedback = min(feedback, vec3(0.95));
-		}
-		radiance += feedback * irradiance.rgb * irradiance.a;
+		ps.packed_bounces_flags |= DDGI_BOUNCE_FLAG;
+		ps.throughput = diffuse_reflectance;
+		ps.offset_normal = N;
 	}
 
 	ps.radiance = (any(isnan(radiance)) || any(isinf(radiance))) ? vec3(0.0) : radiance;

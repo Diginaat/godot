@@ -276,8 +276,9 @@ the scene renders exactly as with DDGI off, including SDFGI/VoxelGI.
 
 GPU timings: run with `--gpu-profile`, or open the Visual Profiler in the
 editor; the DDGI passes are `DDGI Build Acceleration Structures`, `DDGI
-Schedule`, `DDGI Trace Probe Rays`, `DDGI Blend Probes`, `DDGI Relocate
-Classify` and `DDGI Apply`.
+Schedule`, `DDGI Trace Probe Rays`, `DDGI Bounce Light`, `DDGI Blend
+Probes` (irradiance), `DDGI Blend Distance`, `DDGI Relocate Classify`, `DDGI
+Smooth` and `DDGI Apply`.
 
 Common problems:
 - Light leaks through a wall: the wall is thinner than about a quarter of the
@@ -339,9 +340,13 @@ the depth prepass, where SDFGI/VoxelGI would run):
 3. **Trace** (ray tracing pipeline, one ray per thread): the path tracer
    pipeline's raygen, in DDGI mode, traces `rays_per_probe` rays per listed
    probe. The closest hit returns emission + direct light (NEE with shadow
-   rays) + albedo times the previous frame's DDGI irradiance (multiple
-   bounces over time); back faces return a negative distance. Misses return
-   the sky (or ambient color).
+   rays); back faces return a negative distance. Misses return the sky (or
+   ambient color). For front faces it also writes the albedo, normal and hit
+   point (relative to the probe) into the ray bounce buffer.
+   **Bounce light** (compute, one thread per ray) then adds albedo times the
+   previous frame's DDGI irradiance at the hit (multiple bounces over time).
+   The lookup used to run in the closest hit, where it took about 70% of the
+   trace time; in compute it costs a fraction of that.
 4. **Blend** (compute, one workgroup per probe): irradiance (cosine weighted)
    and distance moments (sharp lobe) of the new rays are blended into the
    probe tiles with hysteresis. It is lowered when the light changed by
@@ -413,6 +418,7 @@ noise of the first updates doesn't linger.
 | 17 | Moving objects: temporal gradient from the fixed rays; guided probe rays | Done |
 | 18 | Black surfaces: custom-shader geometry in the TLAS while its hit group compiles; inactive probes sampled | Done |
 | 19 | Dark areas on par with the path tracer: DDGI occludes sky reflections | Done |
+| 20 | Performance: bounce light lookup moved out of the ray tracing pipeline | Done |
 
 ## Test project
 
@@ -472,28 +478,34 @@ button and WASD/QE.
 Measured with the benchmark harness above. GPU: see each run. Times are
 averages over the measured frames, after warm-up.
 
-RTX 3060, driver 616.92, Vulkan, 1920x1080 native, 300 warm-up + 300
-measured frames, `--gpu-profile`, commit `835a780893`. Default volumes (3
-cascades of 24 x 12 x 24, 1 m spacing). "Frame" is the whole frame's GPU
-time; "DDGI" is the sum of the DDGI passes. All times in ms.
+RTX 3060, Vulkan, 1920x1080 native, 300 warm-up + 300 measured frames,
+`--gpu-profile`, measured 2026-10-11 after the bounce light pass (step 20).
+Default volumes (3 cascades of 24 x 12 x 24, 1 m spacing). "Frame" is the
+whole frame's GPU time; "DDGI" is the sum of the DDGI passes, "Blend" the
+irradiance and distance blends together. All times in ms.
 
-| View | GI | Frame | DDGI | AS | Trace | Blend | Apply |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| room | none | 1.28 | | | | | |
-| room | Low | 2.30 | 0.95 | 0.11 | 0.12 | 0.08 | 0.63 |
-| room | Medium | 2.61 | 1.26 | 0.11 | 0.30 | 0.20 | 0.63 |
-| room | High | 3.06 | 1.72 | 0.10 | 0.57 | 0.42 | 0.61 |
-| room | Ultra | 4.10 | 2.76 | 0.10 | 1.13 | 0.89 | 0.62 |
-| outdoor | none | 0.86 | | | | | |
-| outdoor | Low | 2.01 | 1.07 | 0.10 | 0.26 | 0.10 | 0.60 |
-| outdoor | Medium | 2.74 | 1.79 | 0.10 | 0.81 | 0.27 | 0.59 |
-| outdoor | High | 4.50 | 3.53 | 0.10 | 2.06 | 0.75 | 0.59 |
-| outdoor | Ultra | 8.21 | 7.26 | 0.10 | 4.70 | 1.75 | 0.68 |
-| stress | none | 1.50 | | | | | |
-| stress | Low | 2.34 | 0.77 | 0.10 | 0.12 | 0.07 | 0.46 |
-| stress | Medium | 2.72 | 1.12 | 0.11 | 0.34 | 0.18 | 0.47 |
-| stress | High | 3.25 | 1.70 | 0.10 | 0.71 | 0.41 | 0.46 |
-| stress | Ultra | 4.49 | 2.96 | 0.10 | 1.48 | 0.89 | 0.46 |
+| View | GI | Frame | DDGI | Trace | Bounce | Blend | Smooth | Apply |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| room | Low | 2.43 | 1.07 | 0.06 | 0.02 | 0.09 | 0.09 | 0.66 |
+| room | Medium | 2.70 | 1.34 | 0.14 | 0.07 | 0.22 | 0.10 | 0.65 |
+| room | High | 3.24 | 1.89 | 0.30 | 0.14 | 0.48 | 0.15 | 0.66 |
+| room | Ultra | 4.33 | 2.97 | 0.66 | 0.30 | 1.03 | 0.15 | 0.67 |
+| outdoor | Low | 2.12 | 1.15 | 0.08 | 0.07 | 0.10 | 0.09 | 0.66 |
+| outdoor | Medium | 2.63 | 1.65 | 0.22 | 0.25 | 0.30 | 0.10 | 0.63 |
+| outdoor | High | 3.78 | 2.82 | 0.63 | 0.54 | 0.74 | 0.15 | 0.62 |
+| outdoor | Ultra | 6.57 | 5.60 | 1.51 | 1.34 | 1.80 | 0.15 | 0.63 |
+| stress | Low | 2.48 | 0.92 | 0.06 | 0.03 | 0.09 | 0.09 | 0.50 |
+| stress | Medium | 2.77 | 1.22 | 0.16 | 0.10 | 0.23 | 0.10 | 0.48 |
+| stress | High | 3.36 | 1.80 | 0.36 | 0.18 | 0.47 | 0.15 | 0.49 |
+| stress | Ultra | 4.89 | 3.36 | 0.89 | 0.48 | 1.18 | 0.16 | 0.49 |
+
+The same runs before step 20 (bounce light looked up in the closest hit),
+DDGI ms Low / Medium / High / Ultra: room 1.13 / 1.46 / 2.05 / 3.32,
+outdoor 1.22 / 1.98 / 3.82 / 8.00, stress 0.93 / 1.28 / 2.08 / 3.82; the
+trace alone was 5.10 ms in outdoor Ultra (now 1.51 + 1.34 bounce).
+
+The variants below are older (commit `835a780893`, before the smooth
+pass, guided rays and the temporal gradient); the relations still hold.
 
 Variants (Medium unless noted):
 
@@ -529,6 +541,27 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-11: Step 20, performance. Measured first: the DDGI irradiance
+  lookup at the hit of each probe ray (8 probes, two texture reads each)
+  took about 70% of the trace time (outdoor Ultra 5.10 ms with it, 1.48 ms
+  without), as the ray tracing pipeline runs it at low occupancy. The
+  closest hit now writes albedo, normal and the hit point (direction and
+  distance from the probe, so rays through glass work too) into a
+  16-byte record per ray (`DDGIRayBounce`, binding 40), and a compute pass
+  after the trace (`MODE_BOUNCE`) does the lookup. Outdoor Ultra trace +
+  bounce 1.51 + 1.34 ms instead of 5.10; DDGI 8.00 -> 5.60 ms, Medium
+  1.98 -> 1.65 ms; every view and quality got faster. Same image: mean
+  linear brightness equal to 4 digits in all four views, per pixel
+  difference of the mean images within the run-to-run difference of the
+  old build (interior mean 0.45 vs 0.61 levels, stress max 18 vs 15).
+  The distance blend now passes over the rays once for all (up to 2 x 2)
+  texels of a thread: 4-7% off the blends only, it is bound by the cos^50
+  arithmetic, not by the shared memory reads. Tried and dropped: skipping
+  smooth pass texels of probes whose display has settled (90 frames after
+  their update): with the budget feedback every probe updates sooner than
+  that, so nothing was skipped; the pass is bound by memory bandwidth
+  (about 48 MB per frame at Ultra).
 
 - 2026-10-11: Step 19. Report: dark spots (inside the demo's crouch tunnel)
   stay lit and bluish with DDGI, black with the path tracer. Measured with

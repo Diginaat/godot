@@ -93,7 +93,7 @@ struct DDGIProbeGPU {
 };
 static_assert(sizeof(DDGIProbeGPU) == 80, "DDGIProbeGPU must match DDGIProbe");
 
-/// Resources the ray tracing scene set binds at 34-39 (raytracing_ddgi_inc.glsl).
+/// Resources the ray tracing scene set binds at 34-40 (raytracing_ddgi_inc.glsl).
 struct RTDDGIBindings {
 	RID uniform_buffer;
 	RID irradiance_atlas;
@@ -101,6 +101,7 @@ struct RTDDGIBindings {
 	RID probe_buffer;
 	RID ray_data;
 	RID update_list;
+	RID ray_bounce;
 	/// True when the dispatch traces probe rays instead of camera paths.
 	bool trace = false;
 };
@@ -162,6 +163,10 @@ public:
 		RID stats_buffer;
 		RID fixed_history; // Luminance and hit distance (two halfs) of each fixed ray at the previous update, MAX_FIXED_RAYS per probe.
 		RID ray_data;
+		// Per probe ray, where its hit needs the probes' light (one uvec4 per ray,
+		// see MODE_BOUNCE in ddgi_update.glsl): looked up in a compute pass after
+		// the trace, which is much cheaper than inside the ray tracing pipeline.
+		RID ray_bounce;
 		RID irradiance_atlas; // What the probe updates write.
 		// What surfaces sample: eases toward irradiance_atlas every frame, so a
 		// probe's update never shows as a jump (see DDGI.md, "Smooth light changes").
@@ -196,6 +201,7 @@ private:
 		UPDATE_BLEND_DISTANCE,
 		UPDATE_RELOCATE_CLASSIFY,
 		UPDATE_SMOOTH,
+		UPDATE_BOUNCE,
 		UPDATE_MODE_MAX,
 	};
 

@@ -14,12 +14,14 @@
 //     geometry and marks probes as active, inactive or inside.
 //   MODE_SMOOTH: one thread per irradiance atlas texel. Eases the display
 //     irradiance (what surfaces sample) toward the probes' irradiance.
+//   MODE_BOUNCE: one thread per traced ray, right after the trace. Adds the
+//     light the probes pass on (bounce light) at the ray's hit.
 
 #ifdef MODE_SCHEDULE
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #elif defined(MODE_SMOOTH)
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-#elif defined(MODE_RELOCATE_CLASSIFY)
+#elif defined(MODE_RELOCATE_CLASSIFY) || defined(MODE_BOUNCE)
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 #else
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -44,7 +46,11 @@ layout(set = 0, binding = 2, std430) restrict buffer DDGIUpdateList {
 	uint ddgi_update_probes[];
 };
 
+#ifdef MODE_BOUNCE
+layout(set = 0, binding = 3, rgba16f) uniform restrict image2D ddgi_ray_data;
+#else
 layout(set = 0, binding = 3, rgba16f) uniform restrict readonly image2D ddgi_ray_data;
+#endif
 
 // Persistent across frames. The scheduler multiplies every update rate by
 // rate_scale; the relocate pass raises it while the per-frame budget isn't
@@ -75,6 +81,18 @@ layout(set = 0, binding = 6, rgba16f) uniform restrict image2D ddgi_display;
 #endif
 #ifdef MODE_BLEND_DISTANCE
 layout(set = 0, binding = 4, rg16f) uniform restrict coherent image2D ddgi_atlas;
+#endif
+#ifdef MODE_BOUNCE
+// Written by the trace (raytracing_ddgi_inc.glsl).
+layout(set = 0, binding = 4, std430) restrict readonly buffer DDGIRayBounce {
+	uvec4 ddgi_ray_bounce[];
+};
+// What surfaces sample, as in the ray tracing hit shaders before.
+layout(set = 0, binding = 6) uniform texture2D ddgi_irradiance_atlas;
+layout(set = 0, binding = 8) uniform texture2D ddgi_distance_atlas;
+layout(set = 0, binding = 9) uniform sampler ddgi_linear_sampler;
+#define DDGI_SAMPLER ddgi_linear_sampler
+#define DDGI_SAMPLING
 #endif
 
 layout(push_constant, std430) uniform Params {
@@ -374,6 +392,53 @@ void main() {
 	float probe_share = probe_light.x / max(probe_light.y, 1e-6);
 #endif
 
+#ifdef MODE_BLEND_DISTANCE
+	// Up to 16 texels per side (every quality preset), each thread has at
+	// most 2 x 2 texels: one pass over the rays serves all of them, so each
+	// ray is read from shared memory once instead of once per texel.
+	if (texels <= 16) {
+		ivec2 first = ivec2(gl_LocalInvocationID.xy);
+		vec3 dirs[4];
+		vec2 sums[4];
+		float weight_sums[4];
+		bool valid[4];
+		for (int k = 0; k < 4; k++) {
+			ivec2 texel = first + ivec2(k & 1, k >> 1) * 8;
+			valid[k] = all(lessThan(texel, ivec2(texels)));
+			dirs[k] = ddgi_texel_direction(texel, uint(texels));
+			sums[k] = vec2(0.0);
+			weight_sums[k] = 0.0;
+		}
+		for (uint i = 0u; i < ray_count; i++) {
+			vec4 ray = shared_rays[i];
+			vec3 ray_dir = shared_dirs[i];
+			for (int k = 0; k < 4; k++) {
+				// A sharp lobe (cos^50): distance varies faster than light.
+				float c = max(0.0, dot(dirs[k], ray_dir));
+				float c2 = c * c;
+				float c4 = c2 * c2;
+				float c8 = c4 * c4;
+				float c16 = c8 * c8;
+				float c32 = c16 * c16;
+				float w = c32 * c16 * c2 * ray.z;
+				sums[k] += ray.xy * w;
+				weight_sums[k] += w;
+			}
+		}
+		for (int k = 0; k < 4; k++) {
+			if (!valid[k]) {
+				continue;
+			}
+			ivec2 texel = first + ivec2(k & 1, k >> 1) * 8;
+			vec2 previous = imageLoad(ddgi_atlas, origin + texel).rg;
+			if (any(isnan(previous))) {
+				previous = vec2(max_distance, max_distance * max_distance);
+			}
+			vec2 result = weight_sums[k] > 0.0 ? sums[k] / weight_sums[k] : previous;
+			imageStore(ddgi_atlas, origin + texel, vec4(mix(result, previous, hysteresis), 0.0, 0.0));
+		}
+	} else
+#endif
 	for (int ty = int(gl_LocalInvocationID.y); ty < texels; ty += 8) {
 		for (int tx = int(gl_LocalInvocationID.x); tx < texels; tx += 8) {
 			ivec2 texel = ivec2(tx, ty);
@@ -600,6 +665,50 @@ void main() {
 }
 
 #endif // MODE_SMOOTH
+
+#ifdef MODE_BOUNCE
+
+// The light the probes pass on at the hit of a probe ray: what the closest
+// hit shader added itself before (see ddgi_probe_ray_shade()). Inside the ray
+// tracing pipeline this lookup took about 70% of the trace time.
+void main() {
+	uint ray = gl_GlobalInvocationID.x;
+	uint slot = gl_GlobalInvocationID.y;
+	if (slot >= ddgi_traced_count() || ray >= ddgi.counts.y) {
+		return;
+	}
+	uvec4 bounce = ddgi_ray_bounce[slot * ddgi.counts.y + ray];
+	if ((bounce.x >> 24u) == 0u) {
+		return; // Missed, back face, or nothing to reflect.
+	}
+	uint probe = ddgi_update_probes[slot];
+	DDGIProbe pd = ddgi_probes[probe];
+	// As in the trace: these probes traced only the fixed rays.
+	if ((pd.state == DDGI_PROBE_INACTIVE || pd.state == DDGI_PROBE_INSIDE) && ray >= ddgi.counts.z) {
+		return;
+	}
+	DDGIVolume vol = ddgi.volumes[ddgi_find_volume(probe)];
+	vec3 probe_position = ddgi_probe_world_position(vol, ddgi_probe_logical(vol, probe), pd.offset);
+	vec3 to_hit = oct_to_vec3(unpackUnorm2x16(bounce.z) * 2.0 - 1.0);
+	vec3 hit_pos = probe_position + to_hit * uintBitsToFloat(bounce.w);
+	vec3 normal = oct_to_vec3(unpackUnorm2x16(bounce.y) * 2.0 - 1.0);
+
+	vec4 irradiance = ddgi_sample_irradiance(hit_pos, normal, -to_hit);
+	// Bounce energy (DDGIVolume.bounce_energy) scales the light passed on
+	// from bounce to bounce: above 1, rooms lit indirectly get brighter.
+	// The feedback stays below 1, or the bounces would add up forever.
+	vec3 feedback = unpackUnorm4x8(bounce.x).rgb * ddgi.schedule.w;
+	if (ddgi.schedule.w > 1.0) {
+		feedback = min(feedback, vec3(0.95));
+	}
+	ivec2 texel = ivec2(ray, slot);
+	vec4 data = imageLoad(ddgi_ray_data, texel);
+	vec3 radiance = data.rgb + feedback * irradiance.rgb * irradiance.a;
+	data.rgb = (any(isnan(radiance)) || any(isinf(radiance))) ? vec3(0.0) : radiance;
+	imageStore(ddgi_ray_data, texel, data);
+}
+
+#endif // MODE_BOUNCE
 
 #ifdef MODE_RELOCATE_CLASSIFY
 

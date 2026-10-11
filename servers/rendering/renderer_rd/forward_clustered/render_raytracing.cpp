@@ -3661,7 +3661,7 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		uniforms.push_back(u);
 	}
 
-	// Bindings 34-39: DDGI (raytracing_ddgi_inc.glsl).
+	// Bindings 34-40: DDGI (raytracing_ddgi_inc.glsl).
 	{
 		RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 		RID default_ssbo = RendererRD::MeshStorage::get_singleton()->get_default_rd_storage_buffer();
@@ -3674,6 +3674,7 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 37, has_ddgi ? p_ddgi->probe_buffer : default_ssbo));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 38, has_ddgi ? p_ddgi->ray_data : defaults.image_rgba16f));
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 39, has_ddgi ? p_ddgi->update_list : default_ssbo));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 40, has_ddgi && p_ddgi->ray_bounce.is_valid() ? p_ddgi->ray_bounce : default_ssbo));
 	}
 
 	RID shader_rd = shader ? shader->get_pipeline_shader_rd(p_rt_flags) : RID();

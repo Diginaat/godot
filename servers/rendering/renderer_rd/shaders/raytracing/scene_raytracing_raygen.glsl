@@ -55,7 +55,8 @@ void ddgi_trace_probe_rays() {
 		}
 	}
 	DDGIVolume vol = ddgi.volumes[volume];
-	vec3 ray_origin = ddgi_probe_world_position(vol, ddgi_probe_logical(vol, probe), pd.offset);
+	vec3 probe_position = ddgi_probe_world_position(vol, ddgi_probe_logical(vol, probe), pd.offset);
+	vec3 ray_origin = probe_position;
 	vec3 ray_dir = ddgi_probe_ray_direction_weighted(ray, pd.guide).xyz;
 
 	PathState ps;
@@ -88,6 +89,18 @@ void ddgi_trace_probe_rays() {
 	}
 
 	imageStore(ddgi_ray_data, ivec2(ray, slot), vec4(ps.radiance, first_hit));
+
+	// Where the probes' light is looked up after the trace. The hit point is
+	// stored relative to the probe, so rays that passed through glass work too.
+	uvec4 bounce = uvec4(0u);
+	if ((ps.packed_bounces_flags & DDGI_BOUNCE_FLAG) != 0u) {
+		vec3 to_hit = ray_origin + ray_dir * ps.hit_t - probe_position;
+		float dist = length(to_hit);
+		if (dist > 0.0) {
+			bounce = uvec4(packUnorm4x8(vec4(ps.throughput, 1.0)), packUnorm2x16(vec3_to_oct(ps.offset_normal)), packUnorm2x16(vec3_to_oct(to_hit / dist)), floatBitsToUint(dist));
+		}
+	}
+	ddgi_ray_bounce[slot * ddgi.counts.y + ray] = bounce;
 }
 
 void main() {

@@ -156,6 +156,12 @@ bool is_ddgi_probe_ray(uint packed) {
 	return (packed & DDGI_PROBE_RAY_FLAG) != 0u;
 }
 
+// Set by the closest hit of a DDGI probe ray (bit 29) when the hit needs the
+// probes' light (bounce light): the hit leaves the diffuse reflectance in the
+// throughput and the normal in the offset normal, and a compute pass after
+// the trace looks the probes up (MODE_BOUNCE in ddgi_update.glsl).
+const uint DDGI_BOUNCE_FLAG = (1u << 29);
+
 // Bounce limits
 #define MAX_DIFFUSE_BOUNCES 2u
 #define MAX_DENOISER_SPECULAR_HIT_THRESHOLD 0.25

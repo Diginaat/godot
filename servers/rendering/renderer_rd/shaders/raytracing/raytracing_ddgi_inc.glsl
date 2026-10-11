@@ -1,4 +1,4 @@
-// DDGI resources in the ray tracing scene set (set 0, bindings 34-39).
+// DDGI resources in the ray tracing scene set (set 0, bindings 34-40).
 // Bound in every RT dispatch (with small defaults when DDGI is off), so the
 // path tracer pipeline layout stays the same with and without DDGI.
 // Include after raytracing_common_inc.glsl, and after
@@ -24,6 +24,14 @@ layout(set = 0, binding = 39, std430) readonly buffer DDGIUpdateList {
 	uint ddgi_update_count;
 	uint ddgi_update_pad[3];
 	uint ddgi_update_probes[];
+};
+
+// Per probe ray (slot * rays per probe + ray), for the bounce light pass
+// (MODE_BOUNCE in ddgi_update.glsl): x the diffuse reflectance (unorm8 rgb,
+// a 1 when the hit needs bounce light), y the normal and z the direction from
+// the probe to the hit (octahedral, unorm16), w the distance (float bits).
+layout(set = 0, binding = 40, std430) restrict writeonly buffer DDGIRayBounce {
+	uvec4 ddgi_ray_bounce[];
 };
 #endif
 

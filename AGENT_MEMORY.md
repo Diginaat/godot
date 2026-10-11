@@ -162,8 +162,13 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   GPLv3; A-SVGF code: unclear). This fork is MIT: implement from the paper,
   never copy that code (same rule as the RTXGI SDK).
 - Measure GPU cost with the test project's `--gpu-profile ... --bench=300`
-  before and after; per pass times are in the BENCH line. GPU times shown
-  during `--write-movie` runs are meaningless (30-80 ms).
+  before and after; per pass times are in the BENCH line. Before optimizing
+  a pass, switch parts of it off in a test build to see what costs: the
+  probe lookup in the probe rays' closest hit was 70% of the trace. GPU
+  times shown during `--write-movie` runs are meaningless (30-80 ms).
+- Texture-heavy work in ray tracing hit shaders runs at low occupancy. Write
+  what it needs per ray into a buffer and do it in a compute pass after the
+  trace (DDGI bounce light: 5.1 ms of trace became 1.5 + 1.3 ms).
 - Custom-shader hit groups compile for seconds. Anything that classifies or
   caches against the TLAS (DDGI probe states) must not run against a scene
   with those surfaces missing; they are now traced with the default hit
