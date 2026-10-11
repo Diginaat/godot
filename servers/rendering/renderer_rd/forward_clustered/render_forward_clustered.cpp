@@ -1730,13 +1730,6 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		RENDER_TIMESTAMP("Render GI");
 	}
 
-	// XeGTAO first: DDGI reads its bent normals.
-	xegtao_bent_normals_ready = false;
-	if (xegtao_active_this_frame && rb_data.is_valid()) {
-		_process_xegtao(p_render_data, p_normal_roughness_slices);
-		xegtao_bent_normals_ready = xegtao_settings.bent_normals;
-	}
-
 	//prepare shadow rendering
 	if (render_shadows) {
 		_render_shadow_begin();
@@ -1772,6 +1765,13 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 		if (p_use_ssil || p_use_ssr) {
 			ss_effects->allocate_last_frame_buffer(rb, p_use_ssil, p_use_ssr);
+		}
+
+		// After the GI processing: recorded before DDGI's apply pass, XeGTAO
+		// changed how the render graph scheduled the DDGI passes and the
+		// probes lost their bounce light (see DDGI.md).
+		if (xegtao_active_this_frame) {
+			_process_xegtao(p_render_data, p_normal_roughness_slices);
 		}
 
 		if (p_use_ssao || p_use_ssil) {
@@ -2163,19 +2163,19 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
 
-	// XeGTAO, from the DDGIVolume: needs the depth prepass (checked below)
-	// and a view large enough for its depth MIPs.
+	// XeGTAO (Environment): needs the depth prepass (checked below) and a
+	// view large enough for its depth MIPs.
 	xegtao_used = false;
 	bool xegtao_requested = false;
 	if (xegtao && !is_reflection_probe && rb_data.is_valid() && p_render_data->environment.is_valid()) {
-		RendererEnvironmentStorage::DDGISettings ddgi_settings = RendererEnvironmentStorage::get_singleton()->environment_get_ddgi(p_render_data->environment);
-		if (ddgi_settings.ao_enabled) {
-			xegtao_settings.quality = ddgi_settings.ao_quality;
-			xegtao_settings.resolution = ddgi_settings.ao_resolution;
-			xegtao_settings.radius = ddgi_settings.ao_radius;
-			xegtao_settings.intensity = ddgi_settings.ao_intensity;
-			xegtao_settings.bent_normals = ddgi_settings.ao_bent_normals;
-			xegtao_settings.debug_mode = ddgi_settings.ao_debug_mode;
+		RendererEnvironmentStorage::XeGTAOSettings env_xegtao = RendererEnvironmentStorage::get_singleton()->environment_get_xegtao(p_render_data->environment);
+		if (env_xegtao.enabled) {
+			xegtao_settings.quality = env_xegtao.quality;
+			xegtao_settings.resolution = env_xegtao.resolution;
+			xegtao_settings.radius = env_xegtao.radius;
+			xegtao_settings.intensity = env_xegtao.intensity;
+			xegtao_settings.bent_normals = env_xegtao.bent_normals;
+			xegtao_settings.debug_mode = env_xegtao.debug_mode;
 			xegtao_requested = RendererRD::XeGTAO::get_ao_size(rb->get_internal_size(), xegtao_settings) != Size2i();
 		}
 	}
@@ -2544,7 +2544,6 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, rb_data.is_valid() && rb_data->has_voxelgi() ? rb_data->get_voxelgi() : RID());
 	ddgi_active_this_frame = false;
 	xegtao_active_this_frame = false;
-	xegtao_bent_normals_ready = false;
 	xegtao_used = using_xegtao;
 
 	if (current_cluster_builder) {

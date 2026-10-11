@@ -117,6 +117,10 @@ func _apply_args() -> void:
 		env.ddgi_energy = float(args["energy"])
 	# Screen-space effects and exposure for comparison shots.
 	env.ssao_enabled = args.get("ssao", "0") == "1"
+	if args.has("ssao_intensity"):
+		env.ssao_intensity = float(args["ssao_intensity"])
+		env.ssao_power = float(args.get("ssao_power", "1.5"))
+		env.ssao_radius = float(args.get("ssao_radius", "1.0"))
 	env.ssil_enabled = args.get("ssil", "0") == "1"
 	env.ssr_enabled = args.get("ssr", "0") == "1"
 	if args.has("bounce"):
@@ -141,6 +145,8 @@ func _apply_args() -> void:
 		# 0 bilinear, 1 FSR1, 2 FSR2, 6 DLSS (see Viewport.Scaling3DMode).
 		vp.scaling_3d_mode = int(args["scale3d"])
 		vp.scaling_3d_scale = float(args.get("scale", "0.67"))
+	if args.has("ser"):
+		ProjectSettings.set_setting("rendering/pathtracing/use_shader_execution_reordering", args["ser"] == "1")
 	if args.has("taa"):
 		vp.use_taa = args["taa"] == "1"
 	if args.has("linear"):
@@ -259,104 +265,100 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	elif key.keycode == KEY_P:
 		env.pathtracing_enabled = not env.pathtracing_enabled
 	elif key.keycode == KEY_O:
-		if volume:
-			volume.ao_enabled = not volume.ao_enabled
-		else:
-			env.ddgi_ao_enabled = not env.ddgi_ao_enabled
+		env.xegtao_enabled = not env.xegtao_enabled
 	_update_hud()
 
 
-# --ao=1 turns on the DDGIVolume ambient occlusion (XeGTAO): on the --volume
-# node, or without one on the Environment. --ao_quality=0..3 (low..ultra),
-# --ao_res=0|1|2 (auto, full, half), --ao_radius=m, --ao_intensity=,
-# --ao_bent=1 (bent normals), --ao_debug=0..6 (see DDGIVolume.ao_debug_view).
+# --ao=1 turns on the Environment's XeGTAO ambient occlusion:
+# --ao_quality=0..3 (low..ultra), --ao_res=0|1|2 (auto, full, half),
+# --ao_radius=m, --ao_intensity=, --ao_bent=1 (bent normals),
+# --ao_debug=0..6 (see Environment.xegtao_debug_mode).
 func _setup_ao() -> void:
-	var on: bool = args.get("ao", "0") == "1"
-	var quality := int(args.get("ao_quality", "2"))
-	var res := int(args.get("ao_res", "0"))
-	var radius := float(args.get("ao_radius", "0.5"))
-	var intensity := float(args.get("ao_intensity", "1.0"))
-	var bent: bool = args.get("ao_bent", "0") == "1"
-	var debug := int(args.get("ao_debug", "0"))
-	if volume:
-		volume.ao_quality = quality
-		volume.ao_resolution = res
-		volume.ao_radius = radius
-		volume.ao_intensity = intensity
-		volume.ao_bent_normals = bent
-		volume.ao_debug_view = debug
-		volume.ao_enabled = on
-	else:
-		env.ddgi_ao_quality = quality
-		env.ddgi_ao_resolution = res
-		env.ddgi_ao_radius = radius
-		env.ddgi_ao_intensity = intensity
-		env.ddgi_ao_bent_normals = bent
-		env.ddgi_ao_debug_mode = debug
-		env.ddgi_ao_enabled = on
+	env.xegtao_quality = int(args.get("ao_quality", "2"))
+	env.xegtao_resolution = int(args.get("ao_res", "0"))
+	env.xegtao_radius = float(args.get("ao_radius", "0.5"))
+	env.xegtao_intensity = float(args.get("ao_intensity", "1.0"))
+	env.xegtao_bent_normals = args.get("ao_bent", "0") == "1"
+	env.xegtao_debug_mode = int(args.get("ao_debug", "0"))
+	env.xegtao_enabled = args.get("ao", "0") == "1"
 
 
-# --ao_test=1: switches every ambient occlusion setting at runtime, resizes
-# the view, disables and removes the volume, and checks that the probes
-# (the renderer's and the baked resource) didn't change. Use with --volume
-# and --baked=path --bake_mode=1, so the probes don't change by themselves.
-# Prints "AO_TEST ..." lines; errors show as ERROR lines in the log.
+# --ao_test=1: switches every XeGTAO setting at runtime, resizes the view,
+# disables and removes the DDGIVolume, and checks that the probes (the
+# renderer's and the baked resource) didn't change and that XeGTAO doesn't
+# depend on the volume. Use with --volume and --baked=path --bake_mode=1, so
+# the probes don't change by themselves. Prints "AO_TEST ..." lines; errors
+# show as ERROR lines in the log.
 func _ao_test() -> void:
 	if volume == null or volume.probe_data == null:
 		print("AO_TEST needs --volume and --baked")
 		return
-	var resource_hash := var_to_bytes(volume.probe_data.get_data()).hash()
+	var resource_hash := hash(volume.probe_data.get_data())
 	var probes_before := _probe_hash()
 	var steps: Array[Callable] = [
-		func(): volume.ao_enabled = true,
-		func(): volume.ao_quality = Environment.DDGI_AO_QUALITY_LOW,
-		func(): volume.ao_quality = Environment.DDGI_AO_QUALITY_MEDIUM,
-		func(): volume.ao_quality = Environment.DDGI_AO_QUALITY_ULTRA,
-		func(): volume.ao_quality = Environment.DDGI_AO_QUALITY_HIGH,
-		func(): volume.ao_resolution = Environment.DDGI_AO_RESOLUTION_HALF,
-		func(): volume.ao_bent_normals = true,
-		func(): volume.ao_resolution = Environment.DDGI_AO_RESOLUTION_FULL,
-		func(): volume.ao_radius = 2.0,
-		func(): volume.ao_intensity = 2.0,
-		func(): volume.ao_intensity = 0.0,
-		func(): volume.ao_debug_view = Environment.DDGI_AO_DEBUG_RAW_AO,
-		func(): volume.ao_debug_view = Environment.DDGI_AO_DEBUG_BENT_NORMALS,
-		func(): volume.ao_debug_view = Environment.DDGI_AO_DEBUG_DISABLED,
-		func(): volume.ao_bent_normals = false,
-		func(): vp.use_taa = not vp.use_taa,
-		func(): vp.use_taa = not vp.use_taa,
+		func(): env.xegtao_enabled = true,
+		func(): env.xegtao_quality = Environment.XEGTAO_QUALITY_LOW,
+		func(): env.xegtao_quality = Environment.XEGTAO_QUALITY_MEDIUM,
+		func(): env.xegtao_quality = Environment.XEGTAO_QUALITY_ULTRA,
+		func(): env.xegtao_quality = Environment.XEGTAO_QUALITY_HIGH,
+		func(): env.xegtao_resolution = Environment.XEGTAO_RESOLUTION_HALF,
+		func(): env.xegtao_bent_normals = true,
+		func(): env.xegtao_resolution = Environment.XEGTAO_RESOLUTION_FULL,
+		func(): env.xegtao_radius = 2.0,
+		func(): env.xegtao_intensity = 2.0,
+		func(): env.xegtao_intensity = 0.0,
+		func(): env.xegtao_debug_mode = Environment.XEGTAO_DEBUG_RAW_AO,
+		func(): env.xegtao_debug_mode = Environment.XEGTAO_DEBUG_BENT_NORMALS,
+		func(): env.xegtao_debug_mode = Environment.XEGTAO_DEBUG_DISABLED,
+		func(): env.xegtao_bent_normals = false,
 		func(): env.ssao_enabled = true,
-		func(): volume.ao_enabled = false,
-		func(): volume.ao_enabled = true,
+		func(): env.xegtao_enabled = false,
+		func(): env.xegtao_enabled = true,
+	]
+	var view_steps: Array[Callable] = [
+		func(): vp.use_taa = not vp.use_taa,
+		func(): vp.use_taa = not vp.use_taa,
 		func(): _resize_view(Vector2i(37, 23)),
 		func(): _resize_view(Vector2i(1023, 577)),
 		func(): _resize_view(Vector2i(640, 360)),
 	]
+	# --ao_test=control: the same waits without any change.
+	var control: bool = args["ao_test"] == "control"
 	for step in steps:
-		step.call()
+		if not control:
+			step.call()
 		for i in 5:
 			await RenderingServer.frame_post_draw
-	var probes_after := _probe_hash()
-	print("AO_TEST renderer_probes_unchanged=%s resource_unchanged=%s" % [probes_before == probes_after, var_to_bytes(volume.probe_data.get_data()).hash() == resource_hash])
-	# Without DDGI, and with the volume gone: back to the Environment's SSAO.
+	print("AO_TEST after AO changes: renderer_probes_unchanged=%s resource_unchanged=%s" % [_probe_hash() == probes_before, hash(volume.probe_data.get_data()) == resource_hash])
+	for step in view_steps:
+		if not control:
+			step.call()
+		for i in 5:
+			await RenderingServer.frame_post_draw
+	print("AO_TEST after view changes (TAA, resizes): renderer_probes_unchanged=%s resource_unchanged=%s" % [_probe_hash() == probes_before, hash(volume.probe_data.get_data()) == resource_hash])
+	# XeGTAO belongs to the Environment: DDGI off or gone doesn't touch it.
 	volume.enabled = false
 	for i in 5:
 		await RenderingServer.frame_post_draw
-	print("AO_TEST volume disabled: env ddgi_ao_enabled=%s ssao_enabled=%s" % [env.ddgi_ao_enabled, env.ssao_enabled])
+	print("AO_TEST volume disabled: xegtao_enabled=%s ddgi_enabled=%s" % [env.xegtao_enabled, env.ddgi_enabled])
 	volume.enabled = true
 	remove_child(volume)
 	for i in 5:
 		await RenderingServer.frame_post_draw
-	print("AO_TEST volume removed: env ddgi_ao_enabled=%s" % env.ddgi_ao_enabled)
+	print("AO_TEST volume removed: xegtao_enabled=%s" % env.xegtao_enabled)
 	add_child(volume)
 	for i in 5:
 		await RenderingServer.frame_post_draw
-	print("AO_TEST volume added again: env ddgi_ao_enabled=%s" % env.ddgi_ao_enabled)
 	print("AO_TEST done")
 
 
+# The probes' light, distances and states (the images are new objects every
+# call, so hash their bytes).
 func _probe_hash() -> int:
-	return var_to_bytes(RenderingServer.viewport_get_ddgi_probe_data(vp.get_viewport_rid())).hash()
+	var d := RenderingServer.viewport_get_ddgi_probe_data(vp.get_viewport_rid())
+	if d.is_empty():
+		return 0
+	return hash([(d["irradiance"] as Image).get_data(), (d["distance"] as Image).get_data(), d["probes"]])
 
 
 func _resize_view(p_size: Vector2i) -> void:

@@ -38,7 +38,6 @@
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_data_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
-#include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_server_default.h" // IWYU pragma: keep. RENDER_TIMESTAMP macro uses RSG.
 #include "servers/rendering/storage/environment_storage.h"
@@ -862,7 +861,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	rd->draw_command_end_label();
 }
 
-void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution, const RID *p_bent_normals) {
+void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution) {
 	ERR_FAIL_COND(!initialized);
 	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
 	ERR_FAIL_COND(rb.is_null());
@@ -918,7 +917,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
 		push.screen_size[0] = internal_size.x;
 		push.screen_size[1] = internal_size.y;
-		push.flags = (p_half_resolution ? 1 : 0) | (p_bent_normals ? 2 : 0);
+		push.flags = p_half_resolution ? 1 : 0;
 		push.debug_mode = uint32_t(s.debug_mode);
 
 		RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
@@ -930,10 +929,8 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RD::Uniform u_normal(RD::UNIFORM_TYPE_TEXTURE, 6, p_normal_roughness_slices[v]);
 		RD::Uniform u_ambient(RD::UNIFORM_TYPE_IMAGE, 7, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_AMBIENT, v, 0));
 		RD::Uniform u_reflection(RD::UNIFORM_TYPE_IMAGE, 8, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_REFLECTION, v, 0));
-		RID bent = p_bent_normals ? p_bent_normals[v] : RendererRD::TextureStorage::get_singleton()->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_NORMAL);
-		RD::Uniform u_bent(RD::UNIFORM_TYPE_TEXTURE, 9, bent);
 
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_ambient, u_reflection, u_bent), 0);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_ambient, u_reflection), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		rd->compute_list_dispatch_threads(list, gi_size.x, gi_size.y, 1);
 	}

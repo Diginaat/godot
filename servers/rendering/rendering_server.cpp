@@ -3111,7 +3111,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_bounce_energy", "env", "energy"), &RenderingServer::environment_set_ddgi_bounce_energy);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_realtime_updates", "env", "enable"), &RenderingServer::environment_set_ddgi_realtime_updates);
 	ClassDB::bind_method(D_METHOD("environment_set_ddgi_baked_data", "env", "mode", "data"), &RenderingServer::environment_set_ddgi_baked_data);
-	ClassDB::bind_method(D_METHOD("environment_set_ddgi_ao", "env", "enable", "quality", "resolution", "radius", "intensity", "bent_normals", "debug_mode"), &RenderingServer::environment_set_ddgi_ao);
+	ClassDB::bind_method(D_METHOD("environment_set_xegtao", "env", "enable", "quality", "resolution", "radius", "intensity", "bent_normals", "debug_mode"), &RenderingServer::environment_set_xegtao);
 	ClassDB::bind_method(D_METHOD("environment_set_volumetric_fog", "env", "enable", "density", "albedo", "emission", "emission_energy", "anisotropy", "length", "detail_spread", "gi_inject", "temporal_reprojection", "temporal_reprojection_amount", "ambient_inject", "sky_affect"), &RenderingServer::environment_set_volumetric_fog);
 
 	ClassDB::bind_method(D_METHOD("environment_glow_set_use_bicubic_upscale", "enable"), &RenderingServer::environment_glow_set_use_bicubic_upscale);

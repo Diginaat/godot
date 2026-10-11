@@ -890,13 +890,12 @@ protected:
 	virtual bool _ddgi_get_fog_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) { return false; }
 	bool ddgi_active_this_frame = false;
 
-	// XeGTAO (DDGIVolume ambient occlusion): replaces SSAO as the producer of
+	// XeGTAO (Environment ambient occlusion): replaces SSAO as the producer of
 	// the AO texture the scene shader reads. Set while it is processed this
 	// frame (_pre_opaque_render), and while its output is valid for the
 	// opaque pass (until the next render_scene()).
 	bool xegtao_active_this_frame = false;
 	bool xegtao_used = false;
-	bool xegtao_bent_normals_ready = false; // Processed this frame, with bent normals (for DDGI apply).
 	RendererRD::XeGTAO::Settings xegtao_settings;
 	void _process_xegtao(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices);
 

@@ -115,28 +115,28 @@ public:
 		DDGI_DEBUG_MAX
 	};
 
-	enum DDGIAOQuality {
-		DDGI_AO_QUALITY_LOW,
-		DDGI_AO_QUALITY_MEDIUM,
-		DDGI_AO_QUALITY_HIGH,
-		DDGI_AO_QUALITY_ULTRA,
+	enum XeGTAOQuality {
+		XEGTAO_QUALITY_LOW,
+		XEGTAO_QUALITY_MEDIUM,
+		XEGTAO_QUALITY_HIGH,
+		XEGTAO_QUALITY_ULTRA,
 	};
 
-	enum DDGIAOResolution {
-		DDGI_AO_RESOLUTION_AUTO,
-		DDGI_AO_RESOLUTION_FULL,
-		DDGI_AO_RESOLUTION_HALF,
+	enum XeGTAOResolution {
+		XEGTAO_RESOLUTION_AUTO,
+		XEGTAO_RESOLUTION_FULL,
+		XEGTAO_RESOLUTION_HALF,
 	};
 
-	enum DDGIAODebugMode {
-		DDGI_AO_DEBUG_DISABLED,
-		DDGI_AO_DEBUG_RAW_AO,
-		DDGI_AO_DEBUG_FINAL_AO,
-		DDGI_AO_DEBUG_DEPTH,
-		DDGI_AO_DEBUG_NORMALS,
-		DDGI_AO_DEBUG_BENT_NORMALS,
-		DDGI_AO_DEBUG_EDGES,
-		DDGI_AO_DEBUG_MAX
+	enum XeGTAODebugMode {
+		XEGTAO_DEBUG_DISABLED,
+		XEGTAO_DEBUG_RAW_AO,
+		XEGTAO_DEBUG_FINAL_AO,
+		XEGTAO_DEBUG_DEPTH,
+		XEGTAO_DEBUG_NORMALS,
+		XEGTAO_DEBUG_BENT_NORMALS,
+		XEGTAO_DEBUG_EDGES,
+		XEGTAO_DEBUG_MAX
 	};
 
 	enum FogMode {
@@ -253,15 +253,15 @@ private:
 	DDGIDebugMode ddgi_debug_mode = DDGI_DEBUG_DISABLED;
 	void _update_ddgi();
 
-	// DDGI ambient occlusion (XeGTAO)
-	bool ddgi_ao_enabled = false;
-	DDGIAOQuality ddgi_ao_quality = DDGI_AO_QUALITY_HIGH;
-	DDGIAOResolution ddgi_ao_resolution = DDGI_AO_RESOLUTION_AUTO;
-	float ddgi_ao_radius = 0.5;
-	float ddgi_ao_intensity = 1.0;
-	bool ddgi_ao_bent_normals = false;
-	DDGIAODebugMode ddgi_ao_debug_mode = DDGI_AO_DEBUG_DISABLED;
-	void _update_ddgi_ao();
+	// XeGTAO ambient occlusion (replaces SSAO while enabled)
+	bool xegtao_enabled = false;
+	XeGTAOQuality xegtao_quality = XEGTAO_QUALITY_HIGH;
+	XeGTAOResolution xegtao_resolution = XEGTAO_RESOLUTION_AUTO;
+	float xegtao_radius = 0.5;
+	float xegtao_intensity = 1.0;
+	bool xegtao_bent_normals = false;
+	XeGTAODebugMode xegtao_debug_mode = XEGTAO_DEBUG_DISABLED;
+	void _update_xegtao();
 
 	// Glow
 	bool glow_enabled = false;
@@ -495,20 +495,20 @@ public:
 	// Baked probes from DDGIProbeData::get_data() (set by DDGIVolume, not stored).
 	void set_ddgi_baked_data(int p_mode, const Dictionary &p_data);
 
-	void set_ddgi_ao_enabled(bool p_enabled);
-	bool is_ddgi_ao_enabled() const;
-	void set_ddgi_ao_quality(DDGIAOQuality p_quality);
-	DDGIAOQuality get_ddgi_ao_quality() const;
-	void set_ddgi_ao_resolution(DDGIAOResolution p_resolution);
-	DDGIAOResolution get_ddgi_ao_resolution() const;
-	void set_ddgi_ao_radius(float p_radius);
-	float get_ddgi_ao_radius() const;
-	void set_ddgi_ao_intensity(float p_intensity);
-	float get_ddgi_ao_intensity() const;
-	void set_ddgi_ao_bent_normals(bool p_enabled);
-	bool is_ddgi_ao_bent_normals_enabled() const;
-	void set_ddgi_ao_debug_mode(DDGIAODebugMode p_mode);
-	DDGIAODebugMode get_ddgi_ao_debug_mode() const;
+	void set_xegtao_enabled(bool p_enabled);
+	bool is_xegtao_enabled() const;
+	void set_xegtao_quality(XeGTAOQuality p_quality);
+	XeGTAOQuality get_xegtao_quality() const;
+	void set_xegtao_resolution(XeGTAOResolution p_resolution);
+	XeGTAOResolution get_xegtao_resolution() const;
+	void set_xegtao_radius(float p_radius);
+	float get_xegtao_radius() const;
+	void set_xegtao_intensity(float p_intensity);
+	float get_xegtao_intensity() const;
+	void set_xegtao_bent_normals(bool p_enabled);
+	bool is_xegtao_bent_normals_enabled() const;
+	void set_xegtao_debug_mode(XeGTAODebugMode p_mode);
+	XeGTAODebugMode get_xegtao_debug_mode() const;
 
 	// Glow
 	void set_glow_enabled(bool p_enabled);
@@ -622,7 +622,7 @@ VARIANT_ENUM_CAST(Environment::SDFGIYScale)
 VARIANT_ENUM_CAST(Environment::GlowBlendMode)
 VARIANT_ENUM_CAST(Environment::PathtracingDebugMode)
 VARIANT_ENUM_CAST(Environment::DDGIDebugMode)
-VARIANT_ENUM_CAST(Environment::DDGIAOQuality)
-VARIANT_ENUM_CAST(Environment::DDGIAOResolution)
-VARIANT_ENUM_CAST(Environment::DDGIAODebugMode)
+VARIANT_ENUM_CAST(Environment::XeGTAOQuality)
+VARIANT_ENUM_CAST(Environment::XeGTAOResolution)
+VARIANT_ENUM_CAST(Environment::XeGTAODebugMode)
 VARIANT_ENUM_CAST(Environment::FogMode)

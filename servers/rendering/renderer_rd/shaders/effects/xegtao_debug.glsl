@@ -4,7 +4,7 @@
 
 #VERSION_DEFINES
 
-// XeGTAO debug views (DDGIVolume.ao_debug_view), drawn over the frame at the
+// XeGTAO debug views (Environment.xegtao_debug_mode), drawn over the frame at the
 // internal resolution: 1 raw AO (before the denoiser), 2 final AO, 3 view
 // depth, 4 normals, 5 bent normals, 6 the denoiser's edges (white = no edge).
 

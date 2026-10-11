@@ -93,21 +93,10 @@ private:
 	Ref<DDGIProbeData> probe_data;
 	Ref<Environment> applied_environment;
 
-	// Screen-space ambient occlusion (XeGTAO). Independent of the probes:
-	// changing it never touches the probe data.
-	bool ao_enabled = false;
-	Environment::DDGIAOQuality ao_quality = Environment::DDGI_AO_QUALITY_HIGH;
-	Environment::DDGIAOResolution ao_resolution = Environment::DDGI_AO_RESOLUTION_AUTO;
-	float ao_radius = 0.5f;
-	float ao_intensity = 1.0f;
-	bool ao_bent_normals = false;
-	Environment::DDGIAODebugMode ao_debug_view = Environment::DDGI_AO_DEBUG_DISABLED;
-
 	Vector3i _grid_from_size() const;
 	Ref<Environment> _get_environment() const;
 	void _apply_to_environment();
 	void _apply_baked_data();
-	void _apply_ao();
 	bool _probe_data_matches() const;
 
 protected:
@@ -167,27 +156,6 @@ public:
 
 	void set_probe_data(const Ref<DDGIProbeData> &p_data);
 	Ref<DDGIProbeData> get_probe_data() const;
-
-	void set_ao_enabled(bool p_enabled);
-	bool is_ao_enabled() const;
-
-	void set_ao_quality(Environment::DDGIAOQuality p_quality);
-	Environment::DDGIAOQuality get_ao_quality() const;
-
-	void set_ao_resolution(Environment::DDGIAOResolution p_resolution);
-	Environment::DDGIAOResolution get_ao_resolution() const;
-
-	void set_ao_radius(float p_radius);
-	float get_ao_radius() const;
-
-	void set_ao_intensity(float p_intensity);
-	float get_ao_intensity() const;
-
-	void set_ao_bent_normals(bool p_enabled);
-	bool is_ao_bent_normals_enabled() const;
-
-	void set_ao_debug_view(Environment::DDGIAODebugMode p_mode);
-	Environment::DDGIAODebugMode get_ao_debug_view() const;
 
 	/// Traces the probes until they converge and stores the result in
 	/// probe_data. Blocks; renders p_updates_per_probe updates per probe

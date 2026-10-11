@@ -47,7 +47,7 @@ namespace RendererRD {
 // at half resolution, a depth-guided upscale. Its output is a visibility
 // texture (R8, internal resolution, one layer per view) that the Forward+
 // renderer binds in place of the SSAO texture. Settings come from the
-// DDGIVolume (RendererEnvironmentStorage::DDGISettings ao_*).
+// Environment (RendererEnvironmentStorage::XeGTAOSettings).
 class XeGTAO {
 public:
 	struct Settings {
@@ -127,8 +127,6 @@ public:
 
 	// Visibility for the scene shader (all views), valid after process().
 	static RID get_visibility_texture(Ref<RenderSceneBuffersRD> p_render_buffers);
-	// Bent normal slices (one per view), when process() made them; false otherwise.
-	static bool get_bent_normal_slices(Ref<RenderSceneBuffersRD> p_render_buffers, RID *r_slices);
 	// The debug view, or RID() when none was rendered.
 	static RID get_debug_texture(Ref<RenderSceneBuffersRD> p_render_buffers);
 

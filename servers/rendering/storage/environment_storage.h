@@ -61,16 +61,18 @@ public:
 		int bake_mode = 0;
 		Dictionary baked_data;
 		uint64_t baked_version = 0;
-		// Screen-space ambient occlusion (XeGTAO), set by the DDGIVolume. It
-		// replaces the Environment's SSAO for the view while enabled and
-		// doesn't depend on the probes (it also runs with DDGI off).
-		bool ao_enabled = false;
-		int ao_quality = 2; // 0 low, 1 medium, 2 high, 3 ultra.
-		int ao_resolution = 0; // 0 auto, 1 full, 2 half.
-		float ao_radius = 0.5; // Meters.
-		float ao_intensity = 1.0;
-		bool ao_bent_normals = false;
-		int ao_debug_mode = 0; // Environment::DDGIAODebugMode.
+	};
+
+	// Screen-space ambient occlusion (XeGTAO). Replaces SSAO for the view
+	// while enabled.
+	struct XeGTAOSettings {
+		bool enabled = false;
+		int quality = 2; // 0 low, 1 medium, 2 high, 3 ultra.
+		int resolution = 0; // 0 auto, 1 full, 2 half.
+		float radius = 0.5; // Meters.
+		float intensity = 1.0;
+		bool bent_normals = false;
+		int debug_mode = 0; // Environment::XeGTAODebugMode.
 	};
 
 	union TonemapParameters {
@@ -219,6 +221,9 @@ private:
 
 		// DDGI
 		DDGISettings ddgi;
+
+		// XeGTAO
+		XeGTAOSettings xegtao;
 
 		// Adjustments
 		bool adjustments_enabled = false;
@@ -386,7 +391,8 @@ public:
 	void environment_set_ddgi_bounce_energy(RID p_env, float p_energy);
 	void environment_set_ddgi_realtime_updates(RID p_env, bool p_enable);
 	void environment_set_ddgi_baked_data(RID p_env, int p_mode, const Dictionary &p_data);
-	void environment_set_ddgi_ao(RID p_env, bool p_enable, int p_quality, int p_resolution, float p_radius, float p_intensity, bool p_bent_normals, int p_debug_mode);
+	void environment_set_xegtao(RID p_env, bool p_enable, int p_quality, int p_resolution, float p_radius, float p_intensity, bool p_bent_normals, int p_debug_mode);
+	XeGTAOSettings environment_get_xegtao(RID p_env) const;
 	bool environment_get_ddgi_enabled(RID p_env) const;
 	DDGISettings environment_get_ddgi(RID p_env) const;
 

@@ -191,6 +191,13 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 - It produces the texture the scene shader already reads as SSAO (binding
   27, `SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO`), so AO is applied once, to
   ambient light only. Never add a second AO multiplication.
+- Settings live on the Environment (`xegtao_*`), not on DDGIVolume. It runs
+  after the GI processing: recorded before the DDGI apply pass, it made the
+  probes lose their bounce light (open DDGI synchronization issue, see the
+  DDGI.md findings log).
+- Compare DDGI brightness only after 600+ frames. At 120 frames the
+  budgeted scheduler hasn't converged and its pace depends on unrelated
+  work in the frame, which looks like a bug that isn't there.
 - `RD::capture_timestamp()` (`RENDER_TIMESTAMP`) fails inside a compute
   list that already dispatched: give every timed pass its own list.
 - The material storage's default samplers carry the mipmap LOD bias (TAA

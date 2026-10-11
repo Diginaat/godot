@@ -250,9 +250,50 @@ brighter without flicker:
   reflection probe light: the scene shader scales it by the DDGI irradiance
   over the environment's (unoccluded) ambient light at the surface, about 1
   in the open and near 0 in caves and tunnels. SSR is unchanged.
-- **SSAO / SSIL** still apply on top.
+- **SSAO / SSIL** still apply on top. **XeGTAO** (below) can replace SSAO.
 - **Path tracing**: when `pathtracing_enabled` is on, the path tracer computes
   all light and DDGI is not used. Select one or the other per environment.
+
+### Ambient occlusion (XeGTAO)
+
+The Environment has an XeGTAO group next to SSAO (`Environment.xegtao_*`):
+Intel's XeGTAO (ground truth ambient occlusion, MIT, ported to GLSL in
+`servers/rendering/renderer_rd/effects/xegtao.*` and
+`shaders/effects/xegtao_*.glsl`). It isn't part of DDGI and works with any
+GI or none, but it suits DDGI: the probes resolve light at the scale of
+their spacing, XeGTAO the contacts and corners in between.
+
+| Property | Default | Meaning |
+| --- | --- | --- |
+| `xegtao_enabled` | off | Replaces SSAO while on (`ssao_enabled` is ignored, its settings kept) |
+| `xegtao_quality` | High | Slices x steps per side, Intel's presets: Low 1 x 2, Medium 2 x 2, High 3 x 3, Ultra 9 x 3 |
+| `xegtao_resolution` | Auto | Full, Half (depth-guided upscale), Auto (half above 2560 x 1600 internal pixels) |
+| `xegtao_radius` | 0.5 m | Occlusion distance |
+| `xegtao_intensity` | 1.0 | Exponent on the visibility (0 removes it) |
+| `xegtao_bent_normals` | off | Also compute bent normals (debug view only for now) |
+| `xegtao_debug_mode` | Disabled | Raw AO, final AO, depth, normals, bent normals, denoiser edges |
+
+How it is applied: XeGTAO writes the texture the Forward+ scene shader
+already reads as SSAO (`ao_buffer`, `SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO`),
+so the shader does what it does for SSAO: `ao = min(material AO, AO)`,
+multi-bounce approximation, ambient light only. Direct light, emission and
+reflections keep their brightness; there is no second AO multiplication.
+
+Passes (one compute list each, so each has a GPU timestamp): `XeGTAO Depth
+Preparation` (view depth and 5 MIPs, R16F), `XeGTAO Main Pass` (horizon
+search, edges), `XeGTAO Denoise` (Intel's edge-aware 3x3, one pass with TAA
+or a temporal upscaler, two without), `XeGTAO Upscale` (half resolution
+only). Without temporal AA the noise pattern is fixed (no flicker); with it
+the pattern changes every frame (64 frame cycle) and TAA averages it.
+
+Limits (screen space): occluders off screen or behind other geometry don't
+count, thin objects are treated as thick, and the effect fades at screen
+edges. The thickness heuristic of the reference is off (Intel's default).
+FP32 math throughout (no half precision).
+
+It runs after the GI processing (see the findings log, 2026-10-11: run
+before the DDGI apply pass, it made the probes lose their bounce light).
+Bent normals are therefore not fed into the DDGI lookup.
 
 ### Unsupported hardware
 
@@ -419,7 +460,7 @@ noise of the first updates doesn't linger.
 | 18 | Black surfaces: custom-shader geometry in the TLAS while its hit group compiles; inactive probes sampled | Done |
 | 19 | Dark areas on par with the path tracer: DDGI occludes sky reflections | Done |
 | 20 | Performance: bounce light lookup moved out of the ray tracing pipeline | Done |
-| 21 | Ambient occlusion: XeGTAO, controlled by the DDGIVolume (settings, compute passes, Forward+ AO texture, debug views) | In progress (branch `dev-ddgi-ao`) |
+| 21 | Ambient occlusion: XeGTAO on the Environment (compute passes, Forward+ AO texture, debug views) | In progress (branch `dev-ddgi-ao`): works and tested; benchmarks at 1440p/4K and Auto policy open |
 
 ## Test project
 
@@ -542,6 +583,26 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-11: Step 21, XeGTAO (branch `dev-ddgi-ao`). Open DDGI issue
+  found on the way: when XeGTAO's main pass ran before the DDGI apply pass
+  in the same frame, the probes lost their bounce light (interior, GI
+  buffer mean 13.4 -> 8.1 after 600 frames, as with bounce energy 0), in
+  budgeted and realtime mode alike. Independent of what XeGTAO computes
+  (quality, resolution, radius, intensity 0, even a dummy normal buffer
+  give the same 8.1); its depth prefilter alone is harmless. Fixed by any
+  of: `GODOT_RG_REORDER=0`, `GODOT_RG_FULL_BARRIERS=1`, or a graph
+  synchronization point at any DDGI step. Not fixed by full access bits
+  (`FORCE_FULL_ACCESS_BITS`), by explicit RT buffer dependencies for
+  `ray_bounce` / `probe_buffer` / `update_list`, or by turning SER off.
+  Khronos synchronization validation reports no hazard in the DDGI passes.
+  So some synchronization the render graph derives for the DDGI passes is
+  too weak once other compute work shares their levels; cause not found.
+  XeGTAO now runs after the GI processing, where DDGI is unaffected
+  (13.9 with and without it). Godot's SSAO already ran there.
+  Measuring note: compare DDGI results after 600+ frames; at 120 frames the
+  budgeted scheduler hasn't converged and its pace depends on the rest of
+  the frame (two runs differed by up to 20% at 120 frames, <2% at 600).
 
 - 2026-10-11: Step 20, performance. Measured first: the DDGI irradiance
   lookup at the hit of each probe ray (8 probes, two texture reads each)

@@ -820,71 +820,71 @@ void Environment::_update_ddgi() {
 	RS::get_singleton()->environment_set_ddgi_realtime_updates(environment, ddgi_realtime_updates);
 }
 
-void Environment::set_ddgi_ao_enabled(bool p_enabled) {
-	ddgi_ao_enabled = p_enabled;
-	_update_ddgi_ao();
+void Environment::set_xegtao_enabled(bool p_enabled) {
+	xegtao_enabled = p_enabled;
+	_update_xegtao();
 }
 
-bool Environment::is_ddgi_ao_enabled() const {
-	return ddgi_ao_enabled;
+bool Environment::is_xegtao_enabled() const {
+	return xegtao_enabled;
 }
 
-void Environment::set_ddgi_ao_quality(DDGIAOQuality p_quality) {
-	ddgi_ao_quality = p_quality;
-	_update_ddgi_ao();
+void Environment::set_xegtao_quality(XeGTAOQuality p_quality) {
+	xegtao_quality = p_quality;
+	_update_xegtao();
 }
 
-Environment::DDGIAOQuality Environment::get_ddgi_ao_quality() const {
-	return ddgi_ao_quality;
+Environment::XeGTAOQuality Environment::get_xegtao_quality() const {
+	return xegtao_quality;
 }
 
-void Environment::set_ddgi_ao_resolution(DDGIAOResolution p_resolution) {
-	ddgi_ao_resolution = p_resolution;
-	_update_ddgi_ao();
+void Environment::set_xegtao_resolution(XeGTAOResolution p_resolution) {
+	xegtao_resolution = p_resolution;
+	_update_xegtao();
 }
 
-Environment::DDGIAOResolution Environment::get_ddgi_ao_resolution() const {
-	return ddgi_ao_resolution;
+Environment::XeGTAOResolution Environment::get_xegtao_resolution() const {
+	return xegtao_resolution;
 }
 
-void Environment::set_ddgi_ao_radius(float p_radius) {
-	ddgi_ao_radius = CLAMP(p_radius, 0.01f, 100.0f);
-	_update_ddgi_ao();
+void Environment::set_xegtao_radius(float p_radius) {
+	xegtao_radius = CLAMP(p_radius, 0.01f, 100.0f);
+	_update_xegtao();
 }
 
-float Environment::get_ddgi_ao_radius() const {
-	return ddgi_ao_radius;
+float Environment::get_xegtao_radius() const {
+	return xegtao_radius;
 }
 
-void Environment::set_ddgi_ao_intensity(float p_intensity) {
-	ddgi_ao_intensity = CLAMP(p_intensity, 0.0f, 4.0f);
-	_update_ddgi_ao();
+void Environment::set_xegtao_intensity(float p_intensity) {
+	xegtao_intensity = CLAMP(p_intensity, 0.0f, 4.0f);
+	_update_xegtao();
 }
 
-float Environment::get_ddgi_ao_intensity() const {
-	return ddgi_ao_intensity;
+float Environment::get_xegtao_intensity() const {
+	return xegtao_intensity;
 }
 
-void Environment::set_ddgi_ao_bent_normals(bool p_enabled) {
-	ddgi_ao_bent_normals = p_enabled;
-	_update_ddgi_ao();
+void Environment::set_xegtao_bent_normals(bool p_enabled) {
+	xegtao_bent_normals = p_enabled;
+	_update_xegtao();
 }
 
-bool Environment::is_ddgi_ao_bent_normals_enabled() const {
-	return ddgi_ao_bent_normals;
+bool Environment::is_xegtao_bent_normals_enabled() const {
+	return xegtao_bent_normals;
 }
 
-void Environment::set_ddgi_ao_debug_mode(DDGIAODebugMode p_mode) {
-	ddgi_ao_debug_mode = p_mode;
-	_update_ddgi_ao();
+void Environment::set_xegtao_debug_mode(XeGTAODebugMode p_mode) {
+	xegtao_debug_mode = p_mode;
+	_update_xegtao();
 }
 
-Environment::DDGIAODebugMode Environment::get_ddgi_ao_debug_mode() const {
-	return ddgi_ao_debug_mode;
+Environment::XeGTAODebugMode Environment::get_xegtao_debug_mode() const {
+	return xegtao_debug_mode;
 }
 
-void Environment::_update_ddgi_ao() {
-	RS::get_singleton()->environment_set_ddgi_ao(environment, ddgi_ao_enabled, (int)ddgi_ao_quality, (int)ddgi_ao_resolution, ddgi_ao_radius, ddgi_ao_intensity, ddgi_ao_bent_normals, (int)ddgi_ao_debug_mode);
+void Environment::_update_xegtao() {
+	RS::get_singleton()->environment_set_xegtao(environment, xegtao_enabled, (int)xegtao_quality, (int)xegtao_resolution, xegtao_radius, xegtao_intensity, xegtao_bent_normals, (int)xegtao_debug_mode);
 }
 
 // Glow
@@ -1656,6 +1656,31 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ssao_light_affect", PROPERTY_HINT_RANGE, "0.00,1,0.01"), "set_ssao_direct_light_affect", "get_ssao_direct_light_affect");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ssao_ao_channel_affect", PROPERTY_HINT_RANGE, "0.00,1,0.01"), "set_ssao_ao_channel_affect", "get_ssao_ao_channel_affect");
 
+	// XeGTAO (replaces SSAO while enabled)
+	ClassDB::bind_method(D_METHOD("set_xegtao_enabled", "enabled"), &Environment::set_xegtao_enabled);
+	ClassDB::bind_method(D_METHOD("is_xegtao_enabled"), &Environment::is_xegtao_enabled);
+	ClassDB::bind_method(D_METHOD("set_xegtao_quality", "quality"), &Environment::set_xegtao_quality);
+	ClassDB::bind_method(D_METHOD("get_xegtao_quality"), &Environment::get_xegtao_quality);
+	ClassDB::bind_method(D_METHOD("set_xegtao_resolution", "resolution"), &Environment::set_xegtao_resolution);
+	ClassDB::bind_method(D_METHOD("get_xegtao_resolution"), &Environment::get_xegtao_resolution);
+	ClassDB::bind_method(D_METHOD("set_xegtao_radius", "radius"), &Environment::set_xegtao_radius);
+	ClassDB::bind_method(D_METHOD("get_xegtao_radius"), &Environment::get_xegtao_radius);
+	ClassDB::bind_method(D_METHOD("set_xegtao_intensity", "intensity"), &Environment::set_xegtao_intensity);
+	ClassDB::bind_method(D_METHOD("get_xegtao_intensity"), &Environment::get_xegtao_intensity);
+	ClassDB::bind_method(D_METHOD("set_xegtao_bent_normals", "enabled"), &Environment::set_xegtao_bent_normals);
+	ClassDB::bind_method(D_METHOD("is_xegtao_bent_normals_enabled"), &Environment::is_xegtao_bent_normals_enabled);
+	ClassDB::bind_method(D_METHOD("set_xegtao_debug_mode", "mode"), &Environment::set_xegtao_debug_mode);
+	ClassDB::bind_method(D_METHOD("get_xegtao_debug_mode"), &Environment::get_xegtao_debug_mode);
+
+	ADD_GROUP("XeGTAO", "xegtao_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "xegtao_enabled", PROPERTY_HINT_GROUP_ENABLE), "set_xegtao_enabled", "is_xegtao_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "xegtao_quality", PROPERTY_HINT_ENUM, "Low,Medium,High,Ultra"), "set_xegtao_quality", "get_xegtao_quality");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "xegtao_resolution", PROPERTY_HINT_ENUM, "Auto,Full,Half"), "set_xegtao_resolution", "get_xegtao_resolution");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "xegtao_radius", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), "set_xegtao_radius", "get_xegtao_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "xegtao_intensity", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_xegtao_intensity", "get_xegtao_intensity");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "xegtao_bent_normals"), "set_xegtao_bent_normals", "is_xegtao_bent_normals_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "xegtao_debug_mode", PROPERTY_HINT_ENUM, "Disabled,Raw AO,Final AO,Depth,Normals,Bent Normals,Edges"), "set_xegtao_debug_mode", "get_xegtao_debug_mode");
+
 	// SSIL
 	ClassDB::bind_method(D_METHOD("set_ssil_enabled", "enabled"), &Environment::set_ssil_enabled);
 	ClassDB::bind_method(D_METHOD("is_ssil_enabled"), &Environment::is_ssil_enabled);
@@ -1785,29 +1810,6 @@ void Environment::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_probe_classification"), "set_ddgi_probe_classification", "is_ddgi_probe_classification_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_follow_camera"), "set_ddgi_follow_camera", "is_ddgi_following_camera");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades"), "set_ddgi_debug_mode", "get_ddgi_debug_mode");
-
-	ClassDB::bind_method(D_METHOD("set_ddgi_ao_enabled", "enabled"), &Environment::set_ddgi_ao_enabled);
-	ClassDB::bind_method(D_METHOD("is_ddgi_ao_enabled"), &Environment::is_ddgi_ao_enabled);
-	ClassDB::bind_method(D_METHOD("set_ddgi_ao_quality", "quality"), &Environment::set_ddgi_ao_quality);
-	ClassDB::bind_method(D_METHOD("get_ddgi_ao_quality"), &Environment::get_ddgi_ao_quality);
-	ClassDB::bind_method(D_METHOD("set_ddgi_ao_resolution", "resolution"), &Environment::set_ddgi_ao_resolution);
-	ClassDB::bind_method(D_METHOD("get_ddgi_ao_resolution"), &Environment::get_ddgi_ao_resolution);
-	ClassDB::bind_method(D_METHOD("set_ddgi_ao_radius", "radius"), &Environment::set_ddgi_ao_radius);
-	ClassDB::bind_method(D_METHOD("get_ddgi_ao_radius"), &Environment::get_ddgi_ao_radius);
-	ClassDB::bind_method(D_METHOD("set_ddgi_ao_intensity", "intensity"), &Environment::set_ddgi_ao_intensity);
-	ClassDB::bind_method(D_METHOD("get_ddgi_ao_intensity"), &Environment::get_ddgi_ao_intensity);
-	ClassDB::bind_method(D_METHOD("set_ddgi_ao_bent_normals", "enabled"), &Environment::set_ddgi_ao_bent_normals);
-	ClassDB::bind_method(D_METHOD("is_ddgi_ao_bent_normals_enabled"), &Environment::is_ddgi_ao_bent_normals_enabled);
-	ClassDB::bind_method(D_METHOD("set_ddgi_ao_debug_mode", "mode"), &Environment::set_ddgi_ao_debug_mode);
-	ClassDB::bind_method(D_METHOD("get_ddgi_ao_debug_mode"), &Environment::get_ddgi_ao_debug_mode);
-
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_ao_enabled"), "set_ddgi_ao_enabled", "is_ddgi_ao_enabled");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_ao_quality", PROPERTY_HINT_ENUM, "Low,Medium,High,Ultra"), "set_ddgi_ao_quality", "get_ddgi_ao_quality");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_ao_resolution", PROPERTY_HINT_ENUM, "Auto,Full,Half"), "set_ddgi_ao_resolution", "get_ddgi_ao_resolution");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_ao_radius", PROPERTY_HINT_RANGE, "0.01,10,0.01,or_greater,suffix:m"), "set_ddgi_ao_radius", "get_ddgi_ao_radius");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ddgi_ao_intensity", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_ddgi_ao_intensity", "get_ddgi_ao_intensity");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "ddgi_ao_bent_normals"), "set_ddgi_ao_bent_normals", "is_ddgi_ao_bent_normals_enabled");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "ddgi_ao_debug_mode", PROPERTY_HINT_ENUM, "Disabled,Raw AO,Final AO,Depth,Normals,Bent Normals,Edges"), "set_ddgi_ao_debug_mode", "get_ddgi_ao_debug_mode");
 
 	// Glow
 
@@ -2038,23 +2040,23 @@ void Environment::_bind_methods() {
 	BIND_ENUM_CONSTANT(DDGI_DEBUG_CASCADES);
 	BIND_ENUM_CONSTANT(DDGI_DEBUG_MAX);
 
-	BIND_ENUM_CONSTANT(DDGI_AO_QUALITY_LOW);
-	BIND_ENUM_CONSTANT(DDGI_AO_QUALITY_MEDIUM);
-	BIND_ENUM_CONSTANT(DDGI_AO_QUALITY_HIGH);
-	BIND_ENUM_CONSTANT(DDGI_AO_QUALITY_ULTRA);
+	BIND_ENUM_CONSTANT(XEGTAO_QUALITY_LOW);
+	BIND_ENUM_CONSTANT(XEGTAO_QUALITY_MEDIUM);
+	BIND_ENUM_CONSTANT(XEGTAO_QUALITY_HIGH);
+	BIND_ENUM_CONSTANT(XEGTAO_QUALITY_ULTRA);
 
-	BIND_ENUM_CONSTANT(DDGI_AO_RESOLUTION_AUTO);
-	BIND_ENUM_CONSTANT(DDGI_AO_RESOLUTION_FULL);
-	BIND_ENUM_CONSTANT(DDGI_AO_RESOLUTION_HALF);
+	BIND_ENUM_CONSTANT(XEGTAO_RESOLUTION_AUTO);
+	BIND_ENUM_CONSTANT(XEGTAO_RESOLUTION_FULL);
+	BIND_ENUM_CONSTANT(XEGTAO_RESOLUTION_HALF);
 
-	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_DISABLED);
-	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_RAW_AO);
-	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_FINAL_AO);
-	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_DEPTH);
-	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_NORMALS);
-	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_BENT_NORMALS);
-	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_EDGES);
-	BIND_ENUM_CONSTANT(DDGI_AO_DEBUG_MAX);
+	BIND_ENUM_CONSTANT(XEGTAO_DEBUG_DISABLED);
+	BIND_ENUM_CONSTANT(XEGTAO_DEBUG_RAW_AO);
+	BIND_ENUM_CONSTANT(XEGTAO_DEBUG_FINAL_AO);
+	BIND_ENUM_CONSTANT(XEGTAO_DEBUG_DEPTH);
+	BIND_ENUM_CONSTANT(XEGTAO_DEBUG_NORMALS);
+	BIND_ENUM_CONSTANT(XEGTAO_DEBUG_BENT_NORMALS);
+	BIND_ENUM_CONSTANT(XEGTAO_DEBUG_EDGES);
+	BIND_ENUM_CONSTANT(XEGTAO_DEBUG_MAX);
 
 	BIND_ENUM_CONSTANT(FOG_MODE_EXPONENTIAL);
 	BIND_ENUM_CONSTANT(FOG_MODE_DEPTH);
@@ -2086,7 +2088,7 @@ Environment::Environment() {
 	_update_sdfgi();
 	_update_pathtracing();
 	_update_ddgi();
-	_update_ddgi_ao();
+	_update_xegtao();
 	_update_glow();
 	_update_fog();
 	_update_adjustment();

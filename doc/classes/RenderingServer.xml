@@ -1381,20 +1381,6 @@
 				Configures dynamic diffuse global illumination (DDGI) for the environment. See [member Environment.ddgi_enabled] and the other [code]ddgi_*[/code] properties of [Environment] for details.
 			</description>
 		</method>
-		<method name="environment_set_ddgi_ao">
-			<return type="void" />
-			<param index="0" name="env" type="RID" />
-			<param index="1" name="enable" type="bool" />
-			<param index="2" name="quality" type="int" />
-			<param index="3" name="resolution" type="int" />
-			<param index="4" name="radius" type="float" />
-			<param index="5" name="intensity" type="float" />
-			<param index="6" name="bent_normals" type="bool" />
-			<param index="7" name="debug_mode" type="int" />
-			<description>
-				Sets the XeGTAO screen-space ambient occlusion of the environment, which replaces SSAO while enabled: [param quality] as [enum Environment.DDGIAOQuality], [param resolution] as [enum Environment.DDGIAOResolution], [param radius] in meters, [param intensity] (0 to 4), [param bent_normals], and [param debug_mode] as [enum Environment.DDGIAODebugMode]. Used by [DDGIVolume]; see [member DDGIVolume.ao_enabled].
-			</description>
-		</method>
 		<method name="environment_set_ddgi_baked_data">
 			<return type="void" />
 			<param index="0" name="env" type="RID" />
@@ -1666,6 +1652,20 @@
 			<param index="1" name="depth" type="int" />
 			<description>
 				Sets the resolution of the volumetric fog's froxel buffer. [param size] is modified by the screen's aspect ratio and then used to set the width and height of the buffer. While [param depth] is directly used to set the depth of the buffer.
+			</description>
+		</method>
+		<method name="environment_set_xegtao">
+			<return type="void" />
+			<param index="0" name="env" type="RID" />
+			<param index="1" name="enable" type="bool" />
+			<param index="2" name="quality" type="int" />
+			<param index="3" name="resolution" type="int" />
+			<param index="4" name="radius" type="float" />
+			<param index="5" name="intensity" type="float" />
+			<param index="6" name="bent_normals" type="bool" />
+			<param index="7" name="debug_mode" type="int" />
+			<description>
+				Sets the XeGTAO screen-space ambient occlusion of the environment, which replaces SSAO while enabled: [param quality] as [enum Environment.XeGTAOQuality], [param resolution] as [enum Environment.XeGTAOResolution], [param radius] in meters, [param intensity] (0 to 4), [param bent_normals], and [param debug_mode] as [enum Environment.XeGTAODebugMode]. See [member Environment.xegtao_enabled].
 			</description>
 		</method>
 		<method name="fog_volume_create">

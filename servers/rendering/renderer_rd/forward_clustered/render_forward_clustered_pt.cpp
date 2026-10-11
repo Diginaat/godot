@@ -599,9 +599,7 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 			ddgi->update_probes(p_render_data, raytracing, rt_state, rt_flags);
 		}
 	}
-	RID bent_normals[RendererSceneRender::MAX_RENDER_VIEWS];
-	const bool use_bent = xegtao_bent_normals_ready && RendererRD::XeGTAO::get_bent_normal_slices(p_render_data->render_buffers, bent_normals);
-	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution, use_bent ? bent_normals : nullptr);
+	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution);
 	RD::get_singleton()->draw_command_end_label();
 }
 
