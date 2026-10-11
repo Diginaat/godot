@@ -246,8 +246,10 @@ brighter without flicker:
 - **Volumetric fog**: where probes cover it, its ambient light
   (`volumetric_fog_ambient_inject`) comes from the probes instead of the
   unoccluded sky, so fog in caves and interiors stays dark.
-- **Reflections** (sky, reflection probes, SSR) are unchanged: DDGI is diffuse
-  only.
+- **Reflections**: DDGI is diffuse only, but it occludes the sky and
+  reflection probe light: the scene shader scales it by the DDGI irradiance
+  over the environment's (unoccluded) ambient light at the surface, about 1
+  in the open and near 0 in caves and tunnels. SSR is unchanged.
 - **SSAO / SSIL** still apply on top.
 - **Path tracing**: when `pathtracing_enabled` is on, the path tracer computes
   all light and DDGI is not used. Select one or the other per environment.
@@ -410,6 +412,7 @@ noise of the first updates doesn't linger.
 | 16 | Dark caves (no sky ambient fallback, DDGI-lit volumetric fog), scrolling blotches | Done |
 | 17 | Moving objects: temporal gradient from the fixed rays; guided probe rays | Done |
 | 18 | Black surfaces: custom-shader geometry in the TLAS while its hit group compiles; inactive probes sampled | Done |
+| 19 | Dark areas on par with the path tracer: DDGI occludes sky reflections | Done |
 
 ## Test project
 
@@ -526,6 +529,24 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-11: Step 19. Report: dark spots (inside the demo's crouch tunnel)
+  stay lit and bluish with DDGI, black with the path tracer. Measured with
+  fixed exposure (auto exposure hides it: the path tracer's unconverged
+  fireflies hold the exposure down, DDGI's smooth dark image gets raised):
+  tunnel near its 1.1 m opening, DDGI 0.496 against path tracer 0.012
+  (mean linear-ish luminance of the lower screen). Without sky reflections
+  DDGI was 0.052: about 90% was sky and reflection probe light reflected
+  inside the tunnel, which DDGI didn't touch and Godot's specular occlusion
+  (from the ambient brightness) only halves. Fix: DDGI marks its pixels
+  with reflection buffer alpha -1, and the scene shader multiplies indirect
+  specular light by DDGI irradiance / environment ambient light (clamped to
+  0..1). After: 0.064 near the opening; deeper in the tunnel DDGI 0.0025 /
+  0.0073 against path tracer 0.0032 / 0.0053; outdoors 0.553 against
+  0.537. The rest near the opening is probes in and outside the opening
+  spreading outdoor light about a spacing inward (denser probes don't
+  help; not the bounce count: path tracer with 8 or 16 bounces 0.014).
+  Interior flicker 0.26%, DDGI time unchanged.
 
 - 2026-10-11: Step 18. Report: after step 16, outdoor faces in sun shadow
   were pitch black, in a voxel world (infinite world) and in a grid-shader

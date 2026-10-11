@@ -2057,8 +2057,22 @@ void fragment_shader(in SceneData scene_data) {
 		vec4 buffer_reflection = textureLod(sampler2D(reflection_buffer, SAMPLER_LINEAR_CLAMP), coord, 0.0);
 #endif // USE_MULTIVIEW
 
-		ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
-		indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
+		if (buffer_reflection.a < 0.0) {
+			// DDGI (diffuse only) marks its pixels with reflection alpha -1.
+			// Sky and reflection probe light is occluded by how much of the
+			// environment's ambient light actually reaches the surface: the
+			// DDGI irradiance over the unoccluded ambient light. About 1 in the
+			// open (bounce light can only raise it), near 0 in caves, tunnels
+			// and closed rooms, which otherwise reflect the open sky.
+			float open_ambient = dot(ambient_light, vec3(0.2126, 0.7152, 0.0722));
+			float ddgi_ambient = dot(buffer_ambient.rgb, vec3(0.2126, 0.7152, 0.0722));
+			float specular_visibility = open_ambient > 1e-5 ? clamp(ddgi_ambient / open_ambient, 0.0, 1.0) : 1.0;
+			indirect_specular_light *= mix(1.0, specular_visibility, buffer_ambient.a);
+			ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
+		} else {
+			ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
+			indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
+		}
 	}
 #endif // !USE_LIGHTMAP
 

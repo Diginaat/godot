@@ -172,6 +172,10 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 - Before changing what "no usable probe" means, check the probe states
   view (debug mode 4) in a real scene: a sampler change can turn a hidden
   classification problem into black surfaces.
+- Compare DDGI with the path tracer at a fixed exposure (auto exposure off,
+  same multiplier) and split the light by turning sources off one at a time
+  (reflections, sky, sun, bounce energy). With auto exposure the noisy path
+  tracer image and the smooth DDGI image get different exposures.
 
 ## In-editor DLSS installer
 

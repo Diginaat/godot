@@ -113,7 +113,11 @@ void main() {
 	}
 
 	imageStore(ambient_buffer, out_pixel, ambient);
-	imageStore(reflection_buffer, out_pixel, vec4(0.0));
+	// Alpha -1 marks DDGI for the scene shader: it keeps the usual specular
+	// sources (alpha 0) but occludes them by the ratio of the DDGI
+	// irradiance to the environment's (unoccluded sky) ambient light, so
+	// caves and tunnels don't reflect the open sky.
+	imageStore(reflection_buffer, out_pixel, vec4(0.0, 0.0, 0.0, -1.0));
 }
 
 #endif // MODE_APPLY
