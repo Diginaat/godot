@@ -1428,6 +1428,27 @@ void RenderRaytracing::update_procedural_blas(RTProceduralState *p_state, LocalV
 // Material processing
 // ---------------------------------------------------------------------------
 
+// A custom shader's hit group compiles asynchronously, which takes seconds
+// for a large shader. Until it is in the pipeline, its surfaces are traced
+// with the default hit group and a plain grey material instead of being left
+// out of the TLAS: the geometry has to be there for shadows, occlusion and
+// DDGI probe classification (probes classified against a scene without the
+// terrain kept wrong states long after it appeared, and lit it black).
+static inline bool _rt_hit_group_pending(const RTMaterialData *p_mat_data, const SceneShaderRaytracing *p_rt_shader, uint32_t p_rt_flags) {
+	return p_mat_data->rt_sbt_offset > 0 && !p_rt_shader->is_hg_ready_in_bundle(p_mat_data->rt_sbt_offset, p_rt_flags);
+}
+
+static inline RT_MaterialData _rt_pending_material(const RT_MaterialData &p_data) {
+	RT_MaterialData data = p_data;
+	data.albedo_color[0] = 0.5f;
+	data.albedo_color[1] = 0.5f;
+	data.albedo_color[2] = 0.5f;
+	data.albedo_color[3] = 1.0f;
+	data.albedo_texture_idx = 0;
+	data.flags = 0;
+	return data;
+}
+
 RTMaterialData *RenderRaytracing::process_material(RID p_material_rid, uint16_t p_material_invalidation_counter) {
 	// Static default material for invalid/null materials
 	static RTMaterialData s_default_mat;
@@ -2674,12 +2695,7 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 
 				uint16_t material_counter = material_storage->material_get_rt_invalidation_counter(material_rid);
 				RTMaterialData *mat_data = process_material(material_rid, material_counter);
-
-				if (mat_data->rt_sbt_offset > 0 &&
-						!rt_shader_singleton->is_hg_ready_in_bundle(mat_data->rt_sbt_offset, p_rt_flags)) {
-					mm_surf = mm_surf->next;
-					continue;
-				}
+				// A custom hit group still compiling is traced with the default one (see _rt_hit_group_pending()).
 
 				uint32_t inst_flags = 0;
 				if (mm_surf->shader) {
@@ -2812,12 +2828,7 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 
 			uint16_t material_counter = material_storage->material_get_rt_invalidation_counter(material_rid);
 			RTMaterialData *mat_data = process_material(material_rid, material_counter);
-
-			if (mat_data->rt_sbt_offset > 0 &&
-					!rt_shader_singleton->is_hg_ready_in_bundle(mat_data->rt_sbt_offset, p_rt_flags)) {
-				surf = surf->next;
-				continue;
-			}
+			// A custom hit group still compiling is traced with the default one (see _rt_hit_group_pending()).
 
 			// Compute or reuse cached final transform (instance * aabb_transform for compressed meshes).
 			Transform3D final_transform;
@@ -2864,8 +2875,9 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 			}
 #endif
 
-			sbt_offsets.push_back(mat_data->rt_sbt_offset);
-			material_data.push_back(mat_data->data);
+			const bool hg_pending = _rt_hit_group_pending(mat_data, rt_shader_singleton, p_rt_flags);
+			sbt_offsets.push_back(hg_pending ? 0u : mat_data->rt_sbt_offset);
+			material_data.push_back(hg_pending ? _rt_pending_material(mat_data->data) : mat_data->data);
 
 			// Emissive StandardMaterial3D surfaces become mesh lights, so direct-light
 			// sampling can aim at them instead of waiting for a bounce to hit them.
@@ -2960,8 +2972,9 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 			blass.push_back(merged_sd.blas);
 			blas_transforms.push_back(pending.instance_transform);
 			geometry_data.push_back(merged_sd.geometry);
-			sbt_offsets.push_back(pending.mat_data->rt_sbt_offset);
-			material_data.push_back(pending.mat_data->data);
+			const bool hg_pending = _rt_hit_group_pending(pending.mat_data, rt_shader_singleton, p_rt_flags);
+			sbt_offsets.push_back(hg_pending ? 0u : pending.mat_data->rt_sbt_offset);
+			material_data.push_back(hg_pending ? _rt_pending_material(pending.mat_data->data) : pending.mat_data->data);
 			motion_indices.push_back(-1);
 			instance_flags.push_back(pending.inst_flags);
 			instance_masks.push_back(0xFF);
@@ -3018,8 +3031,9 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 				blass.push_back(surf_data->blas);
 				blas_transforms.push_back(final_transform);
 				geometry_data.push_back(surf_data->geometry);
-				sbt_offsets.push_back(pending.mat_data->rt_sbt_offset);
-				material_data.push_back(pending.mat_data->data);
+				const bool hg_pending = _rt_hit_group_pending(pending.mat_data, rt_shader_singleton, p_rt_flags);
+				sbt_offsets.push_back(hg_pending ? 0u : pending.mat_data->rt_sbt_offset);
+				material_data.push_back(hg_pending ? _rt_pending_material(pending.mat_data->data) : pending.mat_data->data);
 
 				if (pending.transform_moved) {
 					Transform3D prev_final = pending.prev_instance_transform * mm_xform;

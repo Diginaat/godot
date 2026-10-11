@@ -409,6 +409,7 @@ noise of the first updates doesn't linger.
 | 15 | Smooth light changes: light transition, realtime updates | Done |
 | 16 | Dark caves (no sky ambient fallback, DDGI-lit volumetric fog), scrolling blotches | Done |
 | 17 | Moving objects: temporal gradient from the fixed rays; guided probe rays | Done |
+| 18 | Black surfaces: custom-shader geometry in the TLAS while its hit group compiles; inactive probes sampled | Done |
 
 ## Test project
 
@@ -525,6 +526,26 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-11: Step 18. Report: after step 16, outdoor faces in sun shadow
+  were pitch black, in a voxel world (infinite world) and in a grid-shader
+  test level (fixed volume); the probe states view showed many probes in
+  open air as inside or inactive. Cause: surfaces with a custom
+  ShaderMaterial were left out of the TLAS until their hit group finished
+  compiling, which takes seconds (the voxel terrain had no geometry in a
+  path traced view at 400 frames, all of it at 900). Probes classified in
+  that time saw no geometry: inactive, or inside where they saw the back of
+  something; inactive and inside probes update at an eighth of the rate, so
+  the states stayed wrong long after. Step 16 then made "no usable probe"
+  dark instead of the sky ambient light. Fixes: (1) such surfaces are traced
+  with the default hit group and a grey material until theirs is ready
+  (`_rt_hit_group_pending()` in render_raytracing.cpp); (2) inactive probes
+  are sampled with 5% weight (they keep their light current with the fixed
+  rays), so only probes inside geometry make a point dark. Checked: voxel
+  world after 7 s and 15 s and the grid level, clear and storm: no black
+  faces; the tunnel test stays dark; interior flicker 0.02%, mean unchanged.
+  A moving emissive sphere costs nothing measurable (5.3 vs 5.4 ms GPU;
+  `--write-movie` runs report 30-80 ms GPU time, ignore those).
 
 - 2026-10-11: Step 17. Report: GI around moving objects lags (bridge scene
   with a moving sphere, rotating cube, realtime updates). New ghost test

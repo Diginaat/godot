@@ -97,7 +97,7 @@ float ddgi_volume_weight(DDGIVolume vol, vec3 p_local) {
 // normal p_normal, seen from direction p_view (unit vector toward the viewer),
 // from one volume. Returns rgb and the volume weight in a. When the point is
 // inside the volume but none of its 8 probes can be used because they are all
-// inside geometry or inactive (a narrow cave or tunnel between probes), returns
+// inside geometry (a narrow cave or tunnel between probes), returns
 // black with the negated volume weight: no light is known to reach the point.
 // Probes not traced yet (new or scrolled in) leave the point uncovered (a = 0).
 vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
@@ -137,7 +137,7 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 			untraced = true;
 			continue;
 		}
-		if (state == DDGI_PROBE_INACTIVE || state == DDGI_PROBE_INSIDE) {
+		if (state == DDGI_PROBE_INSIDE) {
 			continue;
 		}
 
@@ -173,6 +173,13 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 		}
 
 		weight *= trilinear;
+		// Inactive probes (no surface nearby) still keep their light up to date
+		// with the fixed rays. They count a little, so a point whose probes are
+		// all inactive or inside gets their light instead of going dark; only
+		// probes inside geometry never count.
+		if (state == DDGI_PROBE_INACTIVE) {
+			weight *= 0.05;
+		}
 
 		vec3 irradiance = textureLod(sampler2D(ddgi_irradiance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, p_normal, irr_texels, per_row, ddgi.atlas_inv_size.xy), 0.0).rgb;
 		// Blend in a perceptual (square root) space: smoother transitions
@@ -244,7 +251,7 @@ vec4 ddgi_sample_volume_isotropic(uint p_volume, vec3 p_pos) {
 			untraced = true;
 			continue;
 		}
-		if (state == DDGI_PROBE_INACTIVE || state == DDGI_PROBE_INSIDE) {
+		if (state == DDGI_PROBE_INSIDE) {
 			continue;
 		}
 
@@ -268,6 +275,9 @@ vec4 ddgi_sample_volume_isotropic(uint p_volume, vec3 p_pos) {
 		}
 		vec3 tri = mix(1.0 - alpha, alpha, vec3(offs));
 		weight *= tri.x * tri.y * tri.z;
+		if (state == DDGI_PROBE_INACTIVE) {
+			weight *= 0.05; // As in ddgi_sample_volume().
+		}
 
 		vec2 inv_size = ddgi.atlas_inv_size.xy;
 		vec3 up = textureLod(sampler2D(ddgi_irradiance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, vec3(0.0, 1.0, 0.0), ddgi.atlas.x, ddgi.atlas.z, inv_size), 0.0).rgb;

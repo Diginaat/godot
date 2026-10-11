@@ -162,7 +162,16 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   GPLv3; A-SVGF code: unclear). This fork is MIT: implement from the paper,
   never copy that code (same rule as the RTXGI SDK).
 - Measure GPU cost with the test project's `--gpu-profile ... --bench=300`
-  before and after; per pass times are in the BENCH line.
+  before and after; per pass times are in the BENCH line. GPU times shown
+  during `--write-movie` runs are meaningless (30-80 ms).
+- Custom-shader hit groups compile for seconds. Anything that classifies or
+  caches against the TLAS (DDGI probe states) must not run against a scene
+  with those surfaces missing; they are now traced with the default hit
+  group meanwhile. To see what the TLAS holds, render the path tracer
+  (`pathtracing_enabled`, debug mode geometry normals) from a test script.
+- Before changing what "no usable probe" means, check the probe states
+  view (debug mode 4) in a real scene: a sampler change can turn a hidden
+  classification problem into black surfaces.
 
 ## In-editor DLSS installer
 
