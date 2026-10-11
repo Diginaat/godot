@@ -296,9 +296,13 @@ Common problems:
   from the quality preset. Probes with no surface nearby (classification)
   only trace the fixed rays (a quarter of the rays, at most 32), and get an
   eighth of the update rate.
-- Probes in view and probes whose light changes get more of the per-frame
-  budget; stable probes behind the camera get less. A feedback factor on
-  the GPU raises all rates until the per-frame budget is used.
+- Probes that light visible surfaces and probes whose light changes get
+  more of the per-frame budget: a mark pass after the apply pass (one pixel
+  per 8x8 tile, at a position that rotates every frame) records which
+  probes surfaces sample, and probes marked in the last 16 frames get 3x
+  the rate. Probes in the view frustum that no surface samples (behind
+  walls) get 0.8x, probes off screen 0.6x. A feedback factor on the GPU
+  raises all rates until the per-frame budget is used.
 - Coarser cascades update half as often per level.
 - `gpu_time_budget_ms` adapts the probe budget to measured GPU time. It
   never goes below an eighth of the quality's probes per frame, so a budget
@@ -419,6 +423,7 @@ noise of the first updates doesn't linger.
 | 18 | Black surfaces: custom-shader geometry in the TLAS while its hit group compiles; inactive probes sampled | Done |
 | 19 | Dark areas on par with the path tracer: DDGI occludes sky reflections | Done |
 | 20 | Performance: bounce light lookup moved out of the ray tracing pipeline | Done |
+| 22 | Scheduling: probes sampled by visible surfaces first (mark pass) | Done (branch `dev-ddgi-sched`) |
 
 ## Test project
 
@@ -456,8 +461,18 @@ Flicker and brightness: `--measure=N` captures N frames and prints mean
 linear brightness, the mean temporal deviation per pixel (8-bit levels) and
 the share of pixels deviating by more than 2 levels; `--mean=path` and
 `--stdmap=path` save the mean image and a deviation map (white = 8 levels),
-`--trace_px=x,y` prints one pixel per frame. Use `--anim=0 --tod=0`: a
-perfect result then has no flicker at all.
+`--trace_px=x,y` prints one pixel per frame, `--trace_mean=1` the image
+mean of every captured frame (`MEANF frame value`). Use `--anim=0 --tod=0`:
+a perfect result then has no flicker at all.
+
+Response to a light change: `--sun_step=factor` multiplies the sun energy
+as the measurement starts. Converge first, then trace the GI buffer:
+`--view=interior --tod=0 --anim=0 --debug=1 --frames=400 --measure=300
+--trace_mean=1 --sun_step=0.5`, and count the frames to 90% and 98% of the
+change. This is reproducible to a few frames; the first 100-200 frames
+after startup are not (asynchronously compiled hit groups change what the
+first probe rays see, so the image mean at frame 20 varied from 10 to 30
+between identical runs).
 
 Baking: `--volume=cx,cy,cz,sx,sy,sz` adds a `DDGIVolume` (with
 `--vspacing=`, `--vcascades=`), `--bake=path.res` bakes and saves it before
@@ -541,6 +556,38 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 22, scheduling (branch `dev-ddgi-sched`). Probes the
+  surfaces actually sample now get the highest rate instead of probes whose
+  position is in the view frustum (idea from Ghost of Yotei, see
+  `kb/research/ghost-of-yotei-ambient.md`). RTX 3060, interior, sun halved
+  after 400 frames, GI buffer mean, 2 runs each:
+
+  | Variant | 90% of change | 98% | Overshoot | Outdoor motion error | Apply ms (1080p room) |
+  | --- | --- | --- | --- | --- | --- |
+  | Before (frustum: in view 2x, else 0.6x) | 230, 231 | 272, 273 | 2.2-2.7% | 1.000 | 0.662 |
+  | Marked 2x, frustum 1x | 219, 223 | 275, 275 | 2.4-3.4% | 0.916 | 0.698 |
+  | Marked 3x, frustum 0.8x, marked in apply | 208, 217 | 266, 270 | 1.2-1.8% | 0.909 | 0.708 |
+  | Same, separate mark pass, 16 frame window (shipped) | 202, 207 | 269, 272 | 1.7-2.6% | 0.919 (4 frame window) | 0.69-0.70 |
+
+  Outdoor motion error: mean absolute difference between the GI buffer while
+  flying (`--move=1`, 300 frames) and after settling 300 frames. Static
+  interior flicker (600 + 60 frames, 3 runs): before 0.01/0.06/0.01% of
+  pixels, std 0.156-0.172; after 0.06/0.03/0.04%, std 0.163-0.191. Visible
+  probes update more often, so their update noise shows slightly more.
+  Marking inside the apply pass cost 0.05 ms whether every pixel, one per
+  4x4 block or a rotating quarter of the workgroups marked: the code alone
+  (divergent warps, registers) cost it, compiled out it was back to 0.662.
+  A separate pass, one thread per 8x8 tile, costs about 0.03 ms. With a 4
+  frame window the favored set changed often enough to add flicker (0.07%
+  and 0.49% in two runs); 16 frames keeps it stable.
+  A real game level (storm weather, a bright emissive sphere circling in
+  front of the camera, baked + realtime updates, auto exposure off,
+  `--fixed-fps 60`, 3 runs): GPU time unchanged within noise (3.28-3.43 vs
+  3.37-3.89 ms), GI buffer mean while the sphere moves 20.2-20.8 (before
+  17.9-21.0), jitter the same. Single frames there differ between runs
+  even with a fixed frame rate, so only averages are compared. Test method:
+  `kb/tooling/ddgi-test-protocol.md`.
 
 - 2026-10-11: Step 20, performance. Measured first: the DDGI irradiance
   lookup at the hit of each probe ray (8 probes, two texture reads each)

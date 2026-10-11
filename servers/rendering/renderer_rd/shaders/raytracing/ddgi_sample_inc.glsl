@@ -314,6 +314,35 @@ vec4 ddgi_sample_fog_radiance(vec3 p_pos) {
 	return coverage > 0.0 ? vec4(sum / coverage, coverage) : vec4(0.0);
 }
 
+#ifdef DDGI_MARK_SAMPLED
+// Marks the probes a surface at p_pos samples (the 8 around the biased
+// lookup position, in every volume until one covers it fully), with the
+// frame p_frame, for the scheduler.
+void ddgi_mark_sampled_probes(vec3 p_pos, vec3 p_normal, vec3 p_view, uint p_frame) {
+	float remaining = 1.0;
+	for (uint v = 0u; v < ddgi.counts.x && v < uint(DDGI_MAX_VOLUMES); v++) {
+		DDGIVolume vol = ddgi.volumes[v];
+		float volume_weight = ddgi_volume_weight(vol, ddgi_xform(vol.world_to_local, p_pos));
+		if (volume_weight <= 0.0) {
+			continue;
+		}
+		vec3 local = ddgi_xform(vol.world_to_local, p_pos + p_normal * vol.spacing.y + p_view * vol.spacing.z);
+		vec3 g = local / vol.spacing.x + (vec3(vol.grid.xyz) - 1.0) * 0.5;
+		ivec3 base = clamp(ivec3(floor(g)), ivec3(0), vol.grid.xyz - 2);
+		for (uint i = 0u; i < 8u; i++) {
+			uint probe = ddgi_probe_index(vol, base + ivec3(i & 1u, (i >> 1u) & 1u, (i >> 2u) & 1u));
+			if (ddgi_sampled_frame[probe] != p_frame) {
+				ddgi_sampled_frame[probe] = p_frame;
+			}
+		}
+		remaining *= 1.0 - volume_weight;
+		if (remaining < 0.001) {
+			break;
+		}
+	}
+}
+#endif
+
 // Index of the finest volume that covers a point, or -1.
 int ddgi_volume_at(vec3 p_pos) {
 	for (uint v = 0u; v < ddgi.counts.x && v < uint(DDGI_MAX_VOLUMES); v++) {

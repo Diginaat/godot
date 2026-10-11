@@ -11,6 +11,10 @@
 //     shader reads (INSTANCE_FLAGS_USE_GI_BUFFERS). The reflection buffer
 //     gets alpha 0, so specular reflections keep their usual sources.
 //   MODE_DEBUG_PROBES: draws the probes as small spheres over the image.
+//   MODE_MARK: one thread per 8x8 pixel tile marks the probes that light the
+//     surface at one pixel of the tile (rotating every frame), so the
+//     scheduler can favor them. A separate pass: in the apply pass the
+//     marking code alone cost about 0.05 ms at 1080p.
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -39,6 +43,15 @@ layout(rgba16f, set = 0, binding = 8) uniform restrict writeonly image2D reflect
 
 #ifdef MODE_DEBUG_PROBES
 layout(rgba16f, set = 0, binding = 6) uniform restrict image2D color_buffer;
+#endif
+
+#ifdef MODE_MARK
+layout(set = 0, binding = 6) uniform texture2D normal_roughness_buffer;
+// The frame each probe was last marked; the scheduler favors them.
+layout(set = 0, binding = 9, std430) restrict buffer DDGISampledFrame {
+	uint ddgi_sampled_frame[];
+};
+#define DDGI_MARK_SAMPLED
 #endif
 
 layout(push_constant, std430) uniform Params {
@@ -121,6 +134,30 @@ void main() {
 }
 
 #endif // MODE_APPLY
+
+#ifdef MODE_MARK
+
+void main() {
+	ivec2 tile = ivec2(gl_GlobalInvocationID.xy);
+	// A different pixel of the tile every frame (8 x 8 positions over 64
+	// frames, well spread), so surfaces smaller than a tile get marked too.
+	uint f = ddgi.atlas.w;
+	ivec2 pixel = tile * 8 + ivec2((f * 3u) & 7u, (f * 5u + (f >> 3u)) & 7u);
+	if (any(greaterThanEqual(pixel, params.screen_size))) {
+		return;
+	}
+	float depth = texelFetch(sampler2D(depth_buffer, linear_sampler), pixel, 0).r;
+	vec3 view_normal = texelFetch(sampler2D(normal_roughness_buffer, linear_sampler), pixel, 0).xyz * 2.0 - 1.0;
+	if (depth <= 0.0 || dot(view_normal, view_normal) <= 1e-6) {
+		return;
+	}
+	vec3 world_pos = ddgi_xform(params.cam_rotation, view_position(pixel, depth));
+	vec3 normal = normalize(ddgi_xform_dir(params.cam_rotation, normalize(view_normal)));
+	vec3 to_camera = normalize(vec3(params.cam_rotation[0].w, params.cam_rotation[1].w, params.cam_rotation[2].w) - world_pos);
+	ddgi_mark_sampled_probes(world_pos, normal, to_camera, f);
+}
+
+#endif // MODE_MARK
 
 #ifdef MODE_DEBUG_PROBES
 

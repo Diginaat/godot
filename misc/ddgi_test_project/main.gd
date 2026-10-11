@@ -400,6 +400,10 @@ func _run_capture() -> void:
 # deviation (white = 8 levels). Every second pixel per
 # axis is used. With --anim=0 a perfect result has no flicker at all.
 func _measure(p_frames: int) -> void:
+	# --sun_step=factor: multiply the sun energy as the measurement starts, to
+	# trace how fast the indirect light follows (with --trace_mean=1).
+	if args.has("sun_step") and sun:
+		sun.light_energy *= float(args["sun_step"])
 	var w := 0
 	var h := 0
 	var sum := PackedFloat32Array()
@@ -424,6 +428,7 @@ func _measure(p_frames: int) -> void:
 			var tp: PackedStringArray = args["trace_px"].split(",")
 			var tc := img.get_pixel(int(tp[0]), int(tp[1]))
 			print("PX %d %.1f" % [f, 255.0 * (0.2126 * tc.r + 0.7152 * tc.g + 0.0722 * tc.b)])
+		var frame_sum := 0.0
 		for y in h:
 			var row := y * 2 * stride
 			for x in w:
@@ -434,10 +439,14 @@ func _measure(p_frames: int) -> void:
 				var luma := 0.2126 * r + 0.7152 * g + 0.0722 * b
 				var i := y * w + x
 				sum[i] += luma
+				frame_sum += luma
 				sum_sq[i] += luma * luma
 				sum_rgb[i * 3] += r
 				sum_rgb[i * 3 + 1] += g
 				sum_rgb[i * 3 + 2] += b
+		# --trace_mean=1: the image mean (8-bit luma) of every captured frame.
+		if args.has("trace_mean"):
+			print("MEANF %d %.3f" % [f, frame_sum / float(w * h)])
 	var n := float(p_frames)
 	var lin_sum := 0.0
 	var std_sum := 0.0

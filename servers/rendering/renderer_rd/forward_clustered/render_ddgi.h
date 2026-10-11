@@ -162,6 +162,9 @@ public:
 		RID update_list;
 		RID stats_buffer;
 		RID fixed_history; // Luminance and hit distance (two halfs) of each fixed ray at the previous update, MAX_FIXED_RAYS per probe.
+		// The frame (DDGIDataGPU atlas.w) each probe was last sampled by a
+		// surface in the apply pass; 0: never. The scheduler favors them.
+		RID sampled_frame;
 		RID ray_data;
 		// Per probe ray, where its hit needs the probes' light (one uvec4 per ray,
 		// see MODE_BOUNCE in ddgi_update.glsl): looked up in a compute pass after
@@ -208,6 +211,7 @@ private:
 	enum ApplyMode {
 		APPLY_GI,
 		APPLY_DEBUG_PROBES,
+		APPLY_MARK,
 		APPLY_MODE_MAX,
 	};
 

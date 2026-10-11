@@ -111,7 +111,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 
 void RenderDDGI::ViewportData::free_data() {
 	RD *rd = RD::get_singleton();
-	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas };
+	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &sampled_frame, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas };
 	for (RID *r : rids) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
@@ -149,6 +149,7 @@ void RenderDDGI::initialize() {
 		Vector<String> modes;
 		modes.push_back("\n#define MODE_APPLY\n");
 		modes.push_back("\n#define MODE_DEBUG_PROBES\n");
+		modes.push_back("\n#define MODE_MARK\n");
 		apply_shader.initialize(modes);
 		apply_shader_version = apply_shader.version_create();
 		for (int i = 0; i < APPLY_MODE_MAX; i++) {
@@ -271,6 +272,13 @@ void RenderDDGI::_allocate(ViewportData *p_data, int p_cascades, const Vector3i 
 		// Read only for probes whose history_rays says it's filled.
 		p_data->fixed_history = rd->storage_buffer_create(p_data->total_probes * MAX_FIXED_RAYS * sizeof(uint32_t));
 		rd->set_resource_name(p_data->fixed_history, "DDGI Fixed Ray History");
+	}
+	{
+		Vector<uint8_t> zeros;
+		zeros.resize(p_data->total_probes * sizeof(uint32_t));
+		zeros.fill(0);
+		p_data->sampled_frame = rd->storage_buffer_create(zeros.size(), zeros);
+		rd->set_resource_name(p_data->sampled_frame, "DDGI Sampled Frame");
 	}
 	{
 		float stats[4] = { 1.0f, 0, 0, 0 }; // rate_scale starts at 1.
@@ -742,7 +750,8 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		RD::ComputeListID list = rd->compute_list_begin();
 		RID shader = update_shader.version_get_shader(update_shader_version, UPDATE_SCHEDULE);
 		rd->compute_list_bind_compute_pipeline(list, update_pipelines[UPDATE_SCHEDULE]);
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_stats), 0);
+		RD::Uniform u_sampled(RD::UNIFORM_TYPE_STORAGE_BUFFER, 10, vd->sampled_frame);
+		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_list, u_rays, u_stats, u_sampled), 0);
 		push.schedule_new_only = 1;
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		rd->compute_list_dispatch_threads(list, vd->total_probes, 1, 1);
@@ -930,9 +939,36 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RD::Uniform u_ambient(RD::UNIFORM_TYPE_IMAGE, 7, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_AMBIENT, v, 0));
 		RD::Uniform u_reflection(RD::UNIFORM_TYPE_IMAGE, 8, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_REFLECTION, v, 0));
 
+
 		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_ambient, u_reflection), 0);
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		rd->compute_list_dispatch_threads(list, gi_size.x, gi_size.y, 1);
+	}
+
+	// Mark the probes visible surfaces sample, for next frame's schedule
+	// (one pixel per 8x8 tile).
+	{
+		RID mark_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_MARK);
+		rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_MARK]);
+		for (uint32_t v = 0; v < p_render_data->scene_data->view_count; v++) {
+			ApplyPushConstant push = {};
+			RendererRD::MaterialStorage::store_camera((correction * p_render_data->scene_data->view_projection[v]).inverse(), push.inv_projection);
+			RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
+			push.screen_size[0] = internal_size.x;
+			push.screen_size[1] = internal_size.y;
+
+			RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
+			RD::Uniform u_probes(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, vd->probe_buffer);
+			RD::Uniform u_irradiance(RD::UNIFORM_TYPE_TEXTURE, 2, vd->irradiance_display);
+			RD::Uniform u_distance(RD::UNIFORM_TYPE_TEXTURE, 3, vd->distance_atlas);
+			RD::Uniform u_sampler(RD::UNIFORM_TYPE_SAMPLER, 4, linear_sampler);
+			RD::Uniform u_depth(RD::UNIFORM_TYPE_TEXTURE, 5, rb->get_depth_texture(v));
+			RD::Uniform u_normal(RD::UNIFORM_TYPE_TEXTURE, 6, p_normal_roughness_slices[v]);
+			RD::Uniform u_sampled(RD::UNIFORM_TYPE_STORAGE_BUFFER, 9, vd->sampled_frame);
+			rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(mark_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_sampled), 0);
+			rd->compute_list_set_push_constant(list, &push, sizeof(push));
+			rd->compute_list_dispatch_threads(list, (internal_size.x + 7) / 8, (internal_size.y + 7) / 8, 1);
+		}
 	}
 
 	rd->compute_list_end();

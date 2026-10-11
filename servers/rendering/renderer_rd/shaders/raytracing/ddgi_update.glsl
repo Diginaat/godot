@@ -52,6 +52,13 @@ layout(set = 0, binding = 3, rgba16f) uniform restrict image2D ddgi_ray_data;
 layout(set = 0, binding = 3, rgba16f) uniform restrict readonly image2D ddgi_ray_data;
 #endif
 
+#ifdef MODE_SCHEDULE
+// The frame each probe was last sampled by a surface (DDGI apply pass).
+layout(set = 0, binding = 10, std430) restrict readonly buffer DDGISampledFrame {
+	uint ddgi_sampled_frame[];
+};
+#endif
+
 // Persistent across frames. The scheduler multiplies every update rate by
 // rate_scale; the relocate pass raises it while the per-frame budget isn't
 // filled and lowers it when the budget overflows, so the budget gets used.
@@ -221,12 +228,20 @@ void main() {
 			rate *= 4.0;
 		}
 
-		// Probes in view (and close to the camera) matter most, but probes
-		// off screen still update so turning around doesn't show stale light.
+		// Probes that light visible surfaces (the apply pass marks the ones it
+		// samples) matter most. Probes in the view frustum that no surface
+		// samples (behind walls, beyond the finer cascades) get the base rate,
+		// and probes off screen still update so turning around doesn't show
+		// stale light.
+		uint sampled = ddgi_sampled_frame[probe];
+		// The mark pass samples one pixel per 8x8 tile per frame, at a
+		// rotating position: look 16 frames back, so the set of favored probes
+		// stays stable (with 4 frames it changed often enough to add flicker).
+		bool recently_sampled = sampled != 0u && ddgi.atlas.w - sampled <= 16u;
 		vec3 world_pos = ddgi_probe_world_position(vol, logical, pd.offset);
 		vec4 clip = ddgi.camera_view_projection * vec4(world_pos, 1.0);
 		bool in_view = clip.w > 0.0 && all(lessThanEqual(abs(clip.xy), vec2(clip.w * 1.2)));
-		rate *= in_view ? 2.0 : 0.6;
+		rate *= recently_sampled ? 3.0 : (in_view ? 0.8 : 0.6);
 	}
 
 	pd.urgency += rate;
