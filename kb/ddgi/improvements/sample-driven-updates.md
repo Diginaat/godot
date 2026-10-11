@@ -3,7 +3,7 @@ type: Proposal
 title: Sample-driven probe updates
 description: Let the DDGI apply pass mark the probes it samples, and give marked probes priority in the next frame's schedule.
 tags: [ddgi, scheduling, proposal]
-status: draft
+status: stable
 generated: { by: claude_code/claude-opus-5-5, at: 2026-10-12T00:00:00Z }
 sources:
   - id: yotei
@@ -11,7 +11,28 @@ sources:
     title: Ghost of Yotei ambient lighting
 ---
 
-# Today
+# Result (2026-10-12, branch `dev-ddgi-sched`)
+
+Implemented as a separate mark pass after the apply pass: one thread per
+8x8 tile marks the 8 probes around one pixel of the tile (rotating every
+frame) in a per-probe frame stamp buffer. Probes marked in the last 16
+frames get 3x the rate. Probes in the frustum that no surface samples get
+0.8x, off screen 0.6x. RTX 3060:
+
+| | Before | After |
+| --- | --- | --- |
+| Interior, sun halved: frames to 90% / 98% | 230-231 / 272-273 | 202-207 / 269-272 |
+| Overshoot | 2.2-2.7% | 1.7-2.6% |
+| Outdoor motion error | 1.000 | 0.91-0.92 |
+| Apply + mark, 1080p room | 0.662 ms | 0.69-0.70 ms |
+| Static flicker, 3 runs | 0.01-0.06% | 0.03-0.06% |
+| Game level, storm, moving emissive: GI mean while moving, 3 runs | 17.9-21.0 | 20.2-20.8 |
+
+Lessons: [marking in the apply pass was too expensive](/ddgi/findings/shader-code-cost-without-work.md),
+[the favored set must be stable](/ddgi/findings/scheduler-favored-set-stability.md).
+How it was measured: [DDGI test protocol](/tooling/ddgi-test-protocol.md).
+
+# Before
 
 The scheduler (`ddgi_update.glsl`, `MODE_SCHEDULE`) gives probes "in view"
 twice the rate, tested by projecting the probe position into a frustum
