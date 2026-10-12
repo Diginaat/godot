@@ -157,7 +157,9 @@ void ddgi_trace_near_field_rays() {
 	ps = path_unpack(payload);
 
 	bool missed = ps.hit_t >= DDGI_MISS_DISTANCE;
-	imageStore(ddgi_ray_data, texel, missed ? vec4(0.0, 0.0, 0.0, DDGI_MISS_DISTANCE) : vec4(ps.radiance, ps.hit_t));
+	// A miss keeps the sky's radiance (the miss shader's), with the miss
+	// distance.
+	imageStore(ddgi_ray_data, texel, vec4(ps.radiance, missed ? DDGI_MISS_DISTANCE : ps.hit_t));
 	// z: 1 when the hit object keeps moving.
 	uvec4 bounce = uvec4(0u, 0u, (!missed && (ps.packed_bounces_flags & DDGI_MOVING_HIT_FLAG) != 0u) ? 1u : 0u, 0u);
 	if (!missed && (ps.packed_bounces_flags & DDGI_BOUNCE_FLAG) != 0u) {

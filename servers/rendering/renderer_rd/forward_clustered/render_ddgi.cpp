@@ -984,7 +984,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		}
 		if (!rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
 			uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1, RB_TEX_DDGI_NF_OBJECT, RB_TEX_DDGI_NF_OBJECT_WEIGHT, RB_TEX_DDGI_NF_NOISE, RB_TEX_DDGI_NF_MOMENTS0, RB_TEX_DDGI_NF_MOMENTS1 }) {
+			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1, RB_TEX_DDGI_NF_OBJECT, RB_TEX_DDGI_NF_OBJECT_WEIGHT, RB_TEX_DDGI_NF_NOISE, RB_TEX_DDGI_NF_MOMENTS0, RB_TEX_DDGI_NF_MOMENTS1, RB_TEX_DDGI_NF_FILTER }) {
 				rb->create_texture(RB_SCOPE_DDGI_LOW, name, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, low_size);
 			}
 			// The cosine rays' hits, then the object rays' below them.
@@ -1037,12 +1037,12 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RendererRD::MaterialStorage::store_camera(prev_vp, nf.prev_view_projection);
 		// Rays reach a few spacings of the finest volume; the probes give
 		// the light from farther away.
-		// Moving objects reach 2 spacings (their own rays, no noise); the
-		// near-field rays only near_field_distance: longer rays sampled the
-		// sunlit ground outside a dark tunnel now and then, which showed as
-		// soft blotches, while the probes give that light smoothly.
+		// Moving objects reach 2 spacings (their own rays). The near-field
+		// rays have no range limit: a hit at any distance is shaded (direct
+		// light, and the probes' light for the next bounce), a miss is the
+		// sky. Their noise is filtered (temporal, then a-trous).
 		nf.params[0] = 2.0f * vd->volumes[0].spacing;
-		const float ray_distance = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/near_field_distance") * vd->volumes[0].spacing;
+		const float ray_distance = 10000.0f;
 		nf.params[1] = float(vd->frame % 65536u);
 		nf.params[2] = 0.06f;
 		nf.params[3] = vd->nf_history_valid ? 1.0f : 0.0f;
@@ -1196,27 +1196,29 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);
 
-				// Smooth (two passes, the first into the raw texture), and put in
-				// place of the light from the probes.
+				// Smooth (five a-trous passes, ping-ponging between the raw and
+				// the filter texture; pass 0 reads the history), and put in
+				// place of the light from the probes (last pass).
 				RID filter_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_NF_FILTER);
 				rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_NF_FILTER]);
-				RD::Uniform u_history_texture(RD::UNIFORM_TYPE_TEXTURE, 22, history);
 				RD::Uniform u_object_texture(RD::UNIFORM_TYPE_TEXTURE, 27, object);
 				RD::Uniform u_noise_texture(RD::UNIFORM_TYPE_TEXTURE, 31, noise);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_raw_image, u_history_texture, u_object_texture, u_noise_texture), 0);
-				rd->compute_list_set_push_constant(list, &push, sizeof(push));
-				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
-				rd->compute_list_add_barrier(list);
-				// Final pass: reads the first pass's result; its unused output
-				// is the previous history (not read any more this frame).
-				ApplyPushConstant final_push = push;
-				final_push.flags |= 1u << 28;
-				RD::Uniform u_unused_image(RD::UNIFORM_TYPE_IMAGE, 21, history_prev);
-				RD::Uniform u_first_pass(RD::UNIFORM_TYPE_TEXTURE, 22, raw);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_unused_image, u_first_pass, u_object_texture, u_noise_texture), 0);
-				rd->compute_list_set_push_constant(list, &final_push, sizeof(final_push));
-				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
-				rd->compute_list_add_barrier(list);
+				RID filter_tex = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_FILTER, v, 0);
+				const uint32_t filter_passes = 5;
+				for (uint32_t p = 0; p < filter_passes; p++) {
+					RID input = p == 0 ? history : ((p & 1u) ? raw : filter_tex);
+					// The last pass writes the low resolution data; its unused
+					// output is the previous history (not read any more).
+					RID output = p == filter_passes - 1 ? history_prev : ((p & 1u) ? filter_tex : raw);
+					ApplyPushConstant pass_push = push;
+					pass_push.flags |= p << 26;
+					RD::Uniform u_in(RD::UNIFORM_TYPE_TEXTURE, 22, input);
+					RD::Uniform u_out(RD::UNIFORM_TYPE_IMAGE, 21, output);
+					rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_out, u_in, u_object_texture, u_noise_texture), 0);
+					rd->compute_list_set_push_constant(list, &pass_push, sizeof(pass_push));
+					rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
+					rd->compute_list_add_barrier(list);
+				}
 				vd->nf_history_valid = true;
 			} else if (v == 0) {
 				vd->nf_history_valid = false;

@@ -47,8 +47,9 @@
 //     the mesh fills), without noise or lag. MODE_NF_TEMPORAL accumulates the samples
 //     over frames (reprojected, history clamped to the neighborhood, so
 //     changes show within a few frames), MODE_NF_FILTER smooths them with
-//     an edge-aware blur (two passes) and puts them in place of the probes'
-//     light in the low resolution data.
+//     an edge-avoiding, variance-guided a-trous filter (five passes, as in
+//     SVGF) and puts them in place of the probes' light in the low
+//     resolution data.
 //   MODE_MARK: one thread per 8x8 pixel tile marks the probes that light the
 //     surface at one pixel of the tile (rotating every frame), so the
 //     scheduler can favor them. A separate pass: in the apply pass the
@@ -239,8 +240,7 @@ params;
 
 #define FLAG_HALF_RES 1u
 #define FLAG_NEAR_FIELD (1u << 25u)
-// MODE_NF_FILTER: the second (final) pass, with taps 2 blocks apart.
-#define FLAG_NF_FILTER_FINAL (1u << 28u)
+// MODE_NF_FILTER: bits 26-28 hold the pass index.
 
 uint low_block_size() {
 	return max((params.flags >> 8u) & 0xFFu, 1u);
@@ -1078,15 +1078,15 @@ void main() {
 	// geometry (overlapping boxes, a block's surface just inside another
 	// object): not a valid sample. Like a miss, it takes the probes' light;
 	// counted as black, it left dark specks.
-	if (ray.a >= DDGI_MISS_DISTANCE * 0.5 || ray.a < 0.0) {
-		// Nothing within range: the probes' irradiance at the surface stands
-		// for the light from farther away. Where no ray hits anything (open
-		// ground under the sky) the result is the probes' light, without
-		// noise. (The probes' irradiance at the ray's end, facing along the
-		// ray, was tried first: its cosine lobe also takes in what lies to
-		// the side, so rays along a sunlit floor brought its light back and
-		// the floor came out too bright.)
+	if (ray.a < 0.0) {
+		// The ray started inside geometry: no sample; the probes' light.
 		radiance = probe.rgb;
+	} else if (ray.a >= DDGI_MISS_DISTANCE * 0.5) {
+		// Nothing hit at all: the sky (the miss shader's radiance). The rays
+		// have no range limit: with one (4 spacings), rays that left a dark
+		// tunnel took the probes' light instead, and the probes' patches
+		// (probe-sized, in a tunnel lower than the spacing) came back.
+		radiance = ray.rgb;
 	} else {
 		radiance = ray.rgb;
 		uvec4 b = nf_bounce[idx];
@@ -1291,80 +1291,109 @@ void main() {
 
 #ifdef MODE_NF_FILTER
 
-// Two passes of an edge-aware 5x5 filter (a-trous): taps 1 block apart,
-// then 2 apart, about 9x9 blocks in all. The workgroup's blocks and a
-// border of 4 are loaded once.
-#define NF_BORDER 4
-#define NF_TILE (8 + 2 * NF_BORDER)
-// How far above its noise (standard errors) a difference from the probes
-// must be to count fully. Neighboring blocks' samples are correlated (ray
-// patterns, the filter), so the real noise is larger than the estimate: at
-// 1 (with the filter's 9 blocks counted), a dark tunnel lit through an
-// opening still showed soft blotches.
-#define NF_NOISE_THRESHOLD 3.0
-shared vec4 tile_light[NF_TILE * NF_TILE];
-shared vec4 tile_geometry[NF_TILE * NF_TILE];
+// Edge-avoiding a-trous wavelet filter, guided by the variance (as in SVGF,
+// Schied et al. 2017; written from the paper): NF_FILTER_PASSES passes of a
+// 5x5 kernel with taps 1, 2, 4, 8 and 16 blocks apart (pass index in the
+// flags), about 60 blocks across in all. Each tap counts by the kernel, how
+// well its surface matches (depth, normal), and how close its light is in
+// units of the center's remaining noise: noise is smoothed away, real
+// changes in the light (a contact shadow, the edge of a bounce) stay. The
+// variance (a) is carried along: sum of w^2 var / (sum of w)^2.
+//
+// Pass 0 reads the temporal history (the correction to the probes' light,
+// and the frame count) and the noise estimate; it starts from the probes'
+// light and adds the correction as the history fills (a block seen for the
+// first time has only one noisy sample). The last pass puts the result in
+// place of the probes' light in the low resolution data.
+#define NF_FILTER_PASSES 5
+// How many standard deviations of the center's noise a neighbor's light
+// may differ by and still count (SVGF uses 4).
+#define NF_LUMINANCE_SIGMA 4.0
+
+// Light (rgb) and variance (a) of a block for this pass.
+vec4 nf_filter_input(ivec2 p_block, bool p_first) {
+	vec4 v = texelFetch(sampler2D(nf_history, linear_sampler), p_block, 0);
+	if (!p_first) {
+		return v;
+	}
+	vec3 probe = texelFetch(sampler2D(nf_probe, linear_sampler), p_block, 0).rgb;
+	float count = v.a;
+	if (count <= 0.0) {
+		return vec4(probe, 0.0);
+	}
+	float noise = texelFetch(sampler2D(nf_noise, linear_sampler), p_block, 0).r;
+	// Trusted as the history fills: fully after 8 frames.
+	float trust = smoothstep(1.0, 8.0, count);
+	return vec4(probe + v.rgb * trust, noise * noise * trust * trust);
+}
+
+// Depth (w; 0 for no surface) and normal (xyz) of a block.
+vec4 nf_filter_geometry(ivec2 p_block) {
+	float depth = imageLoad(low_data1, p_block).w;
+	if (depth <= 0.0 || imageLoad(low_data0, p_block).a <= 0.0) {
+		return vec4(0.0);
+	}
+	return vec4(oct_to_vec3(vec2(imageLoad(low_data2, p_block).w, imageLoad(low_data3, p_block).w) * 2.0 - 1.0), depth);
+}
 
 void main() {
-	bool final_pass = (params.flags & FLAG_NF_FILTER_FINAL) != 0u;
-	int tap_step = final_pass ? 2 : 1;
 	ivec2 block = ivec2(gl_GlobalInvocationID.xy);
-	ivec2 tile_origin = ivec2(gl_WorkGroupID.xy) * 8 - NF_BORDER;
-	for (uint i = gl_LocalInvocationIndex; i < uint(NF_TILE * NF_TILE); i += 64u) {
-		ivec2 c = tile_origin + ivec2(int(i) % NF_TILE, int(i) / NF_TILE);
-		vec4 light = vec4(0.0);
-		vec4 geometry = vec4(0.0);
-		if (all(greaterThanEqual(c, ivec2(0))) && all(lessThan(c, nf.size.xy))) {
-			light = texelFetch(sampler2D(nf_history, linear_sampler), c, 0);
-			if (!final_pass) {
-				// The history holds the correction to the probes' light. It
-				// counts only where it stands out of its remaining noise: in
-				// a dark tunnel a few rays reach the sunlit ground outside,
-				// and their average wanders around the probes' (smooth) value
-				// as blotches. Real near-field light (a contact shadow, color
-				// bleeding) stands out much more and stays. Gated here, before
-				// the blur, so the blur smooths the decision too (gated after
-				// it, neighboring blocks flipped and showed as speckle).
-				vec3 correction = light.rgb;
-				float d = max(abs(correction.r), max(abs(correction.g), abs(correction.b)));
-				float noise = texelFetch(sampler2D(nf_noise, linear_sampler), c, 0).r * NF_NOISE_THRESHOLD;
-				light.rgb = texelFetch(sampler2D(nf_probe, linear_sampler), c, 0).rgb + correction * (d * d / (d * d + noise * noise + 1e-12));
-			}
-			float depth = imageLoad(low_data1, c).w;
-			if (light.a > 0.0 && depth > 0.0) {
-				geometry = vec4(oct_to_vec3(vec2(imageLoad(low_data2, c).w, imageLoad(low_data3, c).w) * 2.0 - 1.0), depth);
-			}
-		}
-		tile_light[i] = light;
-		tile_geometry[i] = geometry;
-	}
-	barrier();
-
 	if (any(greaterThanEqual(block, nf.size.xy))) {
 		return;
 	}
-	ivec2 t = ivec2(gl_LocalInvocationID.xy) + NF_BORDER;
-	vec4 center = tile_geometry[t.y * NF_TILE + t.x];
-	if (center.w <= 0.0) {
-		if (!final_pass) {
-			imageStore(nf_filter_out, block, tile_light[t.y * NF_TILE + t.x]);
+	uint pass_index = (params.flags >> 26u) & 7u;
+	bool first = pass_index == 0u;
+	bool last = pass_index == uint(NF_FILTER_PASSES - 1);
+	int tap_step = 1 << pass_index;
+
+	vec4 center_geometry = nf_filter_geometry(block);
+	vec4 center = nf_filter_input(block, first);
+	if (center_geometry.w <= 0.0) {
+		if (!last) {
+			imageStore(nf_filter_out, block, center);
 		}
-		return; // The final pass leaves the probes' light.
+		return; // The last pass leaves the probes' light.
 	}
+
+	// The center's noise, smoothed a little (3x3) as in SVGF: a single
+	// variance value is itself noisy.
+	float variance = 0.0;
+	float variance_weight = 0.0;
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			ivec2 c = clamp(block + ivec2(x, y), ivec2(0), nf.size.xy - 1);
+			float k = (x == 0 ? 0.5 : 0.25) * (y == 0 ? 0.5 : 0.25);
+			variance += nf_filter_input(c, first).a * k;
+			variance_weight += k;
+		}
+	}
+	variance /= variance_weight;
+	float center_lum = ddgi_luminance(center.rgb);
+	float luminance_scale = NF_LUMINANCE_SIGMA * sqrt(max(variance, 0.0)) + 1e-4 + 0.02 * center_lum;
+
+	const float kernel[3] = float[](3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0);
 	vec3 sum = vec3(0.0);
+	float var_sum = 0.0;
 	float weight_sum = 0.0;
 	for (int y = -2; y <= 2; y++) {
 		for (int x = -2; x <= 2; x++) {
-			int i = (t.y + y * tap_step) * NF_TILE + t.x + x * tap_step;
-			vec4 g = tile_geometry[i];
-			float w = nf_geometry_weight(center.w, center.xyz, g.w, g.xyz) * exp(-0.35 * float(x * x + y * y));
-			sum += tile_light[i].rgb * w;
+			ivec2 c = block + ivec2(x, y) * tap_step;
+			if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, nf.size.xy))) {
+				continue;
+			}
+			vec4 g = (x == 0 && y == 0) ? center_geometry : nf_filter_geometry(c);
+			vec4 s = (x == 0 && y == 0) ? center : nf_filter_input(c, first);
+			float w = kernel[abs(x)] * kernel[abs(y)] * nf_geometry_weight(center_geometry.w, center_geometry.xyz, g.w, g.xyz);
+			w *= exp(-abs(ddgi_luminance(s.rgb) - center_lum) / luminance_scale);
+			sum += s.rgb * w;
+			var_sum += s.a * w * w;
 			weight_sum += w;
 		}
 	}
 	vec3 light = sum / max(weight_sum, 1e-6);
-	if (!final_pass) {
-		imageStore(nf_filter_out, block, vec4(light, tile_light[t.y * NF_TILE + t.x].a));
+	float light_variance = var_sum / max(weight_sum * weight_sum, 1e-12);
+	if (!last) {
+		imageStore(nf_filter_out, block, vec4(light, light_variance));
 		return;
 	}
 

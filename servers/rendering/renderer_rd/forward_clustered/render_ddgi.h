@@ -59,6 +59,7 @@
 #define RB_TEX_DDGI_NF_NOISE SNAME("nf_noise")
 #define RB_TEX_DDGI_NF_MOMENTS0 SNAME("nf_moments0")
 #define RB_TEX_DDGI_NF_MOMENTS1 SNAME("nf_moments1")
+#define RB_TEX_DDGI_NF_FILTER SNAME("nf_filter")
 
 class RenderDataRD;
 class RenderSceneBuffersRD;
