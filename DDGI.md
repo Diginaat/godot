@@ -621,6 +621,20 @@ How to read them:
 
 Newest first. Note the date, the commit, what you saw or changed.
 
+- 2026-10-12: Report: white speckles on walls near a bright tunnel
+  opening, crawling while walking ("light flowing like water"); not in
+  0.5.0/0.6.0. Present since 0.7.0 and also with near-field rays off;
+  not with the full resolution apply. Ruled out step by step (camera walk
+  past the wall, difference against full resolution): normals of the
+  material, the min/max checkerboard, the per-pixel normal gradient,
+  depth and plane matching, render graph ordering, volumetric fog. Raw
+  block values were smooth; bilinear-only upsampling was clean; forcing
+  the GI coverage (alpha) to 1 was clean. Cause: the upsample blended the
+  coverage with the per-pixel match weights; at single pixels it dipped
+  below 1 and the scene shader filled the rest with the (much brighter)
+  sky ambient. Coverage is now blended bilinearly only. Flicker unchanged
+  (0.00%), bleed shapes unchanged.
+
 - 2026-10-12: Step 30, continued. Report: screenshots of the game level's
   crouch tunnel (probe spacing 2 m) with soft blotches and specks. Probes
   only: clean. Found and fixed, each checked in the tunnel (static, and the

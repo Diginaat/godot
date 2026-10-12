@@ -758,6 +758,8 @@ void main() {
 		vec2 f = low_pos - vec2(base);
 		vec4 sum = vec4(0.0);
 		float weight_sum = 0.0;
+		float coverage_sum = 0.0;
+		float coverage_weight = 0.0;
 		vec4 best = vec4(0.0);
 		float best_match = -1.0;
 		for (int y = 0; y <= 1; y++) {
@@ -780,12 +782,21 @@ void main() {
 					best = value;
 				}
 				vec2 bl = mix(1.0 - f, f, vec2(x, y));
+				// The coverage (alpha: how much the scene takes DDGI's light
+				// instead of the environment's) is blended bilinearly only.
+				// Blended with the per-pixel match weights, it dipped below 1
+				// at single pixels where the match picked a block at the
+				// volume's edge, and the bright sky ambient showed through as
+				// dots that crawled with the camera.
+				coverage_sum += tile_value[i].a * bl.x * bl.y;
+				coverage_weight += bl.x * bl.y;
 				float w = bl.x * bl.y * match;
 				sum += value * w;
 				weight_sum += w;
 			}
 		}
 		ambient = weight_sum > 1e-4 ? sum / weight_sum : best;
+		ambient.a = coverage_weight > 0.0 ? coverage_sum / coverage_weight : best.a;
 	}
 	imageStore(ambient_buffer, out_pixel, ambient);
 	// As in MODE_APPLY.
