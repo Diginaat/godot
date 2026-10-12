@@ -20,7 +20,9 @@ Built as `rendering/global_illumination/ddgi/apply_resolution` (Full, 1/2,
 1/4, 1/8; default 1/4). Instead of L1 SH, each block stores the
 irradiance at its normal plus the gradient over the normal, from four
 directions tilted around it (exact at the block normal, linear around
-it). 1080p, RTX 3060: apply 0.717 -> 0.399 ms at 1/4, 0.362 at 1/8;
+it). Block surfaces use the min/max depth checkerboard from
+[SDFDDGI](/research/sdfddgi.md). 1080p, RTX 3060: apply 0.717 -> 0.372 ms
+at 1/4, 0.309 at 1/8;
 GI buffer within 0.3 levels of full resolution in the interior. The
 full resolution upsample (about 0.2 ms) is the floor. Details and the
 cost breakdown: DDGI.md findings log, step 23;

@@ -202,41 +202,45 @@ void main() {
 	}
 	ivec2 last = min(origin + size, params.screen_size) - 1;
 
-	// The block's main surface: the pixels within 5% of the depth of the
-	// center pixel (or of the first valid pixel), averaged. Averaging over
-	// the block keeps the result stable as the camera moves; leaving out
-	// pixels at other depths keeps the point on a surface instead of in the
-	// air between a foreground edge and the background. Only 2x2 pixels of
-	// the block are read, at a quarter and three quarters of its width:
-	// reading all of them cost as much as a full resolution pass of reads
-	// (0.15 ms at 1080p), more than the probe sampling of the blocks.
+	// The block's surface: 2x2 pixels of the block are read (at a quarter
+	// and three quarters of its width; reading all of them cost as much as
+	// a full resolution pass of reads, 0.15 ms at 1080p). As in SDFDDGI's
+	// min/max checkerboard, alternate blocks take the nearest or the
+	// farthest of them as reference, so at an edge both the foreground and
+	// the background have blocks nearby for the upsample to match. The
+	// pixels within 5% of the reference depth are averaged: stable as the
+	// camera moves, and on a surface instead of in the air between an edge
+	// and the background.
 	int stride = max(size / 2, 1);
-	vec3 ref_pos;
-	vec3 ref_normal;
-	bool found = pixel_surface(min(origin + size / 2, last), ref_pos, ref_normal);
-	for (int y = origin.y; y <= last.y && !found; y += stride) {
-		for (int x = origin.x; x <= last.x && !found; x += stride) {
-			found = pixel_surface(ivec2(x, y), ref_pos, ref_normal);
+	vec3 sample_pos[4];
+	vec3 sample_normal[4];
+	bool sample_valid[4];
+	bool nearest = ((block.x + block.y) & 1) == 0;
+	int ref = -1;
+	for (int k = 0; k < 4; k++) {
+		ivec2 p = min(origin + ivec2(k & 1, k >> 1) * stride + stride / 2, last);
+		sample_valid[k] = pixel_surface(p, sample_pos[k], sample_normal[k]);
+		if (sample_valid[k] && (ref < 0 || (nearest ? sample_pos[k].z > sample_pos[ref].z : sample_pos[k].z < sample_pos[ref].z))) {
+			ref = k; // View space z is negative: larger is nearer.
 		}
 	}
+	bool found = ref >= 0;
 	vec4 out0 = vec4(0.0);
 	vec4 out1 = vec4(0.0);
 	vec4 out2 = vec4(0.0);
 	vec4 out3 = vec4(0.0);
 	if (found) {
+		vec3 ref_pos = sample_pos[ref];
+		vec3 ref_normal = sample_normal[ref];
 		float ref_depth = -ref_pos.z;
 		vec3 pos_sum = vec3(0.0);
 		vec3 normal_sum = vec3(0.0);
 		float count = 0.0;
-		for (int y = origin.y + stride / 2; y <= last.y; y += stride) {
-			for (int x = origin.x + stride / 2; x <= last.x; x += stride) {
-				vec3 p;
-				vec3 n;
-				if (pixel_surface(ivec2(x, y), p, n) && abs(-p.z - ref_depth) <= 0.05 * ref_depth) {
-					pos_sum += p;
-					normal_sum += n;
-					count += 1.0;
-				}
+		for (int k = 0; k < 4; k++) {
+			if (sample_valid[k] && abs(-sample_pos[k].z - ref_depth) <= 0.05 * ref_depth) {
+				pos_sum += sample_pos[k];
+				normal_sum += sample_normal[k];
+				count += 1.0;
 			}
 		}
 		vec3 view_pos = count > 0.0 ? pos_sum / count : ref_pos;

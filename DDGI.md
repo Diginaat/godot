@@ -316,14 +316,16 @@ Common problems:
   softer indirect light at object edges.
 - `rendering/global_illumination/ddgi/apply_resolution` (default 1/4)
   samples the probes once per block of 2x2, 4x4 or 8x8 pixels instead of
-  per pixel: at the block's main surface (2x2 pixels near the depth of its
-  center, averaged), for the normal and four directions tilted 27 degrees
+  per pixel: at the block's surface (2x2 pixels of the block; alternate
+  blocks take the nearest or the farthest as reference, as in SDFDDGI's
+  min/max checkerboard, and average the pixels near its depth), for the
+  normal and four directions tilted 27 degrees
   around it, which gives the irradiance and its gradient over the normal.
   An upsample pass then writes the GI buffer: each pixel blends the 2x2
   blocks around it by bilinear weight x depth match x normal match and
   evaluates their light at its own normal, so normal maps keep their
-  indirect shading. 1080p, RTX 3060: apply 0.717 ms at full, 0.399 at 1/4,
-  0.362 at 1/8. The upsample (about 0.2 ms, reading depth and normals and
+  indirect shading. 1080p, RTX 3060: apply 0.717 ms at full, 0.372 at 1/4,
+  0.309 at 1/8. The upsample (about 0.2 ms, reading depth and normals and
   writing the GI buffers at full resolution) is the floor; with the half
   resolution GI buffer the low resolution apply saves nothing below 1/8.
 
@@ -603,6 +605,12 @@ Newest first. Note the date, the commit, what you saw or changed.
   - The five directions cost about 0.02 ms over one (probe weights are
     shared). Shared memory for the upsample changed nothing: its cost is
     the full resolution reads and writes, not the block fetches.
+  - The min/max checkerboard reference (from SDFDDGI) instead of the
+    center pixel: same quality (stress view p99 10.3 vs 10.0 levels at
+    1/4), 4 reads per block instead of 5: apply 0.372 ms at 1/4, 0.309 at
+    1/8. Open: about 0.1% of the stress view's pixels (edges of thin far
+    boxes) are far off at 1/4 and 1/8 (p99.9 92-165 levels), where no
+    block around the pixel matches its surface.
 
 - 2026-10-12: Step 22, scheduling (branch `dev-ddgi-sched`). Probes the
   surfaces actually sample now get the highest rate instead of probes whose

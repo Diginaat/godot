@@ -37,6 +37,10 @@ clustered for culling and held in L1 cache.[^paper]
 
 # For this fork
 
+- Its min/max checkerboard depth downsampling (alternate low resolution
+  pixels take the nearest or farthest depth of their area) is used by the
+  [low-resolution apply](/ddgi/improvements/low-res-apply-directional.md).
+
 - Ours traces real geometry in hardware; the SDF scene needs hand-made
   primitives (the paper's own limitation). Not a replacement.
 - **Contact GI** fits the XeGTAO work: see
