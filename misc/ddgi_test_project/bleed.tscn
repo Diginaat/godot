@@ -1,0 +1,70 @@
+[gd_scene format=3 uid="uid://d6ubw32ap07q"]
+
+[ext_resource type="Script" uid="uid://byxhnprm6vein" path="res://bounce_ball.gd" id="1_xf1ke"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_0g3kx"]
+
+[sub_resource type="Sky" id="Sky_l03i2"]
+sky_material = SubResource("ProceduralSkyMaterial_0g3kx")
+
+[sub_resource type="Environment" id="Environment_5ccxf"]
+background_mode = 2
+sky = SubResource("Sky_l03i2")
+ambient_light_source = 3
+reflected_light_source = 2
+tonemap_mode = 4
+ddgi_enabled = true
+ddgi_probe_grid = Vector3i(25, 13, 25)
+ddgi_follow_camera = false
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pxbti"]
+roughness = 0.45
+
+[sub_resource type="BoxMesh" id="BoxMesh_lfdf6"]
+size = Vector3(30, 1, 30)
+
+[sub_resource type="BoxMesh" id="BoxMesh_8dxue"]
+size = Vector3(10, 2.4907837, 0.3)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_562g6"]
+albedo_color = Color(0.7921569, 0, 0, 1)
+roughness = 0.5
+
+[sub_resource type="SphereMesh" id="SphereMesh_hh7th"]
+radius = 0.6
+height = 1.2
+
+[node name="Bleed" type="Node3D" unique_id=187357904]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=404259561]
+environment = SubResource("Environment_5ccxf")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=406926095]
+transform = Transform3D(0.99735814, -0.03632124, 0.06291023, -0.020420969, 0.6909152, 0.7226474, -0.06971307, -0.7220228, 0.6883481, 0, 0, 0.09328079)
+layers = 15
+light_energy = 1.529
+shadow_enabled = true
+
+[node name="DDGIVolume" type="DDGIVolume" parent="." unique_id=917863529]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+
+[node name="Floor" type="MeshInstance3D" parent="." unique_id=1797696717]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+material_override = SubResource("StandardMaterial3D_pxbti")
+mesh = SubResource("BoxMesh_lfdf6")
+
+[node name="Wall" type="MeshInstance3D" parent="." unique_id=1257319506]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2453918, 1.4223099)
+material_override = SubResource("StandardMaterial3D_pxbti")
+mesh = SubResource("BoxMesh_8dxue")
+
+[node name="RedBall" type="MeshInstance3D" parent="." unique_id=1854530363]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0.6)
+layers = 2
+material_override = SubResource("StandardMaterial3D_562g6")
+mesh = SubResource("SphereMesh_hh7th")
+script = ExtResource("1_xf1ke")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=669590913]
+transform = Transform3D(-1, 6.228615e-09, -8.720061e-08, 0, 0.9974587, 0.07124705, 8.742278e-08, 0.07124705, -0.9974587, 0, 1.6, -5)
+fov = 60.0

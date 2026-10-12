@@ -3867,6 +3867,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/apply_resolution", PROPERTY_HINT_ENUM, "Full,1/2 (2x2 Blocks),1/4 (4x4 Blocks),1/8 (8x8 Blocks)"), 2);
 	GLOBAL_DEF("rendering/global_illumination/ddgi/emissive_lights", true);
 	GLOBAL_DEF("rendering/global_illumination/ddgi/near_field_rays", true);
+	GLOBAL_DEF("rendering/global_illumination/ddgi/skip_moving_objects", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/near_field_distance", PROPERTY_HINT_RANGE, "0.5,8,0.1"), 2.0);
 
 	// OpenGL limits

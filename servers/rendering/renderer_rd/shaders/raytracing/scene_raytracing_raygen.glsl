@@ -79,7 +79,7 @@ void ddgi_trace_probe_rays() {
 	[[dont_unroll]] for (uint i = 0u; i < 4u; i++) {
 		path_pack(payload, ps);
 		// No face culling: back face hits tell that the probe is inside geometry.
-		traceRayEXT(tlas, gl_RayFlagsNoneEXT, 0xFF, 0, 0, 0, ray_origin, 0.0, ray_dir, 10000.0, 0);
+		traceRayEXT(tlas, gl_RayFlagsNoneEXT, rt_cull_mask(), 0, 0, 0, ray_origin, 0.0, ray_dir, 10000.0, 0);
 		ps = path_unpack(payload);
 		if (i == 0u) {
 			first_hit = ps.hit_t;
@@ -113,7 +113,7 @@ void ddgi_trace_probe_rays() {
 // a header (count, max distance as float bits) and per block the origin
 // (xyz float bits) and the direction (octahedral, unorm16 x 2). Hits are
 // shaded as probe rays are (emission, direct light, bounce light looked up
-// afterwards); a ray that reaches the max distance stores the distance
+// afterwards; bounce z tells a hit on a moving object); a ray that reaches the max distance stores the distance
 // DDGI_MISS_DISTANCE and no light: the resolve pass takes the probes' light
 // for it instead (far field).
 void ddgi_trace_near_field_rays() {
@@ -151,9 +151,10 @@ void ddgi_trace_near_field_rays() {
 
 	bool missed = ps.hit_t >= DDGI_MISS_DISTANCE;
 	imageStore(ddgi_ray_data, texel, missed ? vec4(0.0, 0.0, 0.0, DDGI_MISS_DISTANCE) : vec4(ps.radiance, ps.hit_t));
-	uvec4 bounce = uvec4(0u);
+	// z: 1 when the hit object keeps moving.
+	uvec4 bounce = uvec4(0u, 0u, (!missed && (ps.packed_bounces_flags & DDGI_MOVING_HIT_FLAG) != 0u) ? 1u : 0u, 0u);
 	if (!missed && (ps.packed_bounces_flags & DDGI_BOUNCE_FLAG) != 0u) {
-		bounce = uvec4(packUnorm4x8(vec4(ps.throughput, 1.0)), packUnorm2x16(vec3_to_oct(ps.offset_normal)), 0u, floatBitsToUint(ps.hit_t));
+		bounce.xyw = uvec3(packUnorm4x8(vec4(ps.throughput, 1.0)), packUnorm2x16(vec3_to_oct(ps.offset_normal)), floatBitsToUint(ps.hit_t));
 	}
 	ddgi_ray_bounce[block] = bounce;
 }

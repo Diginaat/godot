@@ -136,7 +136,7 @@ layout(rgba16f, set = 0, binding = 17) uniform restrict writeonly image2D nf_pro
 layout(set = 0, binding = 17) uniform texture2D nf_probe;
 layout(set = 0, binding = 19) uniform texture2D nf_ray_data; // Radiance (rgb), hit distance (a).
 layout(set = 0, binding = 20, std430) restrict readonly buffer DDGINearFieldBounce {
-	uvec4 nf_bounce[]; // As DDGIRayBounce, z unused, w the hit distance.
+	uvec4 nf_bounce[]; // As DDGIRayBounce, z 1 for a hit on a moving object, w the hit distance.
 };
 layout(rgba16f, set = 0, binding = 21) uniform restrict writeonly image2D nf_raw_out;
 #endif
@@ -747,6 +747,9 @@ void main() {
 	vec3 origin = uintBitsToFloat(r.xyz);
 	vec3 dir = oct_to_vec3(unpackUnorm2x16(r.w) * 2.0 - 1.0);
 	vec4 ray = texelFetch(sampler2D(nf_ray_data, linear_sampler), block, 0);
+	// a: 2 for a hit on a moving object (MODE_NF_TEMPORAL lets go of the
+	// history faster around it), 1 otherwise.
+	float sample_flag = nf_bounce[idx].z != 0u ? 2.0 : 1.0;
 	vec3 radiance;
 	if (ray.a >= DDGI_MISS_DISTANCE * 0.5) {
 		// Nothing within range: the probes' irradiance at the surface stands
@@ -780,7 +783,7 @@ void main() {
 	if (any(isnan(radiance)) || any(isinf(radiance))) {
 		radiance = vec3(0.0);
 	}
-	imageStore(nf_raw_out, block, vec4(radiance, 1.0));
+	imageStore(nf_raw_out, block, vec4(radiance, sample_flag));
 }
 
 #endif // MODE_NF_RESOLVE
@@ -832,10 +835,16 @@ void main() {
 	vec3 sum_sq = vec3(0.0);
 	float weight_sum = 0.0;
 	float weight_sq_sum = 0.0;
+	// A ray nearby hit a moving object (a sample flag of 2), this frame or
+	// the previous one. Only this frame's hits are passed on, or the flag
+	// would keep itself alive through the history.
+	bool moving_now = false;
+	bool moving_before = false;
 	for (int y = -NF_RADIUS; y <= NF_RADIUS; y++) {
 		for (int x = -NF_RADIUS; x <= NF_RADIUS; x++) {
 			int i = (t.y + y) * NF_TILE + t.x + x;
 			vec4 g = tile_geometry[i];
+			moving_now = moving_now || tile_raw[i].a > 1.5;
 			float w = tile_raw[i].a > 0.0 ? nf_geometry_weight(depth, normal, g.w, g.xyz) : 0.0;
 			sum += tile_raw[i].rgb * w;
 			sum_sq += tile_raw[i].rgb * tile_raw[i].rgb * w;
@@ -872,26 +881,33 @@ void main() {
 				w *= bl.x * bl.y;
 				history += texelFetch(sampler2D(nf_history, linear_sampler), c, 0) * w;
 				history_weight += w;
+				// Moving objects were near here last frame (geometry w 2): the
+				// light they left must go as fast as it came.
+				moving_before = moving_before || (w > 0.0 && g.w > 1.5);
 			}
 			history = history_weight > 0.05 ? history / history_weight : vec4(0.0);
 		}
 	}
 
+	bool moving = moving_now || moving_before;
 	vec3 result = center_raw.rgb;
 	float count = 1.0;
 	if (history.a > 0.0) {
 		// Keep the history within what this frame's neighborhood allows:
 		// light that changed (a moving object) shows within a few frames
 		// instead of trailing behind.
-		vec3 spread = 4.0 * deviation / sqrt(max(effective, 1.0)) + 0.03 * mean + 1e-4;
+		// Near moving objects the clamp is tighter and the history lets go
+		// faster, so their shadow and bounce light don't smear behind them;
+		// the filter passes smooth the extra noise.
+		vec3 spread = (moving ? 2.0 : 4.0) * deviation / sqrt(max(effective, 1.0)) + (moving ? 0.01 : 0.03) * mean + 1e-4;
 		vec3 clamped = clamp(history.rgb, mean - spread, mean + spread);
-		count = min(history.a + 1.0, 64.0);
+		count = min(history.a + 1.0, moving ? 8.0 : 64.0);
 		float alpha = max(1.0 / count, nf.params.z);
 		result = mix(clamped, center_raw.rgb, alpha);
 	}
 	imageStore(nf_history_out, block, vec4(result, count));
 	vec2 oct = vec3_to_oct(normal);
-	imageStore(nf_geometry_out, block, vec4(depth, oct, 1.0));
+	imageStore(nf_geometry_out, block, vec4(depth, oct, moving_now ? 2.0 : 1.0));
 }
 
 #endif // MODE_NF_TEMPORAL

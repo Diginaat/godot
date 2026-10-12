@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-10-12 (moving objects)
+
+* **Updated**: DDGI.md step 26: probes skip moving objects, near-field
+  history lets go faster near them (the smears behind a moving ball).
+
 ## 2026-10-12 (near-field rays)
 
 * **Added**: [near-field rays](/ddgi/improvements/near-field-rays.md)

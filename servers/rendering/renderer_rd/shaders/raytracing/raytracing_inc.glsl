@@ -162,6 +162,10 @@ bool is_ddgi_probe_ray(uint packed) {
 // the trace looks the probes up (MODE_BOUNCE in ddgi_update.glsl).
 const uint DDGI_BOUNCE_FLAG = (1u << 29);
 
+// Set by the closest hit of a DDGI ray (bit 30) when the hit object keeps
+// moving (FLAG_MOVING): near-field rays then let go of their history faster.
+const uint DDGI_MOVING_HIT_FLAG = (1u << 30);
+
 // Bounce limits
 #define MAX_DIFFUSE_BOUNCES 2u
 #define MAX_DENOISER_SPECULAR_HIT_THRESHOLD 0.25
@@ -180,6 +184,8 @@ const uint FLAG_EMISSIVE_LIGHT = 8u;
 const uint FLAG_VERTEX_DISPLACED = 16u;
 // Face culling is disabled: back faces are real surfaces, not the inside of a mesh.
 const uint FLAG_DOUBLE_SIDED = 32u;
+// The instance keeps moving (TLAS instance mask 0x80, see rt_cull_mask()).
+const uint FLAG_MOVING = 64u;
 
 // ============================================================================
 // RANDOM NUMBER GENERATION - PCG (Permuted Congruential Generator)

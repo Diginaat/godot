@@ -474,6 +474,9 @@ void debug_visualize(
 /// for the light they reflect. Ends the path.
 void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout PathState ps) {
 	ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
+	if ((geometries[h.geometry_idx].flags & FLAG_MOVING) != 0u) {
+		ps.packed_bounces_flags |= DDGI_MOVING_HIT_FLAG;
+	}
 
 	bool double_sided = (geometries[h.geometry_idx].flags & FLAG_DOUBLE_SIDED) != 0u;
 	if (!h.is_front_face && !double_sided) {

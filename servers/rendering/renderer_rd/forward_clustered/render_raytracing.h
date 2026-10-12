@@ -58,6 +58,10 @@ class RenderForwardClustered;
 class SceneShaderRaytracing;
 struct RTDDGIBindings;
 
+// TLAS instance mask of objects that keep moving; DDGI probe rays trace with
+// all other bits (raytracing_inc.glsl rt_cull_mask()).
+static constexpr uint8_t RT_INSTANCE_MASK_MOVING = 0x80;
+
 // Must match GLSL GeometryData (std430, 128 bytes).
 struct alignas(16) RT_GeometryData {
 	uint64_t vertex_buffer_address;
@@ -206,6 +210,9 @@ enum {
 	RT_GEOM_FLAG_VERTEX_DISPLACED = 16u,
 	// The instance has face culling disabled (both faces are real surfaces).
 	RT_GEOM_FLAG_DOUBLE_SIDED = 32u,
+	// The instance keeps moving (RT_INSTANCE_MASK_MOVING): DDGI near-field
+	// rays that hit it let go of their history faster.
+	RT_GEOM_FLAG_MOVING = 64u,
 };
 
 /// Per-instance state for procedural RT geometry. Heap-allocated, only exists for procedural instances.
@@ -441,7 +448,19 @@ class RenderRaytracing {
 	LocalVector<RID> blass;
 	LocalVector<Transform3D> blas_transforms;
 	LocalVector<uint32_t> instance_flags;
-	LocalVector<uint8_t> instance_masks; // Per-instance ray mask (0x00 = invisible to rays, 0xFF = normal)
+	LocalVector<uint8_t> instance_masks; // Per-instance ray mask (0x00 = invisible to rays, 0xFF = normal, RT_INSTANCE_MASK_MOVING)
+	/// Objects that keep moving, for DDGI (rendering/global_illumination/ddgi/skip_moving_objects):
+	/// per geometry instance, the last frame it moved and on how many frames
+	/// in a row (with gaps under a second) it did.
+	struct MovingInstance {
+		uint64_t last_moved = 0;
+		uint32_t moves = 0;
+	};
+	HashMap<const void *, MovingInstance> moving_instances;
+	uint64_t moving_instances_pruned = 0;
+	/// The TLAS mask of an instance: RT_INSTANCE_MASK_MOVING when it has kept
+	/// moving (DDGI probe rays skip those), 0xFF otherwise.
+	uint8_t _instance_mask(const void *p_instance, bool p_moved, bool p_emissive);
 	LocalVector<uint32_t> sbt_offsets; // 0 = default material hit group
 
 	HashMap<RenderSceneBuffersRD *, RTViewportState *> viewport_states;

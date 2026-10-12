@@ -121,6 +121,7 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `emissive_lights` | On: emissive surfaces light pixels directly (sphere lights with a ray traced shadow); the probes carry only their bounce light |
 | `near_field_rays` | On: one short ray per block of the low resolution apply and frame, accumulated and filtered, in place of the probes' light near surfaces (see below) |
 | `near_field_distance` | 2: how far the near-field rays reach, in probe spacings of the finest volume |
+| `skip_moving_objects` | On: probe rays (and their shadow rays) skip objects that keep moving; the near-field rays still see them, so their shadow and bounce light follow them without a trailing smear |
 
 ### Baking
 
@@ -472,6 +473,7 @@ noise of the first updates doesn't linger.
 | 23 | Performance: low resolution apply with directional output and upsampling | Done (branch `dev-ddgi-quality`) |
 | 24 | Baking: least-squares refinement against a half-spacing bake | Done (branch `dev-ddgi-quality`) |
 | 25 | Near-field rays in the apply pass: bounce light from nearby objects in place, following them | Done (branch `dev-ddgi-quality`) |
+| 26 | Moving objects out of the probes; near-field history lets go faster near them | Done (branch `dev-ddgi-quality`) |
 
 ## Test project
 
@@ -613,6 +615,24 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 26, moving objects (branch `dev-ddgi-quality`). Report:
+  in the user's red ball scene (`misc/ddgi_test_project/bleed.tscn`,
+  animated) the indirect light had ugly smears and blobs, "almost like bad
+  AO": a dark blob and red streaks where the ball had just been. Cause: the
+  probes saw the ball and blended it in and out over many frames, and the
+  near-field rays that hit nothing took that lagging probe light. Fix,
+  after the emissive lights: probes don't see objects that keep moving
+  (moved on 3 frames, until still for 60; TLAS instance mask 0x80,
+  `rt_cull_mask()` 0x7F for probe dispatches and their shadow rays;
+  emissive objects stay), setting `skip_moving_objects`. Near-field rays
+  that hit a moving object mark their block; there and on the next frame
+  the history clamp is 2 instead of 4 standard errors and the history at
+  most 8 frames. (The first try passed the mark on through the history: it
+  never cleared and the whole wall went noisy.) Result: the smear is gone,
+  shadow and red bounce follow the ball; static flicker unchanged
+  (interior std 0.072/0.074), storm level unchanged (GI 12.6-13.1 /
+  21.2-21.3). The red near the ball is a little grainy in the bleed view.
 
 - 2026-10-12: Step 25, near-field rays (branch `dev-ddgi-quality`). Report:
   ugly blobs and spots in the indirect light; it should be smooth and fast

@@ -48,6 +48,15 @@ float get_rt_param(uint idx) {
 	return rt_params[idx >> 2u][idx & 3u];
 }
 
+/// Ray mask for every ray of this dispatch. DDGI probe rays
+/// (RT_PARAM_DDGI_TRACE 1 or 2), and their shadow rays, skip objects that
+/// keep moving (instance mask 0x80, RenderRaytracing::_instance_mask()), so
+/// the probes don't trail them; everything else sees all objects.
+uint rt_cull_mask() {
+	float ddgi_trace = get_rt_param(RT_PARAM_DDGI_TRACE);
+	return (ddgi_trace > 0.5 && ddgi_trace < 2.5) ? 0x7Fu : 0xFFu;
+}
+
 /// Project a world-space point to UV through an unjittered VP.
 vec2 project_uv(vec3 world_pos, mat4 vp) {
 	vec4 clip = vp * vec4(world_pos, 1.0);

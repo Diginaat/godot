@@ -2645,7 +2645,7 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 				uint32_t inst_flags = RD::ACCELERATION_STRUCTURE_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT |
 						RD::ACCELERATION_STRUCTURE_INSTANCE_FORCE_OPAQUE_BIT;
 				instance_flags.push_back(inst_flags);
-				instance_masks.push_back(0xFF);
+				instance_masks.push_back(_instance_mask(inst, inst->transform_status == RenderForwardClustered::GeometryInstanceForwardClustered::TransformStatus::MOVED, false));
 			}
 			continue;
 		}
@@ -2958,7 +2958,10 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 				}
 			}
 			instance_flags.push_back(inst_flags);
-			instance_masks.push_back(0xFF);
+			instance_masks.push_back(_instance_mask(inst, inst->transform_status == RenderForwardClustered::GeometryInstanceForwardClustered::TransformStatus::MOVED, (geometry_data[geometry_data.size() - 1].flags & RT_GEOM_FLAG_EMISSIVE_LIGHT) != 0));
+			if (instance_masks[instance_masks.size() - 1] == RT_INSTANCE_MASK_MOVING) {
+				geometry_data[geometry_data.size() - 1].flags |= RT_GEOM_FLAG_MOVING;
+			}
 
 			surf = surf->next;
 		}
@@ -3318,6 +3321,52 @@ void RenderRaytracing::_ensure_default_resources() {
 	defaults.image_r32f = rd->texture_create(tf, RD::TextureView());
 	tf.format = RD::DATA_FORMAT_R16G16_SFLOAT;
 	defaults.image_rg16f = rd->texture_create(tf, RD::TextureView());
+}
+
+// DDGI probes skip objects that keep moving (a character, a rolling ball):
+// probes blend their light over many frames, so a moving object's shadow and
+// bounce light would trail behind it as a dark or colored blob. The DDGI
+// near-field rays and the path tracer still see them. An object counts as
+// moving after moving on 3 frames, until it has stood still for a second
+// (60 frames). Emissive objects stay in the probes, or their light would be
+// lost when emissive lights are off.
+uint8_t RenderRaytracing::_instance_mask(const void *p_instance, bool p_moved, bool p_emissive) {
+	if (!GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/skip_moving_objects")) {
+		return 0xFF;
+	}
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	MovingInstance *moving = moving_instances.getptr(p_instance);
+	if (p_moved) {
+		if (!moving) {
+			moving = &moving_instances.insert(p_instance, MovingInstance())->value;
+		}
+		if (moving->last_moved != frame) {
+			moving->moves = MIN(moving->moves + 1, 1000u);
+			moving->last_moved = frame;
+		}
+	}
+	// Forget instances that stood still for a while (or were freed).
+	if (frame > moving_instances_pruned + 600) {
+		moving_instances_pruned = frame;
+		LocalVector<const void *> stale;
+		for (const KeyValue<const void *, MovingInstance> &E : moving_instances) {
+			if (frame > E.value.last_moved + 600) {
+				stale.push_back(E.key);
+			}
+		}
+		for (const void *key : stale) {
+			moving_instances.erase(key);
+		}
+		moving = moving_instances.getptr(p_instance);
+	}
+	if (!moving) {
+		return 0xFF;
+	}
+	if (frame > moving->last_moved + 60) {
+		moving->moves = 0;
+		return 0xFF;
+	}
+	return (moving->moves >= 3 && !p_emissive) ? RT_INSTANCE_MASK_MOVING : 0xFF;
 }
 
 RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderDataRD *p_render_data, uint32_t p_rt_flags, const RTDDGIBindings *p_ddgi) {
