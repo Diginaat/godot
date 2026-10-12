@@ -65,6 +65,10 @@ void ddgi_trace_probe_rays() {
 	// Counted as an indirect bounce: lights use their indirect energy and the
 	// camera-only effects (depth, motion vectors, volumetric fog) are skipped.
 	ps.packed_bounces_flags = set_ddgi_probe_ray(pack_bounces(1u, 1u));
+	// Emissive lights mode (2): the apply pass lights surfaces from the
+	// emitters directly. The hits sample the emitters as lights instead of
+	// seeing their emission, so the probes only carry their bounce light.
+	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, get_rt_param(RT_PARAM_DDGI_TRACE) > 1.5);
 	ps.rng_state = init_rng(uvec2(ray, probe), ddgi.atlas.w, 7u);
 	ps.hit_t = DDGI_MISS_DISTANCE;
 	ps.offset_normal = vec3(0.0, 0.0, 1.0);

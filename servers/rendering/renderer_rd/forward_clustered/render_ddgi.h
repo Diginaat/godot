@@ -110,6 +110,9 @@ struct RTDDGIBindings {
 	RID ray_bounce;
 	/// True when the dispatch traces probe rays instead of camera paths.
 	bool trace = false;
+	/// Emissive lights mode: the apply pass lights surfaces from emitters
+	/// directly, so probe rays sample emitters as lights instead of seeing them.
+	bool emitters_as_lights = false;
 };
 
 /// Dynamic diffuse global illumination: ray traced irradiance probes for the
@@ -174,6 +177,9 @@ public:
 		// The frame (DDGIDataGPU atlas.w) each probe was last sampled by a
 		// surface in the apply pass; 0: never. The scheduler favors them.
 		RID sampled_frame;
+		// Emissive lights (center, radius, radiance) for the apply pass.
+		RID emitter_buffer;
+		uint32_t emitter_capacity = 0;
 		RID ray_data;
 		// Per probe ray, where its hit needs the probes' light (one uvec4 per ray,
 		// see MODE_BOUNCE in ddgi_update.glsl): looked up in a compute pass after
@@ -223,6 +229,8 @@ private:
 		APPLY_MARK,
 		APPLY_LOW,
 		APPLY_UPSAMPLE,
+		APPLY_GI_EMITTERS,
+		APPLY_LOW_EMITTERS,
 		APPLY_MODE_MAX,
 	};
 
@@ -251,6 +259,10 @@ private:
 	RID apply_pipelines[APPLY_MODE_MAX];
 
 	bool initialized = false;
+	// The apply variants with emissive lights need ray queries.
+	bool emitters_supported = false;
+	/// rendering/global_illumination/ddgi/emissive_lights, if the GPU can do it.
+	bool _emissive_lights() const;
 
 	Ref<ViewportData> _get_viewport_data(RenderSceneBuffersRD *p_render_buffers);
 	void _allocate(ViewportData *p_data, int p_cascades, const Vector3i &p_grid, const Quality &p_quality);
@@ -297,7 +309,9 @@ public:
 
 	/// Writes the diffuse indirect light into the GI ambient buffer, at half
 	/// the internal resolution if p_half_resolution.
-	void apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution);
+	/// p_tlas and p_emitters (RenderRaytracing::ddgi_emitters) when the probes
+	/// were traced this frame: emissive surfaces then light the GI directly.
+	void apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution, RID p_tlas = RID(), const LocalVector<float> *p_emitters = nullptr);
 
 	/// Debug view of the probes over the internal color buffer (before tonemapping).
 	void debug_draw(RenderDataRD *p_render_data);

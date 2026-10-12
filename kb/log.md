@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-10-12 (emissive lights, work in progress)
+
+* **Added**: references [DDGI papers and reference code](/research/majercik-ddgi-reference.md)
+  and [O3DE DiffuseProbeGrid](/research/o3de-diffuse-probe-grid.md).
+* **In progress**: emissive surfaces as direct lights in the DDGI apply pass
+  (`rendering/global_illumination/ddgi/emissive_lights`), against light
+  spots, blocky glow and bleeding from small emitters. Not verified yet.
+
 ## 2026-10-12 (least-squares bake)
 
 * **Implemented**: [least-squares baking](/ddgi/improvements/least-squares-bake.md)

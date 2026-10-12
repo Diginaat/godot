@@ -551,6 +551,7 @@ void RenderRaytracing::prepare_frame() {
 	motion_indices.clear();
 	motion_transforms.clear();
 	emissive_meshes.clear();
+	ddgi_emitters.clear();
 	deformed_active_this_frame.clear();
 	merged_mm_active_this_frame.clear();
 
@@ -2904,6 +2905,17 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 					em.primitive_count = triangle_count;
 					em.power = emission_luminance * area_estimate;
 					emissive_meshes.push_back(em);
+					// As a sphere for DDGI: the radius of a sphere with the
+					// surface's area (the box area estimate times pi / 6, exact
+					// for a sphere in its bounding box).
+					ddgi_emitters.push_back(center.x);
+					ddgi_emitters.push_back(center.y);
+					ddgi_emitters.push_back(center.z);
+					ddgi_emitters.push_back(Math::sqrt(area_estimate * float(Math::PI / 6.0) / float(4.0 * Math::PI)));
+					ddgi_emitters.push_back(md.emission_color[0] * md.emission_strength);
+					ddgi_emitters.push_back(md.emission_color[1] * md.emission_strength);
+					ddgi_emitters.push_back(md.emission_color[2] * md.emission_strength);
+					ddgi_emitters.push_back(em.radius);
 					geometry_data[geometry_data.size() - 1].flags |= RT_GEOM_FLAG_EMISSIVE_LIGHT;
 				}
 			}
@@ -3458,7 +3470,8 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 			}
 		}
 		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_FOG_USE_LEGACY_BLENDING] = owner->fog_use_legacy_blending_get() ? 1.0f : 0.0f;
-		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_DDGI_TRACE] = ddgi_trace ? 1.0f : 0.0f;
+		// 2: probe rays with emissive surfaces as lights (RTDDGIBindings::emitters_as_lights).
+		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_DDGI_TRACE] = ddgi_trace ? (p_ddgi->emitters_as_lights ? 2.0f : 1.0f) : 0.0f;
 
 		// rt_params layout (see RaytracingParamIndex enum):
 		// [0] = VIS_MODE, [1] = SAMPLE_COUNT, [2] = MAX_BOUNCES,

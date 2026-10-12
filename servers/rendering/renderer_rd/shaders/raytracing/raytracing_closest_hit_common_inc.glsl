@@ -466,9 +466,12 @@ void debug_visualize(
 /// from analytic lights (NEE). The indirect light from the previous frame's
 /// probes (this gives infinite bounces over time) is added after the trace,
 /// in a compute pass (DDGI_BOUNCE_FLAG): looking the probes up here took most
-/// of the trace time. Emissive meshes are not sampled with NEE here: their
-/// light already reaches the surface through the probes, which see emitters
-/// directly. Ends the path.
+/// of the trace time. Emissive meshes: by default the probes see them
+/// directly and pass their light on. In the emissive lights mode
+/// (EMISSIVE_SAMPLED_FLAG set by the ray generation) the apply pass lights
+/// surfaces from them directly, so a hit on an emitter that is a mesh
+/// light gives no emission, and hits sample the emitters as lights (NEE)
+/// for the light they reflect. Ends the path.
 void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout PathState ps) {
 	ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
 
@@ -491,12 +494,15 @@ void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout Pat
 	brdf_mat.transmissivness = 0.0;
 	brdf_mat.opacity = 1.0;
 
-	vec3 radiance = m.emissive;
+	bool emitters_as_lights = is_emissive_sampled(ps.packed_bounces_flags);
+	bool mesh_light = (geometries[h.geometry_idx].flags & FLAG_EMISSIVE_LIGHT) != 0u;
+	vec3 radiance = (emitters_as_lights && mesh_light) ? vec3(0.0) : m.emissive;
 
 	uint rt_light_count = uint(get_rt_param(RT_PARAM_LIGHT_COUNT));
-	if (rt_light_count > 0u) {
+	uint mesh_count = emitters_as_lights ? uint(get_rt_param(RT_PARAM_EMISSIVE_MESH_COUNT)) : 0u;
+	if (rt_light_count + mesh_count > 0u) {
 		vec3 hit_pos_offset = offset_ray_origin(h.hit_pos, h.geometry_normal);
-		radiance += lights_evaluate_direct_lighting(hit_pos_offset, N, V, brdf_mat, ps.rng_state, true, rt_light_count, 0u);
+		radiance += lights_evaluate_direct_lighting(hit_pos_offset, N, V, brdf_mat, ps.rng_state, true, rt_light_count, mesh_count);
 	}
 
 	vec3 diffuse_reflectance = baseColorToDiffuseReflectance(m.albedo, m.metalness);

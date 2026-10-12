@@ -363,6 +363,10 @@ Dictionary DDGIVolume::_bake_trace(int p_updates, int p_progress_from, int p_pro
 	for (int k = 0; k < 5; k++) {
 		saved_quality[k] = ps->get_setting(quality_keys[k]);
 	}
+	// Baked probes keep the emitters' light: baked-only views have no ray
+	// tracing for the direct emissive lights.
+	const Variant saved_emissive_lights = ps->get_setting("rendering/global_illumination/ddgi/emissive_lights");
+	ps->set_setting("rendering/global_illumination/ddgi/emissive_lights", false);
 	// Rays, irradiance and distance texels of the presets (RenderDDGI::get_quality()).
 	static const int presets[4][3] = { { 64, 6, 12 }, { 128, 6, 14 }, { 192, 8, 14 }, { 256, 8, 16 } };
 	const int quality = saved_quality[0];
@@ -436,6 +440,7 @@ Dictionary DDGIVolume::_bake_trace(int p_updates, int p_progress_from, int p_pro
 	for (int k = 0; k < 5; k++) {
 		ps->set_setting(quality_keys[k], saved_quality[k]);
 	}
+	ps->set_setting("rendering/global_illumination/ddgi/emissive_lights", saved_emissive_lights);
 	remove_child(vp);
 	memdelete(vp);
 	*r_cancelled = cancelled;

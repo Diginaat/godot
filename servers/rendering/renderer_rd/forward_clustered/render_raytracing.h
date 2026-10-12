@@ -435,6 +435,9 @@ class RenderRaytracing {
 	LocalVector<int32_t> motion_indices; ///< Per-instance: index into motion_transforms[], or -1.
 	LocalVector<RT_InstanceMotionData> motion_transforms; ///< Compact: only moving instances.
 	LocalVector<RT_EmissiveMeshData> emissive_meshes; ///< Emissive surfaces sampled as mesh lights.
+	/// The same emitters for DDGI's emissive lights, 8 floats each: center,
+	/// radius of the sphere with the same area, emission (rgb), bounding radius.
+	LocalVector<float> ddgi_emitters;
 	LocalVector<RID> blass;
 	LocalVector<Transform3D> blas_transforms;
 	LocalVector<uint32_t> instance_flags;

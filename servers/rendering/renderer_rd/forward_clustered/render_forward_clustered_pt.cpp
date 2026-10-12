@@ -590,6 +590,7 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 	rt_flags &= ~uint32_t(SceneShaderRaytracing::RT_FLAG_DEBUG_VIS_ENABLED | SceneShaderRaytracing::RT_FLAG_DLSS_RR_ENABLED);
 
 	RD::get_singleton()->draw_command_begin_label("DDGI");
+	RID tlas;
 	if (RenderDDGI::is_baked_only(p_render_data)) {
 		ddgi->update_baked(p_render_data);
 	} else {
@@ -597,9 +598,10 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 		RTViewportState *rt_state = raytracing->build_tlas(p_render_data, rt_flags);
 		if (rt_state) {
 			ddgi->update_probes(p_render_data, raytracing, rt_state, rt_flags);
+			tlas = rt_state->tlas;
 		}
 	}
-	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution);
+	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution, tlas, tlas.is_valid() ? &raytracing->ddgi_emitters : nullptr);
 	RD::get_singleton()->draw_command_end_label();
 }
 

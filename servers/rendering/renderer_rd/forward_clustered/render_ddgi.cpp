@@ -40,6 +40,7 @@
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_server_default.h" // IWYU pragma: keep. RENDER_TIMESTAMP macro uses RSG.
+#include "servers/rendering/storage/camera_attributes_storage.h"
 #include "servers/rendering/storage/environment_storage.h"
 
 using namespace RendererSceneRenderImplementation;
@@ -112,7 +113,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 
 void RenderDDGI::ViewportData::free_data() {
 	RD *rd = RD::get_singleton();
-	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &sampled_frame, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas };
+	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &sampled_frame, &emitter_buffer, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas };
 	for (RID *r : rids) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
@@ -153,9 +154,19 @@ void RenderDDGI::initialize() {
 		modes.push_back("\n#define MODE_MARK\n");
 		modes.push_back("\n#define MODE_APPLY_LOW\n");
 		modes.push_back("\n#define MODE_UPSAMPLE\n");
+		modes.push_back("\n#define MODE_APPLY\n#define DDGI_EMITTERS\n");
+		modes.push_back("\n#define MODE_APPLY_LOW\n#define DDGI_EMITTERS\n");
 		apply_shader.initialize(modes);
+		emitters_supported = RD::get_singleton()->has_feature(RD::SUPPORTS_RAY_QUERY);
+		if (!emitters_supported) {
+			apply_shader.set_variant_enabled(APPLY_GI_EMITTERS, false);
+			apply_shader.set_variant_enabled(APPLY_LOW_EMITTERS, false);
+		}
 		apply_shader_version = apply_shader.version_create();
 		for (int i = 0; i < APPLY_MODE_MAX; i++) {
+			if (!emitters_supported && (i == APPLY_GI_EMITTERS || i == APPLY_LOW_EMITTERS)) {
+				continue;
+			}
 			apply_pipelines[i] = RD::get_singleton()->compute_pipeline_create(apply_shader.version_get_shader(apply_shader_version, i));
 		}
 	}
@@ -777,6 +788,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 		bindings.update_list = vd->update_list;
 		bindings.ray_bounce = vd->ray_bounce;
 		bindings.trace = true;
+		bindings.emitters_as_lights = _emissive_lights();
 
 		RID rt_set = p_raytracing->update_uniform_set(p_rt_state, p_render_data, p_rt_flags, &bindings);
 		RID pipeline = p_raytracing->get_shader()->get_raytracing_pipeline(p_rt_flags);
@@ -873,7 +885,11 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	rd->draw_command_end_label();
 }
 
-void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution) {
+bool RenderDDGI::_emissive_lights() const {
+	return emitters_supported && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/emissive_lights");
+}
+
+void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution, RID p_tlas, const LocalVector<float> *p_emitters) {
 	ERR_FAIL_COND(!initialized);
 	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
 	ERR_FAIL_COND(rb.is_null());
@@ -915,7 +931,36 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
 	RID linear_sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
-	RID shader = apply_shader.version_get_shader(apply_shader_version, APPLY_GI);
+	// Emissive lights: only when the probes were traced this frame (with
+	// the emitters left out of them), never for baked-only probes.
+	uint32_t emitter_count = 0;
+	if (p_tlas.is_valid() && p_emitters && _emissive_lights()) {
+		emitter_count = MIN(p_emitters->size() / 8, 511u);
+	}
+	if (emitter_count > 0) {
+		// Two vec4 per emitter: center and radius, radiance (exposure
+		// normalized as the scene shaders do) and bounding radius.
+		// As the scene data does it (RenderSceneDataRD::update_ubo()); its own
+		// emissive_exposure_normalization field is only set for material previews.
+		const float exposure = p_render_data->camera_attributes.is_valid() ? RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes) : 1.0f;
+		LocalVector<float> data;
+		data.resize(emitter_count * 8);
+		for (uint32_t i = 0; i < emitter_count * 8; i++) {
+			const uint32_t k = i % 8;
+			data[i] = (*p_emitters)[i] * ((k >= 4 && k < 7) ? exposure : 1.0f);
+		}
+		const uint32_t bytes = emitter_count * 8 * sizeof(float);
+		if (!vd->emitter_buffer.is_valid() || vd->emitter_capacity < bytes) {
+			if (vd->emitter_buffer.is_valid()) {
+				rd->free_rid(vd->emitter_buffer);
+			}
+			vd->emitter_capacity = MAX(bytes, 64u * 8u * uint32_t(sizeof(float)));
+			vd->emitter_buffer = rd->storage_buffer_create(vd->emitter_capacity);
+			rd->set_resource_name(vd->emitter_buffer, "DDGI Emitters");
+		}
+		rd->buffer_update(vd->emitter_buffer, 0, bytes, data.ptr());
+	}
+	RID shader = apply_shader.version_get_shader(apply_shader_version, emitter_count > 0 ? APPLY_GI_EMITTERS : APPLY_GI);
 
 	// Low resolution apply (rendering/global_illumination/ddgi/apply_resolution):
 	// probes sampled once per block of pixels, then upsampled into the GI
@@ -946,7 +991,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 	correction.set_depth_correction(true);
 
 	if (low_res) {
-		RID low_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_LOW);
+		RID low_shader = apply_shader.version_get_shader(apply_shader_version, emitter_count > 0 ? APPLY_LOW_EMITTERS : APPLY_LOW);
 		RID up_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_UPSAMPLE);
 		for (uint32_t v = 0; v < p_render_data->scene_data->view_count; v++) {
 			ApplyPushConstant push = {};
@@ -954,7 +999,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 			RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
 			push.screen_size[0] = internal_size.x;
 			push.screen_size[1] = internal_size.y;
-			push.flags = (p_half_resolution ? 1 : 0) | (block << 8);
+			push.flags = (p_half_resolution ? 1 : 0) | (block << 8) | (emitter_count << 16);
 			push.debug_mode = uint32_t(s.debug_mode);
 
 			RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
@@ -971,14 +1016,20 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW3, v, 0),
 			};
 
-			rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_LOW]);
+			rd->compute_list_bind_compute_pipeline(list, apply_pipelines[emitter_count > 0 ? APPLY_LOW_EMITTERS : APPLY_LOW]);
 			RD::Uniform u_low_images[4] = {
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, low[0]),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, low[1]),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, low[2]),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, low[3]),
 			};
-			rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3]), 0);
+			if (emitter_count > 0) {
+				RD::Uniform u_tlas(RD::UNIFORM_TYPE_ACCELERATION_STRUCTURE, 14, p_tlas);
+				RD::Uniform u_emitters(RD::UNIFORM_TYPE_STORAGE_BUFFER, 15, vd->emitter_buffer);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_tlas, u_emitters), 0);
+			} else {
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3]), 0);
+			}
 			rd->compute_list_set_push_constant(list, &push, sizeof(push));
 			rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 			rd->compute_list_add_barrier(list);
@@ -999,7 +1050,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 	}
 
 	if (!low_res) {
-		rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_GI]);
+		rd->compute_list_bind_compute_pipeline(list, apply_pipelines[emitter_count > 0 ? APPLY_GI_EMITTERS : APPLY_GI]);
 	}
 	for (uint32_t v = 0; v < (low_res ? 0 : p_render_data->scene_data->view_count); v++) {
 		ApplyPushConstant push = {};
@@ -1007,7 +1058,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
 		push.screen_size[0] = internal_size.x;
 		push.screen_size[1] = internal_size.y;
-		push.flags = p_half_resolution ? 1 : 0;
+		push.flags = (p_half_resolution ? 1 : 0) | (emitter_count << 16);
 		push.debug_mode = uint32_t(s.debug_mode);
 
 		RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
@@ -1021,7 +1072,13 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RD::Uniform u_reflection(RD::UNIFORM_TYPE_IMAGE, 8, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_REFLECTION, v, 0));
 
 
-		rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_ambient, u_reflection), 0);
+		if (emitter_count > 0) {
+			RD::Uniform u_tlas(RD::UNIFORM_TYPE_ACCELERATION_STRUCTURE, 14, p_tlas);
+			RD::Uniform u_emitters(RD::UNIFORM_TYPE_STORAGE_BUFFER, 15, vd->emitter_buffer);
+			rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_ambient, u_reflection, u_tlas, u_emitters), 0);
+		} else {
+			rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_ambient, u_reflection), 0);
+		}
 		rd->compute_list_set_push_constant(list, &push, sizeof(push));
 		rd->compute_list_dispatch_threads(list, gi_size.x, gi_size.y, 1);
 	}

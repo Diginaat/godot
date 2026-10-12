@@ -3125,6 +3125,9 @@
 		<member name="rendering/global_illumination/ddgi/custom_rays_per_probe" type="int" setter="" getter="" default="128">
 			Rays traced per probe update when [member rendering/global_illumination/ddgi/quality] is Custom. More rays give less noisy indirect light; the ray tracing cost grows linearly.
 		</member>
+		<member name="rendering/global_illumination/ddgi/emissive_lights" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], emissive [StandardMaterial3D] surfaces light their surroundings directly: each pixel gets their light as from a sphere light, with a ray traced shadow, and the probes only carry the light they reflect. This gives smooth, correctly falling off light from small bright emitters instead of noisy, blocky spots at the probe spacing, and no light through walls. If [code]false[/code], the probes see emitters directly, as before. Needs ray queries; not used for baked-only probes (bakes keep the emitters' light in the probes). Emission textures and custom shaders are not taken into account for the direct light.
+		</member>
 		<member name="rendering/global_illumination/ddgi/gpu_time_budget_ms" type="float" setter="" getter="" default="0.0">
 			If above zero, DDGI measures its GPU time and lowers the number of probes traced per frame to stay within this many milliseconds (but never below an eighth of the quality setting's value). [code]0[/code] disables the budget.
 		</member>

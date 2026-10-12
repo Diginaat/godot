@@ -22,6 +22,11 @@ ideas; check the license before taking any code.
 * [FF7 Rebirth GI analysis](/research/ff7-rebirth-gi.md) - ambient cube probes, reflection leaks, specular occlusion fixes
 * [Zhihu article 571673961](/research/zhihu-571673961.md) - not read: access refused
 
+# DDGI sources and engines (read 2026-10-12)
+
+* [DDGI papers and reference code (Majercik 2019, 2021)](/research/majercik-ddgi-reference.md) - our sampling matches the reference; it averages in gamma 5 space and floors visibility at 0.05
+* [O3DE DiffuseProbeGrid](/research/o3de-diffuse-probe-grid.md) - RTXGI in O3DE: thresholds, emissive multiplier, a simpler low resolution composite; no code taken
+
 # What they mean for DDGI
 
 * [DDGI improvement proposals, ranked](/ddgi/improvements/index.md)

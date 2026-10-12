@@ -1,8 +1,12 @@
 #[compute]
 
-#version 450
+#version 460
 
 #VERSION_DEFINES
+
+#ifdef DDGI_EMITTERS
+#extension GL_EXT_ray_query : enable
+#endif
 
 // DDGI screen passes.
 //   MODE_APPLY: samples the probes for every opaque pixel (from the depth and
@@ -21,6 +25,11 @@
 //     blocks whose depth and normal match its own, and evaluates their
 //     irradiance at its own normal (so normal maps keep their indirect
 //     shading).
+//   DDGI_EMITTERS (with MODE_APPLY or MODE_APPLY_LOW): emissive surfaces
+//     light the surface directly, as sphere lights with a ray traced
+//     shadow (rendering/global_illumination/ddgi/emissive_lights). The
+//     probe rays then leave the emitters' own light out (it would count
+//     twice) and only carry what they light, as bounce light.
 //   MODE_MARK: one thread per 8x8 pixel tile marks the probes that light the
 //     surface at one pixel of the tile (rotating every frame), so the
 //     scheduler can favor them. A separate pass: in the apply pass the
@@ -78,6 +87,15 @@ layout(set = 0, binding = 12) uniform texture2D low_data2;
 layout(set = 0, binding = 13) uniform texture2D low_data3;
 #endif
 
+#ifdef DDGI_EMITTERS
+layout(set = 0, binding = 14) uniform accelerationStructureEXT ddgi_tlas;
+// Two vec4 per emitter: center (xyz) and radius of the sphere with the
+// same surface area (w); radiance (rgb) and bounding radius (w).
+layout(set = 0, binding = 15, std430) restrict readonly buffer DDGIEmitters {
+	vec4 ddgi_emitters[];
+};
+#endif
+
 #ifdef MODE_MARK
 layout(set = 0, binding = 6) uniform texture2D normal_roughness_buffer;
 // The frame each probe was last marked; the scheduler favors them.
@@ -91,7 +109,7 @@ layout(push_constant, std430) uniform Params {
 	mat4 inv_projection; // Includes the depth correction used by the depth buffer.
 	vec4 cam_rotation[3]; // Rows of the camera-to-world 3x4 transform.
 	ivec2 screen_size; // Internal (full) resolution.
-	uint flags; // FLAG_HALF_RES: the GI buffer has half the resolution. Bits 8-15: low resolution block size.
+	uint flags; // FLAG_HALF_RES: the GI buffer has half the resolution. Bits 8-15: low resolution block size. Bits 16-24: emitters.
 	uint debug_mode; // Environment.DDGIDebugMode.
 }
 params;
@@ -112,6 +130,70 @@ params;
 uint low_block_size() {
 	return max((params.flags >> 8u) & 0xFFu, 1u);
 }
+
+#ifdef DDGI_EMITTERS
+// Light from a sphere of radiance 1 that fills sin^2 = p_sin2 of the view
+// from a surface whose normal makes cos = p_cos with the direction to it,
+// as mean radiance over the cosine lobe (what the probes store): the
+// sphere light illuminance of Lagarde and de Rousiers ("Moving Frostbite
+// to PBR", 2014) over pi, which handles a sphere partly below the
+// horizon.
+float sphere_light(float p_cos, float p_sin2) {
+	if (p_cos * p_cos > p_sin2) {
+		return p_sin2 * max(p_cos, 0.0);
+	}
+	float sin_t = sqrt(max(1.0 - p_cos * p_cos, 1e-8));
+	float x = sqrt(max(1.0 / p_sin2 - 1.0, 1e-8));
+	float y = clamp(-x * (p_cos / sin_t), -1.0, 1.0);
+	float sin_sqrt_y = sin_t * sqrt(max(1.0 - y * y, 0.0));
+	return max(((p_cos * acos(y) - x * sin_sqrt_y) * p_sin2 + atan(sin_sqrt_y / x)) / 3.14159265359, 0.0);
+}
+
+// Direct light from the emissive surfaces at p_pos for each of the first
+// p_count directions of p_dirs (surface normals), added to r_light. One
+// shadow ray per emitter, toward its center, shared by the directions.
+void add_emitter_light(vec3 p_pos, vec3 p_normal, vec3 p_dirs[DDGI_DIRS], int p_count, inout vec3 r_light[DDGI_DIRS]) {
+	uint count = (params.flags >> 16u) & 0x1FFu;
+	vec3 origin = p_pos + p_normal * 0.02;
+	for (uint i = 0u; i < count; i++) {
+		vec4 sphere = ddgi_emitters[i * 2u];
+		vec4 radiance = ddgi_emitters[i * 2u + 1u];
+		vec3 to_emitter = sphere.xyz - p_pos;
+		float dist2 = dot(to_emitter, to_emitter);
+		float r2 = sphere.w * sphere.w;
+		if (dist2 <= r2) {
+			continue; // Inside the emitter's bounds.
+		}
+		float sin2 = r2 / dist2;
+		if (sin2 * max(radiance.r, max(radiance.g, radiance.b)) < 1e-4) {
+			continue; // Too far to matter.
+		}
+		float dist = sqrt(dist2);
+		vec3 l = to_emitter / dist;
+		float facing = 0.0;
+		for (int k = 0; k < p_count; k++) {
+			facing = max(facing, dot(p_dirs[k], l));
+		}
+		if (facing * facing <= -sin2 && facing < 0.0) {
+			continue; // Below every direction's horizon.
+		}
+		// Stops at the emitter's bounds, so the ray doesn't hit the emitter.
+		float t_max = dist - radiance.w;
+		if (t_max > 0.03) {
+			rayQueryEXT query;
+			rayQueryInitializeEXT(query, ddgi_tlas, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFF, origin, 0.0, l, t_max);
+			while (rayQueryProceedEXT(query)) {
+			}
+			if (rayQueryGetIntersectionTypeEXT(query, true) != gl_RayQueryCommittedIntersectionNoneEXT) {
+				continue;
+			}
+		}
+		for (int k = 0; k < p_count; k++) {
+			r_light[k] += radiance.rgb * sphere_light(dot(p_dirs[k], l), sin2);
+		}
+	}
+}
+#endif
 
 vec3 view_position(ivec2 p_pixel, float p_depth) {
 	vec4 pos = vec4((vec2(p_pixel) + 0.5) / vec2(params.screen_size) * 2.0 - 1.0, p_depth, 1.0);
@@ -155,6 +237,15 @@ void main() {
 			ambient = vec4(cascade_color(ddgi_volume_at(world_pos)), 1.0);
 		} else {
 			ambient = ddgi_sample_irradiance(world_pos, normal, to_camera);
+#ifdef DDGI_EMITTERS
+			if (ambient.a > 0.0) {
+				vec3 dirs[DDGI_DIRS] = vec3[](normal, normal, normal, normal, normal);
+				vec3 light[DDGI_DIRS] = vec3[](vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
+				add_emitter_light(world_pos, normal, dirs, 1, light);
+				// The scene shader blends the GI buffer by its coverage.
+				ambient.rgb += light[0] / ambient.a;
+			}
+#endif
 			ambient.rgb *= ddgi.volumes[0].params.x; // Energy.
 			if (any(isnan(ambient)) || any(isinf(ambient))) {
 				ambient = vec4(0.0);
@@ -259,6 +350,15 @@ void main() {
 		vec3 dirs[DDGI_DIRS] = vec3[](normal, normalize(normal + t1 * tilt), normalize(normal - t1 * tilt), normalize(normal + t2 * tilt), normalize(normal - t2 * tilt));
 		vec3 e[DDGI_DIRS];
 		float coverage = ddgi_sample_irradiance_dirs(world_pos, normal, to_camera, dirs, e);
+#ifdef DDGI_EMITTERS
+		if (coverage > 0.0) {
+			vec3 light[DDGI_DIRS] = vec3[](vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
+			add_emitter_light(world_pos, normal, dirs, DDGI_DIRS, light);
+			for (int k = 0; k < DDGI_DIRS; k++) {
+				e[k] += light[k] / coverage;
+			}
+		}
+#endif
 		float energy = ddgi.volumes[0].params.x;
 		float inv_step = 1.0 / (2.0 * tilt / sqrt(1.0 + tilt * tilt));
 		vec3 gx = (e[1] - e[2]) * inv_step * energy;
