@@ -16,16 +16,16 @@ sources:
 Implemented as a separate mark pass after the apply pass: one thread per
 8x8 tile marks the 8 probes around one pixel of the tile (rotating every
 frame) in a per-probe frame stamp buffer. Probes marked in the last 16
-frames get 3x the rate. Probes in the frustum that no surface samples get
+frames get 2x the rate. Probes in the frustum that no surface samples get
 0.8x, off screen 0.6x. RTX 3060:
 
 | | Before | After |
 | --- | --- | --- |
-| Interior, sun halved: frames to 90% / 98% | 230-231 / 272-273 | 202-207 / 269-272 |
-| Overshoot | 2.2-2.7% | 1.7-2.6% |
-| Outdoor motion error | 1.000 | 0.91-0.92 |
-| Apply + mark, 1080p room | 0.662 ms | 0.69-0.70 ms |
-| Static flicker, 3 runs | 0.01-0.06% | 0.03-0.06% |
+| Interior, sun halved: frames to 90% / 98% | 230-231 / 272-273 | 211-215 / 264-267 |
+| Overshoot | 2.2-2.7% | 1.6-2.0% |
+| Outdoor motion error | 1.000 | 0.937 |
+| DDGI total, 1080p room | 1.329 ms | 1.317-1.335 ms |
+| Static flicker, 6 runs: std / pixels | 0.155-0.177 / 0.01-0.19% | 0.155-0.177 / 0.00-0.11% |
 | Game level, storm, moving emissive: GI mean while moving, 3 runs | 17.9-21.0 | 20.2-20.8 |
 
 Lessons: [marking in the apply pass was too expensive](/ddgi/findings/shader-code-cost-without-work.md),

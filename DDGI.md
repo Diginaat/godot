@@ -299,7 +299,7 @@ Common problems:
 - Probes that light visible surfaces and probes whose light changes get
   more of the per-frame budget: a mark pass after the apply pass (one pixel
   per 8x8 tile, at a position that rotates every frame) records which
-  probes surfaces sample, and probes marked in the last 16 frames get 3x
+  probes surfaces sample, and probes marked in the last 16 frames get 2x
   the rate. Probes in the view frustum that no surface samples (behind
   walls) get 0.8x, probes off screen 0.6x. A feedback factor on the GPU
   raises all rates until the per-frame budget is used.
@@ -465,6 +465,12 @@ the share of pixels deviating by more than 2 levels; `--mean=path` and
 mean of every captured frame (`MEANF frame value`). Use `--anim=0 --tod=0`:
 a perfect result then has no flicker at all.
 
+Moving light: `--emissive_step=1` puts a bright emissive sphere in the
+interior's lit room and moves it 4.5 m when the measurement starts. With
+`--sun_step=0 --debug=1 --frames=400 --measure=600` it prints the frames
+until the image is 50%, 90% and 98% of the way to its final state
+(`EMISSIVE_STEP`, noise floor subtracted).
+
 Response to a light change: `--sun_step=factor` multiplies the sun energy
 as the measurement starts. Converge first, then trace the GI buffer:
 `--view=interior --tod=0 --anim=0 --debug=1 --frames=400 --measure=300
@@ -568,7 +574,8 @@ Newest first. Note the date, the commit, what you saw or changed.
   | Before (frustum: in view 2x, else 0.6x) | 230, 231 | 272, 273 | 2.2-2.7% | 1.000 | 0.662 |
   | Marked 2x, frustum 1x | 219, 223 | 275, 275 | 2.4-3.4% | 0.916 | 0.698 |
   | Marked 3x, frustum 0.8x, marked in apply | 208, 217 | 266, 270 | 1.2-1.8% | 0.909 | 0.708 |
-  | Same, separate mark pass, 16 frame window (shipped) | 202, 207 | 269, 272 | 1.7-2.6% | 0.919 (4 frame window) | 0.69-0.70 |
+  | Same, separate mark pass, 16 frame window | 202, 207 | 269, 272 | 1.7-2.6% | 0.919 (4 frame window) | 0.69-0.70 |
+  | Marked 2x, frustum 0.8x, mark pass (shipped) | 211, 215 | 264, 267 | 1.6-2.0% | 0.937 | 0.675 |
 
   Outdoor motion error: mean absolute difference between the GI buffer while
   flying (`--move=1`, 300 frames) and after settling 300 frames. Static
@@ -579,8 +586,25 @@ Newest first. Note the date, the commit, what you saw or changed.
   4x4 block or a rotating quarter of the workgroups marked: the code alone
   (divergent warps, registers) cost it, compiled out it was back to 0.662.
   A separate pass, one thread per 8x8 tile, costs about 0.03 ms. With a 4
-  frame window the favored set changed often enough to add flicker (0.07%
-  and 0.49% in two runs); 16 frames keeps it stable.
+  frame window, two runs flickered on 0.07% and 0.49% of pixels.
+
+  Correction, same day: with 6 flicker runs per build the 16 frame window
+  was not the fix. Before: std 0.155-0.177, 0.01-0.19% of pixels (the
+  baseline has outliers too). 3x: std 0.179-0.203, 0.00-0.61%. 2x
+  (shipped): std 0.155-0.177, 0.00-0.11%. More updates of the visible
+  probes add their update noise; 2x keeps most of the speed. The DDGI
+  cost of the shipped variant is 1.317-1.335 ms (before 1.329).
+
+  Tried and rejected for moving lights (light trailing a moving lamp):
+  - Display smoothing that follows large gaps fast (above
+    max(0.2, 2x noise), then max(0.15, 0.5x noise)): emissive step 50%
+    after 17-25 frames instead of 26-29, 90% unchanged (63-72), but
+    the weather fade showed probes stepping one by one (worst frame:
+    0.1% of pixels jump 8-10 levels, before 1).
+  - Flagging the 6 neighbors of a probe with a large confirmed change
+    for the next frame: in the storm game level the settled GI level
+    varied 17.4-27.6 between runs (before 21.4-22.8), with stale dark
+    blocks and sky-lit walls in some runs.
   A real game level (storm weather, a bright emissive sphere circling in
   front of the camera, baked + realtime updates, auto exposure off,
   `--fixed-fps 60`, 3 runs): GPU time unchanged within noise (3.28-3.43 vs

@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-10-12 (scheduler 2x, moving lights)
+
+* **Corrected**: [favored probes and flicker](/ddgi/findings/scheduler-favored-set-stability.md):
+  the cause was the 3x rate, not the window; shipped 2x.
+  [Mistake recorded](/mistakes/three-runs-of-a-noisy-test.md).
+* **Added**: [moving light trailing](/ddgi/findings/moving-light-trailing.md)
+  (open issue, two rejected fixes), the emissive step and weather stepping
+  tests in [the test protocol](/tooling/ddgi-test-protocol.md).
+* **Updated**: sample-driven results in the proposal and the success page.
+
 ## 2026-10-12 (mistakes and successes)
 
 * **Added**: [mistakes](/mistakes/) (7) and [successes](/successes/) (6)

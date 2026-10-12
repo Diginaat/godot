@@ -37,6 +37,7 @@ var bench_samples := []
 # With --volume: a DDGIVolume node (fixed box) instead of the camera-following
 # Environment cascades. Needed for baking.
 var volume: DDGIVolume
+var step_emissive: MeshInstance3D
 # The viewport the 3D scene renders to: the window, or with --res an
 # offscreen SubViewport of exactly that size (the window can't be larger
 # than the screen).
@@ -404,6 +405,15 @@ func _measure(p_frames: int) -> void:
 	# trace how fast the indirect light follows (with --trace_mean=1).
 	if args.has("sun_step") and sun:
 		sun.light_energy *= float(args["sun_step"])
+	# The emissive step test: the sphere jumps 4.5 m across the room. Prints
+	# how far the image still is from where it ends up (STEPERR: mean
+	# absolute difference to the mean of the last 30 frames, minus the noise
+	# floor, as a share of the difference at the jump), then the frames to
+	# 50% / 90% / 98%. The noise floor is the mean error of frames
+	# p_frames - 200 to p_frames - 30 (use --measure=600).
+	if step_emissive:
+		step_emissive.position = Vector3(-1.0, 0.6, -2.5)
+	var step_frames: Array[PackedFloat32Array] = []
 	var w := 0
 	var h := 0
 	var sum := PackedFloat32Array()
@@ -429,6 +439,9 @@ func _measure(p_frames: int) -> void:
 			var tc := img.get_pixel(int(tp[0]), int(tp[1]))
 			print("PX %d %.1f" % [f, 255.0 * (0.2126 * tc.r + 0.7152 * tc.g + 0.0722 * tc.b)])
 		var frame_sum := 0.0
+		var frame_luma := PackedFloat32Array()
+		if step_emissive:
+			frame_luma.resize(w * h)
 		for y in h:
 			var row := y * 2 * stride
 			for x in w:
@@ -440,6 +453,8 @@ func _measure(p_frames: int) -> void:
 				var i := y * w + x
 				sum[i] += luma
 				frame_sum += luma
+				if step_emissive:
+					frame_luma[i] = luma
 				sum_sq[i] += luma * luma
 				sum_rgb[i * 3] += r
 				sum_rgb[i * 3 + 1] += g
@@ -447,6 +462,36 @@ func _measure(p_frames: int) -> void:
 		# --trace_mean=1: the image mean (8-bit luma) of every captured frame.
 		if args.has("trace_mean"):
 			print("MEANF %d %.3f" % [f, frame_sum / float(w * h)])
+		if step_emissive:
+			step_frames.push_back(frame_luma)
+	if step_emissive and p_frames > 60:
+		var final := PackedFloat32Array()
+		final.resize(w * h)
+		final.fill(0.0)
+		for f in range(p_frames - 30, p_frames):
+			for i in w * h:
+				final[i] += step_frames[f][i] / 30.0
+		var errors := PackedFloat32Array()
+		for f in p_frames:
+			var e := 0.0
+			for i in w * h:
+				e += absf(step_frames[f][i] - final[i])
+			errors.push_back(e / (w * h))
+		var floor_from := maxi(p_frames - 200, 1)
+		var noise_floor := 0.0
+		for f in range(floor_from, p_frames - 30):
+			noise_floor += errors[f] / float(p_frames - 30 - floor_from)
+		var span := maxf(errors[0] - noise_floor, 1e-6)
+		var reached := [-1, -1, -1]
+		var levels := [0.5, 0.1, 0.02]
+		for k in 3:
+			for f in p_frames:
+				if errors[f] - noise_floor <= span * levels[k]:
+					reached[k] = f
+					break
+		for f in range(0, p_frames, 10):
+			print("STEPERR %d %.3f" % [f, (errors[f] - noise_floor) / span])
+		print("EMISSIVE_STEP start_err=%.3f noise_floor=%.3f frames50=%d frames90=%d frames98=%d" % [errors[0], noise_floor, reached[0], reached[1], reached[2]])
 	var n := float(p_frames)
 	var lin_sum := 0.0
 	var std_sum := 0.0
@@ -738,3 +783,7 @@ func _build_interior(o: Vector3) -> void:
 	_box(house, Vector3(-1.5, 0.75, -1.0), Vector3(1.4, 0.06, 0.9), _mat(Color(0.6, 0.45, 0.3)))
 	_box(house, Vector3(4.5, 0.9, -3.8), Vector3(1.6, 1.8, 0.6), _mat(Color(0.7, 0.25, 0.2)))
 	_sphere(house, Vector3(3.5, 0.4, 1.5), 0.4, _mat(Color(0.85, 0.85, 0.85)))
+	# --emissive_step=1: a bright emissive sphere in the lit room. It moves to
+	# another spot when the measurement starts (see _measure()).
+	if args.get("emissive_step", "0") == "1":
+		step_emissive = _sphere(house, Vector3(-4.0, 0.6, 1.5), 0.25, _emissive(Color(1.0, 0.55, 0.2), 40.0))

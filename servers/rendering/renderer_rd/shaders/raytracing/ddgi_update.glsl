@@ -235,13 +235,15 @@ void main() {
 		// stale light.
 		uint sampled = ddgi_sampled_frame[probe];
 		// The mark pass samples one pixel per 8x8 tile per frame, at a
-		// rotating position: look 16 frames back, so the set of favored probes
-		// stays stable (with 4 frames it changed often enough to add flicker).
+		// rotating position: look 16 frames back, so a probe stays favored
+		// while any of its pixels was sampled recently.
 		bool recently_sampled = sampled != 0u && ddgi.atlas.w - sampled <= 16u;
 		vec3 world_pos = ddgi_probe_world_position(vol, logical, pd.offset);
 		vec4 clip = ddgi.camera_view_projection * vec4(world_pos, 1.0);
 		bool in_view = clip.w > 0.0 && all(lessThanEqual(abs(clip.xy), vec2(clip.w * 1.2)));
-		rate *= recently_sampled ? 3.0 : (in_view ? 0.8 : 0.6);
+		// 2x, as probes in view had before: 3x was 4% faster still, but the
+		// extra updates of visible probes added flicker (6 runs each).
+		rate *= recently_sampled ? 2.0 : (in_view ? 0.8 : 0.6);
 	}
 
 	pd.urgency += rate;

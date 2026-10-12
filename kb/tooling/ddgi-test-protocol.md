@@ -34,7 +34,9 @@ sources:
 | Converged brightness | `--view=interior --debug=1 --frames=600 --shot=...` | Image mean; only compare at 600+ frames (see [the convergence finding](/ddgi/findings/measure-after-convergence.md)) |
 | Response to a light change | `--view=interior --debug=1 --frames=400 --measure=300 --trace_mean=1 --sun_step=0.5` | Frames to 90% / 98% of the change, overshoot. Repeats to a few frames |
 | Error left by camera motion | `--view=outdoor --debug=1 --move=1 --frames=300 --settle=300 --shot=...` | Mean absolute difference between the moving shot and the `_settled` shot |
-| Flicker | `--view=interior --frames=600 --measure=60` | `flicker_px` and `flicker_std`; 3 runs |
+| Response to a moving light | `--view=interior --debug=1 --sun_step=0 --emissive_step=1 --frames=400 --measure=600` | `EMISSIVE_STEP`: frames to 50 / 90 / 98% of the way, noise floor subtracted. Repeats within about 10 frames |
+| Flicker | `--view=interior --frames=600 --measure=60` | `flicker_std` (stable) and `flicker_px` (has outliers: 0.01-0.19% on an unchanged build); 6 runs |
+| Weather fade stepping | `--view=interior --debug=1 --frames=600 --weather=dir` | Per-frame 99.9th percentile of the pixel change: 1 level on the baseline. Higher means probes visibly step one by one |
 | Cost | `--gpu-profile` engine arg, `--view=room --quality=1 --res=1920x1080 --frames=200 --bench=300` | `ddgi_ms` and per pass; varies about ±0.02 ms between runs |
 | Baking | `--volume=... --vspacing=0.5 --bake=path` | `BAKE ... OK` |
 
@@ -61,6 +63,8 @@ jitter, and the screenshots.
 
 - Turn auto exposure off. It adapts over seconds and hides how fast the
   indirect light follows.
+- Remove physics objects in the test (the demo's physics cubes are
+  removed in test mode): their simulation differs between runs.
 - Use `--fixed-fps 60` so weather, light transitions and the moving object
   advance the same amount per frame in every run.
 - Even then, single frames differ between runs (GI mean 23.7 vs 20.3 at
