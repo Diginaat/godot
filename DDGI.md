@@ -484,7 +484,7 @@ code (`main.gd`):
 | `outdoor` | Sun with a time-of-day cycle, 400 m street of open-fronted buildings and pillars; `--move` flies the camera down the street (scrolling) |
 | `stress` | 4000 MultiMesh instances, 40 moving slabs, 32 fast-changing omni lights; `--move` orbits the camera |
 | `interior` | Closed house lit only by the sun through one window, and a windowless back room behind a doorway (bounce light only); use `--tod=0` |
-| `bleed` | A red ball bouncing in front of a white wall in bright, low sun from the side (`--sun=<energy>`, default 4): the red bounce light on the wall and floor; `--nf=0` turns the near-field rays off |
+| `bleed` | A red ball bouncing in front of a 2 m white wall; bright sun from the side and slightly behind the wall lights the ball, the wall front stays out of direct sun (`--sun=<energy>`, default 4): the red bounce light on the wall and floor; `--nf=0` turns the near-field rays off |
 
 ```
 bin\godot.windows.editor.x86_64.exe --path misc\ddgi_test_project

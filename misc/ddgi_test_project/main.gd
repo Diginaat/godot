@@ -177,8 +177,9 @@ func _set_view(p_view: String) -> void:
 	view = p_view
 	camera.look_at_from_position(VIEWS[view][0], VIEWS[view][1])
 	if view == "bleed":
-		# A bright, low sun from the side (see _build_bleed()).
-		sun.rotation_degrees = Vector3(-25, 90, 0)
+		# A bright sun from the side and a little behind the wall (see
+		# _build_bleed()).
+		sun.rotation_degrees = Vector3(-30, 75, 0)
 		sun.light_energy = float(args.get("sun", "4.0"))
 	# The sun is for the outdoor and stress areas; the room is closed anyway.
 	_update_hud()
@@ -810,12 +811,13 @@ func _build_interior(o: Vector3) -> void:
 		step_emissive = _sphere(house, Vector3(-4.0, 0.6, 1.5), 0.25, _emissive(Color(1.0, 0.55, 0.2), 40.0))
 
 
-# Color bleeding: a white wall, 3 m high, and a red sphere bouncing in front
-# of it. A bright sun, 65 degrees high from the camera's side (set in
-# _build_environment(), --sun=<energy>, default 4), lights the top of the
-# sphere, also the part that faces the wall, so the red bounces onto the
-# wall. The DDGI indirect light view (--debug=1) shows the bounce alone.
-# --anim=0 stops the sphere.
+# Color bleeding: a white wall, 2 m high, and a red sphere bouncing in front
+# of it. A bright sun (set in _set_view(), --sun=<energy>, default 4), 30
+# degrees high, comes from the side and a little from behind the wall: it
+# lights the sphere, also the side that faces the wall, while the wall's
+# front gets no direct sun, so the red bounce light shows on it. The DDGI
+# indirect light view (--debug=1) shows the bounce alone. --anim=0 stops
+# the sphere.
 func _build_bleed(o: Vector3) -> void:
 	var bleed := Node3D.new()
 	bleed.name = "Bleed"
@@ -823,9 +825,9 @@ func _build_bleed(o: Vector3) -> void:
 	add_child(bleed)
 	var white := _mat(Color(0.85, 0.85, 0.85))
 	_box(bleed, Vector3(0, -0.5, 0), Vector3(30, 1, 30), white) # Floor.
-	_box(bleed, Vector3(0, 1.5, 2.15), Vector3(10, 3, 0.3), white) # Wall, front at z = 2.
+	_box(bleed, Vector3(0, 1.0, 2.15), Vector3(10, 2, 0.3), white) # Wall, front at z = 2.
 	var ball := _sphere(bleed, Vector3(0, 0.6, 1.2), 0.6, _mat(Color(0.8, 0.04, 0.03)))
 	var place := func(time_s: float) -> void:
-		ball.position = Vector3(sin(time_s * 0.5) * 3.0, 0.6 + absf(sin(time_s * 1.6)) * 1.2, 0.9 - 0.4 * (0.5 + 0.5 * sin(time_s * 0.23)))
+		ball.position = Vector3(sin(time_s * 0.5) * 3.0, 0.6 + absf(sin(time_s * 1.6)) * 1.2, 0.8 - 0.4 * (0.5 + 0.5 * sin(time_s * 0.23)))
 	place.call(0.0)
 	animated.append(place)
