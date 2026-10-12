@@ -552,6 +552,7 @@ void RenderRaytracing::prepare_frame() {
 	motion_transforms.clear();
 	emissive_meshes.clear();
 	ddgi_emitters.clear();
+	ddgi_moving.clear();
 	deformed_active_this_frame.clear();
 	merged_mm_active_this_frame.clear();
 
@@ -2961,6 +2962,19 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 			instance_masks.push_back(_instance_mask(inst, inst->transform_status == RenderForwardClustered::GeometryInstanceForwardClustered::TransformStatus::MOVED, (geometry_data[geometry_data.size() - 1].flags & RT_GEOM_FLAG_EMISSIVE_LIGHT) != 0));
 			if (instance_masks[instance_masks.size() - 1] == RT_INSTANCE_MASK_MOVING) {
 				geometry_data[geometry_data.size() - 1].flags |= RT_GEOM_FLAG_MOVING;
+				// Once per instance (its surfaces come one after another).
+				const uint32_t n = ddgi_moving.size();
+				const AABB &bounds = inst->transformed_aabb;
+				const Vector3 center = bounds.get_center();
+				if (n < 64 * 4 && !(n >= 4 && ddgi_moving[n - 4] == center.x && ddgi_moving[n - 3] == center.y && ddgi_moving[n - 2] == center.z)) {
+					ddgi_moving.push_back(center.x);
+					ddgi_moving.push_back(center.y);
+					ddgi_moving.push_back(center.z);
+					// The mean half extent: the radius for a ball, close enough
+					// for compact objects (the box's half diagonal made a ball
+					// look 1.7 times bigger).
+					ddgi_moving.push_back((bounds.size.x + bounds.size.y + bounds.size.z) / 6.0f);
+				}
 			}
 
 			surf = surf->next;

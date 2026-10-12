@@ -445,6 +445,10 @@ class RenderRaytracing {
 	/// The same emitters for DDGI's emissive lights, 8 floats each: center,
 	/// radius of the sphere with the same area, emission (rgb), bounding radius.
 	LocalVector<float> ddgi_emitters;
+	/// Objects that keep moving (RT_INSTANCE_MASK_MOVING), as spheres
+	/// (center, mean half extent; 4 floats each), at most 64: DDGI
+	/// near-field object rays light from them directly.
+	LocalVector<float> ddgi_moving;
 	LocalVector<RID> blass;
 	LocalVector<Transform3D> blas_transforms;
 	LocalVector<uint32_t> instance_flags;
@@ -544,6 +548,8 @@ public:
 	void cleanup_caches();
 
 	RTViewportState *build_tlas(const RenderDataRD *p_render_data, uint32_t p_rt_flags);
+	/// Bounding spheres of the objects that keep moving (see ddgi_moving).
+	const LocalVector<float> &get_ddgi_moving() const { return ddgi_moving; }
 	uint32_t gather_lights(const RenderDataRD *p_render_data, RT_LightData *r_light_data, uint32_t p_max_lights);
 	/// Scene set (set 0) for a trace dispatch. With p_ddgi, DDGI resources are
 	/// bound; if p_ddgi->trace, the dispatch traces DDGI probe rays and the

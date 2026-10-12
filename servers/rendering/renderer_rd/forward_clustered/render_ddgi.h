@@ -54,6 +54,7 @@
 #define RB_TEX_DDGI_NF_HISTORY1 SNAME("nf_history1")
 #define RB_TEX_DDGI_NF_GEOMETRY0 SNAME("nf_geometry0")
 #define RB_TEX_DDGI_NF_GEOMETRY1 SNAME("nf_geometry1")
+#define RB_TEX_DDGI_NF_OBJECT SNAME("nf_object")
 
 class RenderDataRD;
 class RenderSceneBuffersRD;
@@ -208,6 +209,7 @@ public:
 		RID nf_rays;
 		RID nf_bounce;
 		RID nf_params;
+		RID nf_moving; // Bounding spheres of moving objects (RenderRaytracing::ddgi_moving).
 		uint32_t nf_blocks = 0;
 		uint32_t nf_parity = 0; // Which history texture is this frame's.
 		bool nf_history_valid = false;
@@ -278,7 +280,7 @@ private:
 	struct NFParams {
 		float prev_view_projection[16];
 		float params[4]; // Max ray distance, frame, minimum history blend, history valid.
-		int32_t size[4]; // Low resolution size, block size.
+		int32_t size[4]; // Low resolution size, block size, moving objects.
 	};
 	static constexpr uint32_t NF_PARAMS_SIZE = 96;
 	static_assert(sizeof(NFParams) == NF_PARAMS_SIZE, "NFParams must match DDGINearFieldParams");

@@ -40,7 +40,10 @@
 //     tracing pipeline as probe rays are (scene_raytracing_raygen.glsl).
 //     MODE_NF_RESOLVE adds the probes' light at each hit (bounce light); rays
 //     that hit nothing within range take the probes' irradiance at the
-//     surface (far field). MODE_NF_TEMPORAL accumulates the samples
+//     surface (far field). Moving objects are left out of the probes and
+//     these rays; each block also traces one ray toward the nearest moving
+//     object and gets its light (bounce and shadow) as from a sphere,
+//     without noise or lag. MODE_NF_TEMPORAL accumulates the samples
 //     over frames (reprojected, history clamped to the neighborhood, so
 //     changes show within a few frames), MODE_NF_FILTER smooths them with
 //     an edge-aware blur (two passes) and puts them in place of the probes'
@@ -112,9 +115,10 @@ layout(set = 0, binding = 15, std430) restrict readonly buffer DDGIEmitters {
 #endif
 
 #if defined(MODE_APPLY_LOW) || defined(MODE_NF_RESOLVE) || defined(MODE_NF_TEMPORAL) || defined(MODE_NF_FILTER)
-// Near-field ray of each block (MODE_APPLY_LOW writes, the trace and
-// MODE_NF_RESOLVE read): [0] header (block count, max distance, width), then
-// per block origin (xyz float bits) and direction (octahedral unorm16 x 2;
+// Near-field rays (MODE_APPLY_LOW writes, the trace and MODE_NF_RESOLVE
+// read): [0] header (block count, max distance, width, height), then per
+// block the cosine ray, then per block the ray toward the nearest moving
+// object: origin (xyz float bits) and direction (octahedral unorm16 x 2;
 // 0: no ray).
 layout(set = 0, binding = 16, std430) restrict buffer DDGINearFieldRays {
 	uvec4 nf_rays[];
@@ -122,23 +126,31 @@ layout(set = 0, binding = 16, std430) restrict buffer DDGINearFieldRays {
 layout(set = 0, binding = 18, std140) uniform DDGINearFieldParams {
 	mat4 prev_view_projection; // World to the previous frame's clip space.
 	vec4 params; // x: max ray distance, y: frame, z: minimum history blend, w: history valid (0 after a reset).
-	ivec4 size; // xy: low resolution size, z: block size.
+	ivec4 size; // xy: low resolution size, z: block size, w: moving objects.
 }
 nf;
 #endif
 
 #ifdef MODE_APPLY_LOW
-// Probe irradiance without emitters (rgb), for the near-field passes.
+// Probe irradiance without emitters (rgb) and the form factor of the
+// nearest moving object (a), for the near-field passes.
 layout(rgba16f, set = 0, binding = 17) uniform restrict writeonly image2D nf_probe_out;
+// Bounding spheres (center, radius) of the objects that keep moving.
+layout(set = 0, binding = 26, std430) restrict readonly buffer DDGINearFieldMoving {
+	vec4 nf_moving[];
+};
 #endif
 
 #ifdef MODE_NF_RESOLVE
 layout(set = 0, binding = 17) uniform texture2D nf_probe;
-layout(set = 0, binding = 19) uniform texture2D nf_ray_data; // Radiance (rgb), hit distance (a).
+// Radiance (rgb), hit distance (a); the object rays in the lower half.
+layout(set = 0, binding = 19) uniform texture2D nf_ray_data;
 layout(set = 0, binding = 20, std430) restrict readonly buffer DDGINearFieldBounce {
-	uvec4 nf_bounce[]; // As DDGIRayBounce, z 1 for a hit on a moving object, w the hit distance.
+	uvec4 nf_bounce[]; // As DDGIRayBounce, z 1 for a hit on a moving object, w the hit distance; then the object rays.
 };
 layout(rgba16f, set = 0, binding = 21) uniform restrict writeonly image2D nf_raw_out;
+// The moving objects' light (rgb): bounce light minus the light they hide.
+layout(rgba16f, set = 0, binding = 27) uniform restrict writeonly image2D nf_object_out;
 #endif
 
 #ifdef MODE_NF_TEMPORAL
@@ -161,6 +173,7 @@ layout(rgba16f, set = 0, binding = 13) uniform restrict image2D low_data3;
 layout(set = 0, binding = 17) uniform texture2D nf_probe;
 layout(set = 0, binding = 22) uniform texture2D nf_history; // This frame's accumulated light (or the first pass's result).
 layout(rgba16f, set = 0, binding = 21) uniform restrict writeonly image2D nf_filter_out; // The first pass's result.
+layout(set = 0, binding = 27) uniform texture2D nf_object; // The moving objects' light (MODE_NF_RESOLVE).
 #endif
 
 #ifdef MODE_MARK
@@ -201,7 +214,6 @@ uint low_block_size() {
 	return max((params.flags >> 8u) & 0xFFu, 1u);
 }
 
-#ifdef DDGI_EMITTERS
 // Light from a sphere of radiance 1 that fills sin^2 = p_sin2 of the view
 // from a surface whose normal makes cos = p_cos with the direction to it,
 // as mean radiance over the cosine lobe (what the probes store): the
@@ -219,6 +231,7 @@ float sphere_light(float p_cos, float p_sin2) {
 	return max(((p_cos * acos(y) - x * sin_sqrt_y) * p_sin2 + atan(sin_sqrt_y / x)) / 3.14159265359, 0.0);
 }
 
+#ifdef DDGI_EMITTERS
 // Direct light from the emissive surfaces at p_pos for each of the first
 // p_count directions of p_dirs (surface normals), added to r_light. One
 // shadow ray per emitter, toward its center, shared by the directions.
@@ -420,9 +433,6 @@ void main() {
 		vec3 dirs[DDGI_DIRS] = vec3[](normal, normalize(normal + t1 * tilt), normalize(normal - t1 * tilt), normalize(normal + t2 * tilt), normalize(normal - t2 * tilt));
 		vec3 e[DDGI_DIRS];
 		float coverage = ddgi_sample_irradiance_dirs(world_pos, normal, to_camera, dirs, e);
-		if ((params.flags & FLAG_NEAR_FIELD) != 0u) {
-			imageStore(nf_probe_out, block, vec4(e[0], coverage));
-		}
 #ifdef DDGI_EMITTERS
 		if (coverage > 0.0) {
 			vec3 light[DDGI_DIRS] = vec3[](vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
@@ -443,13 +453,50 @@ void main() {
 			float frame = nf.params.y;
 			vec2 r2 = fract(vec2(0.7548776662, 0.5698402910) * frame);
 			vec2 u = fract((vec2(stratum & 3u, stratum >> 2u) + jitter) * 0.25 + r2);
+
 			float phi = 6.28318530718 * u.x;
 			float sin_t = sqrt(u.y);
 			vec3 dir = normalize(t1 * (cos(phi) * sin_t) + t2 * (sin(phi) * sin_t) + normal * sqrt(max(1.0 - u.y, 0.0)));
+
+			// Moving objects (a ball rolling by): the probes and the cosine
+			// rays leave them out (rt_cull_mask()), so their own light can be
+			// averaged over many frames. The nearest moving object (by solid
+			// angle) gets a second ray, toward its center: the light leaving
+			// it there, spread as from a sphere of that radiance (as the
+			// emissive lights are), minus the light it hides, is its bounce
+			// light and shadow. The same every frame: no noise, no lag.
+			float best_sin2 = 0.0;
+			float best_fade = 0.0;
+			vec3 object_dir = normal;
+			for (int i = 0; i < nf.size.w; i++) {
+				vec4 sphere = nf_moving[i];
+				vec3 to_sphere = sphere.xyz - world_pos;
+				float d2 = dot(to_sphere, to_sphere);
+				float radius2 = sphere.w * sphere.w;
+				if (d2 <= radius2 * 1.01) {
+					continue; // On or inside the object itself.
+				}
+				float d = sqrt(d2);
+				if (d - sphere.w > nf.params.x || dot(to_sphere, normal) < -sphere.w) {
+					continue; // Out of range, or below the horizon.
+				}
+				float sin2 = radius2 / d2;
+				if (sin2 > best_sin2) {
+					best_sin2 = sin2;
+					object_dir = to_sphere / d;
+					// Fades out over the second half of the range, so the
+					// range doesn't show as an edge.
+					best_fade = 1.0 - smoothstep(0.5 * nf.params.x, nf.params.x, d - sphere.w);
+				}
+			}
+			float form_factor = best_sin2 > 0.0 ? sphere_light(dot(normal, object_dir), best_sin2) * best_fade : 0.0;
+			imageStore(nf_probe_out, block, vec4(e[0], form_factor));
 			// Off the surface by a bit more far away (depth precision).
 			vec3 ray_origin = world_pos + normal * max(0.01, 0.002 * ref_depth);
 			uint idx = uint(block.y) * uint(nf.size.x) + uint(block.x);
 			nf_rays[1u + idx] = uvec4(floatBitsToUint(ray_origin), max(packUnorm2x16(vec3_to_oct(dir)), 1u));
+			uint blocks = uint(nf.size.x * nf.size.y);
+			nf_rays[1u + blocks + idx] = form_factor > 0.0 ? uvec4(floatBitsToUint(ray_origin), max(packUnorm2x16(vec3_to_oct(object_dir)), 1u)) : uvec4(0u);
 		}
 		float energy = ddgi.volumes[0].params.x;
 		float inv_step = 1.0 / (2.0 * tilt / sqrt(1.0 + tilt * tilt));
@@ -467,6 +514,7 @@ void main() {
 	}
 	if (!found && (params.flags & FLAG_NEAR_FIELD) != 0u) {
 		nf_rays[1u + uint(block.y) * uint(nf.size.x) + uint(block.x)] = uvec4(0u);
+		nf_rays[1u + uint(nf.size.x * nf.size.y) + uint(block.y) * uint(nf.size.x) + uint(block.x)] = uvec4(0u);
 		imageStore(nf_probe_out, block, vec4(0.0));
 	}
 	imageStore(low_data0, block, out0);
@@ -742,8 +790,41 @@ void main() {
 	uvec4 r = nf_rays[1u + idx];
 	if (r.w == 0u) {
 		imageStore(nf_raw_out, block, vec4(0.0));
+		imageStore(nf_object_out, block, vec4(0.0));
 		return;
 	}
+	vec4 probe = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0);
+
+	// The nearest moving object: the light leaving it toward this block (as
+	// any hit: emission, direct light, bounce light), spread with the
+	// object's form factor, minus the light behind it it hides (the probes'
+	// irradiance stands for that, as for rays that hit nothing).
+	vec3 object_light = vec3(0.0);
+	uint blocks = uint(nf.size.x * nf.size.y);
+	uvec4 object_ray = nf_rays[1u + blocks + idx];
+	if (object_ray.w != 0u && probe.a > 0.0) {
+		vec4 hit = texelFetch(sampler2D(nf_ray_data, linear_sampler), block + ivec2(0, nf.size.y), 0);
+		uvec4 b = nf_bounce[blocks + idx];
+		if (hit.a > 0.0 && hit.a < DDGI_MISS_DISTANCE * 0.5 && b.z != 0u) {
+			vec3 leaving = hit.rgb;
+			if ((b.x >> 24u) != 0u) {
+				vec3 object_dir = oct_to_vec3(unpackUnorm2x16(object_ray.w) * 2.0 - 1.0);
+				vec3 hit_normal = oct_to_vec3(unpackUnorm2x16(b.y) * 2.0 - 1.0);
+				vec3 hit_pos = uintBitsToFloat(object_ray.xyz) + object_dir * uintBitsToFloat(b.w);
+				vec4 irradiance = ddgi_sample_irradiance(hit_pos, hit_normal, -object_dir);
+				leaving += unpackUnorm4x8(b.x).rgb * min(ddgi.schedule.w, 0.95) * irradiance.rgb * irradiance.a;
+			}
+			float lum = ddgi_luminance(leaving);
+			if (lum > ddgi.schedule.z) {
+				leaving *= ddgi.schedule.z / lum;
+			}
+			object_light = (leaving - probe.rgb) * probe.a;
+		}
+	}
+	if (any(isnan(object_light)) || any(isinf(object_light))) {
+		object_light = vec3(0.0);
+	}
+	imageStore(nf_object_out, block, vec4(object_light, 1.0));
 	vec3 origin = uintBitsToFloat(r.xyz);
 	vec3 dir = oct_to_vec3(unpackUnorm2x16(r.w) * 2.0 - 1.0);
 	vec4 ray = texelFetch(sampler2D(nf_ray_data, linear_sampler), block, 0);
@@ -759,7 +840,7 @@ void main() {
 		// ray, was tried first: its cosine lobe also takes in what lies to
 		// the side, so rays along a sunlit floor brought its light back and
 		// the floor came out too bright.)
-		radiance = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0).rgb;
+		radiance = probe.rgb;
 	} else {
 		radiance = ray.rgb;
 		uvec4 b = nf_bounce[idx];
@@ -974,6 +1055,8 @@ void main() {
 	// In place of the probes' light; the gradients over the normal (from
 	// the probes) are scaled by the same ratio.
 	vec4 probe = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0);
+	// The moving objects' light, the same every frame: not accumulated.
+	light = max(light + texelFetch(sampler2D(nf_object, linear_sampler), block, 0).rgb, vec3(0.0));
 	float energy = ddgi.volumes[0].params.x;
 	vec4 d0 = imageLoad(low_data0, block);
 	d0.rgb = max(d0.rgb + (light - probe.rgb) * energy, vec3(0.0));

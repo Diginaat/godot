@@ -113,7 +113,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 
 void RenderDDGI::ViewportData::free_data() {
 	RD *rd = RD::get_singleton();
-	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &sampled_frame, &emitter_buffer, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas, &nf_rays, &nf_bounce, &nf_params };
+	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &sampled_frame, &emitter_buffer, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas, &nf_rays, &nf_bounce, &nf_params, &nf_moving };
 	for (RID *r : rids) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
@@ -984,27 +984,33 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		}
 		if (!rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
 			uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAY, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1 }) {
+			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1, RB_TEX_DDGI_NF_OBJECT }) {
 				rb->create_texture(RB_SCOPE_DDGI_LOW, name, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, low_size);
 			}
+			// The cosine rays' hits, then the object rays' below them.
+			rb->create_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_RAY, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, Size2i(low_size.x, low_size.y * 2));
 			vd->nf_history_valid = false;
 		}
 		// The near-field ray buffers (also bound, unused, when the rays are off).
 		const uint32_t blocks = uint32_t(low_size.x * low_size.y);
 		if (vd->nf_blocks != blocks || !vd->nf_rays.is_valid()) {
-			for (RID *r : { &vd->nf_rays, &vd->nf_bounce, &vd->nf_params }) {
+			for (RID *r : { &vd->nf_rays, &vd->nf_bounce, &vd->nf_params, &vd->nf_moving }) {
 				if (r->is_valid()) {
 					rd->free_rid(*r);
 					*r = RID();
 				}
 			}
 			vd->nf_blocks = blocks;
-			vd->nf_rays = rd->storage_buffer_create((blocks + 1) * 16);
-			rd->buffer_clear(vd->nf_rays, 0, (blocks + 1) * 16);
+			vd->nf_rays = rd->storage_buffer_create((2 * blocks + 1) * 16);
+			rd->buffer_clear(vd->nf_rays, 0, (2 * blocks + 1) * 16);
 			rd->set_resource_name(vd->nf_rays, "DDGI Near-Field Rays");
-			vd->nf_bounce = rd->storage_buffer_create(blocks * 16);
+			vd->nf_bounce = rd->storage_buffer_create(2 * blocks * 16);
 			rd->set_resource_name(vd->nf_bounce, "DDGI Near-Field Bounce");
 			vd->nf_params = rd->uniform_buffer_create(NF_PARAMS_SIZE);
+			if (!vd->nf_moving.is_valid()) {
+				vd->nf_moving = rd->storage_buffer_create(64 * 16);
+				rd->set_resource_name(vd->nf_moving, "DDGI Near-Field Moving Objects");
+			}
 			vd->nf_history_valid = false;
 		}
 	} else if (rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
@@ -1030,12 +1036,17 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		nf.size[0] = low_size.x;
 		nf.size[1] = low_size.y;
 		nf.size[2] = int32_t(block);
+		const LocalVector<float> &moving = p_raytracing->get_ddgi_moving();
+		nf.size[3] = int32_t(MIN(moving.size() / 4, 64u));
+		if (nf.size[3] > 0) {
+			rd->buffer_update(vd->nf_moving, 0, nf.size[3] * 16, moving.ptr());
+		}
 		rd->buffer_update(vd->nf_params, 0, sizeof(nf), &nf);
 		uint32_t header[4];
 		header[0] = uint32_t(low_size.x * low_size.y);
 		memcpy(&header[1], &nf.params[0], sizeof(float));
 		header[2] = uint32_t(low_size.x);
-		header[3] = 0;
+		header[3] = uint32_t(low_size.y);
 		rd->buffer_update(vd->nf_rays, 0, sizeof(header), header);
 	}
 
@@ -1081,12 +1092,13 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 			RD::Uniform u_nf_rays(RD::UNIFORM_TYPE_STORAGE_BUFFER, 16, vd->nf_rays);
 			RD::Uniform u_nf_probe_image(RD::UNIFORM_TYPE_IMAGE, 17, rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_PROBE, v, 0));
 			RD::Uniform u_nf_params(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 18, vd->nf_params);
+			RD::Uniform u_nf_moving(RD::UNIFORM_TYPE_STORAGE_BUFFER, 26, vd->nf_moving);
 			if (emitter_count > 0) {
 				RD::Uniform u_tlas(RD::UNIFORM_TYPE_ACCELERATION_STRUCTURE, 14, p_tlas);
 				RD::Uniform u_emitters(RD::UNIFORM_TYPE_STORAGE_BUFFER, 15, vd->emitter_buffer);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_tlas, u_emitters, u_nf_rays, u_nf_probe_image, u_nf_params), 0);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_tlas, u_emitters, u_nf_rays, u_nf_probe_image, u_nf_params, u_nf_moving), 0);
 			} else {
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_image, u_nf_params), 0);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_image, u_nf_params, u_nf_moving), 0);
 			}
 			rd->compute_list_set_push_constant(list, &push, sizeof(push));
 			rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
@@ -1117,7 +1129,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 						rd->raytracing_list_bind_uniform_set(rt_list, bindless_set, 1);
 					}
 					p_raytracing->register_raytracing_buffer_dependencies(rt_list);
-					rd->raytracing_list_trace_rays(rt_list, 0, p_raytracing->get_shader()->get_hit_sbt(p_rt_flags), low_size.x * low_size.y, 1, 1);
+					rd->raytracing_list_trace_rays(rt_list, 0, p_raytracing->get_shader()->get_hit_sbt(p_rt_flags), low_size.x * low_size.y, 2, 1);
 					rd->raytracing_list_end();
 				}
 				list = rd->compute_list_begin();
@@ -1137,7 +1149,9 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				RD::Uniform u_bounce(RD::UNIFORM_TYPE_STORAGE_BUFFER, 20, vd->nf_bounce);
 				RD::Uniform u_raw_image(RD::UNIFORM_TYPE_IMAGE, 21, raw);
 				RD::Uniform u_nf_probe_texture(RD::UNIFORM_TYPE_TEXTURE, 17, rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_PROBE, v, 0));
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(resolve_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_nf_rays, u_nf_probe_texture, u_nf_params, u_ray_texture, u_bounce, u_raw_image), 0);
+				RID object = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_OBJECT, v, 0);
+				RD::Uniform u_object_image(RD::UNIFORM_TYPE_IMAGE, 27, object);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(resolve_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_nf_rays, u_nf_probe_texture, u_nf_params, u_ray_texture, u_bounce, u_raw_image, u_object_image), 0);
 				rd->compute_list_set_push_constant(list, &push, sizeof(push));
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);
@@ -1160,7 +1174,8 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				RID filter_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_NF_FILTER);
 				rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_NF_FILTER]);
 				RD::Uniform u_history_texture(RD::UNIFORM_TYPE_TEXTURE, 22, history);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_raw_image, u_history_texture), 0);
+				RD::Uniform u_object_texture(RD::UNIFORM_TYPE_TEXTURE, 27, object);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_raw_image, u_history_texture, u_object_texture), 0);
 				rd->compute_list_set_push_constant(list, &push, sizeof(push));
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);
@@ -1170,7 +1185,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				final_push.flags |= 1u << 28;
 				RD::Uniform u_unused_image(RD::UNIFORM_TYPE_IMAGE, 21, history_prev);
 				RD::Uniform u_first_pass(RD::UNIFORM_TYPE_TEXTURE, 22, raw);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_unused_image, u_first_pass), 0);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_unused_image, u_first_pass, u_object_texture), 0);
 				rd->compute_list_set_push_constant(list, &final_push, sizeof(final_push));
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);

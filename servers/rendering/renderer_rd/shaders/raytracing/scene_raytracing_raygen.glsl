@@ -108,7 +108,8 @@ void ddgi_trace_probe_rays() {
 }
 
 // DDGI near-field rays (RT_PARAM_DDGI_TRACE 3 or 4): one short ray per
-// block of the low resolution apply, x = block index. The update list
+// block of the low resolution apply, x = block index, and with y = 1 one
+// ray toward the nearest moving object. The update list
 // binding holds the rays instead of probes (ddgi_apply.glsl, MODE_APPLY_LOW):
 // a header (count, max distance as float bits) and per block the origin
 // (xyz float bits) and the direction (octahedral, unorm16 x 2). Hits are
@@ -118,18 +119,24 @@ void ddgi_trace_probe_rays() {
 // for it instead (far field).
 void ddgi_trace_near_field_rays() {
 	uint block = gl_LaunchIDEXT.x;
-	if (block >= ddgi_update_count) {
+	uint blocks = ddgi_update_count;
+	if (block >= blocks) {
 		return;
 	}
-	float max_distance = uintBitsToFloat(ddgi_update_pad[0]);
+	// y 0: the cosine ray, which skips moving objects (rt_cull_mask()); y 1:
+	// the ray toward the nearest moving object, which sees everything.
+	bool object_ray = gl_LaunchIDEXT.y == 1u;
+	float max_distance = object_ray ? 10000.0 : uintBitsToFloat(ddgi_update_pad[0]);
 	uint width = max(ddgi_update_pad[1], 1u);
-	ivec2 texel = ivec2(block % width, block / width);
-	uvec4 packed_ray = uvec4(ddgi_update_probes[block * 4u], ddgi_update_probes[block * 4u + 1u], ddgi_update_probes[block * 4u + 2u], ddgi_update_probes[block * 4u + 3u]);
+	uint height = ddgi_update_pad[2];
+	ivec2 texel = ivec2(block % width, block / width + (object_ray ? height : 0u));
+	uint record = object_ray ? blocks + block : block;
+	uvec4 packed_ray = uvec4(ddgi_update_probes[record * 4u], ddgi_update_probes[record * 4u + 1u], ddgi_update_probes[record * 4u + 2u], ddgi_update_probes[record * 4u + 3u]);
 	vec3 ray_origin = uintBitsToFloat(packed_ray.xyz);
 	if (packed_ray.w == 0u) {
 		// No surface in this block.
 		imageStore(ddgi_ray_data, texel, vec4(0.0, 0.0, 0.0, DDGI_MISS_DISTANCE));
-		ddgi_ray_bounce[block] = uvec4(0u);
+		ddgi_ray_bounce[record] = uvec4(0u);
 		return;
 	}
 	vec3 ray_dir = oct_to_vec3(unpackUnorm2x16(packed_ray.w) * 2.0 - 1.0);
@@ -146,7 +153,7 @@ void ddgi_trace_near_field_rays() {
 
 	path_pack(payload, ps);
 	// Back faces count: a ray that starts inside geometry sees no light.
-	traceRayEXT(tlas, gl_RayFlagsNoneEXT, 0xFF, 0, 0, 0, ray_origin, 0.0, ray_dir, max_distance, 0);
+	traceRayEXT(tlas, gl_RayFlagsNoneEXT, object_ray ? 0xFFu : rt_cull_mask(), 0, 0, 0, ray_origin, 0.0, ray_dir, max_distance, 0);
 	ps = path_unpack(payload);
 
 	bool missed = ps.hit_t >= DDGI_MISS_DISTANCE;
@@ -156,7 +163,7 @@ void ddgi_trace_near_field_rays() {
 	if (!missed && (ps.packed_bounces_flags & DDGI_BOUNCE_FLAG) != 0u) {
 		bounce.xyw = uvec3(packUnorm4x8(vec4(ps.throughput, 1.0)), packUnorm2x16(vec3_to_oct(ps.offset_normal)), floatBitsToUint(ps.hit_t));
 	}
-	ddgi_ray_bounce[block] = bounce;
+	ddgi_ray_bounce[record] = bounce;
 }
 
 void main() {

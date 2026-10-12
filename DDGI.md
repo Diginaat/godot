@@ -121,7 +121,7 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `emissive_lights` | On: emissive surfaces light pixels directly (sphere lights with a ray traced shadow); the probes carry only their bounce light |
 | `near_field_rays` | On: one short ray per block of the low resolution apply and frame, accumulated and filtered, in place of the probes' light near surfaces (see below) |
 | `near_field_distance` | 2: how far the near-field rays reach, in probe spacings of the finest volume |
-| `skip_moving_objects` | On: probe rays (and their shadow rays) skip objects that keep moving; the near-field rays still see them, so their shadow and bounce light follow them without a trailing smear |
+| `skip_moving_objects` | On: probes and near-field cosine rays skip objects that keep moving; each block lights from the nearest one with one ray toward it (as a sphere light), so its shadow and bounce light follow it without noise or smear |
 
 ### Baking
 
@@ -474,6 +474,7 @@ noise of the first updates doesn't linger.
 | 24 | Baking: least-squares refinement against a half-spacing bake | Done (branch `dev-ddgi-quality`) |
 | 25 | Near-field rays in the apply pass: bounce light from nearby objects in place, following them | Done (branch `dev-ddgi-quality`) |
 | 26 | Moving objects out of the probes; near-field history lets go faster near them | Done (branch `dev-ddgi-quality`) |
+| 27 | Moving objects lit as spheres by one ray per block: no noise | Done (branch `dev-ddgi-quality`) |
 
 ## Test project
 
@@ -615,6 +616,27 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 27, noise near moving objects (branch
+  `dev-ddgi-quality`). Report: after step 26 the light around the ball was
+  grainy ("needs to be smooth, no noise allowed"). One cosine ray per block
+  hits the ball only now and then, and the short history near it can't
+  average that out. Sampling the cone toward the ball half of the time
+  (mixture pdf weights) didn't help visibly. Fix, as for the emissive
+  lights: the cosine rays skip moving objects too (`rt_cull_mask()` 0x7F
+  for every DDGI dispatch); each block traces one more ray, toward the
+  center of the nearest moving object (spheres: center and mean half
+  extent, from `RenderRaytracing`), and adds (light leaving the hit -
+  probe irradiance) x the sphere's form factor (the emitters'
+  `sphere_light()`), faded out over the second half of the range. It is
+  the same every frame, so it isn't accumulated. First try used half the
+  box diagonal as radius: the ball counted 1.7x bigger and the surfaces
+  inside that sphere showed a ghost outline and a flat patch. Result: the
+  ball's red bounce and shadow are smooth and follow it in both the bleed
+  view and `bleed.tscn`. Interior flicker std 0.069-0.073 (unchanged);
+  storm level settled GI 20.9 (was 21.2: small moving objects now skip the
+  probes); DDGI 1.50 -> 1.62 ms (room 1080p, which has a moving ball and
+  box).
 
 - 2026-10-12: Step 26, moving objects (branch `dev-ddgi-quality`). Report:
   in the user's red ball scene (`misc/ddgi_test_project/bleed.tscn`,

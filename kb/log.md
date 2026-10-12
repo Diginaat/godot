@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-10-12 (moving objects, no noise)
+
+* **Updated**: DDGI.md step 27: moving objects lit as spheres by one ray
+  per block, no noise.
+
 ## 2026-10-12 (moving objects)
 
 * **Updated**: DDGI.md step 26: probes skip moving objects, near-field
