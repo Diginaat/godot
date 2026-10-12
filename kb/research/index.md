@@ -12,6 +12,16 @@ ideas; check the license before taking any code.
 * [Adaptive placement of GI probes (Forza)](/research/forza-adaptive-probe-placement.md) - procedural layered probe point clouds for baking
 * [Gaussian compression for probes](/research/gaussian-probe-compression.md) - Gaussian + MLP compression of baked SH probes, cascaded lighting volumes
 
+# Probes, baking and reconstruction (read 2026-10-12, second set)
+
+* [Unity 6 Adaptive Probe Volumes](/research/unity6-adaptive-probe-volumes.md) - 4x4x4 bricks at 1/3/9/27 m, baked sky occlusion x dynamic sky color, scenario blending, streaming
+* [Tetrahedral probe interpolation (GDC 2012)](/research/tetrahedral-probe-interpolation.md) - Delaunay tets, barycentric weights, coherent walks
+* [CoD: Infinite Warfare precomputed lighting](/research/cod-iw-precomputed-lighting.md) - decoupled self-visibility, regular tet light grid with per-probe visibility, SH de-ringing, least-squares baking
+* [Stupid SH Tricks](/research/stupid-sh-tricks.md) - SH irradiance, ringing and windowing, lights from SH
+* [GI downscaling](/research/gi-downscaling.md) - GI at 1/4-1/32 resolution: downsampled G-buffer, depth-normal upsampling, L1 SH
+* [FF7 Rebirth GI analysis](/research/ff7-rebirth-gi.md) - ambient cube probes, reflection leaks, specular occlusion fixes
+* [Zhihu article 571673961](/research/zhihu-571673961.md) - not read: access refused
+
 # What they mean for DDGI
 
 * [DDGI improvement proposals, ranked](/ddgi/improvements/index.md)

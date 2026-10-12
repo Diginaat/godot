@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-10-12 (second research set)
+
+* **Added**: 6 references (Unity 6 APV, tetrahedral interpolation, CoD:
+  Infinite Warfare precomputed lighting, Stupid SH Tricks, GI downscaling,
+  FF7 Rebirth GI) and an unread stub for a Zhihu article (HTTP 403).
+* **Added**: proposals 9-11 (low-resolution apply with directional output,
+  specular occlusion, least-squares baking) and two small ideas.
+
 ## 2026-10-12 (scheduler 2x, moving lights)
 
 * **Corrected**: [favored probes and flicker](/ddgi/findings/scheduler-favored-set-stability.md):
