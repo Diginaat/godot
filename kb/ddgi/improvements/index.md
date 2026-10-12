@@ -25,7 +25,7 @@ Status per proposal in the last column.
 | 8 | [Compressed baked data](/ddgi/improvements/compressed-baked-data.md) | Baked data size | Small to large | Gaussian compression, Enemies, Unity APV | Proposed |
 | 9 | [Low-resolution apply with directional output](/ddgi/improvements/low-res-apply-directional.md) | The apply pass is half the DDGI cost; half resolution softens edges | Medium | GI downscaling, Stupid SH Tricks | Done (`dev-ddgi-quality`) |
 | 10 | [Specular occlusion for the DDGI reflection output](/ddgi/improvements/specular-occlusion.md) | Bright reflections in shadowed corners and interiors | Small to medium | FF7 Rebirth analysis, Enlisted | Proposed |
-| 11 | [Least-squares baking with a smoothness regularizer](/ddgi/improvements/least-squares-bake.md) | Interpolation error, seams and noise in baked data | Medium | CoD: Infinite Warfare | Proposed |
+| 11 | [Least-squares baking with a smoothness regularizer](/ddgi/improvements/least-squares-bake.md) | Interpolation error, seams and noise in baked data | Medium | CoD: Infinite Warfare | Done (`dev-ddgi-quality`) |
 
 Small ideas not worth their own page yet:
 

@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-10-12 (least-squares bake)
+
+* **Implemented**: [least-squares baking](/ddgi/improvements/least-squares-bake.md)
+  on `dev-ddgi-quality`; [success](/successes/least-squares-bake.md).
+* **Reread** the six GI papers for these two features: SDFDDGI's min/max
+  checkerboard went into the low resolution apply; Enemies' dilation
+  caveat (it creates new leaks) kept probes inside geometry out of the
+  solve and its smoothness term.
+
 ## 2026-10-12 (low resolution apply)
 
 * **Implemented**: [low-resolution apply](/ddgi/improvements/low-res-apply-directional.md)

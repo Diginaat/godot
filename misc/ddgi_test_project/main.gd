@@ -265,7 +265,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 # --volume=cx,cy,cz,sx,sy,sz adds a DDGIVolume (center and size) with
 # --vspacing= and --vcascades= (default 1 m, 1 cascade). --bake=path bakes it
 # before the capture and saves the DDGIProbeData; --baked=path loads one with
-# --bake_mode=0|1|2 (dynamic, baked, baked + dynamic; default 1).
+# --bake_mode=0|1|2 (dynamic, baked, baked + dynamic; default 1),
+# --bake_ls=0|1 (least-squares refinement of the bake; default 1).
 func _setup_volume() -> void:
 	if not args.has("volume"):
 		return
@@ -279,6 +280,8 @@ func _setup_volume() -> void:
 	if args.has("bounce"):
 		volume.bounce_energy = float(args["bounce"])
 	volume.realtime_updates = env.ddgi_realtime_updates
+	# --bake_ls=0|1: least-squares refinement of the bake (default on).
+	volume.bake_least_squares = args.get("bake_ls", "1") == "1"
 	add_child(volume)
 	if args.has("baked"):
 		volume.probe_data = load(args["baked"])

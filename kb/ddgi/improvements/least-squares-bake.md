@@ -3,7 +3,7 @@ type: Proposal
 title: Least-squares baking with a smoothness regularizer
 description: Bake probe values so that the interpolated light matches dense samples between probes, with a penalty on differences between mutually visible probes - less interpolation error and noise in baked DDGI.
 tags: [ddgi, baking, quality, proposal]
-status: draft
+status: stable
 generated: { by: claude_code/claude-opus-5-5, at: 2026-10-12T00:00:00Z }
 sources:
   - id: cod
@@ -11,7 +11,19 @@ sources:
     title: Precomputed lighting in CoD - Infinite Warfare
 ---
 
-# Today
+# Result (2026-10-12, branch `dev-ddgi-quality`)
+
+Built as `DDGIVolume.bake_least_squares` (default on),
+`scene/3d/ddgi_bake_solver.cpp`. Instead of surface samples, the samples
+are a second bake with half the probe spacing; the system per cascade,
+texel and channel is solved by conjugate gradients on the CPU. Against an
+independent half-spacing bake, the error of the baked GI buffer drops
+from 1.34 to 0.74 levels in the interior and from 0.72 to 0.47 in the
+room (2 cascades); bake time 0.5 -> 6.0 s for the interior. Details:
+DDGI.md, step 24. Not tuned yet: smoothness and prior weights (0.05
+each).
+
+# Before
 
 The bake traces each probe and stores its own light (many rays, averaged).
 What surfaces see is the trilinear, visibility-weighted interpolation of 8

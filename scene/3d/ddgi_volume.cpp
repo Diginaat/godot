@@ -30,6 +30,8 @@
 
 #include "ddgi_volume.h"
 
+#include "ddgi_bake_solver.h"
+
 #include "core/config/project_settings.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
@@ -337,17 +339,9 @@ Ref<DDGIProbeData> DDGIVolume::get_probe_data() const {
 	return probe_data;
 }
 
-Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
-	ERR_FAIL_COND_V_MSG(!is_inside_tree(), Ref<DDGIProbeData>(), "DDGIVolume must be inside the scene tree to bake.");
-	ERR_FAIL_COND_V_MSG(!enabled, Ref<DDGIProbeData>(), "DDGIVolume is disabled; enable it to bake.");
-	ERR_FAIL_COND_V_MSG(infinite_world, Ref<DDGIProbeData>(), "An infinite world DDGIVolume (probes following the camera) can't be baked. Turn off infinite_world.");
+Dictionary DDGIVolume::_bake_trace(int p_updates, int p_progress_from, int p_progress_to, bool *r_cancelled) {
 	Ref<Environment> env = _get_environment();
-	ERR_FAIL_COND_V_MSG(env.is_null(), Ref<DDGIProbeData>(), "DDGIVolume needs a WorldEnvironment with an Environment to bake.");
-	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
-	ERR_FAIL_COND_V_MSG(!rd || !rd->has_feature(RD::SUPPORTS_RAYTRACING_PIPELINE), Ref<DDGIProbeData>(), "Baking DDGI needs hardware ray tracing: the Forward+ renderer, the Vulkan driver and a GPU with ray tracing pipelines.");
-
-	// Every probe is updated about this many times.
-	const int updates = p_updates_per_probe > 0 ? p_updates_per_probe : 96;
+	const int updates = p_updates;
 	const Vector3i grid = _grid_from_size();
 	const int64_t total_probes = int64_t(grid.x) * grid.y * grid.z * cascades;
 
@@ -410,9 +404,6 @@ Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 	camera->set_transform(Transform3D(Basis(), get_global_position()));
 	camera->make_current();
 
-	if (bake_begin_function) {
-		bake_begin_function();
-	}
 	bool cancelled = false;
 	const int fast_updates = updates / 3;
 	float hysteresis = -1.0f;
@@ -431,7 +422,7 @@ Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 			env->set_ddgi_hysteresis(h);
 		}
 		RS::get_singleton()->draw(false);
-		if (bake_step_function && (i % 8) == 0 && bake_step_function(int(int64_t(i) * 1000 / frames), vformat(RTR("Tracing probes (%d / %d frames)"), i, frames))) {
+		if (bake_step_function && (i % 8) == 0 && bake_step_function(p_progress_from + int(int64_t(i) * (p_progress_to - p_progress_from) / frames), vformat(RTR("Tracing probes (%d / %d frames)"), i, frames))) {
 			cancelled = true;
 			break;
 		}
@@ -447,6 +438,68 @@ Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 	}
 	remove_child(vp);
 	memdelete(vp);
+	*r_cancelled = cancelled;
+	return data;
+}
+
+Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
+	ERR_FAIL_COND_V_MSG(!is_inside_tree(), Ref<DDGIProbeData>(), "DDGIVolume must be inside the scene tree to bake.");
+	ERR_FAIL_COND_V_MSG(!enabled, Ref<DDGIProbeData>(), "DDGIVolume is disabled; enable it to bake.");
+	ERR_FAIL_COND_V_MSG(infinite_world, Ref<DDGIProbeData>(), "An infinite world DDGIVolume (probes following the camera) can't be baked. Turn off infinite_world.");
+	Ref<Environment> env = _get_environment();
+	ERR_FAIL_COND_V_MSG(env.is_null(), Ref<DDGIProbeData>(), "DDGIVolume needs a WorldEnvironment with an Environment to bake.");
+	RenderingDevice *rd = RenderingServer::get_singleton()->get_rendering_device();
+	ERR_FAIL_COND_V_MSG(!rd || !rd->has_feature(RD::SUPPORTS_RAYTRACING_PIPELINE), Ref<DDGIProbeData>(), "Baking DDGI needs hardware ray tracing: the Forward+ renderer, the Vulkan driver and a GPU with ray tracing pipelines.");
+
+	// Every probe is updated about this many times.
+	const int updates = p_updates_per_probe > 0 ? p_updates_per_probe : 96;
+	const Vector3i grid = _grid_from_size();
+	// The least-squares refinement needs a second bake with half the probe
+	// spacing, on a grid of 2n - 1 probes per side (the coarse probes and
+	// the points between them), within the 64 probes per side the renderer
+	// allows.
+	const Vector3i fine_grid = grid * 2 - Vector3i(1, 1, 1);
+	bool refine = bake_least_squares && fine_grid.x <= 64 && fine_grid.y <= 64 && fine_grid.z <= 64;
+	if (bake_least_squares && !refine) {
+		WARN_PRINT(vformat("DDGI bake: least-squares refinement skipped: it needs at most 32 probes per side (this volume has %s).", grid));
+	}
+
+	if (bake_begin_function) {
+		bake_begin_function();
+	}
+	bool cancelled = false;
+	Dictionary data = _bake_trace(updates, 0, refine ? 150 : 1000, &cancelled);
+	if (refine && !cancelled && !data.is_empty()) {
+		// The fine grid: the same center, half the spacing, and a size that
+		// makes it exactly 2n - 1 probes per side.
+		const float saved_spacing = probe_spacing;
+		const Vector3 saved_size = size;
+		probe_spacing = saved_spacing * 0.5f;
+		size = Vector3(grid - Vector3i(1, 1, 1)) * saved_spacing;
+		_apply_to_environment();
+		Dictionary fine = _bake_trace(updates, 150, 950, &cancelled);
+		probe_spacing = saved_spacing;
+		size = saved_size;
+		_apply_to_environment();
+		if (!cancelled && !fine.is_empty()) {
+			if (bake_step_function) {
+				bake_step_function(950, RTR("Solving probes"));
+			}
+			DDGIBakeSolver::Settings settings;
+			settings.normal_bias = normal_bias;
+			DDGIBakeSolver::Report report;
+			String error;
+			uint64_t t0 = OS::get_singleton()->get_ticks_msec();
+			Dictionary solved = DDGIBakeSolver::solve(data, fine, settings, &report, &error);
+			if (solved.is_empty()) {
+				WARN_PRINT("DDGI bake: least-squares refinement skipped: " + error + ".");
+			} else {
+				data = solved;
+				print_line(vformat("DDGI bake: least-squares refinement from %d fine probes in %d ms; interpolation error %.4f -> %.4f, irradiance changed by %.1f%%.",
+						report.samples, OS::get_singleton()->get_ticks_msec() - t0, report.residual_before, report.residual_after, report.mean_change * 100.0f));
+			}
+		}
+	}
 	if (bake_end_function) {
 		bake_end_function();
 	}
@@ -462,6 +515,14 @@ Ref<DDGIProbeData> DDGIVolume::bake(int p_updates_per_probe) {
 	result->set_data(data);
 	set_probe_data(result);
 	return result;
+}
+
+void DDGIVolume::set_bake_least_squares(bool p_enabled) {
+	bake_least_squares = p_enabled;
+}
+
+bool DDGIVolume::is_bake_least_squares_enabled() const {
+	return bake_least_squares;
 }
 
 AABB DDGIVolume::get_aabb() const {
@@ -532,6 +593,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_debug_mode", "mode"), &DDGIVolume::set_debug_mode);
 	ClassDB::bind_method(D_METHOD("get_debug_mode"), &DDGIVolume::get_debug_mode);
 	ClassDB::bind_method(D_METHOD("set_bake_mode", "mode"), &DDGIVolume::set_bake_mode);
+	ClassDB::bind_method(D_METHOD("set_bake_least_squares", "enabled"), &DDGIVolume::set_bake_least_squares);
+	ClassDB::bind_method(D_METHOD("is_bake_least_squares_enabled"), &DDGIVolume::is_bake_least_squares_enabled);
 	ClassDB::bind_method(D_METHOD("get_bake_mode"), &DDGIVolume::get_bake_mode);
 	ClassDB::bind_method(D_METHOD("set_probe_data", "data"), &DDGIVolume::set_probe_data);
 	ClassDB::bind_method(D_METHOD("get_probe_data"), &DDGIVolume::get_probe_data);
@@ -556,6 +619,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades"), "set_debug_mode", "get_debug_mode");
 	ADD_GROUP("Baking", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "bake_mode", PROPERTY_HINT_ENUM, "Dynamic,Baked,Baked + Dynamic"), "set_bake_mode", "get_bake_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "bake_least_squares"), "set_bake_least_squares", "is_bake_least_squares_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "probe_data", PROPERTY_HINT_RESOURCE_TYPE, DDGIProbeData::get_class_static()), "set_probe_data", "get_probe_data");
 
 	BIND_ENUM_CONSTANT(BAKE_MODE_DYNAMIC);

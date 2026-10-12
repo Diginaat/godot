@@ -6,6 +6,7 @@ works clearly better than what came before. Mistakes are in
 [mistakes](/mistakes/).
 
 * [Sample-driven probe scheduling](/successes/sample-driven-scheduling.md) - DDGI follows light changes about 8% faster at no measurable cost
+* [Least-squares baking](/successes/least-squares-bake.md) - baked GI error against a finer bake roughly halved, from a talk's idea in two builds
 * [Measuring the response to a change](/successes/step-response-instead-of-startup.md) - converge, step one input, trace: repeats within a few frames
 * [One editor copy per variant](/successes/editor-copy-per-variant.md) - A/B tests without rebuilding
 * [Side work in its own small pass](/successes/separate-small-pass.md) - 0.03 ms instead of 0.05 ms in the hot shader

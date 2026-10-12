@@ -90,6 +90,7 @@ private:
 	bool infinite_world = false;
 	Environment::DDGIDebugMode debug_mode = Environment::DDGI_DEBUG_DISABLED;
 	BakeMode bake_mode = BAKE_MODE_DYNAMIC;
+	bool bake_least_squares = true;
 	Ref<DDGIProbeData> probe_data;
 	Ref<Environment> applied_environment;
 
@@ -98,6 +99,8 @@ private:
 	void _apply_to_environment();
 	void _apply_baked_data();
 	bool _probe_data_matches() const;
+	/// One bake pass: traces the current grid until converged and returns the probe data (empty on failure).
+	Dictionary _bake_trace(int p_updates, int p_progress_from, int p_progress_to, bool *r_cancelled);
 
 protected:
 	void _notification(int p_what);
@@ -153,6 +156,9 @@ public:
 
 	void set_bake_mode(BakeMode p_mode);
 	BakeMode get_bake_mode() const;
+
+	void set_bake_least_squares(bool p_enabled);
+	bool is_bake_least_squares_enabled() const;
 
 	void set_probe_data(const Ref<DDGIProbeData> &p_data);
 	Ref<DDGIProbeData> get_probe_data() const;

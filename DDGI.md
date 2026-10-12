@@ -132,6 +132,21 @@ saves them as a `DDGIProbeData` resource (`<scene>.<node>.ddgi.res`,
 compressed). The interior test scene (4968 probes, Medium) bakes in about
 0.5 s into 3.6 MB; 20736 probes (3 cascades of 25 x 13 x 25) in 1.2 s.
 
+With `bake_least_squares` (default on) the bake then refines the probes
+(`scene/3d/ddgi_bake_solver.cpp`, after Call of Duty: Infinite Warfare's
+light grid bake). It bakes the volume a second time with half the probe
+spacing (2n - 1 probes per side: the coarse probes and the points between
+them), then solves, per cascade, octahedral texel and color channel, for
+the coarse irradiance whose blend at each fine probe, with the renderer's
+own weights (trilinear, backface, Chebyshev visibility from the coarse
+distances, crush, in square root space), best matches the fine probe's
+light. Two regularizers: smoothness between neighboring probes that see
+each other (not through walls) and a pull toward each probe's own traced
+light. Conjugate gradients, 48 iterations, all texels in parallel. Only
+active fine probes (near surfaces) are used. Volumes with more than 32
+probes per side skip it (the fine grid would exceed 64). The interior
+bakes in 6.0 s instead of 0.5 s (solve 0.5 s).
+
 | Bake mode | At runtime |
 | --- | --- |
 | Dynamic | The bake is ignored; probes are traced as before |
@@ -439,6 +454,7 @@ noise of the first updates doesn't linger.
 | 20 | Performance: bounce light lookup moved out of the ray tracing pipeline | Done |
 | 22 | Scheduling: probes sampled by visible surfaces first (mark pass) | Done (branch `dev-ddgi-sched`) |
 | 23 | Performance: low resolution apply with directional output and upsampling | Done (branch `dev-ddgi-quality`) |
+| 24 | Baking: least-squares refinement against a half-spacing bake | Done (branch `dev-ddgi-quality`) |
 
 ## Test project
 
@@ -498,7 +514,8 @@ between identical runs).
 
 Baking: `--volume=cx,cy,cz,sx,sy,sz` adds a `DDGIVolume` (with
 `--vspacing=`, `--vcascades=`), `--bake=path.res` bakes and saves it before
-the capture, `--baked=path.res --bake_mode=0|1|2` loads one.
+the capture, `--baked=path.res --bake_mode=0|1|2` loads one, `--bake_ls=0`
+bakes without the least-squares refinement.
 
 ```
 bin\godot.windows.editor.x86_64.console.exe --path misc\ddgi_test_project -- --view=interior --tod=0 --anim=0 --res=640x360 --linear --exposure=4 --frames=600 --measure=60 --stdmap=C:\tmp\std.png
@@ -578,6 +595,20 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 24, least-squares bake (branch `dev-ddgi-quality`).
+  Each case baked at 0.5 m spacing, rendered baked-only, compared with an
+  independent plain bake at 0.25 m (the reference), 1280x720:
+
+  | Scene | Plain: mean diff / p99 | Least squares | Interpolation error (fine probes) | Solve |
+  | --- | --- | --- | --- | --- |
+  | Interior, 1 cascade | 1.341 / 11.7 | 0.738 / 7.3 | 0.0243 -> 0.0123 | 505 ms, 21498 fine probes |
+  | Room (emissive panels), 2 cascades | 0.721 / 10.3 | 0.471 / 9.3 | 0.0369 -> 0.0210 | 372 ms, 11351 fine probes |
+
+  Brightness unchanged (26.18 vs 26.27 interior). The refined bake also
+  shows less blotchy noise than the reference. Bake time 0.5 -> 6.0 s
+  (interior). Smoothness 0.05 and prior 0.05 were the first values tried,
+  not tuned.
 
 - 2026-10-12: Step 23, low resolution apply (branch `dev-ddgi-quality`,
   from the GI downscaling article in `kb/research/gi-downscaling.md`).
