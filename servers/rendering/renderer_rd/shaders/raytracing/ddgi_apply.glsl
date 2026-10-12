@@ -781,6 +781,13 @@ float nf_geometry_weight(float p_depth, vec3 p_normal, float p_other_depth, vec3
 
 #ifdef MODE_NF_RESOLVE
 
+// How much of the probes' light a moving object passes on (its second
+// bounce). The probes don't see the object, so under a ball they count the
+// floor as lit and the ball's shaded underside came out bright red; against
+// the path tracer, the object's direct light alone matched (red beside and
+// above the ball -12.7 vs -12.6, was -3).
+#define NF_OBJECT_BOUNCE 0.0
+
 void main() {
 	ivec2 block = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(block, nf.size.xy))) {
@@ -795,10 +802,9 @@ void main() {
 	}
 	vec4 probe = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0);
 
-	// The nearest moving object: the light leaving it toward this block (as
-	// any hit: emission, direct light, bounce light), spread with the
-	// object's form factor, minus the light behind it it hides (the probes'
-	// irradiance stands for that, as for rays that hit nothing).
+	// The nearest moving object: the light leaving it toward this block
+	// (emission and direct light; NF_OBJECT_BOUNCE), spread with the
+	// object's form factor, minus the light behind it it hides.
 	vec3 object_light = vec3(0.0);
 	uint blocks = uint(nf.size.x * nf.size.y);
 	uvec4 object_ray = nf_rays[1u + blocks + idx];
@@ -807,18 +813,24 @@ void main() {
 		uvec4 b = nf_bounce[blocks + idx];
 		if (hit.a > 0.0 && hit.a < DDGI_MISS_DISTANCE * 0.5 && b.z != 0u) {
 			vec3 leaving = hit.rgb;
-			if ((b.x >> 24u) != 0u) {
-				vec3 object_dir = oct_to_vec3(unpackUnorm2x16(object_ray.w) * 2.0 - 1.0);
+			if (NF_OBJECT_BOUNCE > 0.0 && (b.x >> 24u) != 0u) {
+				vec3 hit_dir = oct_to_vec3(unpackUnorm2x16(object_ray.w) * 2.0 - 1.0);
 				vec3 hit_normal = oct_to_vec3(unpackUnorm2x16(b.y) * 2.0 - 1.0);
-				vec3 hit_pos = uintBitsToFloat(object_ray.xyz) + object_dir * uintBitsToFloat(b.w);
-				vec4 irradiance = ddgi_sample_irradiance(hit_pos, hit_normal, -object_dir);
-				leaving += unpackUnorm4x8(b.x).rgb * min(ddgi.schedule.w, 0.95) * irradiance.rgb * irradiance.a;
+				vec3 hit_pos = uintBitsToFloat(object_ray.xyz) + hit_dir * uintBitsToFloat(b.w);
+				vec4 irradiance = ddgi_sample_irradiance(hit_pos, hit_normal, -hit_dir);
+				leaving += unpackUnorm4x8(b.x).rgb * min(ddgi.schedule.w, 0.95) * irradiance.rgb * irradiance.a * NF_OBJECT_BOUNCE;
 			}
 			float lum = ddgi_luminance(leaving);
 			if (lum > ddgi.schedule.z) {
 				leaving *= ddgi.schedule.z / lum;
 			}
-			object_light = (leaving - probe.rgb) * probe.a;
+			// The light the object hides: what the probes (which don't see
+			// it) give for a surface facing it. The block's own irradiance
+			// averages the whole hemisphere and hid too little: under a
+			// ball, the bright sky above is what it hides.
+			vec3 object_dir = oct_to_vec3(unpackUnorm2x16(object_ray.w) * 2.0 - 1.0);
+			vec4 hidden = ddgi_sample_irradiance(uintBitsToFloat(object_ray.xyz), object_dir, object_dir);
+			object_light = (leaving - hidden.rgb * hidden.a) * probe.a;
 		}
 	}
 	if (any(isnan(object_light)) || any(isinf(object_light))) {
@@ -1014,6 +1026,13 @@ void main() {
 		vec4 geometry = vec4(0.0);
 		if (all(greaterThanEqual(c, ivec2(0))) && all(lessThan(c, nf.size.xy))) {
 			light = texelFetch(sampler2D(nf_history, linear_sampler), c, 0);
+			if (!final_pass) {
+				// The moving objects' light joins here: not accumulated over
+				// frames, but smoothed with the rest. Each block's object ray
+				// sees one point of the object; a shadow edge across the
+				// object would otherwise show as a hard edge on the wall.
+				light.rgb += texelFetch(sampler2D(nf_object, linear_sampler), c, 0).rgb;
+			}
 			float depth = imageLoad(low_data1, c).w;
 			if (light.a > 0.0 && depth > 0.0) {
 				geometry = vec4(oct_to_vec3(vec2(imageLoad(low_data2, c).w, imageLoad(low_data3, c).w) * 2.0 - 1.0), depth);
@@ -1055,8 +1074,7 @@ void main() {
 	// In place of the probes' light; the gradients over the normal (from
 	// the probes) are scaled by the same ratio.
 	vec4 probe = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0);
-	// The moving objects' light, the same every frame: not accumulated.
-	light = max(light + texelFetch(sampler2D(nf_object, linear_sampler), block, 0).rgb, vec3(0.0));
+	light = max(light, vec3(0.0));
 	float energy = ddgi.volumes[0].params.x;
 	vec4 d0 = imageLoad(low_data0, block);
 	d0.rgb = max(d0.rgb + (light - probe.rgb) * energy, vec3(0.0));

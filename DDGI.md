@@ -475,6 +475,7 @@ noise of the first updates doesn't linger.
 | 25 | Near-field rays in the apply pass: bounce light from nearby objects in place, following them | Done (branch `dev-ddgi-quality`) |
 | 26 | Moving objects out of the probes; near-field history lets go faster near them | Done (branch `dev-ddgi-quality`) |
 | 27 | Moving objects lit as spheres by one ray per block: no noise | Done (branch `dev-ddgi-quality`) |
+| 28 | Moving objects' light checked against the path tracer: direct light only, hidden light toward the object, smoothed | Done (branch `dev-ddgi-quality`) |
 
 ## Test project
 
@@ -616,6 +617,33 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 28 (branch `dev-ddgi-quality`). Report: screenshots
+  of the red ball scene with a red glow beside and under the ball, and
+  thin orange lines (those were editor gizmo lines: a game run has none).
+  Measured against the path tracer at a fixed ball position (`--jitter`
+  keeps it a moving object), red excess beside / above / under the ball
+  and brightness relative to the far wall:
+
+  | | Beside | Above | Under (brightness) |
+  | --- | --- | --- | --- |
+  | Path tracer | -12.6 | -7.2 | 0.59 |
+  | Step 27 | -2.9 | +3.1 | 0.74 |
+  | Object bounce off | -12.7 | -7.7 | 0.74 |
+  | + hidden light toward the object | -12.7 | -7.7 | 0.66 |
+
+  The ball's light included the probes' bounce light at its surface; the
+  probes don't see the ball, so under it they count the floor as lit, and
+  the ball's shaded underside came out bright red. The object's direct
+  light alone matches (`NF_OBJECT_BOUNCE` 0). The light it hides is now the
+  probes' irradiance facing the object (was the surface's own, which
+  averages the whole hemisphere). Beside the ball the wall is still lighter
+  than in the path tracer (0.93 vs 0.80). A shadow edge across the ball
+  (the wall's) showed as a straight-edged pink wedge on the wall: each
+  block's ray sees one point of the ball. The object light now goes through
+  the two filter passes (not the temporal accumulation). Static red objects
+  (not moving) still show too much red right under them: the near-field
+  hits take the probes' leaking light there.
 
 - 2026-10-12: Step 27, noise near moving objects (branch
   `dev-ddgi-quality`). Report: after step 26 the light around the ball was

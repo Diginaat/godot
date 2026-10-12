@@ -24,7 +24,7 @@ roughness = 0.45
 size = Vector3(30, 1, 30)
 
 [sub_resource type="BoxMesh" id="BoxMesh_8dxue"]
-size = Vector3(10, 2.4907837, 0.3)
+size = Vector3(10, 2.1925201, 0.3)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_562g6"]
 albedo_color = Color(0.7921569, 0, 0, 1)
@@ -40,7 +40,7 @@ height = 1.2
 environment = SubResource("Environment_5ccxf")
 
 [node name="Sun" type="DirectionalLight3D" parent="." unique_id=406926095]
-transform = Transform3D(0.99735814, -0.03632124, 0.06291023, -0.020420969, 0.6909152, 0.7226474, -0.06971307, -0.7220228, 0.6883481, 0, 0, 0.09328079)
+transform = Transform3D(-0.13213287, 0.980802, 0.14341724, -0.63332766, -0.19483706, 0.7489557, 0.7625202, 0.008131579, 0.64691335, 0, 0, 0.09328079)
 layers = 15
 light_energy = 1.529
 shadow_enabled = true
@@ -54,12 +54,12 @@ material_override = SubResource("StandardMaterial3D_pxbti")
 mesh = SubResource("BoxMesh_lfdf6")
 
 [node name="Wall" type="MeshInstance3D" parent="." unique_id=1257319506]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2453918, 1.4223099)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0962601, 1.5724883)
 material_override = SubResource("StandardMaterial3D_pxbti")
 mesh = SubResource("BoxMesh_8dxue")
 
 [node name="RedBall" type="MeshInstance3D" parent="." unique_id=1854530363]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0.6)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0.53594446)
 layers = 2
 material_override = SubResource("StandardMaterial3D_562g6")
 mesh = SubResource("SphereMesh_hh7th")

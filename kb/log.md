@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-10-12 (moving objects vs path tracer)
+
+* **Updated**: DDGI.md step 28: moving objects' light matched against the
+  path tracer.
+
 ## 2026-10-12 (moving objects, no noise)
 
 * **Updated**: DDGI.md step 27: moving objects lit as spheres by one ray
