@@ -3868,7 +3868,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/global_illumination/ddgi/emissive_lights", true);
 	GLOBAL_DEF("rendering/global_illumination/ddgi/near_field_rays", true);
 	GLOBAL_DEF("rendering/global_illumination/ddgi/skip_moving_objects", true);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/near_field_distance", PROPERTY_HINT_RANGE, "0.5,8,0.1"), 2.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/near_field_distance", PROPERTY_HINT_RANGE, "0.1,8,0.05"), 0.5);
 
 	// OpenGL limits
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/opengl/max_renderable_elements", PROPERTY_HINT_RANGE, "1024,65536,1"), 65536);

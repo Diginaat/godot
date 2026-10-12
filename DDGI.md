@@ -120,7 +120,7 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `realtime_rays_per_probe` | 64: rays per probe and frame with realtime updates |
 | `emissive_lights` | On: emissive surfaces light pixels directly (sphere lights with a ray traced shadow); the probes carry only their bounce light |
 | `near_field_rays` | On: one short ray per block of the low resolution apply and frame, accumulated and filtered, in place of the probes' light near surfaces (see below) |
-| `near_field_distance` | 2: how far the near-field rays reach, in probe spacings of the finest volume |
+| `near_field_distance` | 0.5: how far the near-field rays reach, in probe spacings of the finest volume (moving objects reach 2 regardless) |
 | `skip_moving_objects` | On: probes and near-field cosine rays skip objects that keep moving; each block takes the light of the one that covers most of its view, from its shape (a sphere, or its oriented box scaled by how much of it the mesh fills), so its shadow and bounce light follow it without noise or smear |
 
 ### Baking
@@ -620,6 +620,25 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 30, continued. Report: screenshots of the game level's
+  crouch tunnel (probe spacing 2 m) with soft blotches and specks. Probes
+  only: clean. Found and fixed, each checked in the tunnel (static, and the
+  camera walking through) with a fixed camera in the level:
+  dark specks on the floor came from scaling the probes' per-direction
+  gradients by near-field / probe light (up to 4x where the probes are
+  nearly black): removed. Soft blotches: the rays reached 2 spacings (4 m)
+  and caught the sunlit ground outside only now and then; their average
+  stayed patchy after 128 frames. The noise gate now uses temporal moments
+  of the samples (as SVGF), a factor 3, and runs before the blur (after
+  it, neighboring blocks flipped and showed as speckle), but the fix that
+  removed the blotches was the range: `near_field_distance` 2 -> 0.5
+  spacings (moving objects keep 2 spacings with their own rays). Also: back
+  face hits (rays starting inside overlapping geometry) count as misses;
+  the "light changed" reset needs a 30% change (5% fired on probe noise).
+  Results: tunnel clean at 1 m and 2 m spacing, also walking; bleed shapes
+  keep their red bounce; flicker pixels 0.00%; storm level settles at once,
+  GPU time about 2 ms (was 4.4).
 
 - 2026-10-12: Step 30, noise in dark places. Report: blotches and noise
   in a dark tunnel of the game level with 0.7.1. New `tunnel` view.

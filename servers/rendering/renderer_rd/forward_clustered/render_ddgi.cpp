@@ -984,7 +984,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		}
 		if (!rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
 			uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1, RB_TEX_DDGI_NF_OBJECT, RB_TEX_DDGI_NF_OBJECT_WEIGHT, RB_TEX_DDGI_NF_NOISE }) {
+			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1, RB_TEX_DDGI_NF_OBJECT, RB_TEX_DDGI_NF_OBJECT_WEIGHT, RB_TEX_DDGI_NF_NOISE, RB_TEX_DDGI_NF_MOMENTS0, RB_TEX_DDGI_NF_MOMENTS1 }) {
 				rb->create_texture(RB_SCOPE_DDGI_LOW, name, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, low_size);
 			}
 			// The cosine rays' hits, then the object rays' below them.
@@ -1037,7 +1037,12 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RendererRD::MaterialStorage::store_camera(prev_vp, nf.prev_view_projection);
 		// Rays reach a few spacings of the finest volume; the probes give
 		// the light from farther away.
-		nf.params[0] = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/near_field_distance") * vd->volumes[0].spacing;
+		// Moving objects reach 2 spacings (their own rays, no noise); the
+		// near-field rays only near_field_distance: longer rays sampled the
+		// sunlit ground outside a dark tunnel now and then, which showed as
+		// soft blotches, while the probes give that light smoothly.
+		nf.params[0] = 2.0f * vd->volumes[0].spacing;
+		const float ray_distance = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/near_field_distance") * vd->volumes[0].spacing;
 		nf.params[1] = float(vd->frame % 65536u);
 		nf.params[2] = 0.06f;
 		nf.params[3] = vd->nf_history_valid ? 1.0f : 0.0f;
@@ -1052,7 +1057,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		rd->buffer_update(vd->nf_params, 0, sizeof(nf), &nf);
 		uint32_t header[4];
 		header[0] = uint32_t(low_size.x * low_size.y);
-		memcpy(&header[1], &nf.params[0], sizeof(float));
+		memcpy(&header[1], &ray_distance, sizeof(float));
 		header[2] = uint32_t(low_size.x);
 		header[3] = uint32_t(low_size.y);
 		rd->buffer_update(vd->nf_rays, 0, sizeof(header), header);
@@ -1151,6 +1156,8 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				vd->nf_parity ^= 1u;
 				RID history_prev = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_HISTORY0 : RB_TEX_DDGI_NF_HISTORY1, v, 0);
 				RID history = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_HISTORY1 : RB_TEX_DDGI_NF_HISTORY0, v, 0);
+				RID moments_prev = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_MOMENTS0 : RB_TEX_DDGI_NF_MOMENTS1, v, 0);
+				RID moments = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_MOMENTS1 : RB_TEX_DDGI_NF_MOMENTS0, v, 0);
 				RID geometry_prev = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_GEOMETRY0 : RB_TEX_DDGI_NF_GEOMETRY1, v, 0);
 				RID geometry = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_GEOMETRY1 : RB_TEX_DDGI_NF_GEOMETRY0, v, 0);
 				RID raw = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_RAW, v, 0);
@@ -1178,11 +1185,13 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				RD::Uniform u_raw_texture(RD::UNIFORM_TYPE_TEXTURE, 21, raw);
 				RD::Uniform u_history_prev(RD::UNIFORM_TYPE_TEXTURE, 22, history_prev);
 				RD::Uniform u_history_out(RD::UNIFORM_TYPE_IMAGE, 23, history);
+				RD::Uniform u_moments_prev(RD::UNIFORM_TYPE_TEXTURE, 32, moments_prev);
+				RD::Uniform u_moments_out(RD::UNIFORM_TYPE_IMAGE, 33, moments);
 				RD::Uniform u_geometry_prev(RD::UNIFORM_TYPE_TEXTURE, 24, geometry_prev);
 				RD::Uniform u_geometry_out(RD::UNIFORM_TYPE_IMAGE, 25, geometry);
 				RID noise = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_NOISE, v, 0);
 				RD::Uniform u_noise_image(RD::UNIFORM_TYPE_IMAGE, 31, noise);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(temporal_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_params, u_raw_texture, u_history_prev, u_history_out, u_geometry_prev, u_geometry_out, u_noise_image, u_nf_probe_texture), 0);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(temporal_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_params, u_raw_texture, u_history_prev, u_history_out, u_geometry_prev, u_geometry_out, u_noise_image, u_nf_probe_texture, u_moments_prev, u_moments_out), 0);
 				rd->compute_list_set_push_constant(list, &push, sizeof(push));
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);
