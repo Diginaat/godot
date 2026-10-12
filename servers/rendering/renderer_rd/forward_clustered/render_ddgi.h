@@ -55,6 +55,7 @@
 #define RB_TEX_DDGI_NF_GEOMETRY0 SNAME("nf_geometry0")
 #define RB_TEX_DDGI_NF_GEOMETRY1 SNAME("nf_geometry1")
 #define RB_TEX_DDGI_NF_OBJECT SNAME("nf_object")
+#define RB_TEX_DDGI_NF_OBJECT_WEIGHT SNAME("nf_object_weight")
 
 class RenderDataRD;
 class RenderSceneBuffersRD;
@@ -209,7 +210,9 @@ public:
 		RID nf_rays;
 		RID nf_bounce;
 		RID nf_params;
-		RID nf_moving; // Bounding spheres of moving objects (RenderRaytracing::ddgi_moving).
+		RID nf_moving; // Shapes of moving objects (RenderRaytracing::ddgi_moving).
+		RID nf_bins[2]; // Light leaving the moving objects' sides, last frame's and this frame's.
+		uint32_t nf_bins_parity = 0;
 		uint32_t nf_blocks = 0;
 		uint32_t nf_parity = 0; // Which history texture is this frame's.
 		bool nf_history_valid = false;

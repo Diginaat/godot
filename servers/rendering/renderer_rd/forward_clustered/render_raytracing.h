@@ -425,6 +425,7 @@ class RenderRaytracing {
 	struct DefaultResources {
 		RID ddgi_uniform_buffer;
 		RID image_rgba16f;
+		RID image_rgba32f; // Binding 0 (the path tracer output) is rgba32f.
 		RID image_r32f;
 		RID image_rg16f;
 	} defaults;
@@ -445,10 +446,21 @@ class RenderRaytracing {
 	/// The same emitters for DDGI's emissive lights, 8 floats each: center,
 	/// radius of the sphere with the same area, emission (rgb), bounding radius.
 	LocalVector<float> ddgi_emitters;
-	/// Objects that keep moving (RT_INSTANCE_MASK_MOVING), as spheres
-	/// (center, mean half extent; 4 floats each), at most 64: DDGI
-	/// near-field object rays light from them directly.
+	/// Surfaces of objects that keep moving (RT_INSTANCE_MASK_MOVING), at
+	/// most 64, for the DDGI near-field object rays: 16 floats each, an
+	/// oriented box (center and fill; half axis x and shape: 0 box, 1
+	/// sphere; half axes y and z). Fill: how much of the box's projected
+	/// size the mesh covers on average (mesh area / box area, Cauchy).
 	LocalVector<float> ddgi_moving;
+	/// Local bounds and surface area of mesh surfaces, read back once.
+	struct MeshShape {
+		AABB aabb;
+		float area = 0.0f;
+		bool valid = false;
+	};
+	HashMap<uint64_t, MeshShape> ddgi_mesh_shapes;
+	MeshShape _ddgi_mesh_shape(RID p_mesh, uint32_t p_surface);
+	void _ddgi_add_moving(RID p_mesh, uint32_t p_surface, const Transform3D &p_transform, const AABB &p_world_bounds);
 	LocalVector<RID> blass;
 	LocalVector<Transform3D> blas_transforms;
 	LocalVector<uint32_t> instance_flags;
@@ -548,7 +560,7 @@ public:
 	void cleanup_caches();
 
 	RTViewportState *build_tlas(const RenderDataRD *p_render_data, uint32_t p_rt_flags);
-	/// Bounding spheres of the objects that keep moving (see ddgi_moving).
+	/// Shapes of the objects that keep moving (see ddgi_moving).
 	const LocalVector<float> &get_ddgi_moving() const { return ddgi_moving; }
 	uint32_t gather_lights(const RenderDataRD *p_render_data, RT_LightData *r_light_data, uint32_t p_max_lights);
 	/// Scene set (set 0) for a trace dispatch. With p_ddgi, DDGI resources are

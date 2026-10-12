@@ -13,7 +13,7 @@ extends Node3D
 ##            windowless back room behind a doorway (bounce light only)
 ##   bleed    a white wall and a red sphere bouncing in front of it in
 ##            bright sun: the red bounce light on the wall (color bleeding,
-##            blobs, lag)
+##            blobs, lag); --shape=box|pole|plank|capsule for other shapes
 
 const VIEWS := {
 	"room": [Vector3(0, 2.0, 3.6), Vector3(0, 1.6, -2.0)],
@@ -42,6 +42,7 @@ var bench_samples := []
 # Environment cascades. Needed for baking.
 var volume: DDGIVolume
 var step_emissive: MeshInstance3D
+var jitter_object: Callable
 # The viewport the 3D scene renders to: the window, or with --res an
 # offscreen SubViewport of exactly that size (the window can't be larger
 # than the screen).
@@ -134,6 +135,9 @@ func _apply_args() -> void:
 		env.tonemap_exposure = float(args["tonemap_exposure"])
 	if args.has("realtime"):
 		env.ddgi_realtime_updates = args["realtime"] == "1"
+	# --skip_moving=0: moving objects stay in the probes (no object rays).
+	if args.has("skip_moving"):
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/skip_moving_objects", args["skip_moving"] == "1")
 	# --nf=0: DDGI near-field rays off (probes only).
 	if args.has("nf"):
 		ProjectSettings.set_setting("rendering/global_illumination/ddgi/near_field_rays", args["nf"] == "1")
@@ -200,6 +204,8 @@ func _process(delta: float) -> void:
 		time += dt
 		for f in animated:
 			f.call(time)
+	elif jitter_object.is_valid():
+		jitter_object.call()
 	if move_camera:
 		_camera_path(dt)
 	elif not capturing:
@@ -826,8 +832,59 @@ func _build_bleed(o: Vector3) -> void:
 	var white := _mat(Color(0.85, 0.85, 0.85))
 	_box(bleed, Vector3(0, -0.5, 0), Vector3(30, 1, 30), white) # Floor.
 	_box(bleed, Vector3(0, 1.0, 2.15), Vector3(10, 2, 0.3), white) # Wall, front at z = 2.
-	var ball := _sphere(bleed, Vector3(0, 0.6, 1.2), 0.6, _mat(Color(0.8, 0.04, 0.03)))
+	# --shape: ball (default), box, pole, plank or capsule, all red. The
+	# other shapes also turn slowly, so their light changes with their
+	# orientation. Their lowest point stays about where the ball's is.
+	var red := _mat(Color(0.8, 0.04, 0.03))
+	var shape: String = args.get("shape", "ball")
+	var ball: MeshInstance3D
+	var low := 0.6 # Height of the center at the lowest point.
+	var reach := 0.6 # Farthest point from the center, turning included.
+	match shape:
+		"box":
+			ball = _box(bleed, Vector3.ZERO, Vector3(1.0, 1.0, 1.0), red)
+			low = 0.85
+			reach = 0.87
+		"pole":
+			ball = MeshInstance3D.new()
+			var cylinder := CylinderMesh.new()
+			cylinder.top_radius = 0.12
+			cylinder.bottom_radius = 0.12
+			cylinder.height = 2.2
+			ball.mesh = cylinder
+			ball.material_override = red
+			bleed.add_child(ball)
+			low = 1.2
+			reach = 1.11
+		"plank":
+			ball = _box(bleed, Vector3.ZERO, Vector3(1.8, 0.06, 0.9), red)
+			low = 0.5
+			reach = 1.01
+		"capsule":
+			ball = MeshInstance3D.new()
+			var capsule := CapsuleMesh.new()
+			capsule.radius = 0.35
+			capsule.height = 1.6
+			ball.mesh = capsule
+			ball.material_override = red
+			bleed.add_child(ball)
+			low = 0.95
+			reach = 0.8
+		_:
+			ball = _sphere(bleed, Vector3.ZERO, 0.6, red)
+	ball.name = "BleedObject"
 	var place := func(time_s: float) -> void:
-		ball.position = Vector3(sin(time_s * 0.5) * 3.0, 0.6 + absf(sin(time_s * 1.6)) * 1.2, 0.8 - 0.4 * (0.5 + 0.5 * sin(time_s * 0.23)))
+		# Its farthest point passes 0.1 to 0.4 m in front of the wall (z = 2).
+		ball.position = Vector3(sin(time_s * 0.5) * 3.0, low + absf(sin(time_s * 1.6)) * 1.2, 2.0 - reach - 0.1 - 0.3 * (0.5 + 0.5 * sin(time_s * 0.23)))
+		if shape != "ball":
+			ball.rotation = Vector3(0.6 * sin(time_s * 0.3), time_s * 0.4, 0.4 * sin(time_s * 0.21))
 	place.call(0.0)
 	animated.append(place)
+	# --jitter: with --anim=0, the object moves by 0.1 mm every frame, so it
+	# counts as a moving object (DDGI skip_moving_objects) but stays in place
+	# (comparisons with the path tracer).
+	if args.has("jitter"):
+		var step := [0]
+		jitter_object = func() -> void:
+			step[0] += 1
+			ball.position.x += 0.0001 if step[0] % 2 == 0 else -0.0001

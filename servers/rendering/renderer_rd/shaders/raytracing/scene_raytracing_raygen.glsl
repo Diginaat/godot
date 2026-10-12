@@ -125,12 +125,12 @@ void ddgi_trace_near_field_rays() {
 	}
 	// y 0: the cosine ray, which skips moving objects (rt_cull_mask()); y 1:
 	// the ray toward the nearest moving object, which sees everything.
-	bool object_ray = gl_LaunchIDEXT.y == 1u;
+	bool object_ray = gl_LaunchIDEXT.y >= 1u;
 	float max_distance = object_ray ? 10000.0 : uintBitsToFloat(ddgi_update_pad[0]);
 	uint width = max(ddgi_update_pad[1], 1u);
 	uint height = ddgi_update_pad[2];
-	ivec2 texel = ivec2(block % width, block / width + (object_ray ? height : 0u));
-	uint record = object_ray ? blocks + block : block;
+	ivec2 texel = ivec2(block % width, block / width + gl_LaunchIDEXT.y * height);
+	uint record = gl_LaunchIDEXT.y * blocks + block;
 	uvec4 packed_ray = uvec4(ddgi_update_probes[record * 4u], ddgi_update_probes[record * 4u + 1u], ddgi_update_probes[record * 4u + 2u], ddgi_update_probes[record * 4u + 3u]);
 	vec3 ray_origin = uintBitsToFloat(packed_ray.xyz);
 	if (packed_ray.w == 0u) {

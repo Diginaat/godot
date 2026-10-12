@@ -41,9 +41,10 @@
 //     MODE_NF_RESOLVE adds the probes' light at each hit (bounce light); rays
 //     that hit nothing within range take the probes' irradiance at the
 //     surface (far field). Moving objects are left out of the probes and
-//     these rays; each block also traces one ray toward the nearest moving
-//     object and gets its light (bounce and shadow) as from a sphere,
-//     without noise or lag. MODE_NF_TEMPORAL accumulates the samples
+//     these rays; each block also traces one ray toward the moving object
+//     that covers most of its view and gets its light (bounce and shadow)
+//     from the object's shape (a sphere, or its box scaled by how much of it
+//     the mesh fills), without noise or lag. MODE_NF_TEMPORAL accumulates the samples
 //     over frames (reprojected, history clamped to the neighborhood, so
 //     changes show within a few frames), MODE_NF_FILTER smooths them with
 //     an edge-aware blur (two passes) and puts them in place of the probes'
@@ -117,9 +118,9 @@ layout(set = 0, binding = 15, std430) restrict readonly buffer DDGIEmitters {
 #if defined(MODE_APPLY_LOW) || defined(MODE_NF_RESOLVE) || defined(MODE_NF_TEMPORAL) || defined(MODE_NF_FILTER)
 // Near-field rays (MODE_APPLY_LOW writes, the trace and MODE_NF_RESOLVE
 // read): [0] header (block count, max distance, width, height), then per
-// block the cosine ray, then per block the ray toward the nearest moving
-// object: origin (xyz float bits) and direction (octahedral unorm16 x 2;
-// 0: no ray).
+// block the cosine ray, then per block the ray toward the moving object that
+// covers most of the view: origin (xyz float bits) and direction
+// (octahedral unorm16 x 2; 0: no ray).
 layout(set = 0, binding = 16, std430) restrict buffer DDGINearFieldRays {
 	uvec4 nf_rays[];
 };
@@ -135,10 +136,15 @@ nf;
 // Probe irradiance without emitters (rgb) and the form factor of the
 // nearest moving object (a), for the near-field passes.
 layout(rgba16f, set = 0, binding = 17) uniform restrict writeonly image2D nf_probe_out;
-// Bounding spheres (center, radius) of the objects that keep moving.
+// The visible faces' form factors (rgb) and object and face code (a).
+layout(rgba16f, set = 0, binding = 28) uniform restrict writeonly image2D nf_object_weight_out;
+// Shapes of the objects that keep moving, 4 vec4 each: center (xyz) and
+// fill (w), half axes x (xyz; w 1 for a sphere), y and z (RenderRaytracing::
+// ddgi_moving).
 layout(set = 0, binding = 26, std430) restrict readonly buffer DDGINearFieldMoving {
 	vec4 nf_moving[];
 };
+
 #endif
 
 #ifdef MODE_NF_RESOLVE
@@ -151,6 +157,21 @@ layout(set = 0, binding = 20, std430) restrict readonly buffer DDGINearFieldBoun
 layout(rgba16f, set = 0, binding = 21) uniform restrict writeonly image2D nf_raw_out;
 // The moving objects' light (rgb): bounce light minus the light they hide.
 layout(rgba16f, set = 0, binding = 27) uniform restrict writeonly image2D nf_object_out;
+layout(set = 0, binding = 28) uniform texture2D nf_object_weight;
+layout(set = 0, binding = 26, std430) restrict readonly buffer DDGINearFieldMoving {
+	vec4 nf_moving[];
+};
+// The light leaving each moving object's six sides (box faces, or the
+// directions of its axes for a sphere), gathered from the object rays that
+// hit it: rgb sums (fixed point, NF_BIN_SCALE) and a count, per object and
+// side. Last frame's, to read; this frame's, to add to.
+#define NF_BIN_SCALE 64.0
+layout(set = 0, binding = 29, std430) restrict readonly buffer DDGINearFieldBinsPrevious {
+	uint nf_bins_previous[];
+};
+layout(set = 0, binding = 30, std430) restrict buffer DDGINearFieldBins {
+	uint nf_bins[];
+};
 #endif
 
 #ifdef MODE_NF_TEMPORAL
@@ -230,6 +251,128 @@ float sphere_light(float p_cos, float p_sin2) {
 	float sin_sqrt_y = sin_t * sqrt(max(1.0 - y * y, 0.0));
 	return max(((p_cos * acos(y) - x * sin_sqrt_y) * p_sin2 + atan(sin_sqrt_y / x)) / 3.14159265359, 0.0);
 }
+
+#ifdef MODE_APPLY_LOW
+// One edge of Lambert's formula for unit vectors p_a, p_b: their cross
+// product times angle / (2 pi sin(angle)), from a rational fit instead of
+// acos (the fit includes the 1 / 2 pi; acos per edge made this pass 1 ms
+// slower).
+vec3 polygon_edge(vec3 p_a, vec3 p_b) {
+	float x = dot(p_a, p_b);
+	float y = abs(x);
+	float a = 0.8543985 + (0.4965155 + 0.0145206 * y) * y;
+	float b = 3.4175940 + (4.1616724 + y) * y;
+	float v = a / b;
+	float theta_over_sin = x > 0.0 ? v : 0.5 * inversesqrt(max(1.0 - x * x, 1e-7)) - v;
+	return cross(p_a, p_b) * theta_over_sin;
+}
+
+// Form factor (cosine-weighted share of the hemisphere above normal p_n) of
+// a quad given by its corners relative to the point, clipped at the
+// horizon: Lambert's formula, a sum over the edges.
+float polygon_form_factor(vec3 p_c0, vec3 p_c1, vec3 p_c2, vec3 p_c3, vec3 p_n) {
+	float d0 = dot(p_c0, p_n);
+	float d1 = dot(p_c1, p_n);
+	float d2 = dot(p_c2, p_n);
+	float d3 = dot(p_c3, p_n);
+	if (max(max(d0, d1), max(d2, d3)) <= 0.0) {
+		return 0.0; // All below the horizon.
+	}
+	vec3 sum;
+	if (min(min(d0, d1), min(d2, d3)) >= 0.0) {
+		// All above the horizon (the usual case): no clipping.
+		vec3 a = normalize(p_c0);
+		vec3 b = normalize(p_c1);
+		vec3 c = normalize(p_c2);
+		vec3 d = normalize(p_c3);
+		sum = polygon_edge(a, b) + polygon_edge(b, c) + polygon_edge(c, d) + polygon_edge(d, a);
+	} else {
+		// Clip against the horizon plane: at most 5 corners.
+		vec3 corners[4] = vec3[](p_c0, p_c1, p_c2, p_c3);
+		float dots[4] = float[](d0, d1, d2, d3);
+		vec3 clipped[5];
+		int count = 0;
+		for (int i = 0; i < 4; i++) {
+			int j = (i + 1) & 3;
+			if (dots[i] >= 0.0) {
+				clipped[count++] = corners[i];
+			}
+			if ((dots[i] >= 0.0) != (dots[j] >= 0.0)) {
+				clipped[count++] = corners[i] + (corners[j] - corners[i]) * (dots[i] / (dots[i] - dots[j]));
+			}
+		}
+		sum = vec3(0.0);
+		for (int i = 0; i < count; i++) {
+			sum += polygon_edge(normalize(clipped[i]), normalize(clipped[(i + 1) % count]));
+		}
+	}
+	return abs(dot(sum, p_n));
+}
+
+// Form factors of a moving object's shape seen from p_pos with normal
+// p_normal: a sphere has one (r_faces[0]), a box one per axis whose face
+// faces the point (r_sides: bit per axis, set for the + face), already
+// scaled by how much of the box the mesh fills. r_targets: a point on each
+// face. r_distance: to the closest point.
+// Returns the total, or a negative value when p_pos is on or in the shape.
+float moving_form_factor(int p_index, vec3 p_pos, vec3 p_normal, out vec3 r_targets[3], out float r_faces[3], out uint r_sides, out float r_distance) {
+	vec4 c = nf_moving[p_index * 4];
+	vec4 ax = nf_moving[p_index * 4 + 1];
+	vec4 ay = nf_moving[p_index * 4 + 2];
+	vec4 az = nf_moving[p_index * 4 + 3];
+	vec3 axes[3] = vec3[](ax.xyz, ay.xyz, az.xyz);
+	r_targets = vec3[](c.xyz, c.xyz, c.xyz);
+	r_faces = float[](0.0, 0.0, 0.0);
+	r_sides = 0u;
+	vec3 rel = p_pos - c.xyz;
+	// The closest point on the box, in its axes.
+	vec3 local;
+	vec3 closest = c.xyz;
+	for (int i = 0; i < 3; i++) {
+		float len2 = max(dot(axes[i], axes[i]), 1e-12);
+		local[i] = dot(rel, axes[i]) / len2; // -1..1 inside.
+		closest += axes[i] * clamp(local[i], -1.0, 1.0);
+	}
+	r_distance = length(p_pos - closest);
+	if (ax.w > 0.5) {
+		// Sphere: exact.
+		float radius = (length(ax.xyz) + length(ay.xyz) + length(az.xyz)) / 3.0;
+		vec3 to_center = c.xyz - p_pos;
+		float d = length(to_center);
+		r_distance = d - radius;
+		if (r_distance < 0.02) {
+			return -1.0; // On or in the object: it doesn't light itself.
+		}
+		r_faces[0] = sphere_light(dot(p_normal, to_center / d), radius * radius / (d * d));
+		return r_faces[0];
+	}
+	if (r_distance < 0.02) {
+		return -1.0; // On or in the object: it doesn't light itself.
+	}
+	// The box faces that face the point; a convex box's visible faces don't
+	// overlap, so their form factors add up. Each face gets its own ray, so
+	// a lit and a shaded face both count (one ray for the whole box jumped
+	// between them and left hard edges).
+	float total = 0.0;
+	for (int i = 0; i < 3; i++) {
+		if (abs(local[i]) <= 1.0) {
+			continue; // Neither face on this axis faces the point.
+		}
+		vec3 face_center = c.xyz + axes[i] * sign(local[i]);
+		vec3 face = face_center - p_pos;
+		vec3 u = axes[(i + 1) % 3];
+		vec3 v = axes[(i + 2) % 3];
+		// How much of the box the mesh covers on average.
+		r_faces[i] = polygon_form_factor(face - u - v, face + u - v, face + u + v, face - u + v, p_normal) * c.w;
+		// A bit inside the face: on the mesh even where it doesn't fill the
+		// box's corners (a capsule's ends).
+		r_targets[i] = mix(face_center, c.xyz, 0.25);
+		r_sides |= local[i] > 0.0 ? (1u << uint(i)) : 0u;
+		total += r_faces[i];
+	}
+	return total;
+}
+#endif
 
 #ifdef DDGI_EMITTERS
 // Direct light from the emissive surfaces at p_pos for each of the first
@@ -465,38 +608,62 @@ void main() {
 			// it there, spread as from a sphere of that radiance (as the
 			// emissive lights are), minus the light it hides, is its bounce
 			// light and shadow. The same every frame: no noise, no lag.
-			float best_sin2 = 0.0;
-			float best_fade = 0.0;
-			vec3 object_dir = normal;
+			// The moving object with the largest form factor, faded out over
+			// the second half of the range so the range doesn't show as an
+			// edge.
+			// The object that covers most of the view: its faces' form
+			// factors (rgb) and which object and faces (a: index * 8 + side
+			// bits + 1; 0 for none), and one ray toward it that tells whether
+			// it is in view (and gathers its light, MODE_NF_RESOLVE).
+			float form_factor = 0.0;
+			vec3 object_faces = vec3(0.0);
+			float object_code = 0.0;
+			vec3 object_target = world_pos;
+			// The pick, by a cheap estimate (the solid angle of a sphere of
+			// the object's mean size); the exact form factor only for it.
+			int pick = -1;
+			float pick_estimate = 0.0;
 			for (int i = 0; i < nf.size.w; i++) {
-				vec4 sphere = nf_moving[i];
-				vec3 to_sphere = sphere.xyz - world_pos;
-				float d2 = dot(to_sphere, to_sphere);
-				float radius2 = sphere.w * sphere.w;
-				if (d2 <= radius2 * 1.01) {
-					continue; // On or inside the object itself.
-				}
-				float d = sqrt(d2);
-				if (d - sphere.w > nf.params.x || dot(to_sphere, normal) < -sphere.w) {
+				vec4 c = nf_moving[i * 4];
+				float size = (length(nf_moving[i * 4 + 1].xyz) + length(nf_moving[i * 4 + 2].xyz) + length(nf_moving[i * 4 + 3].xyz)) / 3.0;
+				vec3 to_object = c.xyz - world_pos;
+				float d2 = dot(to_object, to_object);
+				float reach = nf.params.x + 1.75 * size; // Range plus the box's half diagonal at most.
+				if (d2 > reach * reach || dot(to_object, normal) < -1.75 * size) {
 					continue; // Out of range, or below the horizon.
 				}
-				float sin2 = radius2 / d2;
-				if (sin2 > best_sin2) {
-					best_sin2 = sin2;
-					object_dir = to_sphere / d;
-					// Fades out over the second half of the range, so the
-					// range doesn't show as an edge.
-					best_fade = 1.0 - smoothstep(0.5 * nf.params.x, nf.params.x, d - sphere.w);
+				float estimate = size * size / max(d2, 1e-4);
+				if (estimate > pick_estimate) {
+					pick_estimate = estimate;
+					pick = i;
 				}
 			}
-			float form_factor = best_sin2 > 0.0 ? sphere_light(dot(normal, object_dir), best_sin2) * best_fade : 0.0;
+			if (pick >= 0) {
+				vec3 targets[3];
+				float faces[3];
+				uint sides;
+				float distance;
+				float f = moving_form_factor(pick, world_pos, normal, targets, faces, sides, distance);
+				if (f > 0.0 && distance <= nf.params.x) {
+					float fade = 1.0 - smoothstep(0.5 * nf.params.x, nf.params.x, distance);
+					form_factor = f * fade;
+					object_faces = vec3(faces[0], faces[1], faces[2]) * fade;
+					object_code = float(uint(pick) * 8u + sides) + 1.0;
+					// Toward the visible faces, weighted by their share.
+					object_target = (targets[0] * faces[0] + targets[1] * faces[1] + targets[2] * faces[2]) / f;
+				}
+			}
+			imageStore(nf_object_weight_out, block, vec4(object_faces, object_code));
+
 			imageStore(nf_probe_out, block, vec4(e[0], form_factor));
 			// Off the surface by a bit more far away (depth precision).
 			vec3 ray_origin = world_pos + normal * max(0.01, 0.002 * ref_depth);
 			uint idx = uint(block.y) * uint(nf.size.x) + uint(block.x);
 			nf_rays[1u + idx] = uvec4(floatBitsToUint(ray_origin), max(packUnorm2x16(vec3_to_oct(dir)), 1u));
 			uint blocks = uint(nf.size.x * nf.size.y);
-			nf_rays[1u + blocks + idx] = form_factor > 0.0 ? uvec4(floatBitsToUint(ray_origin), max(packUnorm2x16(vec3_to_oct(object_dir)), 1u)) : uvec4(0u);
+			vec3 to_target = object_target - world_pos;
+			bool valid = form_factor > 0.0 && dot(to_target, to_target) > 1e-8;
+			nf_rays[1u + blocks + idx] = valid ? uvec4(floatBitsToUint(ray_origin), max(packUnorm2x16(vec3_to_oct(normalize(to_target))), 1u)) : uvec4(0u);
 		}
 		float energy = ddgi.volumes[0].params.x;
 		float inv_step = 1.0 / (2.0 * tilt / sqrt(1.0 + tilt * tilt));
@@ -515,6 +682,7 @@ void main() {
 	if (!found && (params.flags & FLAG_NEAR_FIELD) != 0u) {
 		nf_rays[1u + uint(block.y) * uint(nf.size.x) + uint(block.x)] = uvec4(0u);
 		nf_rays[1u + uint(nf.size.x * nf.size.y) + uint(block.y) * uint(nf.size.x) + uint(block.x)] = uvec4(0u);
+		imageStore(nf_object_weight_out, block, vec4(0.0));
 		imageStore(nf_probe_out, block, vec4(0.0));
 	}
 	imageStore(low_data0, block, out0);
@@ -781,12 +949,11 @@ float nf_geometry_weight(float p_depth, vec3 p_normal, float p_other_depth, vec3
 
 #ifdef MODE_NF_RESOLVE
 
-// How much of the probes' light a moving object passes on (its second
-// bounce). The probes don't see the object, so under a ball they count the
-// floor as lit and the ball's shaded underside came out bright red; against
-// the path tracer, the object's direct light alone matched (red beside and
-// above the ball -12.7 vs -12.6, was -3).
-#define NF_OBJECT_BOUNCE 0.0
+// A moving object's light is its emission and direct light only, not the
+// probes' light it passes on: the probes don't see the object, so under a
+// ball they count the floor as lit and the ball's shaded underside came out
+// bright red. Against the path tracer, direct light alone matched (red
+// beside and above the ball -12.7 vs -12.6, was -3).
 
 void main() {
 	ivec2 block = ivec2(gl_GlobalInvocationID.xy);
@@ -802,35 +969,76 @@ void main() {
 	}
 	vec4 probe = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0);
 
-	// The nearest moving object: the light leaving it toward this block
-	// (emission and direct light; NF_OBJECT_BOUNCE), spread with the
-	// object's form factor, minus the light behind it it hides.
+	// The moving object that covers most of the view: its visible sides'
+	// light times their form factors (MODE_APPLY_LOW), minus the light it
+	// hides. The side's light is averaged over every object ray that hit
+	// that side last frame, so it is smooth even where the object's lighting
+	// changes across it (a shadow edge); one ray per block only tells whether
+	// the object is in view, and adds to this frame's averages.
 	vec3 object_light = vec3(0.0);
 	uint blocks = uint(nf.size.x * nf.size.y);
+	vec4 weights = texelFetch(sampler2D(nf_object_weight, linear_sampler), block, 0);
 	uvec4 object_ray = nf_rays[1u + blocks + idx];
-	if (object_ray.w != 0u && probe.a > 0.0) {
+	if (weights.a > 0.5 && object_ray.w != 0u) {
+		uint code = uint(weights.a - 0.5);
+		int object = int(code / 8u);
+		uint sides = code % 8u;
 		vec4 hit = texelFetch(sampler2D(nf_ray_data, linear_sampler), block + ivec2(0, nf.size.y), 0);
 		uvec4 b = nf_bounce[blocks + idx];
-		if (hit.a > 0.0 && hit.a < DDGI_MISS_DISTANCE * 0.5 && b.z != 0u) {
-			vec3 leaving = hit.rgb;
-			if (NF_OBJECT_BOUNCE > 0.0 && (b.x >> 24u) != 0u) {
-				vec3 hit_dir = oct_to_vec3(unpackUnorm2x16(object_ray.w) * 2.0 - 1.0);
-				vec3 hit_normal = oct_to_vec3(unpackUnorm2x16(b.y) * 2.0 - 1.0);
-				vec3 hit_pos = uintBitsToFloat(object_ray.xyz) + hit_dir * uintBitsToFloat(b.w);
-				vec4 irradiance = ddgi_sample_irradiance(hit_pos, hit_normal, -hit_dir);
-				leaving += unpackUnorm4x8(b.x).rgb * min(ddgi.schedule.w, 0.95) * irradiance.rgb * irradiance.a * NF_OBJECT_BOUNCE;
-			}
+		if (object < nf.size.w && hit.a > 0.0 && hit.a < DDGI_MISS_DISTANCE * 0.5 && b.z != 0u) {
+			vec3 object_dir = oct_to_vec3(unpackUnorm2x16(object_ray.w) * 2.0 - 1.0);
+			vec3 leaving = max(hit.rgb, vec3(0.0));
 			float lum = ddgi_luminance(leaving);
 			if (lum > ddgi.schedule.z) {
 				leaving *= ddgi.schedule.z / lum;
 			}
+			vec3 axes[3] = vec3[](normalize(nf_moving[object * 4 + 1].xyz), normalize(nf_moving[object * 4 + 2].xyz), normalize(nf_moving[object * 4 + 3].xyz));
+			// Add this hit to its side's average (by the hit normal).
+			if ((b.x >> 24u) != 0u) {
+				vec3 hit_normal = oct_to_vec3(unpackUnorm2x16(b.y) * 2.0 - 1.0);
+				vec3 along = vec3(dot(hit_normal, axes[0]), dot(hit_normal, axes[1]), dot(hit_normal, axes[2]));
+				int axis = abs(along.x) > abs(along.y) ? (abs(along.x) > abs(along.z) ? 0 : 2) : (abs(along.y) > abs(along.z) ? 1 : 2);
+				uint bin = uint(object * 6 + axis * 2 + (along[axis] > 0.0 ? 1 : 0)) * 4u;
+				uvec3 fixed_point = uvec3(clamp(leaving, vec3(0.0), vec3(64.0)) * NF_BIN_SCALE + 0.5);
+				atomicAdd(nf_bins[bin], fixed_point.r);
+				atomicAdd(nf_bins[bin + 1u], fixed_point.g);
+				atomicAdd(nf_bins[bin + 2u], fixed_point.b);
+				atomicAdd(nf_bins[bin + 3u], 1u);
+			}
+			float total = 0.0;
+			if (nf_moving[object * 4 + 1].w > 0.5) {
+				// Sphere: its sides blended by how much they face this block.
+				vec3 facing = -object_dir;
+				vec3 sum = vec3(0.0);
+				float weight_sum = 0.0;
+				for (int axis = 0; axis < 3; axis++) {
+					float d = dot(facing, axes[axis]);
+					uint bin = uint(object * 6 + axis * 2 + (d > 0.0 ? 1 : 0)) * 4u;
+					uint count = nf_bins_previous[bin + 3u];
+					vec3 side = count > 0u ? vec3(nf_bins_previous[bin], nf_bins_previous[bin + 1u], nf_bins_previous[bin + 2u]) / (NF_BIN_SCALE * float(count)) : leaving;
+					sum += side * d * d;
+					weight_sum += d * d;
+				}
+				object_light = sum / max(weight_sum, 1e-6) * weights.r;
+				total = weights.r;
+			} else {
+				for (int axis = 0; axis < 3; axis++) {
+					if (weights[axis] <= 0.0) {
+						continue;
+					}
+					uint bin = uint(object * 6 + axis * 2 + int((sides >> uint(axis)) & 1u)) * 4u;
+					uint count = nf_bins_previous[bin + 3u];
+					vec3 side = count > 0u ? vec3(nf_bins_previous[bin], nf_bins_previous[bin + 1u], nf_bins_previous[bin + 2u]) / (NF_BIN_SCALE * float(count)) : leaving;
+					object_light += side * weights[axis];
+					total += weights[axis];
+				}
+			}
 			// The light the object hides: what the probes (which don't see
 			// it) give for a surface facing it. The block's own irradiance
-			// averages the whole hemisphere and hid too little: under a
-			// ball, the bright sky above is what it hides.
-			vec3 object_dir = oct_to_vec3(unpackUnorm2x16(object_ray.w) * 2.0 - 1.0);
+			// averages the whole hemisphere and hid too little: under a ball,
+			// the bright sky above is what it hides.
 			vec4 hidden = ddgi_sample_irradiance(uintBitsToFloat(object_ray.xyz), object_dir, object_dir);
-			object_light = (leaving - hidden.rgb * hidden.a) * probe.a;
+			object_light -= hidden.rgb * hidden.a * total;
 		}
 	}
 	if (any(isnan(object_light)) || any(isinf(object_light))) {

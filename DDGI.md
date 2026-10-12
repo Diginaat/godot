@@ -121,7 +121,7 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `emissive_lights` | On: emissive surfaces light pixels directly (sphere lights with a ray traced shadow); the probes carry only their bounce light |
 | `near_field_rays` | On: one short ray per block of the low resolution apply and frame, accumulated and filtered, in place of the probes' light near surfaces (see below) |
 | `near_field_distance` | 2: how far the near-field rays reach, in probe spacings of the finest volume |
-| `skip_moving_objects` | On: probes and near-field cosine rays skip objects that keep moving; each block lights from the nearest one with one ray toward it (as a sphere light), so its shadow and bounce light follow it without noise or smear |
+| `skip_moving_objects` | On: probes and near-field cosine rays skip objects that keep moving; each block takes the light of the one that covers most of its view, from its shape (a sphere, or its oriented box scaled by how much of it the mesh fills), so its shadow and bounce light follow it without noise or smear |
 
 ### Baking
 
@@ -476,6 +476,7 @@ noise of the first updates doesn't linger.
 | 26 | Moving objects out of the probes; near-field history lets go faster near them | Done (branch `dev-ddgi-quality`) |
 | 27 | Moving objects lit as spheres by one ray per block: no noise | Done (branch `dev-ddgi-quality`) |
 | 28 | Moving objects' light checked against the path tracer: direct light only, hidden light toward the object, smoothed | Done (branch `dev-ddgi-quality`) |
+| 29 | Moving objects of any shape: oriented boxes with exact face form factors, light averaged per side | Done (`dev-ddgi`, 0.7.1) |
 
 ## Test project
 
@@ -488,7 +489,7 @@ code (`main.gd`):
 | `outdoor` | Sun with a time-of-day cycle, 400 m street of open-fronted buildings and pillars; `--move` flies the camera down the street (scrolling) |
 | `stress` | 4000 MultiMesh instances, 40 moving slabs, 32 fast-changing omni lights; `--move` orbits the camera |
 | `interior` | Closed house lit only by the sun through one window, and a windowless back room behind a doorway (bounce light only); use `--tod=0` |
-| `bleed` | A red ball bouncing in front of a 2 m white wall; bright sun from the side and slightly behind the wall lights the ball, the wall front stays out of direct sun (`--sun=<energy>`, default 4): the red bounce light on the wall and floor; `--nf=0` turns the near-field rays off |
+| `bleed` | A red ball bouncing in front of a 2 m white wall; bright sun from the side and slightly behind the wall lights the ball, the wall front stays out of direct sun (`--sun=<energy>`, default 4). `--shape=box|pole|plank|capsule` for other shapes (they also turn), `--jitter` with `--anim=0` keeps the object in place but moving (path tracer comparisons), `--nf=0` (near-field rays off), `--skip_moving=0` |
 
 ```
 bin\godot.windows.editor.x86_64.exe --path misc\ddgi_test_project
@@ -617,6 +618,32 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 29, moving objects of any shape (0.7.1). Moving objects
+  were spheres of their mean size. Now each moving surface is its oriented
+  bounding box (from the mesh's local bounds, read back once per mesh with
+  its surface area): the form factor is exact for the box's visible faces
+  (Lambert's formula, clipped at the horizon), times how much of the box the
+  mesh covers on average (mesh area / box area: mean projected area is a
+  quarter of the surface area for convex shapes). Sphere-like meshes (equal
+  sides, area ratio near pi / 6) keep the exact sphere formula. Tested with
+  `--shape=ball|box|pole|plank|capsule` against the path tracer: red on the
+  wall at the sunlit side for ball, box and capsule, faint above the plank,
+  almost none for the thin pole, as in the path tracer. Problems on the
+  way: points on an object's own face weren't inside its box (no margin), so
+  objects lit themselves (now: closer than 2 cm skips the object); one ray
+  per block jumped between a lit and a shaded face (hard-edged patch under
+  the box); three rays per block (one per face) cost 1.4 ms in the room. Now
+  one ray per block only tells whether the object is in view, and every
+  ray's hit adds to an average per object side (six bins, by the hit
+  normal along the object's axes, last frame's used). The exact polygon
+  form factor with acos cost another 0.9 ms: now only for the picked
+  object, no clipping when the face is above the horizon, and a rational
+  fit for angle / sin (which includes the 1 / 2 pi: dividing again made
+  boxes 6x too weak at first). DDGI in the room 1.62 -> 1.78 ms; static
+  flicker and the storm level unchanged. Also: ray tracing binding 0 got a
+  rgba16f default image in DDGI dispatches but is rgba32f (14 validation
+  messages per editor smoke run); it now has its own default.
 
 - 2026-10-12: Step 28 (branch `dev-ddgi-quality`). Report: screenshots
   of the red ball scene with a red glow beside and under the ball, and

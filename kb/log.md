@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-10-12 (moving objects of any shape)
+
+* **Updated**: DDGI.md step 29: moving objects as oriented boxes with exact
+  face form factors (0.7.1).
+
 ## 2026-10-12 (moving objects vs path tracer)
 
 * **Updated**: DDGI.md step 28: moving objects' light matched against the

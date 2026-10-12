@@ -39,6 +39,7 @@
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
+#include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/storage/environment_storage.h"
 
@@ -77,7 +78,7 @@ RenderRaytracing::~RenderRaytracing() {
 		mat_ubo_pool_buffer = RID();
 	}
 
-	for (RID *r : { &defaults.ddgi_uniform_buffer, &defaults.image_rgba16f, &defaults.image_r32f, &defaults.image_rg16f }) {
+	for (RID *r : { &defaults.ddgi_uniform_buffer, &defaults.image_rgba16f, &defaults.image_rgba32f, &defaults.image_r32f, &defaults.image_rg16f }) {
 		if (r->is_valid()) {
 			RD::get_singleton()->free_rid(*r);
 			*r = RID();
@@ -2962,19 +2963,7 @@ RTViewportState *RenderRaytracing::build_tlas(const RenderDataRD *p_render_data,
 			instance_masks.push_back(_instance_mask(inst, inst->transform_status == RenderForwardClustered::GeometryInstanceForwardClustered::TransformStatus::MOVED, (geometry_data[geometry_data.size() - 1].flags & RT_GEOM_FLAG_EMISSIVE_LIGHT) != 0));
 			if (instance_masks[instance_masks.size() - 1] == RT_INSTANCE_MASK_MOVING) {
 				geometry_data[geometry_data.size() - 1].flags |= RT_GEOM_FLAG_MOVING;
-				// Once per instance (its surfaces come one after another).
-				const uint32_t n = ddgi_moving.size();
-				const AABB &bounds = inst->transformed_aabb;
-				const Vector3 center = bounds.get_center();
-				if (n < 64 * 4 && !(n >= 4 && ddgi_moving[n - 4] == center.x && ddgi_moving[n - 3] == center.y && ddgi_moving[n - 2] == center.z)) {
-					ddgi_moving.push_back(center.x);
-					ddgi_moving.push_back(center.y);
-					ddgi_moving.push_back(center.z);
-					// The mean half extent: the radius for a ball, close enough
-					// for compact objects (the box's half diagonal made a ball
-					// look 1.7 times bigger).
-					ddgi_moving.push_back((bounds.size.x + bounds.size.y + bounds.size.z) / 6.0f);
-				}
+				_ddgi_add_moving(surf->owner->data->base, surf->surface_index, instance_transform, inst->transformed_aabb);
 			}
 
 			surf = surf->next;
@@ -3331,10 +3320,112 @@ void RenderRaytracing::_ensure_default_resources() {
 	tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT;
 	tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	defaults.image_rgba16f = rd->texture_create(tf, RD::TextureView());
+	tf.format = RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+	defaults.image_rgba32f = rd->texture_create(tf, RD::TextureView());
 	tf.format = RD::DATA_FORMAT_R32_SFLOAT;
 	defaults.image_r32f = rd->texture_create(tf, RD::TextureView());
 	tf.format = RD::DATA_FORMAT_R16G16_SFLOAT;
 	defaults.image_rg16f = rd->texture_create(tf, RD::TextureView());
+}
+
+RenderRaytracing::MeshShape RenderRaytracing::_ddgi_mesh_shape(RID p_mesh, uint32_t p_surface) {
+	const uint64_t key = (p_mesh.get_id() << 8) | (p_surface & 0xFF);
+	if (const MeshShape *cached = ddgi_mesh_shapes.getptr(key)) {
+		return *cached;
+	}
+	MeshShape shape;
+	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	if (p_mesh.is_valid() && mesh_storage->owns_mesh(p_mesh) && int(p_surface) < mesh_storage->mesh_get_surface_count(p_mesh)) {
+		// Read back once per mesh surface: only for objects that keep moving.
+		RenderingServerTypes::SurfaceData data = static_cast<const RendererMeshStorage *>(mesh_storage)->mesh_get_surface(p_mesh, int(p_surface));
+		shape.aabb = data.aabb;
+		if (data.primitive == RSE::PRIMITIVE_TRIANGLES) {
+			Array arrays = RenderingServer::get_singleton()->mesh_create_arrays_from_surface_data(data);
+			if (arrays.size() == RSE::ARRAY_MAX && arrays[RSE::ARRAY_VERTEX].get_type() == Variant::PACKED_VECTOR3_ARRAY) {
+				const PackedVector3Array vertices = arrays[RSE::ARRAY_VERTEX];
+				const PackedInt32Array indices = arrays[RSE::ARRAY_INDEX];
+				const int count = indices.is_empty() ? vertices.size() : indices.size();
+				double area = 0.0;
+				for (int i = 0; i + 2 < count; i += 3) {
+					const int a = indices.is_empty() ? i : indices[i];
+					const int b = indices.is_empty() ? i + 1 : indices[i + 1];
+					const int c = indices.is_empty() ? i + 2 : indices[i + 2];
+					if (a < vertices.size() && b < vertices.size() && c < vertices.size()) {
+						area += 0.5 * (vertices[b] - vertices[a]).cross(vertices[c] - vertices[a]).length();
+					}
+				}
+				shape.area = float(area);
+				shape.valid = area > 0.0;
+			}
+		}
+	}
+	ddgi_mesh_shapes.insert(key, shape);
+	return shape;
+}
+
+// One moving surface for the DDGI near-field object rays (see ddgi_moving):
+// its oriented bounding box, and what kind of shape fills it. A sphere-like
+// mesh is lit as a sphere (exact); anything else as its box, scaled by how
+// much of the box the mesh covers on average: for convex shapes the mean
+// projected area is a quarter of the surface area (Cauchy), so mesh area /
+// box area is the mean coverage. Flat meshes (planes) count one side.
+void RenderRaytracing::_ddgi_add_moving(RID p_mesh, uint32_t p_surface, const Transform3D &p_transform, const AABB &p_world_bounds) {
+	if (ddgi_moving.size() >= 64 * 16) {
+		return;
+	}
+	const MeshShape shape = _ddgi_mesh_shape(p_mesh, p_surface);
+	Vector3 center;
+	Vector3 axes[3];
+	float area = 0.0f;
+	if (shape.valid) {
+		center = p_transform.xform(shape.aabb.get_center());
+		const Vector3 half = shape.aabb.size * 0.5f;
+		for (int i = 0; i < 3; i++) {
+			axes[i] = p_transform.basis.get_column(i) * half[i];
+		}
+		// Surface area scales with the square of the (mean) scale.
+		const float scale2 = Math::pow(Math::abs(p_transform.basis.determinant()), 2.0f / 3.0f);
+		area = shape.area * scale2;
+	} else {
+		center = p_world_bounds.get_center();
+		const Vector3 half = p_world_bounds.size * 0.5f;
+		axes[0] = Vector3(half.x, 0, 0);
+		axes[1] = Vector3(0, half.y, 0);
+		axes[2] = Vector3(0, 0, half.z);
+	}
+	float h[3] = { axes[0].length(), axes[1].length(), axes[2].length() };
+	const float h_min = MIN(h[0], MIN(h[1], h[2]));
+	const float h_max = MAX(h[0], MAX(h[1], h[2]));
+	if (h_max <= 0.0f) {
+		return;
+	}
+	const float box_area = 8.0f * (h[0] * h[1] + h[1] * h[2] + h[2] * h[0]);
+	float fill = 1.0f;
+	float sphere = 0.0f;
+	if (area > 0.0f) {
+		if (h_min < 0.02f * h_max) {
+			// Flat: one side of the mesh against one side of the box.
+			fill = area / MAX(box_area * 0.5f, 1e-6f);
+		} else {
+			fill = area / box_area;
+			// A sphere covers pi / 6 of its box's area (0.52).
+			if (h_min > 0.85f * h_max && fill > 0.45f && fill < 0.6f) {
+				sphere = 1.0f;
+			}
+		}
+		fill = CLAMP(fill, 0.05f, 1.0f);
+	} else {
+		fill = 0.7f; // Unknown mesh: between a sphere and a box.
+	}
+	const float data[16] = {
+		center.x, center.y, center.z, fill,
+		axes[0].x, axes[0].y, axes[0].z, sphere,
+		axes[1].x, axes[1].y, axes[1].z, 0.0f,
+		axes[2].x, axes[2].y, axes[2].z, 0.0f
+	};
+	for (float f : data) {
+		ddgi_moving.push_back(f);
+	}
 }
 
 // DDGI probes skip objects that keep moving (a character, a rolling ball):
@@ -3411,7 +3502,7 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		u.binding = 0;
 		u.uniform_type = RD::UNIFORM_TYPE_IMAGE;
 		if (ddgi_trace) {
-			u.append_id(defaults.image_rgba16f);
+			u.append_id(defaults.image_rgba32f);
 		} else {
 			rt_ensure_textures(rb);
 			u.append_id(rt_get_texture(rb));
