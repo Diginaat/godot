@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-10-12 (dark places)
+
+* **Updated**: DDGI.md step 30: no flicker or blotches in dark places;
+  new `tunnel` test view.
+
 ## 2026-10-12 (moving objects of any shape)
 
 * **Updated**: DDGI.md step 29: moving objects as oriented boxes with exact

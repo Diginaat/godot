@@ -477,6 +477,7 @@ noise of the first updates doesn't linger.
 | 27 | Moving objects lit as spheres by one ray per block: no noise | Done (branch `dev-ddgi-quality`) |
 | 28 | Moving objects' light checked against the path tracer: direct light only, hidden light toward the object, smoothed | Done (branch `dev-ddgi-quality`) |
 | 29 | Moving objects of any shape: oriented boxes with exact face form factors, light averaged per side | Done (`dev-ddgi`, 0.7.1) |
+| 30 | No flicker or blotches in dark places: near-field history holds the correction to the probes, reset by the probes' own change; close hits use the block's probe light | Done (`dev-ddgi`) |
 
 ## Test project
 
@@ -489,6 +490,7 @@ code (`main.gd`):
 | `outdoor` | Sun with a time-of-day cycle, 400 m street of open-fronted buildings and pillars; `--move` flies the camera down the street (scrolling) |
 | `stress` | 4000 MultiMesh instances, 40 moving slabs, 32 fast-changing omni lights; `--move` orbits the camera |
 | `interior` | Closed house lit only by the sun through one window, and a windowless back room behind a doorway (bounce light only); use `--tod=0` |
+| `tunnel` | A closed 12 m tunnel open at one end onto sunlit ground: dark indirect light only. Use `--tonemap_exposure=6`; `--plain` without the grid texture (path tracer), `--overlap` lets the walls reach into the roof |
 | `bleed` | A red ball bouncing in front of a 2 m white wall; bright sun from the side and slightly behind the wall lights the ball, the wall front stays out of direct sun (`--sun=<energy>`, default 4). `--shape=box|pole|plank|capsule` for other shapes (they also turn), `--jitter` with `--anim=0` keeps the object in place but moving (path tracer comparisons), `--nf=0` (near-field rays off), `--skip_moving=0` |
 
 ```
@@ -618,6 +620,28 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 30, noise in dark places. Report: blotches and noise
+  in a dark tunnel of the game level with 0.7.1. New `tunnel` view.
+  Flickering pixels (realtime updates): 0.6.0 0.01%, 0.7.1 1.39%; with
+  near-field rays off 0.00%. Cause: the near-field history was clamped
+  every frame to this frame's neighborhood, and in the dark only a few rays
+  reach the sunlit opening, so that neighborhood jumps. Now the clamp runs
+  only near moving objects or when the probes' light at the block moved
+  more than 5% from its moving average; otherwise up to 128 frames. The
+  history holds the near-field light minus the probes' (the correction),
+  so the result follows the probes at once (with the light itself, the
+  storm level took about 110 frames to settle after the lamp stopped; now
+  0). A noise gate keeps the probes' value where the near-field differs by
+  less than its remaining standard error. Thin bright streaks along the
+  tunnel's ceiling corners: near-field hits a few cm away looked the probes
+  up where they leak from outside; close hits (under half a spacing) now
+  blend to the block's own probe light. Results: flicker pixels 0.00% in
+  tunnel, interior and bleed; tunnel std 0.17 (static) / 0.64 (realtime,
+  as 0.6.0); storm settled 21.0, 3 runs within 0.01. A wide clamp (6
+  standard errors) brought 0.02% flicker back for a small speed-up and was
+  dropped. The storm test now turns rain off (particles and wet shaders
+  differed between runs).
 
 - 2026-10-12: Step 29, moving objects of any shape (0.7.1). Moving objects
   were spheres of their mean size. Now each moving surface is its oriented

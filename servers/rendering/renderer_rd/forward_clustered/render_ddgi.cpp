@@ -984,7 +984,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		}
 		if (!rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
 			uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1, RB_TEX_DDGI_NF_OBJECT, RB_TEX_DDGI_NF_OBJECT_WEIGHT }) {
+			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1, RB_TEX_DDGI_NF_OBJECT, RB_TEX_DDGI_NF_OBJECT_WEIGHT, RB_TEX_DDGI_NF_NOISE }) {
 				rb->create_texture(RB_SCOPE_DDGI_LOW, name, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, low_size);
 			}
 			// The cosine rays' hits, then the object rays' below them.
@@ -1180,7 +1180,9 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				RD::Uniform u_history_out(RD::UNIFORM_TYPE_IMAGE, 23, history);
 				RD::Uniform u_geometry_prev(RD::UNIFORM_TYPE_TEXTURE, 24, geometry_prev);
 				RD::Uniform u_geometry_out(RD::UNIFORM_TYPE_IMAGE, 25, geometry);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(temporal_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_params, u_raw_texture, u_history_prev, u_history_out, u_geometry_prev, u_geometry_out), 0);
+				RID noise = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_NOISE, v, 0);
+				RD::Uniform u_noise_image(RD::UNIFORM_TYPE_IMAGE, 31, noise);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(temporal_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_params, u_raw_texture, u_history_prev, u_history_out, u_geometry_prev, u_geometry_out, u_noise_image, u_nf_probe_texture), 0);
 				rd->compute_list_set_push_constant(list, &push, sizeof(push));
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);
@@ -1191,7 +1193,8 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_NF_FILTER]);
 				RD::Uniform u_history_texture(RD::UNIFORM_TYPE_TEXTURE, 22, history);
 				RD::Uniform u_object_texture(RD::UNIFORM_TYPE_TEXTURE, 27, object);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_raw_image, u_history_texture, u_object_texture), 0);
+				RD::Uniform u_noise_texture(RD::UNIFORM_TYPE_TEXTURE, 31, noise);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_raw_image, u_history_texture, u_object_texture, u_noise_texture), 0);
 				rd->compute_list_set_push_constant(list, &push, sizeof(push));
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);
@@ -1201,7 +1204,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				final_push.flags |= 1u << 28;
 				RD::Uniform u_unused_image(RD::UNIFORM_TYPE_IMAGE, 21, history_prev);
 				RD::Uniform u_first_pass(RD::UNIFORM_TYPE_TEXTURE, 22, raw);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_unused_image, u_first_pass, u_object_texture), 0);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_unused_image, u_first_pass, u_object_texture, u_noise_texture), 0);
 				rd->compute_list_set_push_constant(list, &final_push, sizeof(final_push));
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);

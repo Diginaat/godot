@@ -56,6 +56,7 @@
 #define RB_TEX_DDGI_NF_GEOMETRY1 SNAME("nf_geometry1")
 #define RB_TEX_DDGI_NF_OBJECT SNAME("nf_object")
 #define RB_TEX_DDGI_NF_OBJECT_WEIGHT SNAME("nf_object_weight")
+#define RB_TEX_DDGI_NF_NOISE SNAME("nf_noise")
 
 class RenderDataRD;
 class RenderSceneBuffersRD;

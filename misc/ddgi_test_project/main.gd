@@ -14,6 +14,10 @@ extends Node3D
 ##   bleed    a white wall and a red sphere bouncing in front of it in
 ##            bright sun: the red bounce light on the wall (color bleeding,
 ##            blobs, lag); --shape=box|pole|plank|capsule for other shapes
+##   tunnel   a closed concrete tunnel, 12 m long, open at one end onto
+##            sunlit ground: inside, all light is indirect and dark (noise,
+##            blotches); the camera looks from deep inside toward the opening;
+##            --plain without the grid texture (path tracer comparisons)
 
 const VIEWS := {
 	"room": [Vector3(0, 2.0, 3.6), Vector3(0, 1.6, -2.0)],
@@ -21,8 +25,9 @@ const VIEWS := {
 	"stress": [Vector3(-200, 18, 40), Vector3(-200, 0, 0)],
 	"interior": [Vector3(395.0, 1.6, -4.0), Vector3(401.5, 1.0, 0.5)],
 	"bleed": [Vector3(600.0, 1.6, -5.0), Vector3(600.0, 1.1, 2.0)],
+	"tunnel": [Vector3(800.0, 1.4, 4.5), Vector3(800.3, 1.0, -6.0)],
 }
-const VIEW_KEYS := ["room", "outdoor", "stress", "interior", "bleed"]
+const VIEW_KEYS := ["room", "outdoor", "stress", "interior", "bleed", "tunnel"]
 const GI_MODES := ["none", "sdfgi", "ddgi"]
 const DEBUG_MODE_COUNT := 7
 
@@ -69,6 +74,7 @@ func _ready() -> void:
 	_build_stress(Vector3(-200, 0, 0))
 	_build_interior(Vector3(400, 0, 0))
 	_build_bleed(Vector3(600, 0, 0))
+	_build_tunnel(Vector3(800, 0, 0))
 
 	camera = Camera3D.new()
 	camera.fov = 60.0
@@ -191,7 +197,7 @@ func _set_view(p_view: String) -> void:
 
 func _update_hud() -> void:
 	var q: int = ProjectSettings.get_setting("rendering/global_illumination/ddgi/quality")
-	hud.text = "view: %s   GI: %s   DDGI quality: %s   debug: %d   animation: %s   path tracing: %s\n1-5 views   G GI mode   U quality   Tab debug   L animation   M camera path   P path tracing\nfly: hold right mouse to look, WASD move, Q/E down/up, Shift faster" % [
+	hud.text = "view: %s   GI: %s   DDGI quality: %s   debug: %d   animation: %s   path tracing: %s\n1-6 views   G GI mode   U quality   Tab debug   L animation   M camera path   P path tracing\nfly: hold right mouse to look, WASD move, Q/E down/up, Shift faster" % [
 		view, gi_mode, ["Low", "Medium", "High", "Ultra", "Custom"][q], env.ddgi_debug_mode,
 		"on" if animate else "off", "on" if env.pathtracing_enabled else "off"]
 
@@ -266,7 +272,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if key.keycode >= KEY_1 and key.keycode <= KEY_5:
+	if key.keycode >= KEY_1 and key.keycode <= KEY_6:
 		_set_view(VIEW_KEYS[key.keycode - KEY_1])
 	elif key.keycode == KEY_G:
 		_set_gi_mode(GI_MODES[(GI_MODES.find(gi_mode) + 1) % GI_MODES.size()])
@@ -888,3 +894,43 @@ func _build_bleed(o: Vector3) -> void:
 		jitter_object = func() -> void:
 			step[0] += 1
 			ball.position.x += 0.0001 if step[0] % 2 == 0 else -0.0001
+
+
+# A grid texture like a prototype level's: light tiles, dark lines.
+func _grid_material(p_albedo: Color) -> StandardMaterial3D:
+	if args.has("plain"):
+		# --plain: no texture (the path tracer doesn't use triplanar UVs).
+		return _mat(p_albedo)
+	var image := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	image.fill(p_albedo)
+	var line := p_albedo * 0.45
+	for i in 64:
+		for k in [0, 1, 32]:
+			image.set_pixel(i, k, line)
+			image.set_pixel(k, i, line)
+	image.generate_mipmaps()
+	var m := _mat(Color.WHITE)
+	m.albedo_texture = ImageTexture.create_from_image(image)
+	m.uv1_triplanar = true
+	m.uv1_scale = Vector3(0.5, 0.5, 0.5)
+	return m
+
+
+# Dark indirect light: a closed tunnel (walls, floor, roof and a back wall)
+# 12 m long, 3 m wide and 2.6 m high, open at its far end (z = -6) onto a
+# sunlit ground. Inside, every surface is lit only by light bouncing in
+# through the opening. The camera looks from near the closed end toward it.
+func _build_tunnel(o: Vector3) -> void:
+	var tunnel := Node3D.new()
+	tunnel.name = "Tunnel"
+	tunnel.position = o
+	add_child(tunnel)
+	var grid := _grid_material(Color(0.8, 0.8, 0.8))
+	var t := 0.4
+	_box(tunnel, Vector3(0, -0.5, -10), Vector3(40, 1, 50), _grid_material(Color(0.7, 0.7, 0.72))) # Ground.
+	_box(tunnel, Vector3(0, 2.6 + t * 0.5, 0), Vector3(3 + 2 * t, t, 12), grid) # Roof.
+	# --overlap: the walls reach into the roof instead of just touching it.
+	var wall_h := 2.6 + (t if args.has("overlap") else 0.0)
+	_box(tunnel, Vector3(-1.5 - t * 0.5, wall_h * 0.5, 0), Vector3(t, wall_h, 12), grid) # Left wall.
+	_box(tunnel, Vector3(1.5 + t * 0.5, wall_h * 0.5, 0), Vector3(t, wall_h, 12), grid) # Right wall.
+	_box(tunnel, Vector3(0, 1.3 + t * 0.5, 6 + t * 0.5), Vector3(3 + 2 * t, 2.6 + t, t), grid) # Closed end.

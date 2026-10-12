@@ -182,8 +182,13 @@ layout(rgba16f, set = 0, binding = 13) uniform restrict readonly image2D low_dat
 layout(set = 0, binding = 21) uniform texture2D nf_raw;
 layout(set = 0, binding = 22) uniform texture2D nf_history;
 layout(rgba16f, set = 0, binding = 23) uniform restrict writeonly image2D nf_history_out;
-layout(set = 0, binding = 24) uniform texture2D nf_geometry; // Previous frame: linear depth, octahedral normal.
+// Previous frame: linear depth (negative when a moving object was near),
+// octahedral normal, a moving average of the probes' luminance at the block.
+layout(set = 0, binding = 24) uniform texture2D nf_geometry;
+layout(set = 0, binding = 17) uniform texture2D nf_probe; // This frame's probe irradiance at the block.
 layout(rgba16f, set = 0, binding = 25) uniform restrict writeonly image2D nf_geometry_out;
+// How noisy the accumulated light still is (r: standard error, luminance).
+layout(rgba16f, set = 0, binding = 31) uniform restrict writeonly image2D nf_noise_out;
 #endif
 
 #ifdef MODE_NF_FILTER
@@ -193,6 +198,7 @@ layout(rgba16f, set = 0, binding = 12) uniform restrict image2D low_data2;
 layout(rgba16f, set = 0, binding = 13) uniform restrict image2D low_data3;
 layout(set = 0, binding = 17) uniform texture2D nf_probe;
 layout(set = 0, binding = 22) uniform texture2D nf_history; // This frame's accumulated light (or the first pass's result).
+layout(set = 0, binding = 31) uniform texture2D nf_noise; // MODE_NF_TEMPORAL.
 layout(rgba16f, set = 0, binding = 21) uniform restrict writeonly image2D nf_filter_out; // The first pass's result.
 layout(set = 0, binding = 27) uniform texture2D nf_object; // The moving objects' light (MODE_NF_RESOLVE).
 #endif
@@ -1068,6 +1074,13 @@ void main() {
 			vec3 hit_normal = oct_to_vec3(unpackUnorm2x16(b.y) * 2.0 - 1.0);
 			vec3 hit_pos = origin + dir * uintBitsToFloat(b.w);
 			vec4 irradiance = ddgi_sample_irradiance(hit_pos, hit_normal, -dir);
+			// A hit a few centimeters away (the other side of a corner): the
+			// probe lookup there can reach probes on the far side of the
+			// surface (a sunlit roof) and lit the corner as a bright streak.
+			// Close by, this block's own probe light is the better estimate;
+			// blend to the hit's over half a probe spacing.
+			float near = 1.0 - smoothstep(0.0, 0.5 * ddgi.volumes[0].spacing.x, uintBitsToFloat(b.w));
+			irradiance = mix(vec4(irradiance.rgb * irradiance.a, 1.0), vec4(probe.rgb, 1.0), near);
 			vec3 feedback = unpackUnorm4x8(b.x).rgb * ddgi.schedule.w;
 			if (ddgi.schedule.w > 1.0) {
 				feedback = min(feedback, vec3(0.95));
@@ -1126,6 +1139,7 @@ void main() {
 	if (center_geometry.w <= 0.0 || center_raw.a <= 0.0) {
 		imageStore(nf_history_out, block, vec4(0.0));
 		imageStore(nf_geometry_out, block, vec4(0.0));
+		imageStore(nf_noise_out, block, vec4(0.0));
 		return;
 	}
 	float depth = center_geometry.w;
@@ -1160,6 +1174,7 @@ void main() {
 	// The previous frame's accumulated light at this surface: reprojected
 	// with the camera, bilinear over the blocks whose surface matches.
 	vec4 history = vec4(0.0);
+	float previous_probe = 0.0;
 	if (nf.params.w > 0.5) {
 		vec3 world = nf_block_world_position(block, depth);
 		vec4 clip = nf.prev_view_projection * vec4(world, 1.0);
@@ -1177,38 +1192,65 @@ void main() {
 				vec4 g = texelFetch(sampler2D(nf_geometry, linear_sampler), c, 0);
 				vec3 g_normal = oct_to_vec3(g.yz * 2.0 - 1.0);
 				// The previous frame's depth of this point is clip.w.
-				float w = nf_geometry_weight(clip.w, normal, g.x, g_normal);
+				float w = nf_geometry_weight(clip.w, normal, abs(g.x), g_normal);
 				vec2 bl = mix(1.0 - f, f, vec2(k & 1, k >> 1));
 				w *= bl.x * bl.y;
 				history += texelFetch(sampler2D(nf_history, linear_sampler), c, 0) * w;
 				history_weight += w;
 				// Moving objects were near here last frame (geometry w 2): the
 				// light they left must go as fast as it came.
-				moving_before = moving_before || (w > 0.0 && g.w > 1.5);
+				moving_before = moving_before || (w > 0.0 && g.x < 0.0);
+				previous_probe += g.w * w;
 			}
 			history = history_weight > 0.05 ? history / history_weight : vec4(0.0);
+			previous_probe = history_weight > 0.05 ? previous_probe / history_weight : -1.0;
 		}
 	}
 
 	bool moving = moving_now || moving_before;
-	vec3 result = center_raw.rgb;
+	// Did the light here change? The probes (smooth, noise-free) tell: their
+	// irradiance at the block is more than 5% off its slow moving average
+	// (so gradual changes, a lamp moving away, add up too).
+	vec3 probe_now = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0).rgb;
+	float probe_lum = ddgi_luminance(probe_now);
+	bool light_changed = previous_probe < 0.0 || abs(probe_lum - previous_probe) > 0.05 * max(probe_lum, previous_probe) + 1e-4;
+	float probe_average = previous_probe < 0.0 ? probe_lum : mix(previous_probe, probe_lum, 0.1);
+	// The history holds the near-field correction (near-field light minus
+	// the probes' light), not the light itself: when the probes change, the
+	// result follows them at once, and only the correction is averaged over
+	// many frames (with the light itself, the history trailed the probes
+	// for about 2 seconds after a moving lamp stopped).
+	vec3 sample_correction = center_raw.rgb - probe_now;
+	vec3 result = sample_correction;
 	float count = 1.0;
 	if (history.a > 0.0) {
-		// Keep the history within what this frame's neighborhood allows:
-		// light that changed (a moving object) shows within a few frames
-		// instead of trailing behind.
-		// Near moving objects the clamp is tighter and the history lets go
-		// faster, so their shadow and bounce light don't smear behind them;
-		// the filter passes smooth the extra noise.
-		vec3 spread = (moving ? 2.0 : 4.0) * deviation / sqrt(max(effective, 1.0)) + (moving ? 0.01 : 0.03) * mean + 1e-4;
-		vec3 clamped = clamp(history.rgb, mean - spread, mean + spread);
-		count = min(history.a + 1.0, moving ? 8.0 : 64.0);
-		float alpha = max(1.0 / count, nf.params.z);
-		result = mix(clamped, center_raw.rgb, alpha);
+		history.rgb += probe_now;
+		if (moving || light_changed) {
+			// Keep the history within what this frame's neighborhood allows,
+			// so a change shows within a few frames instead of trailing.
+			// Near moving objects the clamp is tighter and the history lets
+			// go faster.
+			vec3 spread = (moving ? 2.0 : 4.0) * deviation / sqrt(max(effective, 1.0)) + (moving ? 0.01 : 0.03) * mean + 1e-4;
+			history.rgb = clamp(history.rgb, mean - spread, mean + spread);
+			count = min(history.a + 1.0, moving ? 8.0 : 16.0);
+		} else {
+			// Nothing changed: no clamp. In dark places a few rays reach a
+			// bright opening and this frame's neighborhood jumps around; a
+			// clamp to it passed that on as flicker (1.4% of the pixels in
+			// a dark tunnel instead of 0.01%; a wide clamp, 6 standard
+			// errors, still 0.02%).
+			count = min(history.a + 1.0, 128.0);
+		}
+		float alpha = max(1.0 / count, (moving || light_changed) ? nf.params.z : 1.0 / 128.0);
+		result = mix(history.rgb - probe_now, sample_correction, alpha);
 	}
 	imageStore(nf_history_out, block, vec4(result, count));
+	// The standard error left in the accumulated light: this frame's spread
+	// over the samples that went into it (the neighborhood, and the frames).
+	float noise = ddgi_luminance(deviation) / sqrt(max(effective, 1.0) * count);
+	imageStore(nf_noise_out, block, vec4(noise, 0.0, 0.0, 0.0));
 	vec2 oct = vec3_to_oct(normal);
-	imageStore(nf_geometry_out, block, vec4(depth, oct, moving_now ? 2.0 : 1.0));
+	imageStore(nf_geometry_out, block, vec4(moving_now ? -depth : depth, oct, probe_average));
 }
 
 #endif // MODE_NF_TEMPORAL
@@ -1220,6 +1262,9 @@ void main() {
 // border of 4 are loaded once.
 #define NF_BORDER 4
 #define NF_TILE (8 + 2 * NF_BORDER)
+// How far above its noise (standard errors, after the filter) a difference
+// from the probes must be to count fully.
+#define NF_NOISE_THRESHOLD 1.0
 shared vec4 tile_light[NF_TILE * NF_TILE];
 shared vec4 tile_geometry[NF_TILE * NF_TILE];
 
@@ -1235,11 +1280,8 @@ void main() {
 		if (all(greaterThanEqual(c, ivec2(0))) && all(lessThan(c, nf.size.xy))) {
 			light = texelFetch(sampler2D(nf_history, linear_sampler), c, 0);
 			if (!final_pass) {
-				// The moving objects' light joins here: not accumulated over
-				// frames, but smoothed with the rest. Each block's object ray
-				// sees one point of the object; a shadow edge across the
-				// object would otherwise show as a hard edge on the wall.
-				light.rgb += texelFetch(sampler2D(nf_object, linear_sampler), c, 0).rgb;
+				// The history holds the correction to the probes' light.
+				light.rgb += texelFetch(sampler2D(nf_probe, linear_sampler), c, 0).rgb;
 			}
 			float depth = imageLoad(low_data1, c).w;
 			if (light.a > 0.0 && depth > 0.0) {
@@ -1282,7 +1324,18 @@ void main() {
 	// In place of the probes' light; the gradients over the normal (from
 	// the probes) are scaled by the same ratio.
 	vec4 probe = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0);
-	light = max(light, vec3(0.0));
+	// Only where the near-field light differs from the probes' by more than
+	// its remaining noise: in a dark tunnel a few rays reach the sunlit
+	// ground outside, and their average wanders around the probes' (smooth)
+	// value as blotches. Real near-field light (a contact shadow, color
+	// bleeding) differs by much more and stays.
+	vec3 difference = light - probe.rgb;
+	float d = max(abs(difference.r), max(abs(difference.g), abs(difference.b)));
+	float noise = texelFetch(sampler2D(nf_noise, linear_sampler), block, 0).r * NF_NOISE_THRESHOLD;
+	light = probe.rgb + difference * (d * d / (d * d + noise * noise + 1e-12));
+	// The moving objects' light (the same every frame, averaged per side of
+	// the object): not accumulated, not filtered.
+	light = max(light + texelFetch(sampler2D(nf_object, linear_sampler), block, 0).rgb, vec3(0.0));
 	float energy = ddgi.volumes[0].params.x;
 	vec4 d0 = imageLoad(low_data0, block);
 	d0.rgb = max(d0.rgb + (light - probe.rgb) * energy, vec3(0.0));
