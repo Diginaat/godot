@@ -45,6 +45,15 @@
 #define RB_TEX_DDGI_LOW1 SNAME("data1")
 #define RB_TEX_DDGI_LOW2 SNAME("data2")
 #define RB_TEX_DDGI_LOW3 SNAME("data3")
+// Near-field rays (rendering/global_illumination/ddgi/near_field_rays), one
+// texel per low resolution block.
+#define RB_TEX_DDGI_NF_PROBE SNAME("nf_probe")
+#define RB_TEX_DDGI_NF_RAY SNAME("nf_ray")
+#define RB_TEX_DDGI_NF_RAW SNAME("nf_raw")
+#define RB_TEX_DDGI_NF_HISTORY0 SNAME("nf_history0")
+#define RB_TEX_DDGI_NF_HISTORY1 SNAME("nf_history1")
+#define RB_TEX_DDGI_NF_GEOMETRY0 SNAME("nf_geometry0")
+#define RB_TEX_DDGI_NF_GEOMETRY1 SNAME("nf_geometry1")
 
 class RenderDataRD;
 class RenderSceneBuffersRD;
@@ -113,6 +122,9 @@ struct RTDDGIBindings {
 	/// Emissive lights mode: the apply pass lights surfaces from emitters
 	/// directly, so probe rays sample emitters as lights instead of seeing them.
 	bool emitters_as_lights = false;
+	/// Near-field rays: one ray per low resolution block (update_list holds
+	/// the rays, ray_data is per block) instead of probe rays.
+	bool near_field = false;
 };
 
 /// Dynamic diffuse global illumination: ray traced irradiance probes for the
@@ -191,6 +203,15 @@ public:
 		RID irradiance_display;
 		RID distance_atlas;
 
+		// Near-field rays: the rays (header + one uvec4 per block), their
+		// bounce data, and the passes' parameters.
+		RID nf_rays;
+		RID nf_bounce;
+		RID nf_params;
+		uint32_t nf_blocks = 0;
+		uint32_t nf_parity = 0; // Which history texture is this frame's.
+		bool nf_history_valid = false;
+
 		bool node_volume = false; // The volumes were set up for a DDGIVolume node (fixed), not the camera.
 		uint32_t realtime_offset = 0; // Realtime updates: first probe of the next frame's chunk.
 		uint64_t baked_version = 0; // Baked data uploaded into the atlases, 0 for none.
@@ -231,6 +252,9 @@ private:
 		APPLY_UPSAMPLE,
 		APPLY_GI_EMITTERS,
 		APPLY_LOW_EMITTERS,
+		APPLY_NF_RESOLVE,
+		APPLY_NF_TEMPORAL,
+		APPLY_NF_FILTER,
 		APPLY_MODE_MAX,
 	};
 
@@ -250,6 +274,15 @@ private:
 	};
 	static_assert(sizeof(ApplyPushConstant) == 128, "Push constants are limited to 128 bytes");
 
+	// std140, ddgi_apply.glsl DDGINearFieldParams.
+	struct NFParams {
+		float prev_view_projection[16];
+		float params[4]; // Max ray distance, frame, minimum history blend, history valid.
+		int32_t size[4]; // Low resolution size, block size.
+	};
+	static constexpr uint32_t NF_PARAMS_SIZE = 96;
+	static_assert(sizeof(NFParams) == NF_PARAMS_SIZE, "NFParams must match DDGINearFieldParams");
+
 	DdgiUpdateShaderRD update_shader;
 	RID update_shader_version;
 	RID update_pipelines[UPDATE_MODE_MAX];
@@ -263,6 +296,8 @@ private:
 	bool emitters_supported = false;
 	/// rendering/global_illumination/ddgi/emissive_lights, if the GPU can do it.
 	bool _emissive_lights() const;
+	/// rendering/global_illumination/ddgi/near_field_rays.
+	static bool _near_field_rays();
 
 	Ref<ViewportData> _get_viewport_data(RenderSceneBuffersRD *p_render_buffers);
 	void _allocate(ViewportData *p_data, int p_cascades, const Vector3i &p_grid, const Quality &p_quality);
@@ -311,7 +346,9 @@ public:
 	/// the internal resolution if p_half_resolution.
 	/// p_tlas and p_emitters (RenderRaytracing::ddgi_emitters) when the probes
 	/// were traced this frame: emissive surfaces then light the GI directly.
-	void apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution, RID p_tlas = RID(), const LocalVector<float> *p_emitters = nullptr);
+	/// p_raytracing, p_rt_state and p_rt_flags: for the near-field rays
+	/// (null when the probes weren't traced this frame).
+	void apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution, RID p_tlas = RID(), const LocalVector<float> *p_emitters = nullptr, RenderRaytracing *p_raytracing = nullptr, RTViewportState *p_rt_state = nullptr, uint32_t p_rt_flags = 0);
 
 	/// Debug view of the probes over the internal color buffer (before tonemapping).
 	void debug_draw(RenderDataRD *p_render_data);

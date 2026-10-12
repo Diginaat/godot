@@ -107,7 +107,62 @@ void ddgi_trace_probe_rays() {
 	ddgi_ray_bounce[slot * ddgi.counts.y + ray] = bounce;
 }
 
+// DDGI near-field rays (RT_PARAM_DDGI_TRACE 3 or 4): one short ray per
+// block of the low resolution apply, x = block index. The update list
+// binding holds the rays instead of probes (ddgi_apply.glsl, MODE_APPLY_LOW):
+// a header (count, max distance as float bits) and per block the origin
+// (xyz float bits) and the direction (octahedral, unorm16 x 2). Hits are
+// shaded as probe rays are (emission, direct light, bounce light looked up
+// afterwards); a ray that reaches the max distance stores the distance
+// DDGI_MISS_DISTANCE and no light: the resolve pass takes the probes' light
+// for it instead (far field).
+void ddgi_trace_near_field_rays() {
+	uint block = gl_LaunchIDEXT.x;
+	if (block >= ddgi_update_count) {
+		return;
+	}
+	float max_distance = uintBitsToFloat(ddgi_update_pad[0]);
+	uint width = max(ddgi_update_pad[1], 1u);
+	ivec2 texel = ivec2(block % width, block / width);
+	uvec4 packed_ray = uvec4(ddgi_update_probes[block * 4u], ddgi_update_probes[block * 4u + 1u], ddgi_update_probes[block * 4u + 2u], ddgi_update_probes[block * 4u + 3u]);
+	vec3 ray_origin = uintBitsToFloat(packed_ray.xyz);
+	if (packed_ray.w == 0u) {
+		// No surface in this block.
+		imageStore(ddgi_ray_data, texel, vec4(0.0, 0.0, 0.0, DDGI_MISS_DISTANCE));
+		ddgi_ray_bounce[block] = uvec4(0u);
+		return;
+	}
+	vec3 ray_dir = oct_to_vec3(unpackUnorm2x16(packed_ray.w) * 2.0 - 1.0);
+
+	PathState ps;
+	ps.radiance = vec3(0.0);
+	ps.throughput = vec3(1.0);
+	ps.packed_bounces_flags = set_ddgi_probe_ray(pack_bounces(1u, 1u));
+	ps.packed_bounces_flags = set_emissive_sampled(ps.packed_bounces_flags, get_rt_param(RT_PARAM_DDGI_TRACE) > 3.5);
+	ps.rng_state = init_rng(uvec2(block, 0x6E66u), ddgi.atlas.w, 11u);
+	ps.hit_t = DDGI_MISS_DISTANCE;
+	ps.offset_normal = vec3(0.0, 0.0, 1.0);
+	ps.next_ray_dir = ray_dir;
+
+	path_pack(payload, ps);
+	// Back faces count: a ray that starts inside geometry sees no light.
+	traceRayEXT(tlas, gl_RayFlagsNoneEXT, 0xFF, 0, 0, 0, ray_origin, 0.0, ray_dir, max_distance, 0);
+	ps = path_unpack(payload);
+
+	bool missed = ps.hit_t >= DDGI_MISS_DISTANCE;
+	imageStore(ddgi_ray_data, texel, missed ? vec4(0.0, 0.0, 0.0, DDGI_MISS_DISTANCE) : vec4(ps.radiance, ps.hit_t));
+	uvec4 bounce = uvec4(0u);
+	if (!missed && (ps.packed_bounces_flags & DDGI_BOUNCE_FLAG) != 0u) {
+		bounce = uvec4(packUnorm4x8(vec4(ps.throughput, 1.0)), packUnorm2x16(vec3_to_oct(ps.offset_normal)), 0u, floatBitsToUint(ps.hit_t));
+	}
+	ddgi_ray_bounce[block] = bounce;
+}
+
 void main() {
+	if (get_rt_param(RT_PARAM_DDGI_TRACE) > 2.5) {
+		ddgi_trace_near_field_rays();
+		return;
+	}
 	if (get_rt_param(RT_PARAM_DDGI_TRACE) > 0.5) {
 		ddgi_trace_probe_rays();
 		return;

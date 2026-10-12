@@ -30,6 +30,21 @@
 //     shadow (rendering/global_illumination/ddgi/emissive_lights). The
 //     probe rays then leave the emitters' own light out (it would count
 //     twice) and only carry what they light, as bounce light.
+//   Near-field rays (rendering/global_illumination/ddgi/near_field_rays,
+//     with the low resolution apply): probes hold the light at points about
+//     a probe spacing apart, smoothed over many frames, so light from a
+//     nearby object (a red ball next to a white wall) shows as a soft blob
+//     at the probes around it that trails behind it when it moves.
+//     MODE_APPLY_LOW then also writes one cosine-distributed ray per block
+//     (FLAG_NEAR_FIELD), traced up to a few probe spacings by the ray
+//     tracing pipeline as probe rays are (scene_raytracing_raygen.glsl).
+//     MODE_NF_RESOLVE adds the probes' light at each hit (bounce light); rays
+//     that hit nothing within range take the probes' irradiance at the
+//     surface (far field). MODE_NF_TEMPORAL accumulates the samples
+//     over frames (reprojected, history clamped to the neighborhood, so
+//     changes show within a few frames), MODE_NF_FILTER smooths them with
+//     an edge-aware blur (two passes) and puts them in place of the probes'
+//     light in the low resolution data.
 //   MODE_MARK: one thread per 8x8 pixel tile marks the probes that light the
 //     surface at one pixel of the tile (rotating every frame), so the
 //     scheduler can favor them. A separate pass: in the apply pass the
@@ -96,6 +111,58 @@ layout(set = 0, binding = 15, std430) restrict readonly buffer DDGIEmitters {
 };
 #endif
 
+#if defined(MODE_APPLY_LOW) || defined(MODE_NF_RESOLVE) || defined(MODE_NF_TEMPORAL) || defined(MODE_NF_FILTER)
+// Near-field ray of each block (MODE_APPLY_LOW writes, the trace and
+// MODE_NF_RESOLVE read): [0] header (block count, max distance, width), then
+// per block origin (xyz float bits) and direction (octahedral unorm16 x 2;
+// 0: no ray).
+layout(set = 0, binding = 16, std430) restrict buffer DDGINearFieldRays {
+	uvec4 nf_rays[];
+};
+layout(set = 0, binding = 18, std140) uniform DDGINearFieldParams {
+	mat4 prev_view_projection; // World to the previous frame's clip space.
+	vec4 params; // x: max ray distance, y: frame, z: minimum history blend, w: history valid (0 after a reset).
+	ivec4 size; // xy: low resolution size, z: block size.
+}
+nf;
+#endif
+
+#ifdef MODE_APPLY_LOW
+// Probe irradiance without emitters (rgb), for the near-field passes.
+layout(rgba16f, set = 0, binding = 17) uniform restrict writeonly image2D nf_probe_out;
+#endif
+
+#ifdef MODE_NF_RESOLVE
+layout(set = 0, binding = 17) uniform texture2D nf_probe;
+layout(set = 0, binding = 19) uniform texture2D nf_ray_data; // Radiance (rgb), hit distance (a).
+layout(set = 0, binding = 20, std430) restrict readonly buffer DDGINearFieldBounce {
+	uvec4 nf_bounce[]; // As DDGIRayBounce, z unused, w the hit distance.
+};
+layout(rgba16f, set = 0, binding = 21) uniform restrict writeonly image2D nf_raw_out;
+#endif
+
+#ifdef MODE_NF_TEMPORAL
+layout(rgba16f, set = 0, binding = 10) uniform restrict readonly image2D low_data0;
+layout(rgba16f, set = 0, binding = 11) uniform restrict readonly image2D low_data1;
+layout(rgba16f, set = 0, binding = 12) uniform restrict readonly image2D low_data2;
+layout(rgba16f, set = 0, binding = 13) uniform restrict readonly image2D low_data3;
+layout(set = 0, binding = 21) uniform texture2D nf_raw;
+layout(set = 0, binding = 22) uniform texture2D nf_history;
+layout(rgba16f, set = 0, binding = 23) uniform restrict writeonly image2D nf_history_out;
+layout(set = 0, binding = 24) uniform texture2D nf_geometry; // Previous frame: linear depth, octahedral normal.
+layout(rgba16f, set = 0, binding = 25) uniform restrict writeonly image2D nf_geometry_out;
+#endif
+
+#ifdef MODE_NF_FILTER
+layout(rgba16f, set = 0, binding = 10) uniform restrict image2D low_data0;
+layout(rgba16f, set = 0, binding = 11) uniform restrict image2D low_data1;
+layout(rgba16f, set = 0, binding = 12) uniform restrict image2D low_data2;
+layout(rgba16f, set = 0, binding = 13) uniform restrict image2D low_data3;
+layout(set = 0, binding = 17) uniform texture2D nf_probe;
+layout(set = 0, binding = 22) uniform texture2D nf_history; // This frame's accumulated light (or the first pass's result).
+layout(rgba16f, set = 0, binding = 21) uniform restrict writeonly image2D nf_filter_out; // The first pass's result.
+#endif
+
 #ifdef MODE_MARK
 layout(set = 0, binding = 6) uniform texture2D normal_roughness_buffer;
 // The frame each probe was last marked; the scheduler favors them.
@@ -126,6 +193,9 @@ params;
 #define DEBUG_CASCADES 6u
 
 #define FLAG_HALF_RES 1u
+#define FLAG_NEAR_FIELD (1u << 25u)
+// MODE_NF_FILTER: the second (final) pass, with taps 2 blocks apart.
+#define FLAG_NF_FILTER_FINAL (1u << 28u)
 
 uint low_block_size() {
 	return max((params.flags >> 8u) & 0xFFu, 1u);
@@ -350,6 +420,9 @@ void main() {
 		vec3 dirs[DDGI_DIRS] = vec3[](normal, normalize(normal + t1 * tilt), normalize(normal - t1 * tilt), normalize(normal + t2 * tilt), normalize(normal - t2 * tilt));
 		vec3 e[DDGI_DIRS];
 		float coverage = ddgi_sample_irradiance_dirs(world_pos, normal, to_camera, dirs, e);
+		if ((params.flags & FLAG_NEAR_FIELD) != 0u) {
+			imageStore(nf_probe_out, block, vec4(e[0], coverage));
+		}
 #ifdef DDGI_EMITTERS
 		if (coverage > 0.0) {
 			vec3 light[DDGI_DIRS] = vec3[](vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
@@ -359,6 +432,25 @@ void main() {
 			}
 		}
 #endif
+		if ((params.flags & FLAG_NEAR_FIELD) != 0u) {
+			// A cosine-distributed direction: 4x4 neighboring blocks take
+			// one stratum each of a 4x4 grid, shifted every frame (R2
+			// sequence), so a small neighborhood covers the hemisphere.
+			uint stratum = uint(block.x & 3) + uint(block.y & 3) * 4u;
+			uint h = (uint(block.x) * 73856093u) ^ (uint(block.y) * 19349663u);
+			h = (h ^ (h >> 13u)) * 0x5bd1e995u;
+			vec2 jitter = vec2(float(h & 0xFFFFu), float(h >> 16u)) / 65536.0;
+			float frame = nf.params.y;
+			vec2 r2 = fract(vec2(0.7548776662, 0.5698402910) * frame);
+			vec2 u = fract((vec2(stratum & 3u, stratum >> 2u) + jitter) * 0.25 + r2);
+			float phi = 6.28318530718 * u.x;
+			float sin_t = sqrt(u.y);
+			vec3 dir = normalize(t1 * (cos(phi) * sin_t) + t2 * (sin(phi) * sin_t) + normal * sqrt(max(1.0 - u.y, 0.0)));
+			// Off the surface by a bit more far away (depth precision).
+			vec3 ray_origin = world_pos + normal * max(0.01, 0.002 * ref_depth);
+			uint idx = uint(block.y) * uint(nf.size.x) + uint(block.x);
+			nf_rays[1u + idx] = uvec4(floatBitsToUint(ray_origin), max(packUnorm2x16(vec3_to_oct(dir)), 1u));
+		}
 		float energy = ddgi.volumes[0].params.x;
 		float inv_step = 1.0 / (2.0 * tilt / sqrt(1.0 + tilt * tilt));
 		vec3 gx = (e[1] - e[2]) * inv_step * energy;
@@ -372,6 +464,10 @@ void main() {
 			out0 = vec4(0.0);
 			out1 = vec4(0.0, 0.0, 0.0, ref_depth);
 		}
+	}
+	if (!found && (params.flags & FLAG_NEAR_FIELD) != 0u) {
+		nf_rays[1u + uint(block.y) * uint(nf.size.x) + uint(block.x)] = uvec4(0u);
+		imageStore(nf_probe_out, block, vec4(0.0));
 	}
 	imageStore(low_data0, block, out0);
 	imageStore(low_data1, block, out1);
@@ -610,3 +706,272 @@ void main() {
 }
 
 #endif // MODE_DEBUG_PROBES
+
+#if defined(MODE_NF_TEMPORAL) || defined(MODE_NF_FILTER)
+
+// World position of the surface at a block, from its linear depth.
+vec3 nf_block_world_position(ivec2 p_block, float p_depth) {
+	vec2 pixel = (vec2(p_block) + 0.5) * float(nf.size.z);
+	vec4 v = params.inv_projection * vec4(pixel / vec2(params.screen_size) * 2.0 - 1.0, 0.5, 1.0);
+	vec3 view = v.xyz / v.w;
+	view *= p_depth / max(-view.z, 1e-6);
+	return ddgi_xform(params.cam_rotation, view);
+}
+
+// How well two blocks' surfaces match (1: same surface).
+float nf_geometry_weight(float p_depth, vec3 p_normal, float p_other_depth, vec3 p_other_normal) {
+	if (p_other_depth <= 0.0) {
+		return 0.0;
+	}
+	float depth_match = max(0.0, 1.0 - abs(p_other_depth - p_depth) / (0.05 * p_depth));
+	float normal_match = max(dot(p_normal, p_other_normal), 0.0);
+	normal_match *= normal_match;
+	return depth_match * normal_match * normal_match;
+}
+
+#endif
+
+#ifdef MODE_NF_RESOLVE
+
+void main() {
+	ivec2 block = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(block, nf.size.xy))) {
+		return;
+	}
+	uint idx = uint(block.y) * uint(nf.size.x) + uint(block.x);
+	uvec4 r = nf_rays[1u + idx];
+	if (r.w == 0u) {
+		imageStore(nf_raw_out, block, vec4(0.0));
+		return;
+	}
+	vec3 origin = uintBitsToFloat(r.xyz);
+	vec3 dir = oct_to_vec3(unpackUnorm2x16(r.w) * 2.0 - 1.0);
+	vec4 ray = texelFetch(sampler2D(nf_ray_data, linear_sampler), block, 0);
+	vec3 radiance;
+	if (ray.a >= DDGI_MISS_DISTANCE * 0.5) {
+		// Nothing within range: the probes' irradiance at the surface stands
+		// for the light from farther away. Where no ray hits anything (open
+		// ground under the sky) the result is the probes' light, without
+		// noise. (The probes' irradiance at the ray's end, facing along the
+		// ray, was tried first: its cosine lobe also takes in what lies to
+		// the side, so rays along a sunlit floor brought its light back and
+		// the floor came out too bright.)
+		radiance = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0).rgb;
+	} else {
+		radiance = ray.rgb;
+		uvec4 b = nf_bounce[idx];
+		if ((b.x >> 24u) != 0u) {
+			vec3 hit_normal = oct_to_vec3(unpackUnorm2x16(b.y) * 2.0 - 1.0);
+			vec3 hit_pos = origin + dir * uintBitsToFloat(b.w);
+			vec4 irradiance = ddgi_sample_irradiance(hit_pos, hit_normal, -dir);
+			vec3 feedback = unpackUnorm4x8(b.x).rgb * ddgi.schedule.w;
+			if (ddgi.schedule.w > 1.0) {
+				feedback = min(feedback, vec3(0.95));
+			}
+			radiance += feedback * irradiance.rgb * irradiance.a;
+		}
+	}
+	// Clamp single bright rays (fireflies) without changing the hue, as the
+	// probe blend does.
+	float lum = ddgi_luminance(radiance);
+	if (lum > ddgi.schedule.z) {
+		radiance *= ddgi.schedule.z / lum;
+	}
+	if (any(isnan(radiance)) || any(isinf(radiance))) {
+		radiance = vec3(0.0);
+	}
+	imageStore(nf_raw_out, block, vec4(radiance, 1.0));
+}
+
+#endif // MODE_NF_RESOLVE
+
+#ifdef MODE_NF_TEMPORAL
+
+// The workgroup's 8x8 blocks and a border of 2, for the neighborhood
+// statistics.
+#define NF_RADIUS 2
+#define NF_TILE (8 + 2 * NF_RADIUS)
+shared vec4 tile_raw[NF_TILE * NF_TILE];
+shared vec4 tile_geometry[NF_TILE * NF_TILE]; // Normal (xyz), depth (w; 0 for no surface).
+
+void main() {
+	ivec2 block = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 tile_origin = ivec2(gl_WorkGroupID.xy) * 8 - NF_RADIUS;
+	for (uint i = gl_LocalInvocationIndex; i < uint(NF_TILE * NF_TILE); i += 64u) {
+		ivec2 c = tile_origin + ivec2(int(i) % NF_TILE, int(i) / NF_TILE);
+		vec4 raw = vec4(0.0);
+		vec4 geometry = vec4(0.0);
+		if (all(greaterThanEqual(c, ivec2(0))) && all(lessThan(c, nf.size.xy))) {
+			raw = texelFetch(sampler2D(nf_raw, linear_sampler), c, 0);
+			float depth = imageLoad(low_data1, c).w;
+			if (imageLoad(low_data0, c).a > 0.0 && depth > 0.0) {
+				geometry = vec4(oct_to_vec3(vec2(imageLoad(low_data2, c).w, imageLoad(low_data3, c).w) * 2.0 - 1.0), depth);
+			}
+		}
+		tile_raw[i] = raw;
+		tile_geometry[i] = geometry;
+	}
+	barrier();
+
+	if (any(greaterThanEqual(block, nf.size.xy))) {
+		return;
+	}
+	ivec2 t = ivec2(gl_LocalInvocationID.xy) + NF_RADIUS;
+	vec4 center_geometry = tile_geometry[t.y * NF_TILE + t.x];
+	vec4 center_raw = tile_raw[t.y * NF_TILE + t.x];
+	if (center_geometry.w <= 0.0 || center_raw.a <= 0.0) {
+		imageStore(nf_history_out, block, vec4(0.0));
+		imageStore(nf_geometry_out, block, vec4(0.0));
+		return;
+	}
+	float depth = center_geometry.w;
+	vec3 normal = center_geometry.xyz;
+
+	// Mean and variance of this frame's samples on the same surface nearby.
+	vec3 sum = vec3(0.0);
+	vec3 sum_sq = vec3(0.0);
+	float weight_sum = 0.0;
+	float weight_sq_sum = 0.0;
+	for (int y = -NF_RADIUS; y <= NF_RADIUS; y++) {
+		for (int x = -NF_RADIUS; x <= NF_RADIUS; x++) {
+			int i = (t.y + y) * NF_TILE + t.x + x;
+			vec4 g = tile_geometry[i];
+			float w = tile_raw[i].a > 0.0 ? nf_geometry_weight(depth, normal, g.w, g.xyz) : 0.0;
+			sum += tile_raw[i].rgb * w;
+			sum_sq += tile_raw[i].rgb * tile_raw[i].rgb * w;
+			weight_sum += w;
+			weight_sq_sum += w * w;
+		}
+	}
+	vec3 mean = sum / weight_sum;
+	vec3 deviation = sqrt(max(sum_sq / weight_sum - mean * mean, vec3(0.0)));
+	float effective = weight_sum * weight_sum / max(weight_sq_sum, 1e-6);
+
+	// The previous frame's accumulated light at this surface: reprojected
+	// with the camera, bilinear over the blocks whose surface matches.
+	vec4 history = vec4(0.0);
+	if (nf.params.w > 0.5) {
+		vec3 world = nf_block_world_position(block, depth);
+		vec4 clip = nf.prev_view_projection * vec4(world, 1.0);
+		if (clip.w > 1e-4) {
+			vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+			vec2 low_pos = uv * vec2(nf.size.xy) - 0.5;
+			ivec2 base = ivec2(floor(low_pos));
+			vec2 f = low_pos - vec2(base);
+			float history_weight = 0.0;
+			for (int k = 0; k < 4; k++) {
+				ivec2 c = base + ivec2(k & 1, k >> 1);
+				if (any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, nf.size.xy))) {
+					continue;
+				}
+				vec4 g = texelFetch(sampler2D(nf_geometry, linear_sampler), c, 0);
+				vec3 g_normal = oct_to_vec3(g.yz * 2.0 - 1.0);
+				// The previous frame's depth of this point is clip.w.
+				float w = nf_geometry_weight(clip.w, normal, g.x, g_normal);
+				vec2 bl = mix(1.0 - f, f, vec2(k & 1, k >> 1));
+				w *= bl.x * bl.y;
+				history += texelFetch(sampler2D(nf_history, linear_sampler), c, 0) * w;
+				history_weight += w;
+			}
+			history = history_weight > 0.05 ? history / history_weight : vec4(0.0);
+		}
+	}
+
+	vec3 result = center_raw.rgb;
+	float count = 1.0;
+	if (history.a > 0.0) {
+		// Keep the history within what this frame's neighborhood allows:
+		// light that changed (a moving object) shows within a few frames
+		// instead of trailing behind.
+		vec3 spread = 4.0 * deviation / sqrt(max(effective, 1.0)) + 0.03 * mean + 1e-4;
+		vec3 clamped = clamp(history.rgb, mean - spread, mean + spread);
+		count = min(history.a + 1.0, 64.0);
+		float alpha = max(1.0 / count, nf.params.z);
+		result = mix(clamped, center_raw.rgb, alpha);
+	}
+	imageStore(nf_history_out, block, vec4(result, count));
+	vec2 oct = vec3_to_oct(normal);
+	imageStore(nf_geometry_out, block, vec4(depth, oct, 1.0));
+}
+
+#endif // MODE_NF_TEMPORAL
+
+#ifdef MODE_NF_FILTER
+
+// Two passes of an edge-aware 5x5 filter (a-trous): taps 1 block apart,
+// then 2 apart, about 9x9 blocks in all. The workgroup's blocks and a
+// border of 4 are loaded once.
+#define NF_BORDER 4
+#define NF_TILE (8 + 2 * NF_BORDER)
+shared vec4 tile_light[NF_TILE * NF_TILE];
+shared vec4 tile_geometry[NF_TILE * NF_TILE];
+
+void main() {
+	bool final_pass = (params.flags & FLAG_NF_FILTER_FINAL) != 0u;
+	int tap_step = final_pass ? 2 : 1;
+	ivec2 block = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 tile_origin = ivec2(gl_WorkGroupID.xy) * 8 - NF_BORDER;
+	for (uint i = gl_LocalInvocationIndex; i < uint(NF_TILE * NF_TILE); i += 64u) {
+		ivec2 c = tile_origin + ivec2(int(i) % NF_TILE, int(i) / NF_TILE);
+		vec4 light = vec4(0.0);
+		vec4 geometry = vec4(0.0);
+		if (all(greaterThanEqual(c, ivec2(0))) && all(lessThan(c, nf.size.xy))) {
+			light = texelFetch(sampler2D(nf_history, linear_sampler), c, 0);
+			float depth = imageLoad(low_data1, c).w;
+			if (light.a > 0.0 && depth > 0.0) {
+				geometry = vec4(oct_to_vec3(vec2(imageLoad(low_data2, c).w, imageLoad(low_data3, c).w) * 2.0 - 1.0), depth);
+			}
+		}
+		tile_light[i] = light;
+		tile_geometry[i] = geometry;
+	}
+	barrier();
+
+	if (any(greaterThanEqual(block, nf.size.xy))) {
+		return;
+	}
+	ivec2 t = ivec2(gl_LocalInvocationID.xy) + NF_BORDER;
+	vec4 center = tile_geometry[t.y * NF_TILE + t.x];
+	if (center.w <= 0.0) {
+		if (!final_pass) {
+			imageStore(nf_filter_out, block, tile_light[t.y * NF_TILE + t.x]);
+		}
+		return; // The final pass leaves the probes' light.
+	}
+	vec3 sum = vec3(0.0);
+	float weight_sum = 0.0;
+	for (int y = -2; y <= 2; y++) {
+		for (int x = -2; x <= 2; x++) {
+			int i = (t.y + y * tap_step) * NF_TILE + t.x + x * tap_step;
+			vec4 g = tile_geometry[i];
+			float w = nf_geometry_weight(center.w, center.xyz, g.w, g.xyz) * exp(-0.35 * float(x * x + y * y));
+			sum += tile_light[i].rgb * w;
+			weight_sum += w;
+		}
+	}
+	vec3 light = sum / max(weight_sum, 1e-6);
+	if (!final_pass) {
+		imageStore(nf_filter_out, block, vec4(light, tile_light[t.y * NF_TILE + t.x].a));
+		return;
+	}
+
+	// In place of the probes' light; the gradients over the normal (from
+	// the probes) are scaled by the same ratio.
+	vec4 probe = texelFetch(sampler2D(nf_probe, linear_sampler), block, 0);
+	float energy = ddgi.volumes[0].params.x;
+	vec4 d0 = imageLoad(low_data0, block);
+	d0.rgb = max(d0.rgb + (light - probe.rgb) * energy, vec3(0.0));
+	vec3 ratio = clamp(light / max(probe.rgb, vec3(1e-4)), vec3(0.0), vec3(4.0));
+	vec4 d1 = imageLoad(low_data1, block);
+	vec4 d2 = imageLoad(low_data2, block);
+	vec4 d3 = imageLoad(low_data3, block);
+	d1.xyz *= ratio.r;
+	d2.xyz *= ratio.g;
+	d3.xyz *= ratio.b;
+	imageStore(low_data0, block, d0);
+	imageStore(low_data1, block, d1);
+	imageStore(low_data2, block, d2);
+	imageStore(low_data3, block, d3);
+}
+
+#endif // MODE_NF_FILTER

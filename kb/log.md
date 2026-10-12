@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-10-12 (near-field rays)
+
+* **Added**: [near-field rays](/ddgi/improvements/near-field-rays.md)
+  (proposal 12, done), finding [probes put nearby bounce light in the
+  wrong place](/ddgi/findings/near-field-blob.md), success
+  [near-field rays](/successes/near-field-rays.md), mistakes
+  [a test setting in the animation callback](/mistakes/test-setting-in-animation-callback.md)
+  and [a long run of an unfit scene](/mistakes/long-run-of-an-unfit-scene.md).
+* **Updated**: [test protocol](/tooling/ddgi-test-protocol.md) with the
+  bleed view tests (still and animated).
+* **Verified**: emissive surfaces as direct lights (previous entry): the
+  storm level shows a smooth light pool from the moving sphere.
+
 ## 2026-10-12 (emissive lights, work in progress)
 
 * **Added**: references [DDGI papers and reference code](/research/majercik-ddgi-reference.md)

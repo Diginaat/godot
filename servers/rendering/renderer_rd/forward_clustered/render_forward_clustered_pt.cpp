@@ -591,17 +591,18 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 
 	RD::get_singleton()->draw_command_begin_label("DDGI");
 	RID tlas;
+	RTViewportState *rt_state = nullptr;
 	if (RenderDDGI::is_baked_only(p_render_data)) {
 		ddgi->update_baked(p_render_data);
 	} else {
 		RENDER_TIMESTAMP("DDGI Build Acceleration Structures");
-		RTViewportState *rt_state = raytracing->build_tlas(p_render_data, rt_flags);
+		rt_state = raytracing->build_tlas(p_render_data, rt_flags);
 		if (rt_state) {
 			ddgi->update_probes(p_render_data, raytracing, rt_state, rt_flags);
 			tlas = rt_state->tlas;
 		}
 	}
-	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution, tlas, tlas.is_valid() ? &raytracing->ddgi_emitters : nullptr);
+	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution, tlas, tlas.is_valid() ? &raytracing->ddgi_emitters : nullptr, tlas.is_valid() ? raytracing : nullptr, rt_state, rt_flags);
 	RD::get_singleton()->draw_command_end_label();
 }
 

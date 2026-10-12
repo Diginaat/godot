@@ -12,3 +12,4 @@ works clearly better than what came before. Mistakes are in
 * [Side work in its own small pass](/successes/separate-small-pass.md) - 0.03 ms instead of 0.05 ms in the hot shader
 * [Render graph switches to narrow a GPU problem](/successes/env-switch-bisect.md) - ordering vs data in two runs
 * [A real game level in the test suite](/successes/game-level-test.md) - finds visual problems the synthetic scenes miss
+* [Near-field rays fixed the lagging bounce-light blob](/successes/near-field-rays.md) - short rays with the probe-ray shading, small filter, probes as far field

@@ -9,6 +9,7 @@
 * [Extra code in the apply pass costs even when it does no work](/ddgi/findings/shader-code-cost-without-work.md) - per-pixel side work belongs in a separate small pass
 * [Favoring visible probes too much adds flicker](/ddgi/findings/scheduler-favored-set-stability.md) - 3x the update rate added flicker, 2x does not
 * [A full resolution pass has a floor of about 0.2 ms](/ddgi/findings/full-res-pass-floor.md) - reading depth and normals and writing the GI buffers at 1080p; measure where the time goes before optimizing
+* [Probes put nearby bounce light in the wrong place](/ddgi/findings/near-field-blob.md) - a lagging blob around the nearest probes; fixed with near-field rays
 * [Indirect light trails behind a moving lamp](/ddgi/findings/moving-light-trailing.md) - open issue: what limits the response, two rejected fixes, options
 
 # Improvement proposals

@@ -39,6 +39,8 @@ sources:
 | Weather fade stepping | `--view=interior --debug=1 --frames=600 --weather=dir` | Per-frame 99.9th percentile of the pixel change: 1 level on the baseline. Higher means probes visibly step one by one |
 | Cost | `--gpu-profile` engine arg, `--view=room --quality=1 --res=1920x1080 --frames=200 --bench=300` | `ddgi_ms` and per pass; varies about ±0.02 ms between runs |
 | Baking | `--volume=... --vspacing=0.5 --bake=path` | `BAKE ... OK` |
+| Bounce light on a wall, still | `--view=bleed --tod=0 --anim=0 --debug=1 --frames=300 --nf=0` and `--nf=1`, plus a final image | Red next to the ball on the wall and floor, no blob around the probes; open floor the same with and without near-field rays |
+| Bounce light on a wall, animated | `--fixed-fps 60 --write-movie <dir>/f.png --quit-after 720`, user args `--view=bleed --tod=0 --hud=0 --debug=1` | Contact sheet of frames 400-700: the red follows the ball, no trail, no blotches |
 
 Then `devtools/test/smoke.ps1` before committing.
 

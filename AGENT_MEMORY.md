@@ -181,6 +181,11 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   same multiplier) and split the light by turning sources off one at a time
   (reflections, sky, sun, bounce energy). With auto exposure the noisy path
   tracer image and the smooth DDGI image get different exposures.
+- For blotchy or lagging indirect light near objects, use the test
+  project's `bleed` view (red ball, white wall): GI buffer view, still with
+  `--nf=0` and `--nf=1`, and an animated contact sheet. Check the light
+  path (which side of the object is lit) before calling missing bounce
+  light a bug; the probes can show bounce light that isn't there.
 
 ## In-editor DLSS installer
 

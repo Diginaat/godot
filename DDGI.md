@@ -118,6 +118,9 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `gpu_time_budget_ms` | Optional: lower the probes traced per frame to stay within this GPU time |
 | `light_transition_time` | 0.2 s (at 60 fps): how long surfaces take to fade to a probe's new light |
 | `realtime_rays_per_probe` | 64: rays per probe and frame with realtime updates |
+| `emissive_lights` | On: emissive surfaces light pixels directly (sphere lights with a ray traced shadow); the probes carry only their bounce light |
+| `near_field_rays` | On: one short ray per block of the low resolution apply and frame, accumulated and filtered, in place of the probes' light near surfaces (see below) |
+| `near_field_distance` | 2: how far the near-field rays reach, in probe spacings of the finest volume |
 
 ### Baking
 
@@ -396,6 +399,19 @@ the depth prepass, where SDFGI/VoxelGI would run):
    and Chebyshev visibility weights), blends cascades over their edges and
    writes the GI ambient buffer. The scene shader mixes it in like SDFGI's
    (`INSTANCE_FLAGS_USE_GI_BUFFERS`).
+7. **Near-field rays** (`near_field_rays`, with the low resolution
+   apply): the low resolution pass also writes one cosine-distributed ray
+   per block. The ray tracing pipeline traces them like probe rays (raygen
+   mode `RT_PARAM_DDGI_TRACE` 3/4, up to `near_field_distance` spacings;
+   the update list and ray bindings carry the rays). A resolve pass adds
+   the probes' light at the hits (bounce light) and takes the probes'
+   irradiance at the block for rays that hit nothing. The samples are
+   accumulated per block (reprojected with the camera, matched by depth and
+   normal, clamped to the 5x5 neighborhood, blend at least 0.06), filtered
+   (two edge-aware 5x5 passes) and replace the probes' irradiance before the
+   upsample. Probes alone put light from a nearby object (a red ball next
+   to a white wall) as a soft blob around the closest probes that trails
+   the object; with the rays it sits next to the object and follows it.
 
 Scrolling: each cascade's probes are addressed through a toroidal offset, so
 when the camera moves by whole probes only the newly covered slab is reset;
@@ -455,10 +471,11 @@ noise of the first updates doesn't linger.
 | 22 | Scheduling: probes sampled by visible surfaces first (mark pass) | Done (branch `dev-ddgi-sched`) |
 | 23 | Performance: low resolution apply with directional output and upsampling | Done (branch `dev-ddgi-quality`) |
 | 24 | Baking: least-squares refinement against a half-spacing bake | Done (branch `dev-ddgi-quality`) |
+| 25 | Near-field rays in the apply pass: bounce light from nearby objects in place, following them | Done (branch `dev-ddgi-quality`) |
 
 ## Test project
 
-[`misc/ddgi_test_project/`](misc/ddgi_test_project/) builds four scenes from
+[`misc/ddgi_test_project/`](misc/ddgi_test_project/) builds five scenes from
 code (`main.gd`):
 
 | View | Contents |
@@ -467,6 +484,7 @@ code (`main.gd`):
 | `outdoor` | Sun with a time-of-day cycle, 400 m street of open-fronted buildings and pillars; `--move` flies the camera down the street (scrolling) |
 | `stress` | 4000 MultiMesh instances, 40 moving slabs, 32 fast-changing omni lights; `--move` orbits the camera |
 | `interior` | Closed house lit only by the sun through one window, and a windowless back room behind a doorway (bounce light only); use `--tod=0` |
+| `bleed` | A red ball bouncing in front of a white wall in bright, low sun from the side (`--sun=<energy>`, default 4): the red bounce light on the wall and floor; `--nf=0` turns the near-field rays off |
 
 ```
 bin\godot.windows.editor.x86_64.exe --path misc\ddgi_test_project
@@ -595,6 +613,33 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 25, near-field rays (branch `dev-ddgi-quality`). Report:
+  ugly blobs and spots in the indirect light; it should be smooth and fast
+  like the path tracer. New `bleed` view (red ball, white wall). Probes
+  only: the red on the wall is a round blob around the nearest probes,
+  above and behind the ball, trailing it. Realtime updates and 0.5 m
+  spacing changed the frames by less than 1 level (the lag is the
+  blending); hysteresis 0.5 without display easing followed faster but
+  made every surface blotchy. Near-field rays (above, Architecture 7):
+  the red sits on the ball's sunlit side on wall and floor, as in the path
+  tracer, and follows the ball. First version: far field from the probes'
+  irradiance at the ray's end made the floor too bright (its cosine lobe
+  saw the sunlit floor beside the ray); the probes' irradiance at the
+  block fixed it. Clamp 2.5 -> 4 standard errors and blend 0.1 -> 0.06:
+  interior flicker std 0.095 -> 0.07, pixels 0.34% -> 0.07%. RTX 3060,
+  Medium:
+
+  | | Probes only | Near-field rays |
+  | --- | --- | --- |
+  | DDGI ms, room 1080p (2 runs) | 1.148 / 1.117 | 1.504 / 1.498 (apply 0.40 -> 0.78) |
+  | Interior flicker std / pixels (2 runs) | 0.046, 0.056 / 0.00, 0.03% | 0.067, 0.073 / 0.07, 0.07% |
+  | Bleed, static, flicker std | 0.120, 0.118 | 0.145, 0.145 |
+  | GI mean interior / room | 13.92 / 151.63 | 13.18 / 145.53 |
+  | Storm game level (3 runs), GI mean moving / settled, jitter | 12.77 / 21.32, 0.093 | 12.80 / 21.24, 0.093 |
+
+  Smoke tests pass. Also checked: emissive lights (step before) give a
+  smooth light pool from the moving sphere in the storm level.
 
 - 2026-10-12: Step 24, least-squares bake (branch `dev-ddgi-quality`).
   Each case baked at 0.5 m spacing, rendered baked-only, compared with an

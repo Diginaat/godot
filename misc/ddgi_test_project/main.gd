@@ -11,10 +11,9 @@ extends Node3D
 ##            geometry and an orbiting camera
 ##   interior closed house lit only by the sun through one window, with a
 ##            windowless back room behind a doorway (bounce light only)
-##   bleed    a white wall in the sun's shadow and a red sphere bouncing in
-##            front of it; the high sun behind the wall lights the sphere's
-##            wall side, so the wall gets the sphere's red only as bounce
-##            light (color bleeding, blobs, lag)
+##   bleed    a white wall and a red sphere bouncing in front of it in
+##            bright sun: the red bounce light on the wall (color bleeding,
+##            blobs, lag)
 
 const VIEWS := {
 	"room": [Vector3(0, 2.0, 3.6), Vector3(0, 1.6, -2.0)],
@@ -135,6 +134,9 @@ func _apply_args() -> void:
 		env.tonemap_exposure = float(args["tonemap_exposure"])
 	if args.has("realtime"):
 		env.ddgi_realtime_updates = args["realtime"] == "1"
+	# --nf=0: DDGI near-field rays off (probes only).
+	if args.has("nf"):
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/near_field_rays", args["nf"] == "1")
 	if args.has("transition"):
 		ProjectSettings.set_setting("rendering/global_illumination/ddgi/light_transition_time", float(args["transition"]))
 	if args.has("rt_rays"):
@@ -174,6 +176,10 @@ func _set_view(p_view: String) -> void:
 		p_view = "room"
 	view = p_view
 	camera.look_at_from_position(VIEWS[view][0], VIEWS[view][1])
+	if view == "bleed":
+		# A bright, low sun from the side (see _build_bleed()).
+		sun.rotation_degrees = Vector3(-25, 90, 0)
+		sun.light_energy = float(args.get("sun", "4.0"))
 	# The sun is for the outdoor and stress areas; the room is closed anyway.
 	_update_hud()
 
@@ -631,10 +637,7 @@ func _build_environment() -> void:
 	sun.directional_shadow_max_distance = 200.0
 	add_child(sun)
 	animated.append(func(t: float) -> void:
-		if view == "bleed":
-			# High sun from behind the bleed view's wall (see _build_bleed()).
-			sun.rotation_degrees = Vector3(-70, 0, 0)
-		elif args.get("tod", "1") == "1":
+		if view != "bleed" and args.get("tod", "1") == "1":
 			# A day in 60 seconds: the sun sweeps from morning to evening.
 			sun.rotation_degrees = Vector3(-15.0 - 60.0 * absf(sin(t * TAU / 60.0)), -30.0 + t * 6.0, 0))
 
@@ -807,12 +810,12 @@ func _build_interior(o: Vector3) -> void:
 		step_emissive = _sphere(house, Vector3(-4.0, 0.6, 1.5), 0.25, _emissive(Color(1.0, 0.55, 0.2), 40.0))
 
 
-# Color bleeding: a white wall, 3 m high, whose front faces away from the
-# sun, and a red sphere bouncing in front of it. The sun (70 degrees high,
-# from behind the wall; set in _build_environment()) leaves the wall's front
-# and a strip of floor in shadow but lights the sphere's side toward the
-# wall, so the red on the wall is bounce light only. --anim=0 stops the
-# sphere.
+# Color bleeding: a white wall, 3 m high, and a red sphere bouncing in front
+# of it. A bright sun, 65 degrees high from the camera's side (set in
+# _build_environment(), --sun=<energy>, default 4), lights the top of the
+# sphere, also the part that faces the wall, so the red bounces onto the
+# wall. The DDGI indirect light view (--debug=1) shows the bounce alone.
+# --anim=0 stops the sphere.
 func _build_bleed(o: Vector3) -> void:
 	var bleed := Node3D.new()
 	bleed.name = "Bleed"
@@ -823,6 +826,6 @@ func _build_bleed(o: Vector3) -> void:
 	_box(bleed, Vector3(0, 1.5, 2.15), Vector3(10, 3, 0.3), white) # Wall, front at z = 2.
 	var ball := _sphere(bleed, Vector3(0, 0.6, 1.2), 0.6, _mat(Color(0.8, 0.04, 0.03)))
 	var place := func(time_s: float) -> void:
-		ball.position = Vector3(sin(time_s * 0.5) * 3.0, 0.6 + absf(sin(time_s * 1.6)) * 1.2, 2.0 - 0.95 - 0.45 * (0.5 + 0.5 * sin(time_s * 0.23)))
+		ball.position = Vector3(sin(time_s * 0.5) * 3.0, 0.6 + absf(sin(time_s * 1.6)) * 1.2, 0.9 - 0.4 * (0.5 + 0.5 * sin(time_s * 0.23)))
 	place.call(0.0)
 	animated.append(place)

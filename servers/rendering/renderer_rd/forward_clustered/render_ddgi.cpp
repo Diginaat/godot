@@ -113,7 +113,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 
 void RenderDDGI::ViewportData::free_data() {
 	RD *rd = RD::get_singleton();
-	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &sampled_frame, &emitter_buffer, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas };
+	RID *rids[] = { &data_buffer, &probe_buffer, &update_list, &stats_buffer, &fixed_history, &sampled_frame, &emitter_buffer, &ray_data, &ray_bounce, &irradiance_atlas, &irradiance_display, &distance_atlas, &nf_rays, &nf_bounce, &nf_params };
 	for (RID *r : rids) {
 		if (r->is_valid()) {
 			rd->free_rid(*r);
@@ -156,6 +156,9 @@ void RenderDDGI::initialize() {
 		modes.push_back("\n#define MODE_UPSAMPLE\n");
 		modes.push_back("\n#define MODE_APPLY\n#define DDGI_EMITTERS\n");
 		modes.push_back("\n#define MODE_APPLY_LOW\n#define DDGI_EMITTERS\n");
+		modes.push_back("\n#define MODE_NF_RESOLVE\n");
+		modes.push_back("\n#define MODE_NF_TEMPORAL\n");
+		modes.push_back("\n#define MODE_NF_FILTER\n");
 		apply_shader.initialize(modes);
 		emitters_supported = RD::get_singleton()->has_feature(RD::SUPPORTS_RAY_QUERY);
 		if (!emitters_supported) {
@@ -885,11 +888,15 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	rd->draw_command_end_label();
 }
 
+bool RenderDDGI::_near_field_rays() {
+	return GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/near_field_rays");
+}
+
 bool RenderDDGI::_emissive_lights() const {
 	return emitters_supported && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/emissive_lights");
 }
 
-void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution, RID p_tlas, const LocalVector<float> *p_emitters) {
+void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughness_slices, bool p_half_resolution, RID p_tlas, const LocalVector<float> *p_emitters, RenderRaytracing *p_raytracing, RTViewportState *p_rt_state, uint32_t p_rt_flags) {
 	ERR_FAIL_COND(!initialized);
 	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
 	ERR_FAIL_COND(rb.is_null());
@@ -977,18 +984,62 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		}
 		if (!rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
 			uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
-			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3 }) {
+			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3, RB_TEX_DDGI_NF_PROBE, RB_TEX_DDGI_NF_RAY, RB_TEX_DDGI_NF_RAW, RB_TEX_DDGI_NF_HISTORY0, RB_TEX_DDGI_NF_HISTORY1, RB_TEX_DDGI_NF_GEOMETRY0, RB_TEX_DDGI_NF_GEOMETRY1 }) {
 				rb->create_texture(RB_SCOPE_DDGI_LOW, name, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, low_size);
 			}
+			vd->nf_history_valid = false;
+		}
+		// The near-field ray buffers (also bound, unused, when the rays are off).
+		const uint32_t blocks = uint32_t(low_size.x * low_size.y);
+		if (vd->nf_blocks != blocks || !vd->nf_rays.is_valid()) {
+			for (RID *r : { &vd->nf_rays, &vd->nf_bounce, &vd->nf_params }) {
+				if (r->is_valid()) {
+					rd->free_rid(*r);
+					*r = RID();
+				}
+			}
+			vd->nf_blocks = blocks;
+			vd->nf_rays = rd->storage_buffer_create((blocks + 1) * 16);
+			rd->buffer_clear(vd->nf_rays, 0, (blocks + 1) * 16);
+			rd->set_resource_name(vd->nf_rays, "DDGI Near-Field Rays");
+			vd->nf_bounce = rd->storage_buffer_create(blocks * 16);
+			rd->set_resource_name(vd->nf_bounce, "DDGI Near-Field Bounce");
+			vd->nf_params = rd->uniform_buffer_create(NF_PARAMS_SIZE);
+			vd->nf_history_valid = false;
 		}
 	} else if (rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
 		rb->clear_context(RB_SCOPE_DDGI_LOW);
 	}
 
-	RD::ComputeListID list = rd->compute_list_begin();
-
 	Projection correction;
 	correction.set_depth_correction(true);
+
+	// Near-field rays: one view only (their history isn't per view), and
+	// only when the probes were traced this frame.
+	const bool near_field_frame = low_res && p_render_data->scene_data->view_count == 1 && p_raytracing && p_rt_state && _near_field_rays() && s.debug_mode != DEBUG_PROBE_IRRADIANCE;
+	if (near_field_frame) {
+		NFParams nf = {};
+		Projection prev_vp = (correction * p_render_data->scene_data->prev_cam_projection) * Projection(p_render_data->scene_data->prev_cam_transform.affine_inverse());
+		RendererRD::MaterialStorage::store_camera(prev_vp, nf.prev_view_projection);
+		// Rays reach a few spacings of the finest volume; the probes give
+		// the light from farther away.
+		nf.params[0] = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/near_field_distance") * vd->volumes[0].spacing;
+		nf.params[1] = float(vd->frame % 65536u);
+		nf.params[2] = 0.06f;
+		nf.params[3] = vd->nf_history_valid ? 1.0f : 0.0f;
+		nf.size[0] = low_size.x;
+		nf.size[1] = low_size.y;
+		nf.size[2] = int32_t(block);
+		rd->buffer_update(vd->nf_params, 0, sizeof(nf), &nf);
+		uint32_t header[4];
+		header[0] = uint32_t(low_size.x * low_size.y);
+		memcpy(&header[1], &nf.params[0], sizeof(float));
+		header[2] = uint32_t(low_size.x);
+		header[3] = 0;
+		rd->buffer_update(vd->nf_rays, 0, sizeof(header), header);
+	}
+
+	RD::ComputeListID list = rd->compute_list_begin();
 
 	if (low_res) {
 		RID low_shader = apply_shader.version_get_shader(apply_shader_version, emitter_count > 0 ? APPLY_LOW_EMITTERS : APPLY_LOW);
@@ -1023,16 +1074,110 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, low[2]),
 				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, low[3]),
 			};
+			const bool near_field = v == 0 && near_field_frame;
+			if (near_field) {
+				push.flags |= 1u << 25;
+			}
+			RD::Uniform u_nf_rays(RD::UNIFORM_TYPE_STORAGE_BUFFER, 16, vd->nf_rays);
+			RD::Uniform u_nf_probe_image(RD::UNIFORM_TYPE_IMAGE, 17, rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_PROBE, v, 0));
+			RD::Uniform u_nf_params(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 18, vd->nf_params);
 			if (emitter_count > 0) {
 				RD::Uniform u_tlas(RD::UNIFORM_TYPE_ACCELERATION_STRUCTURE, 14, p_tlas);
 				RD::Uniform u_emitters(RD::UNIFORM_TYPE_STORAGE_BUFFER, 15, vd->emitter_buffer);
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_tlas, u_emitters), 0);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_tlas, u_emitters, u_nf_rays, u_nf_probe_image, u_nf_params), 0);
 			} else {
-				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3]), 0);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_image, u_nf_params), 0);
 			}
 			rd->compute_list_set_push_constant(list, &push, sizeof(push));
 			rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 			rd->compute_list_add_barrier(list);
+
+			if (near_field) {
+				rd->compute_list_end();
+				// Trace the rays with the path tracer's pipeline, as the probe rays.
+				RTDDGIBindings bindings;
+				bindings.uniform_buffer = vd->data_buffer;
+				bindings.irradiance_atlas = vd->irradiance_display;
+				bindings.distance_atlas = vd->distance_atlas;
+				bindings.probe_buffer = vd->probe_buffer;
+				bindings.ray_data = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_RAY, v, 0);
+				bindings.update_list = vd->nf_rays;
+				bindings.ray_bounce = vd->nf_bounce;
+				bindings.trace = true;
+				bindings.emitters_as_lights = emitter_count > 0;
+				bindings.near_field = true;
+				RID rt_set = p_raytracing->update_uniform_set(p_rt_state, p_render_data, p_rt_flags, &bindings);
+				RID pipeline = p_raytracing->get_shader()->get_raytracing_pipeline(p_rt_flags);
+				if (rt_set.is_valid() && pipeline.is_valid()) {
+					RD::RaytracingListID rt_list = rd->raytracing_list_begin();
+					rd->raytracing_list_bind_raytracing_pipeline(rt_list, pipeline);
+					rd->raytracing_list_bind_uniform_set(rt_list, rt_set, 0);
+					RID bindless_set = p_raytracing->get_bindless_uniform_set();
+					if (bindless_set.is_valid()) {
+						rd->raytracing_list_bind_uniform_set(rt_list, bindless_set, 1);
+					}
+					p_raytracing->register_raytracing_buffer_dependencies(rt_list);
+					rd->raytracing_list_trace_rays(rt_list, 0, p_raytracing->get_shader()->get_hit_sbt(p_rt_flags), low_size.x * low_size.y, 1, 1);
+					rd->raytracing_list_end();
+				}
+				list = rd->compute_list_begin();
+
+				const uint32_t parity = vd->nf_parity;
+				vd->nf_parity ^= 1u;
+				RID history_prev = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_HISTORY0 : RB_TEX_DDGI_NF_HISTORY1, v, 0);
+				RID history = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_HISTORY1 : RB_TEX_DDGI_NF_HISTORY0, v, 0);
+				RID geometry_prev = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_GEOMETRY0 : RB_TEX_DDGI_NF_GEOMETRY1, v, 0);
+				RID geometry = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, parity ? RB_TEX_DDGI_NF_GEOMETRY1 : RB_TEX_DDGI_NF_GEOMETRY0, v, 0);
+				RID raw = rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_RAW, v, 0);
+
+				// Resolve: bounce light at the hits, far field for the rest.
+				RID resolve_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_NF_RESOLVE);
+				rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_NF_RESOLVE]);
+				RD::Uniform u_ray_texture(RD::UNIFORM_TYPE_TEXTURE, 19, rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_RAY, v, 0));
+				RD::Uniform u_bounce(RD::UNIFORM_TYPE_STORAGE_BUFFER, 20, vd->nf_bounce);
+				RD::Uniform u_raw_image(RD::UNIFORM_TYPE_IMAGE, 21, raw);
+				RD::Uniform u_nf_probe_texture(RD::UNIFORM_TYPE_TEXTURE, 17, rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_NF_PROBE, v, 0));
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(resolve_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_nf_rays, u_nf_probe_texture, u_nf_params, u_ray_texture, u_bounce, u_raw_image), 0);
+				rd->compute_list_set_push_constant(list, &push, sizeof(push));
+				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
+				rd->compute_list_add_barrier(list);
+
+				// Temporal accumulation.
+				RID temporal_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_NF_TEMPORAL);
+				rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_NF_TEMPORAL]);
+				RD::Uniform u_raw_texture(RD::UNIFORM_TYPE_TEXTURE, 21, raw);
+				RD::Uniform u_history_prev(RD::UNIFORM_TYPE_TEXTURE, 22, history_prev);
+				RD::Uniform u_history_out(RD::UNIFORM_TYPE_IMAGE, 23, history);
+				RD::Uniform u_geometry_prev(RD::UNIFORM_TYPE_TEXTURE, 24, geometry_prev);
+				RD::Uniform u_geometry_out(RD::UNIFORM_TYPE_IMAGE, 25, geometry);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(temporal_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_params, u_raw_texture, u_history_prev, u_history_out, u_geometry_prev, u_geometry_out), 0);
+				rd->compute_list_set_push_constant(list, &push, sizeof(push));
+				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
+				rd->compute_list_add_barrier(list);
+
+				// Smooth (two passes, the first into the raw texture), and put in
+				// place of the light from the probes.
+				RID filter_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_NF_FILTER);
+				rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_NF_FILTER]);
+				RD::Uniform u_history_texture(RD::UNIFORM_TYPE_TEXTURE, 22, history);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_raw_image, u_history_texture), 0);
+				rd->compute_list_set_push_constant(list, &push, sizeof(push));
+				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
+				rd->compute_list_add_barrier(list);
+				// Final pass: reads the first pass's result; its unused output
+				// is the previous history (not read any more this frame).
+				ApplyPushConstant final_push = push;
+				final_push.flags |= 1u << 28;
+				RD::Uniform u_unused_image(RD::UNIFORM_TYPE_IMAGE, 21, history_prev);
+				RD::Uniform u_first_pass(RD::UNIFORM_TYPE_TEXTURE, 22, raw);
+				rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(filter_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3], u_nf_rays, u_nf_probe_texture, u_nf_params, u_unused_image, u_first_pass), 0);
+				rd->compute_list_set_push_constant(list, &final_push, sizeof(final_push));
+				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
+				rd->compute_list_add_barrier(list);
+				vd->nf_history_valid = true;
+			} else if (v == 0) {
+				vd->nf_history_valid = false;
+			}
 
 			rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_UPSAMPLE]);
 			RD::Uniform u_ambient(RD::UNIFORM_TYPE_IMAGE, 7, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_AMBIENT, v, 0));

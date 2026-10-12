@@ -3471,7 +3471,8 @@ RID RenderRaytracing::update_uniform_set(RTViewportState *p_state, const RenderD
 		}
 		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_FOG_USE_LEGACY_BLENDING] = owner->fog_use_legacy_blending_get() ? 1.0f : 0.0f;
 		// 2: probe rays with emissive surfaces as lights (RTDDGIBindings::emitters_as_lights).
-		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_DDGI_TRACE] = ddgi_trace ? (p_ddgi->emitters_as_lights ? 2.0f : 1.0f) : 0.0f;
+		// 3, 4: the same for near-field rays (RTDDGIBindings::near_field).
+		rt_ubo.params[SceneShaderRaytracing::RT_PARAM_DDGI_TRACE] = ddgi_trace ? (p_ddgi->emitters_as_lights ? 2.0f : 1.0f) + (p_ddgi->near_field ? 2.0f : 0.0f) : 0.0f;
 
 		// rt_params layout (see RaytracingParamIndex enum):
 		// [0] = VIS_MODE, [1] = SAMPLE_COUNT, [2] = MAX_BOUNCES,
