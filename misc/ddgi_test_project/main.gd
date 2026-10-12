@@ -11,14 +11,19 @@ extends Node3D
 ##            geometry and an orbiting camera
 ##   interior closed house lit only by the sun through one window, with a
 ##            windowless back room behind a doorway (bounce light only)
+##   bleed    a white wall in the sun's shadow and a red sphere bouncing in
+##            front of it; the high sun behind the wall lights the sphere's
+##            wall side, so the wall gets the sphere's red only as bounce
+##            light (color bleeding, blobs, lag)
 
 const VIEWS := {
 	"room": [Vector3(0, 2.0, 3.6), Vector3(0, 1.6, -2.0)],
 	"outdoor": [Vector3(200, 6, 40), Vector3(200, 2, 0)],
 	"stress": [Vector3(-200, 18, 40), Vector3(-200, 0, 0)],
 	"interior": [Vector3(395.0, 1.6, -4.0), Vector3(401.5, 1.0, 0.5)],
+	"bleed": [Vector3(600.0, 1.6, -5.0), Vector3(600.0, 1.1, 2.0)],
 }
-const VIEW_KEYS := ["room", "outdoor", "stress", "interior"]
+const VIEW_KEYS := ["room", "outdoor", "stress", "interior", "bleed"]
 const GI_MODES := ["none", "sdfgi", "ddgi"]
 const DEBUG_MODE_COUNT := 7
 
@@ -63,6 +68,7 @@ func _ready() -> void:
 	_build_outdoor(Vector3(200, 0, 0))
 	_build_stress(Vector3(-200, 0, 0))
 	_build_interior(Vector3(400, 0, 0))
+	_build_bleed(Vector3(600, 0, 0))
 
 	camera = Camera3D.new()
 	camera.fov = 60.0
@@ -89,6 +95,7 @@ func _ready() -> void:
 
 	_apply_args()
 	_setup_volume()
+	hud.visible = args.get("hud", "1") == "1"
 
 	if args.has("shot") or args.has("bench") or args.has("measure") or args.has("weather"):
 		hud.visible = false
@@ -128,6 +135,8 @@ func _apply_args() -> void:
 		env.tonemap_exposure = float(args["tonemap_exposure"])
 	if args.has("realtime"):
 		env.ddgi_realtime_updates = args["realtime"] == "1"
+	if args.has("transition"):
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/light_transition_time", float(args["transition"]))
 	if args.has("rt_rays"):
 		ProjectSettings.set_setting("rendering/global_illumination/ddgi/realtime_rays_per_probe", int(args["rt_rays"]))
 	if args.has("reloc"):
@@ -171,7 +180,7 @@ func _set_view(p_view: String) -> void:
 
 func _update_hud() -> void:
 	var q: int = ProjectSettings.get_setting("rendering/global_illumination/ddgi/quality")
-	hud.text = "view: %s   GI: %s   DDGI quality: %s   debug: %d   animation: %s   path tracing: %s\n1-4 views   G GI mode   U quality   Tab debug   L animation   M camera path   P path tracing\nfly: hold right mouse to look, WASD move, Q/E down/up, Shift faster" % [
+	hud.text = "view: %s   GI: %s   DDGI quality: %s   debug: %d   animation: %s   path tracing: %s\n1-5 views   G GI mode   U quality   Tab debug   L animation   M camera path   P path tracing\nfly: hold right mouse to look, WASD move, Q/E down/up, Shift faster" % [
 		view, gi_mode, ["Low", "Medium", "High", "Ultra", "Custom"][q], env.ddgi_debug_mode,
 		"on" if animate else "off", "on" if env.pathtracing_enabled else "off"]
 
@@ -244,7 +253,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if key.keycode >= KEY_1 and key.keycode <= KEY_4:
+	if key.keycode >= KEY_1 and key.keycode <= KEY_5:
 		_set_view(VIEW_KEYS[key.keycode - KEY_1])
 	elif key.keycode == KEY_G:
 		_set_gi_mode(GI_MODES[(GI_MODES.find(gi_mode) + 1) % GI_MODES.size()])
@@ -622,7 +631,10 @@ func _build_environment() -> void:
 	sun.directional_shadow_max_distance = 200.0
 	add_child(sun)
 	animated.append(func(t: float) -> void:
-		if args.get("tod", "1") == "1":
+		if view == "bleed":
+			# High sun from behind the bleed view's wall (see _build_bleed()).
+			sun.rotation_degrees = Vector3(-70, 0, 0)
+		elif args.get("tod", "1") == "1":
 			# A day in 60 seconds: the sun sweeps from morning to evening.
 			sun.rotation_degrees = Vector3(-15.0 - 60.0 * absf(sin(t * TAU / 60.0)), -30.0 + t * 6.0, 0))
 
@@ -793,3 +805,24 @@ func _build_interior(o: Vector3) -> void:
 	# another spot when the measurement starts (see _measure()).
 	if args.get("emissive_step", "0") == "1":
 		step_emissive = _sphere(house, Vector3(-4.0, 0.6, 1.5), 0.25, _emissive(Color(1.0, 0.55, 0.2), 40.0))
+
+
+# Color bleeding: a white wall, 3 m high, whose front faces away from the
+# sun, and a red sphere bouncing in front of it. The sun (70 degrees high,
+# from behind the wall; set in _build_environment()) leaves the wall's front
+# and a strip of floor in shadow but lights the sphere's side toward the
+# wall, so the red on the wall is bounce light only. --anim=0 stops the
+# sphere.
+func _build_bleed(o: Vector3) -> void:
+	var bleed := Node3D.new()
+	bleed.name = "Bleed"
+	bleed.position = o
+	add_child(bleed)
+	var white := _mat(Color(0.85, 0.85, 0.85))
+	_box(bleed, Vector3(0, -0.5, 0), Vector3(30, 1, 30), white) # Floor.
+	_box(bleed, Vector3(0, 1.5, 2.15), Vector3(10, 3, 0.3), white) # Wall, front at z = 2.
+	var ball := _sphere(bleed, Vector3(0, 0.6, 1.2), 0.6, _mat(Color(0.8, 0.04, 0.03)))
+	var place := func(time_s: float) -> void:
+		ball.position = Vector3(sin(time_s * 0.5) * 3.0, 0.6 + absf(sin(time_s * 1.6)) * 1.2, 2.0 - 0.95 - 0.45 * (0.5 + 0.5 * sin(time_s * 0.23)))
+	place.call(0.0)
+	animated.append(place)
