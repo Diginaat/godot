@@ -648,6 +648,13 @@ Newest first. Note the date, the commit, what you saw or changed.
   leaks, no crash; with the Khronos validation layer (sync validation on)
   no message names a DDGI resource. GI buffer against the baseline: mean
   difference under 1 level, no pixel off by 8. Storm level unchanged.
+  Also tried and dropped: the smooth pass as one workgroup per probe,
+  skipping probes inside geometry and probes whose display copy had caught
+  up (1/1000 of the gap): nearly every probe updates within the 83 frames
+  that takes at the default transition time, so little was skipped, and
+  10x10 tiles left 8x8 workgroups half idle (Ultra 0.16 -> 0.25 ms). Not
+  tracing the moving objects' row of near-field rays when there are none:
+  no measurable change (0.10 ms either way).
 
 - 2026-10-12: Report: white speckles on walls near a bright tunnel
   opening, crawling while walking ("light flowing like water"); not in
