@@ -212,6 +212,7 @@ Releases on GitHub name the Godot base and the own version:
 | 0.5.2 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.2` | Fixes: exported games with an embedded PCK crashed at startup; viewport jitter when DLSS is selected but not installed |
 | 0.5.3 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.3` | Same build as 0.5.2; the editor zips no longer put the files in a `.` folder |
 | 0.6.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.6.0` | DDGI: dark caves and tunnels (no sky light or sky reflections), DDGI-lit volumetric fog, guided probe rays, faster response to moving objects, up to 30% faster; screen reader support (AccessKit) |
+| 0.7.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.7.0` | DDGI: near-field rays (bounce light from nearby objects in place, following them), moving objects lit without smears or noise, emissive surfaces as direct lights, low resolution apply (faster), least-squares baking, visible probes updated first |
 
 ## Release packages (Windows)
 
