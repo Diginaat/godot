@@ -3,7 +3,7 @@ type: Proposal
 title: Low-resolution apply with directional output
 description: Run the DDGI apply pass at 1/4 resolution on a downsampled G-buffer, output L1 SH per pixel, and upsample depth-normal aware, to cut its cost while keeping normal-map detail.
 tags: [ddgi, performance, proposal, upsampling]
-status: draft
+status: stable
 generated: { by: claude_code/claude-opus-5-5, at: 2026-10-12T00:00:00Z }
 sources:
   - id: downscale
@@ -14,7 +14,19 @@ sources:
     title: Stupid SH Tricks
 ---
 
-# Today
+# Result (2026-10-12, branch `dev-ddgi-quality`)
+
+Built as `rendering/global_illumination/ddgi/apply_resolution` (Full, 1/2,
+1/4, 1/8; default 1/4). Instead of L1 SH, each block stores the
+irradiance at its normal plus the gradient over the normal, from four
+directions tilted around it (exact at the block normal, linear around
+it). 1080p, RTX 3060: apply 0.717 -> 0.399 ms at 1/4, 0.362 at 1/8;
+GI buffer within 0.3 levels of full resolution in the interior. The
+full resolution upsample (about 0.2 ms) is the floor. Details and the
+cost breakdown: DDGI.md findings log, step 23;
+[the finding](/ddgi/findings/full-res-pass-floor.md).
+
+# Before
 
 The apply pass samples the probes once per pixel at internal resolution:
 0.66 of 1.33 ms DDGI time at 1080p on an RTX 3060, the largest single

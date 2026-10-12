@@ -3864,6 +3864,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/light_transition_time", PROPERTY_HINT_RANGE, "0,1,0.01,suffix:s"), 0.2);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/realtime_rays_per_probe", PROPERTY_HINT_RANGE, "16,512,8"), 64);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/gpu_time_budget_ms", PROPERTY_HINT_RANGE, "0,16,0.1,or_greater,suffix:ms"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/apply_resolution", PROPERTY_HINT_ENUM, "Full,1/2 (2x2 Blocks),1/4 (4x4 Blocks),1/8 (8x8 Blocks)"), 2);
 
 	// OpenGL limits
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/opengl/max_renderable_elements", PROPERTY_HINT_RANGE, "1024,65536,1"), 65536);

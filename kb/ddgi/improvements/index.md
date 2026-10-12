@@ -23,7 +23,7 @@ Status per proposal in the last column.
 | 6 | [Screen-space probes for near-field detail](/ddgi/improvements/screen-space-probes.md) | Detail below the probe spacing; contact bounce | Large | Ghost of Yotei | Proposed |
 | 7 | [Adaptive probe density](/ddgi/improvements/adaptive-density.md) | Uniform density wastes probes in open space, lacks them near geometry | Large | Enemies, Ghost of Yotei, Forza | Proposed |
 | 8 | [Compressed baked data](/ddgi/improvements/compressed-baked-data.md) | Baked data size | Small to large | Gaussian compression, Enemies, Unity APV | Proposed |
-| 9 | [Low-resolution apply with directional output](/ddgi/improvements/low-res-apply-directional.md) | The apply pass is half the DDGI cost; half resolution softens edges | Medium | GI downscaling, Stupid SH Tricks | Proposed |
+| 9 | [Low-resolution apply with directional output](/ddgi/improvements/low-res-apply-directional.md) | The apply pass is half the DDGI cost; half resolution softens edges | Medium | GI downscaling, Stupid SH Tricks | Done (`dev-ddgi-quality`) |
 | 10 | [Specular occlusion for the DDGI reflection output](/ddgi/improvements/specular-occlusion.md) | Bright reflections in shadowed corners and interiors | Small to medium | FF7 Rebirth analysis, Enlisted | Proposed |
 | 11 | [Least-squares baking with a smoothness regularizer](/ddgi/improvements/least-squares-bake.md) | Interpolation error, seams and noise in baked data | Medium | CoD: Infinite Warfare | Proposed |
 

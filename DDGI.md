@@ -314,6 +314,18 @@ Common problems:
   `rendering/global_illumination/gi/use_half_resolution` (the setting SDFGI
   and VoxelGI use) it runs at half resolution: about a quarter of the cost,
   softer indirect light at object edges.
+- `rendering/global_illumination/ddgi/apply_resolution` (default 1/4)
+  samples the probes once per block of 2x2, 4x4 or 8x8 pixels instead of
+  per pixel: at the block's main surface (2x2 pixels near the depth of its
+  center, averaged), for the normal and four directions tilted 27 degrees
+  around it, which gives the irradiance and its gradient over the normal.
+  An upsample pass then writes the GI buffer: each pixel blends the 2x2
+  blocks around it by bilinear weight x depth match x normal match and
+  evaluates their light at its own normal, so normal maps keep their
+  indirect shading. 1080p, RTX 3060: apply 0.717 ms at full, 0.399 at 1/4,
+  0.362 at 1/8. The upsample (about 0.2 ms, reading depth and normals and
+  writing the GI buffers at full resolution) is the floor; with the half
+  resolution GI buffer the low resolution apply saves nothing below 1/8.
 
 ## Architecture
 
@@ -424,6 +436,7 @@ noise of the first updates doesn't linger.
 | 19 | Dark areas on par with the path tracer: DDGI occludes sky reflections | Done |
 | 20 | Performance: bounce light lookup moved out of the ray tracing pipeline | Done |
 | 22 | Scheduling: probes sampled by visible surfaces first (mark pass) | Done (branch `dev-ddgi-sched`) |
+| 23 | Performance: low resolution apply with directional output and upsampling | Done (branch `dev-ddgi-quality`) |
 
 ## Test project
 
@@ -448,7 +461,8 @@ Arguments (after `--`): `--view=`, `--gi=none|sdfgi|ddgi`, `--quality=0..4`,
 `--debug=0..6`, `--anim=0|1`, `--tod=0|1` (sun cycle), `--move=1`,
 `--speed=`, `--pt=1`, `--scale3d=6 --scale=0.67` (DLSS), `--res=WxH`,
 `--frames=N` (warm-up), `--shot=path`, `--bench=N`, `--instances=`, `--lights=`,
-`--linear --exposure=`, `--budget=ms` (GPU time budget), `--half=1` (half
+`--linear --exposure=`, `--budget=ms` (GPU time budget), `--apply_res=0..3`
+(apply resolution: full, 1/2, 1/4, 1/8), `--half=1` (half
 resolution apply), `--settle=N` (with `--shot`: stop the camera, wait N
 frames and save `<shot>_settled.png`; the difference to the first shot is
 the error that moving leaves), `--reloc=0|1`, `--classify=0|1`,
@@ -562,6 +576,33 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Step 23, low resolution apply (branch `dev-ddgi-quality`,
+  from the GI downscaling article in `kb/research/gi-downscaling.md`).
+  RTX 3060, 1080p room, apply pass (includes the 0.03 ms mark pass):
+
+  | apply_resolution | GI buffer full | GI buffer half |
+  | --- | --- | --- |
+  | Full | 0.717 | 0.192 |
+  | 1/2 | 0.667 | 0.484 |
+  | 1/4 (default) | 0.399 | 0.198 |
+  | 1/8 | 0.362 | 0.158 |
+
+  DDGI total 1.400 -> 1.131 ms at 1/4. Interior GI buffer against full
+  resolution, converged: mean absolute difference 0.28-0.37 levels (p99
+  1.7-2.7), brightness the same. Stress view (many small boxes): 1.13
+  levels at 1/4 (p99 10), 1.83 at 1/8 (p99 21, edges of small far
+  objects). Outdoor motion error 0.886-0.893 (full 0.893). Flicker in the
+  same range (3 runs each). Where the time went, in order of finding it:
+  - The first build was 12% too dark with banding: the block normal was
+    decoded with `oct_to_vec3()`, which expects -1..1, from
+    `vec3_to_oct()`, which returns 0..1.
+  - Reading all pixels of a block to average them cost as much as a full
+    resolution read pass (0.15 ms); 1/8 was slower than 1/4. Now 2x2
+    pixels per block.
+  - The five directions cost about 0.02 ms over one (probe weights are
+    shared). Shared memory for the upsample changed nothing: its cost is
+    the full resolution reads and writes, not the block fetches.
 
 - 2026-10-12: Step 22, scheduling (branch `dev-ddgi-sched`). Probes the
   surfaces actually sample now get the highest rate instead of probes whose

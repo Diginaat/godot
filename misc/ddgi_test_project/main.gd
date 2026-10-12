@@ -104,6 +104,9 @@ func _apply_args() -> void:
 		ProjectSettings.set_setting("rendering/global_illumination/ddgi/gpu_time_budget_ms", float(args["budget"]))
 	if args.has("half"):
 		RenderingServer.gi_set_use_half_resolution(args["half"] == "1")
+	# --apply_res=0..3: DDGI apply resolution (full, 1/2, 1/4, 1/8).
+	if args.has("apply_res"):
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/apply_resolution", int(args["apply_res"]))
 	if args.has("cascades"):
 		env.ddgi_cascades = int(args["cascades"])
 	if args.has("spacing"):

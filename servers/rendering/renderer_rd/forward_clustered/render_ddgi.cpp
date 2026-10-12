@@ -106,6 +106,7 @@ RenderDDGI::Quality RenderDDGI::get_quality() {
 	q.irradiance_texels = CLAMP(q.irradiance_texels, 4u, 16u);
 	q.distance_texels = CLAMP(q.distance_texels, 8u, 32u);
 	q.gpu_time_budget_ms = MAX(0.0f, GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/gpu_time_budget_ms"));
+	q.apply_block = 1u << CLAMP(GLOBAL_GET_CACHED(int, "rendering/global_illumination/ddgi/apply_resolution"), 0, 3);
 	return q;
 }
 
@@ -150,6 +151,8 @@ void RenderDDGI::initialize() {
 		modes.push_back("\n#define MODE_APPLY\n");
 		modes.push_back("\n#define MODE_DEBUG_PROBES\n");
 		modes.push_back("\n#define MODE_MARK\n");
+		modes.push_back("\n#define MODE_APPLY_LOW\n");
+		modes.push_back("\n#define MODE_UPSAMPLE\n");
 		apply_shader.initialize(modes);
 		apply_shader_version = apply_shader.version_create();
 		for (int i = 0; i < APPLY_MODE_MAX; i++) {
@@ -914,13 +917,91 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 	RID linear_sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	RID shader = apply_shader.version_get_shader(apply_shader_version, APPLY_GI);
 
+	// Low resolution apply (rendering/global_illumination/ddgi/apply_resolution):
+	// probes sampled once per block of pixels, then upsampled into the GI
+	// buffer. Not for the cascades debug view, which colors single pixels.
+	const uint32_t block = get_quality().apply_block;
+	const bool low_res = block > 1 && s.debug_mode != DEBUG_CASCADES;
+	Size2i low_size = Size2i((internal_size.x + block - 1) / block, (internal_size.y + block - 1) / block);
+	if (low_res) {
+		if (rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
+			RD::TextureFormat f = rb->get_texture_format(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0);
+			if (f.width != uint32_t(low_size.x) || f.height != uint32_t(low_size.y)) {
+				rb->clear_context(RB_SCOPE_DDGI_LOW);
+			}
+		}
+		if (!rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
+			uint32_t usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
+			for (const StringName &name : { RB_TEX_DDGI_LOW0, RB_TEX_DDGI_LOW1, RB_TEX_DDGI_LOW2, RB_TEX_DDGI_LOW3 }) {
+				rb->create_texture(RB_SCOPE_DDGI_LOW, name, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, usage_bits, RD::TEXTURE_SAMPLES_1, low_size);
+			}
+		}
+	} else if (rb->has_texture(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0)) {
+		rb->clear_context(RB_SCOPE_DDGI_LOW);
+	}
+
 	RD::ComputeListID list = rd->compute_list_begin();
-	rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_GI]);
 
 	Projection correction;
 	correction.set_depth_correction(true);
 
-	for (uint32_t v = 0; v < p_render_data->scene_data->view_count; v++) {
+	if (low_res) {
+		RID low_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_LOW);
+		RID up_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_UPSAMPLE);
+		for (uint32_t v = 0; v < p_render_data->scene_data->view_count; v++) {
+			ApplyPushConstant push = {};
+			RendererRD::MaterialStorage::store_camera((correction * p_render_data->scene_data->view_projection[v]).inverse(), push.inv_projection);
+			RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
+			push.screen_size[0] = internal_size.x;
+			push.screen_size[1] = internal_size.y;
+			push.flags = (p_half_resolution ? 1 : 0) | (block << 8);
+			push.debug_mode = uint32_t(s.debug_mode);
+
+			RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
+			RD::Uniform u_probes(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, vd->probe_buffer);
+			RD::Uniform u_irradiance(RD::UNIFORM_TYPE_TEXTURE, 2, vd->irradiance_display);
+			RD::Uniform u_distance(RD::UNIFORM_TYPE_TEXTURE, 3, vd->distance_atlas);
+			RD::Uniform u_sampler(RD::UNIFORM_TYPE_SAMPLER, 4, linear_sampler);
+			RD::Uniform u_depth(RD::UNIFORM_TYPE_TEXTURE, 5, rb->get_depth_texture(v));
+			RD::Uniform u_normal(RD::UNIFORM_TYPE_TEXTURE, 6, p_normal_roughness_slices[v]);
+			RID low[4] = {
+				rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW0, v, 0),
+				rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW1, v, 0),
+				rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW2, v, 0),
+				rb->get_texture_slice(RB_SCOPE_DDGI_LOW, RB_TEX_DDGI_LOW3, v, 0),
+			};
+
+			rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_LOW]);
+			RD::Uniform u_low_images[4] = {
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 10, low[0]),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 11, low[1]),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 12, low[2]),
+				RD::Uniform(RD::UNIFORM_TYPE_IMAGE, 13, low[3]),
+			};
+			rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(low_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_low_images[0], u_low_images[1], u_low_images[2], u_low_images[3]), 0);
+			rd->compute_list_set_push_constant(list, &push, sizeof(push));
+			rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
+			rd->compute_list_add_barrier(list);
+
+			rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_UPSAMPLE]);
+			RD::Uniform u_ambient(RD::UNIFORM_TYPE_IMAGE, 7, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_AMBIENT, v, 0));
+			RD::Uniform u_reflection(RD::UNIFORM_TYPE_IMAGE, 8, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_REFLECTION, v, 0));
+			RD::Uniform u_low_textures[4] = {
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 10, low[0]),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 11, low[1]),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 12, low[2]),
+				RD::Uniform(RD::UNIFORM_TYPE_TEXTURE, 13, low[3]),
+			};
+			rd->compute_list_bind_uniform_set(list, uniform_set_cache->get_cache(up_shader, 0, u_data, u_probes, u_irradiance, u_distance, u_sampler, u_depth, u_normal, u_ambient, u_reflection, u_low_textures[0], u_low_textures[1], u_low_textures[2], u_low_textures[3]), 0);
+			rd->compute_list_set_push_constant(list, &push, sizeof(push));
+			rd->compute_list_dispatch_threads(list, gi_size.x, gi_size.y, 1);
+		}
+	}
+
+	if (!low_res) {
+		rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_GI]);
+	}
+	for (uint32_t v = 0; v < (low_res ? 0 : p_render_data->scene_data->view_count); v++) {
 		ApplyPushConstant push = {};
 		RendererRD::MaterialStorage::store_camera((correction * p_render_data->scene_data->view_projection[v]).inverse(), push.inv_projection);
 		RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);

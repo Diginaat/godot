@@ -13,4 +13,5 @@ What worked is in [successes](/successes/).
 * [Tuned for speed before checking flicker](/mistakes/tuned-speed-before-stability.md) - run the whole suite per variant
 * [Test script bugs looked like engine bugs](/mistakes/script-bugs-taken-for-engine-bugs.md) - fail fast on script errors, check tests on known answers
 * [Credited a fix on 3 runs of a noisy test](/mistakes/three-runs-of-a-noisy-test.md) - know the test's spread on the baseline first
+* [Mixed up an encoding convention](/mistakes/encoding-convention-mismatch.md) - check the value range of shared helpers before pairing them
 * [Quoting broke generated scripts](/mistakes/generated-code-quoting.md) - put code in files, make edits all-or-nothing

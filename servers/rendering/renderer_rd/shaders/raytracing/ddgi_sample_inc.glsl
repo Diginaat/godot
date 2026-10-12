@@ -93,6 +93,63 @@ float ddgi_volume_weight(DDGIVolume vol, vec3 p_local) {
 	return clamp(d / max(vol.params.w, 0.001), 0.0, 1.0);
 }
 
+// Weight of one of the 8 probes around a lookup point (see
+// ddgi_sample_volume()): 0 when the probe can't be used. Sets r_untraced for
+// probes not traced yet.
+float ddgi_probe_weight(DDGIVolume vol, uint p_probe, ivec3 p_logical, ivec3 p_offs, vec3 p_alpha, vec3 p_local, vec3 p_local_normal, inout bool r_untraced) {
+	uint state = ddgi_probes[p_probe].state;
+	// Scrolled-in probes hold the light of the probes that scrolled out (the
+	// far side of the grid) until traced: let a coarser cascade cover them.
+	if (state == DDGI_PROBE_NEW || state == DDGI_PROBE_SCROLLED) {
+		r_untraced = true;
+		return 0.0;
+	}
+	if (state == DDGI_PROBE_INSIDE) {
+		return 0.0;
+	}
+
+	vec3 probe_local = ddgi_probe_local_position(vol, p_logical) + ddgi_probes[p_probe].offset;
+	vec3 to_probe = probe_local - p_local;
+	float dist = length(to_probe);
+	vec3 dir = dist > 0.0 ? to_probe / dist : p_local_normal;
+
+	vec3 tri = mix(1.0 - p_alpha, p_alpha, vec3(p_offs));
+	float trilinear = tri.x * tri.y * tri.z;
+
+	// Smooth backface: probes behind the surface count less, but never zero,
+	// so thin geometry doesn't go black.
+	float wrap = (dot(dir, p_local_normal) + 1.0) * 0.5;
+	float weight = wrap * wrap + 0.2;
+
+	// Chebyshev visibility from the probe's distance moments, looked up in
+	// the direction from the probe to the shading point.
+	vec3 world_dir_from_probe = -ddgi_xform_dir(vol.local_to_world, dir);
+	vec2 moments = textureLod(sampler2D(ddgi_distance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(p_probe, world_dir_from_probe, ddgi.atlas.y, ddgi.atlas.z, ddgi.atlas_inv_size.zw), 0.0).rg;
+	if (dist > moments.x) {
+		float variance = abs(moments.x * moments.x - moments.y);
+		float d = dist - moments.x;
+		float chebyshev = variance / (variance + d * d);
+		weight *= max(chebyshev * chebyshev * chebyshev, 0.0);
+	}
+	weight = max(weight, 0.000001);
+
+	// Crush tiny weights so light doesn't leak through walls.
+	const float crush_threshold = 0.2;
+	if (weight < crush_threshold) {
+		weight *= weight * weight / (crush_threshold * crush_threshold);
+	}
+
+	weight *= trilinear;
+	// Inactive probes (no surface nearby) still keep their light up to date
+	// with the fixed rays. They count a little, so a point whose probes are
+	// all inactive or inside gets their light instead of going dark; only
+	// probes inside geometry never count.
+	if (state == DDGI_PROBE_INACTIVE) {
+		weight *= 0.05;
+	}
+	return weight;
+}
+
 // Irradiance (cosine weighted mean radiance) at world position p_pos with
 // normal p_normal, seen from direction p_view (unit vector toward the viewer),
 // from one volume. Returns rgb and the volume weight in a. When the point is
@@ -119,7 +176,6 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 	vec3 alpha = clamp(g - vec3(base), vec3(0.0), vec3(1.0));
 
 	uint irr_texels = ddgi.atlas.x;
-	uint dist_texels = ddgi.atlas.y;
 	uint per_row = ddgi.atlas.z;
 
 	vec3 sum = vec3(0.0);
@@ -130,55 +186,9 @@ vec4 ddgi_sample_volume(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view) {
 		ivec3 offs = ivec3(i & 1u, (i >> 1u) & 1u, (i >> 2u) & 1u);
 		ivec3 logical = base + offs;
 		uint probe = ddgi_probe_index(vol, logical);
-		uint state = ddgi_probes[probe].state;
-		// Scrolled-in probes hold the light of the probes that scrolled out (the
-		// far side of the grid) until traced: let a coarser cascade cover them.
-		if (state == DDGI_PROBE_NEW || state == DDGI_PROBE_SCROLLED) {
-			untraced = true;
+		float weight = ddgi_probe_weight(vol, probe, logical, offs, alpha, local, local_normal, untraced);
+		if (weight <= 0.0) {
 			continue;
-		}
-		if (state == DDGI_PROBE_INSIDE) {
-			continue;
-		}
-
-		vec3 probe_local = ddgi_probe_local_position(vol, logical) + ddgi_probes[probe].offset;
-		vec3 to_probe = probe_local - local;
-		float dist = length(to_probe);
-		vec3 dir = dist > 0.0 ? to_probe / dist : local_normal;
-
-		vec3 tri = mix(1.0 - alpha, alpha, vec3(offs));
-		float trilinear = tri.x * tri.y * tri.z;
-
-		// Smooth backface: probes behind the surface count less, but never zero,
-		// so thin geometry doesn't go black.
-		float wrap = (dot(dir, local_normal) + 1.0) * 0.5;
-		float weight = wrap * wrap + 0.2;
-
-		// Chebyshev visibility from the probe's distance moments, looked up in
-		// the direction from the probe to the shading point.
-		vec3 world_dir_from_probe = -ddgi_xform_dir(vol.local_to_world, dir);
-		vec2 moments = textureLod(sampler2D(ddgi_distance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, world_dir_from_probe, dist_texels, per_row, ddgi.atlas_inv_size.zw), 0.0).rg;
-		if (dist > moments.x) {
-			float variance = abs(moments.x * moments.x - moments.y);
-			float d = dist - moments.x;
-			float chebyshev = variance / (variance + d * d);
-			weight *= max(chebyshev * chebyshev * chebyshev, 0.0);
-		}
-		weight = max(weight, 0.000001);
-
-		// Crush tiny weights so light doesn't leak through walls.
-		const float crush_threshold = 0.2;
-		if (weight < crush_threshold) {
-			weight *= weight * weight / (crush_threshold * crush_threshold);
-		}
-
-		weight *= trilinear;
-		// Inactive probes (no surface nearby) still keep their light up to date
-		// with the fixed rays. They count a little, so a point whose probes are
-		// all inactive or inside gets their light instead of going dark; only
-		// probes inside geometry never count.
-		if (state == DDGI_PROBE_INACTIVE) {
-			weight *= 0.05;
 		}
 
 		vec3 irradiance = textureLod(sampler2D(ddgi_irradiance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, p_normal, irr_texels, per_row, ddgi.atlas_inv_size.xy), 0.0).rgb;
@@ -218,6 +228,87 @@ vec4 ddgi_sample_irradiance(vec3 p_pos, vec3 p_normal, vec3 p_view) {
 	}
 	float coverage = 1.0 - remaining;
 	return coverage > 0.0 ? vec4(sum / coverage, coverage) : vec4(0.0);
+}
+
+// ddgi_sample_volume() for DDGI_DIRS lookup directions at once (the low
+// resolution apply: the surface normal and directions tilted around it).
+// The probe weights come from p_normal and are shared by all directions.
+// Returns the volume weight as ddgi_sample_volume() does, the irradiance of
+// each direction in r_irradiance.
+#define DDGI_DIRS 5
+vec4 ddgi_sample_volume_dirs(uint p_volume, vec3 p_pos, vec3 p_normal, vec3 p_view, vec3 p_dirs[DDGI_DIRS], out vec3 r_irradiance[DDGI_DIRS]) {
+	for (int k = 0; k < DDGI_DIRS; k++) {
+		r_irradiance[k] = vec3(0.0);
+	}
+	DDGIVolume vol = ddgi.volumes[p_volume];
+	vec3 pos = p_pos + p_normal * vol.spacing.y + p_view * vol.spacing.z;
+	vec3 local = ddgi_xform(vol.world_to_local, pos);
+	float volume_weight = ddgi_volume_weight(vol, ddgi_xform(vol.world_to_local, p_pos));
+	if (volume_weight <= 0.0) {
+		return vec4(0.0);
+	}
+	vec3 local_normal = ddgi_xform_dir(vol.world_to_local, p_normal);
+	vec3 g = local / vol.spacing.x + (vec3(vol.grid.xyz) - 1.0) * 0.5;
+	ivec3 base = clamp(ivec3(floor(g)), ivec3(0), vol.grid.xyz - 2);
+	vec3 alpha = clamp(g - vec3(base), vec3(0.0), vec3(1.0));
+
+	vec3 sum[DDGI_DIRS];
+	for (int k = 0; k < DDGI_DIRS; k++) {
+		sum[k] = vec3(0.0);
+	}
+	float weight_sum = 0.0;
+	bool untraced = false;
+	for (uint i = 0u; i < 8u; i++) {
+		ivec3 offs = ivec3(i & 1u, (i >> 1u) & 1u, (i >> 2u) & 1u);
+		ivec3 logical = base + offs;
+		uint probe = ddgi_probe_index(vol, logical);
+		float weight = ddgi_probe_weight(vol, probe, logical, offs, alpha, local, local_normal, untraced);
+		if (weight <= 0.0) {
+			continue;
+		}
+		for (int k = 0; k < DDGI_DIRS; k++) {
+			vec3 irradiance = textureLod(sampler2D(ddgi_irradiance_atlas, DDGI_SAMPLER), ddgi_atlas_uv(probe, p_dirs[k], ddgi.atlas.x, ddgi.atlas.z, ddgi.atlas_inv_size.xy), 0.0).rgb;
+			sum[k] += sqrt(max(irradiance, vec3(0.0))) * weight;
+		}
+		weight_sum += weight;
+	}
+	if (weight_sum <= 0.0) {
+		return vec4(0.0, 0.0, 0.0, untraced ? 0.0 : -volume_weight);
+	}
+	for (int k = 0; k < DDGI_DIRS; k++) {
+		vec3 result = sum[k] / weight_sum;
+		r_irradiance[k] = result * result;
+	}
+	return vec4(0.0, 0.0, 0.0, volume_weight);
+}
+
+// ddgi_sample_irradiance() for DDGI_DIRS directions. Returns the coverage.
+float ddgi_sample_irradiance_dirs(vec3 p_pos, vec3 p_normal, vec3 p_view, vec3 p_dirs[DDGI_DIRS], out vec3 r_irradiance[DDGI_DIRS]) {
+	vec3 sum[DDGI_DIRS];
+	for (int k = 0; k < DDGI_DIRS; k++) {
+		sum[k] = vec3(0.0);
+	}
+	float remaining = 1.0;
+	for (uint v = 0u; v < ddgi.counts.x && v < uint(DDGI_MAX_VOLUMES); v++) {
+		vec3 e[DDGI_DIRS];
+		vec4 s = ddgi_sample_volume_dirs(v, p_pos, p_normal, p_view, p_dirs, e);
+		if (s.a == 0.0) {
+			continue;
+		}
+		float weight = abs(s.a);
+		for (int k = 0; k < DDGI_DIRS; k++) {
+			sum[k] += e[k] * weight * remaining;
+		}
+		remaining *= 1.0 - weight;
+		if (remaining < 0.001) {
+			break;
+		}
+	}
+	float coverage = 1.0 - remaining;
+	for (int k = 0; k < DDGI_DIRS; k++) {
+		r_irradiance[k] = coverage > 0.0 ? sum[k] / coverage : vec3(0.0);
+	}
+	return coverage;
 }
 
 // Mean radiance arriving at a point in the air (no surface, so no normal),

@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-10-12 (low resolution apply)
+
+* **Implemented**: [low-resolution apply](/ddgi/improvements/low-res-apply-directional.md)
+  on `dev-ddgi-quality`, default 1/4: DDGI 1.40 -> 1.13 ms at 1080p.
+* **Added**: finding [full resolution pass floor](/ddgi/findings/full-res-pass-floor.md),
+  mistake [encoding convention mismatch](/mistakes/encoding-convention-mismatch.md).
+
 ## 2026-10-12 (second research set)
 
 * **Added**: 6 references (Unity 6 APV, tetrahedral interpolation, CoD:

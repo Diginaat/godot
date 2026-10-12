@@ -39,6 +39,12 @@
 #include "servers/rendering/storage/environment_storage.h"
 
 #define RB_SCOPE_DDGI SNAME("ddgi")
+// Low resolution apply data (rendering/global_illumination/ddgi/apply_resolution).
+#define RB_SCOPE_DDGI_LOW SNAME("ddgi_low")
+#define RB_TEX_DDGI_LOW0 SNAME("data0")
+#define RB_TEX_DDGI_LOW1 SNAME("data1")
+#define RB_TEX_DDGI_LOW2 SNAME("data2")
+#define RB_TEX_DDGI_LOW3 SNAME("data3")
 
 class RenderDataRD;
 class RenderSceneBuffersRD;
@@ -138,6 +144,9 @@ public:
 		uint32_t irradiance_texels = 6;
 		uint32_t distance_texels = 14;
 		float gpu_time_budget_ms = 0.0;
+		// Pixels per side of a block of the low resolution apply; 1: full
+		// resolution (rendering/global_illumination/ddgi/apply_resolution).
+		uint32_t apply_block = 1;
 	};
 	static Quality get_quality();
 
@@ -212,6 +221,8 @@ private:
 		APPLY_GI,
 		APPLY_DEBUG_PROBES,
 		APPLY_MARK,
+		APPLY_LOW,
+		APPLY_UPSAMPLE,
 		APPLY_MODE_MAX,
 	};
 
@@ -226,7 +237,7 @@ private:
 		float inv_projection[16];
 		float cam_rotation[12];
 		int32_t screen_size[2];
-		uint32_t flags; // 1: half resolution GI buffer.
+		uint32_t flags; // 1: half resolution GI buffer. Bits 8-15: low resolution block size.
 		uint32_t debug_mode;
 	};
 	static_assert(sizeof(ApplyPushConstant) == 128, "Push constants are limited to 128 bytes");

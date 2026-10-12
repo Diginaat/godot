@@ -3116,6 +3116,9 @@
 		<member name="rendering/global_illumination/ddgi/custom_irradiance_texels" type="int" setter="" getter="" default="6">
 			Irradiance map resolution per probe side when [member rendering/global_illumination/ddgi/quality] is Custom.
 		</member>
+		<member name="rendering/global_illumination/ddgi/apply_resolution" type="int" setter="" getter="" default="2">
+			The resolution at which surfaces look up the DDGI probes. [b]Full[/b] samples the probes for every pixel of the GI buffer. The lower settings sample them once per block of pixels (2x2, 4x4 or 8x8), at the average depth and normal of the block's main surface, together with how the light changes with the normal; each pixel then takes the matching blocks around it and evaluates their light at its own normal, so normal maps keep their indirect shading. Lower settings cost less; small objects and thin edges get the light of their surroundings more often. Independent of [member rendering/global_illumination/gi/use_half_resolution], which sets the size of the GI buffer itself.
+		</member>
 		<member name="rendering/global_illumination/ddgi/custom_probes_per_frame" type="int" setter="" getter="" default="2048">
 			The most probes traced per frame when [member rendering/global_illumination/ddgi/quality] is Custom (64 to 16384). With more probes per frame, indirect light reacts faster to changes; the ray tracing cost grows linearly.
 		</member>
