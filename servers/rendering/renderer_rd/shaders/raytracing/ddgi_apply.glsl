@@ -241,6 +241,9 @@ params;
 #define FLAG_NEAR_FIELD (1u << 25u)
 // MODE_NF_FILTER: the second (final) pass, with taps 2 blocks apart.
 #define FLAG_NF_FILTER_FINAL (1u << 28u)
+// The reflection buffer holds a constant (alpha -1 marks DDGI pixels for the
+// scene shader): written only when it doesn't hold it yet.
+#define FLAG_WRITE_REFLECTION (1u << 29u)
 
 uint low_block_size() {
 	return max((params.flags >> 8u) & 0xFFu, 1u);
@@ -495,7 +498,9 @@ void main() {
 	// sources (alpha 0) but occludes them by the ratio of the DDGI
 	// irradiance to the environment's (unoccluded sky) ambient light, so
 	// caves and tunnels don't reflect the open sky.
-	imageStore(reflection_buffer, out_pixel, vec4(0.0, 0.0, 0.0, -1.0));
+	if ((params.flags & FLAG_WRITE_REFLECTION) != 0u) {
+		imageStore(reflection_buffer, out_pixel, vec4(0.0, 0.0, 0.0, -1.0));
+	}
 }
 
 #endif // MODE_APPLY
@@ -727,7 +732,12 @@ void main() {
 
 	ivec2 first_pixel = ivec2(gl_WorkGroupID.xy) * 8 * step;
 	ivec2 tile_base = ivec2(floor((vec2(first_pixel) + 0.5) / size - 0.5));
-	for (uint i = gl_LocalInvocationIndex; i < uint(TILE * TILE); i += 64u) {
+	// Only the blocks this workgroup uses: 4x4 of the 10x10 at the default
+	// 1/4 apply resolution, which cut the upsample's texture reads by 80%.
+	ivec2 last_pixel = first_pixel + 7 * step;
+	ivec2 used = min(ivec2(floor((vec2(last_pixel) + 0.5) / size - 0.5)) - tile_base + 2, ivec2(TILE));
+	for (uint j = gl_LocalInvocationIndex; j < uint(used.x * used.y); j += 64u) {
+		uint i = (j / uint(used.x)) * uint(TILE) + j % uint(used.x);
 		ivec2 c = clamp(tile_base + ivec2(int(i) % TILE, int(i) / TILE), ivec2(0), low_size - 1);
 		vec4 d0 = texelFetch(sampler2D(low_data0, linear_sampler), c, 0);
 		vec4 d1 = texelFetch(sampler2D(low_data1, linear_sampler), c, 0);
@@ -800,7 +810,9 @@ void main() {
 	}
 	imageStore(ambient_buffer, out_pixel, ambient);
 	// As in MODE_APPLY.
-	imageStore(reflection_buffer, out_pixel, vec4(0.0, 0.0, 0.0, -1.0));
+	if ((params.flags & FLAG_WRITE_REFLECTION) != 0u) {
+		imageStore(reflection_buffer, out_pixel, vec4(0.0, 0.0, 0.0, -1.0));
+	}
 }
 
 #endif // MODE_UPSAMPLE

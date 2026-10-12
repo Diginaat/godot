@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-10-12 (performance and stability pass)
+
+* **Updated**: DDGI.md findings: baseline per pass, apply sub-pass
+  timestamps, reflection buffer written once, upsample block loads, the
+  dropped distance blend skip, the `--chaos` stability test.
+* **Updated**: tooling/vulkan-sync-validation.md: a too old layer reports
+  false SPIR-V errors.
+
 ## 2026-10-12 (dark places)
 
 * **Updated**: DDGI.md step 30: no flicker or blotches in dark places;

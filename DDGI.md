@@ -297,7 +297,10 @@ GPU timings: run with `--gpu-profile`, or open the Visual Profiler in the
 editor; the DDGI passes are `DDGI Build Acceleration Structures`, `DDGI
 Schedule`, `DDGI Trace Probe Rays`, `DDGI Bounce Light`, `DDGI Blend
 Probes` (irradiance), `DDGI Blend Distance`, `DDGI Relocate Classify`, `DDGI
-Smooth` and `DDGI Apply`.
+Smooth` and `DDGI Apply` (the low resolution probe sampling). While the
+profiler runs, the apply is split further: `DDGI NF Trace`, `DDGI NF
+Resolve`, `DDGI NF Temporal`, `DDGI NF Filter` (near-field rays),
+`DDGI Upsample` and `DDGI Mark`.
 
 Common problems:
 - Light leaks through a wall: the wall is thinner than about a quarter of the
@@ -512,7 +515,11 @@ the error that moving leaves), `--reloc=0|1`, `--classify=0|1`,
 `--bounces=` (path tracer), `--bounce=` (bounce energy), `--realtime=1`
 (realtime updates), `--rt_rays=` (realtime rays per probe), `--weather=dir`
 (a storm over `--weather_frames`, every frame saved; see "Smooth light
-changes").
+changes"). `--chaos=N` (`--seed=`) makes N random runtime changes, 20
+frames apart (quality, apply resolution, near-field rays, realtime updates,
+half resolution, debug modes, GI mode, view, viewport size, 3D scale,
+cascades, spacing, grid) and prints `CHAOS done`: a stability test, pass =
+no `ERROR` lines and no crash.
 
 Flicker and brightness: `--measure=N` captures N frames and prints mean
 linear brightness, the mean temporal deviation per pixel (8-bit levels) and
@@ -620,6 +627,27 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- 2026-10-12: Performance and stability pass. Baseline (RTX 3060, 1080p,
+  DDGI ms Low / Medium / High / Ultra): room 1.40 / 1.72 / 2.21 / 3.48,
+  outdoor 1.34 / 1.92 / 3.25 / 6.26, stress 1.27 / 1.59 / 2.19 / 3.70. The
+  apply chain is a fixed 0.8-1.0 ms at every quality; split with new
+  profiler sub-passes (room, Medium): low resolution sampling 0.33, near-field
+  trace 0.20, upsample 0.25, near-field filter 0.08, resolve + temporal
+  0.10, mark 0.02. Changes: the GI reflection buffer only holds a constant
+  (alpha -1), so it is written once (again after a resize or when another GI
+  wrote it), not every pixel every frame; the upsample loads only the 4x4
+  blocks it uses instead of 10x10. Upsample 0.24 -> 0.22 ms: it is bound by
+  the full resolution reads and writes, not the block loads. Tried and
+  dropped: skipping the distance blend for converged probes whose fixed rays
+  saw no change (3 of 4 updates). Distance blend -65% (outdoor Ultra 0.95 ->
+  0.29 ms), but the tunnel got 2.6% brighter (0.0374 -> 0.0384, spread
+  0.0001) with flicker std 0.22 -> 0.34, and realtime interior flicker
+  pixels 0.88% -> 1.72%; a build without the skip matched the baseline.
+  Stability: new `--chaos` test, 5 seeds x 60-80 changes: no errors, no
+  leaks, no crash; with the Khronos validation layer (sync validation on)
+  no message names a DDGI resource. GI buffer against the baseline: mean
+  difference under 1 level, no pixel off by 8. Storm level unchanged.
 
 - 2026-10-12: Report: white speckles on walls near a bright tunnel
   opening, crawling while walking ("light flowing like water"); not in

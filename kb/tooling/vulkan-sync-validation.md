@@ -33,3 +33,8 @@ isn't installed: the log only shows the loader's implicit layers. Check for
   and `VUID-vkCmdTraceRaysKHR-None-08608` (viewport dynamic state set before
   the trace): both outside DDGI.
 - It found nothing for the [DDGI ordering issue](/ddgi/findings/render-graph-bounce-loss.md).
+- 2026-10-12: the layer that ships with a game launcher's embedded browser
+  is old: it reports `VUID-VkShaderModuleCreateInfo-pCode-08737/08739/08741`
+  for ray query and shader invocation reorder SPIR-V (unknown to it) and
+  `VUID-VkCuModuleCreateInfoNVX` for DLSS. Ignore those; use a current SDK
+  layer for shader checks.

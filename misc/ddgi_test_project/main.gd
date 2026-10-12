@@ -106,6 +106,9 @@ func _ready() -> void:
 	if args.has("shot") or args.has("bench") or args.has("measure") or args.has("weather"):
 		hud.visible = false
 		_run_capture()
+	elif args.has("chaos"):
+		hud.visible = false
+		_run_chaos(int(args["chaos"]))
 
 
 func _apply_args() -> void:
@@ -424,6 +427,74 @@ func _run_capture() -> void:
 			var path: String = String(args["shot"]).get_basename() + "_%d.png" % frame
 			vp.get_texture().get_image().save_png(path)
 			print("Screenshot %s" % path)
+	get_tree().quit()
+
+
+# --chaos=N: N runtime changes, 20 frames apart, chosen by a fixed seed
+# (--seed=): DDGI settings and quality, apply resolution, near-field rays,
+# realtime updates, half resolution GI, debug modes, the GI mode (SDFGI and
+# back), views, the viewport size and the 3D scale. Prints one CHAOS line
+# per change and "CHAOS done" at the end; a stable build shows no ERROR
+# lines and doesn't crash.
+func _run_chaos(p_steps: int) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = int(args.get("seed", "1"))
+	var sizes := [Vector2i(640, 360), Vector2i(1280, 720), Vector2i(1001, 563), Vector2i(320, 200)]
+	for step in p_steps:
+		for i in 20:
+			await RenderingServer.frame_post_draw
+		var change := ""
+		match rng.randi() % 13:
+			0:
+				var q := rng.randi() % 5
+				ProjectSettings.set_setting("rendering/global_illumination/ddgi/quality", q)
+				change = "quality=%d" % q
+			1:
+				var r := rng.randi() % 4
+				ProjectSettings.set_setting("rendering/global_illumination/ddgi/apply_resolution", r)
+				change = "apply_res=%d" % r
+			2:
+				var on := rng.randi() % 2 == 0
+				ProjectSettings.set_setting("rendering/global_illumination/ddgi/near_field_rays", on)
+				change = "nf=%s" % on
+			3:
+				env.ddgi_realtime_updates = not env.ddgi_realtime_updates
+				change = "realtime=%s" % env.ddgi_realtime_updates
+			4:
+				var half := rng.randi() % 2 == 0
+				RenderingServer.gi_set_use_half_resolution(half)
+				change = "half=%s" % half
+			5:
+				env.ddgi_debug_mode = rng.randi() % 7
+				change = "debug=%d" % env.ddgi_debug_mode
+			6:
+				var modes := ["ddgi", "sdfgi", "none", "ddgi"]
+				_set_gi_mode(modes[rng.randi() % modes.size()])
+				change = "gi=%s" % gi_mode
+			7:
+				_set_view(VIEWS.keys()[rng.randi() % VIEWS.size()])
+				change = "view=%s" % view
+			8:
+				if vp is SubViewport:
+					(vp as SubViewport).size = sizes[rng.randi() % sizes.size()]
+					change = "size=%s" % (vp as SubViewport).size
+			9:
+				vp.scaling_3d_scale = [1.0, 0.77, 0.5][rng.randi() % 3]
+				change = "scale3d=%.2f" % vp.scaling_3d_scale
+			10:
+				env.ddgi_cascades = 1 + rng.randi() % 4
+				change = "cascades=%d" % env.ddgi_cascades
+			11:
+				env.ddgi_probe_spacing = [0.5, 1.0, 2.0][rng.randi() % 3]
+				change = "spacing=%.1f" % env.ddgi_probe_spacing
+			12:
+				var g := [Vector3i(24, 12, 24), Vector3i(16, 8, 16), Vector3i(32, 16, 32)]
+				env.ddgi_probe_grid = g[rng.randi() % g.size()]
+				change = "grid=%s" % env.ddgi_probe_grid
+		print("CHAOS %d %s" % [step, change])
+	for i in 60:
+		await RenderingServer.frame_post_draw
+	print("CHAOS done steps=%d" % p_steps)
 	get_tree().quit()
 
 

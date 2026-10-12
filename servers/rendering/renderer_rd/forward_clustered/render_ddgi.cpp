@@ -933,6 +933,19 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		}
 	}
 
+	// The reflection buffer only carries a constant (alpha -1 marks DDGI
+	// pixels): write it once, again only when the texture changed or another
+	// GI wrote it in between (frames without DDGI).
+	bool write_reflection = false;
+	{
+		RID reflection = rb->get_texture(RB_SCOPE_GI, RB_TEX_REFLECTION);
+		const uint64_t frame = RSG::rasterizer->get_frame_number();
+		write_reflection = reflection != vd->reflection_written || frame > vd->reflection_frame + 1;
+		vd->reflection_written = reflection;
+		vd->reflection_frame = frame;
+	}
+	const uint32_t reflection_flag = write_reflection ? (1u << 29) : 0u;
+
 	_ddgi_timestamp("DDGI Apply", get_quality().gpu_time_budget_ms > 0.0f);
 	rd->draw_command_begin_label("DDGI Apply");
 
@@ -1067,6 +1080,15 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 	}
 
 	RD::ComputeListID list = rd->compute_list_begin();
+	// Sub-pass timestamps for the profiler. A timestamp can't go inside a
+	// compute list, so the list is split only while timestamps are captured.
+	auto profile_split = [&](const char *p_name) {
+		if (RSG::utilities->capturing_timestamps) {
+			rd->compute_list_end();
+			_ddgi_timestamp(p_name, false);
+			list = rd->compute_list_begin();
+		}
+	};
 
 	if (low_res) {
 		RID low_shader = apply_shader.version_get_shader(apply_shader_version, emitter_count > 0 ? APPLY_LOW_EMITTERS : APPLY_LOW);
@@ -1077,7 +1099,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 			RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
 			push.screen_size[0] = internal_size.x;
 			push.screen_size[1] = internal_size.y;
-			push.flags = (p_half_resolution ? 1 : 0) | (block << 8) | (emitter_count << 16);
+			push.flags = (p_half_resolution ? 1 : 0) | (block << 8) | (emitter_count << 16) | reflection_flag;
 			push.debug_mode = uint32_t(s.debug_mode);
 
 			RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
@@ -1124,6 +1146,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 
 			if (near_field) {
 				rd->compute_list_end();
+				_ddgi_timestamp("DDGI NF Trace", false);
 				// Trace the rays with the path tracer's pipeline, as the probe rays.
 				RTDDGIBindings bindings;
 				bindings.uniform_buffer = vd->data_buffer;
@@ -1150,6 +1173,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 					rd->raytracing_list_trace_rays(rt_list, 0, p_raytracing->get_shader()->get_hit_sbt(p_rt_flags), low_size.x * low_size.y, 2, 1);
 					rd->raytracing_list_end();
 				}
+				_ddgi_timestamp("DDGI NF Resolve", false);
 				list = rd->compute_list_begin();
 
 				const uint32_t parity = vd->nf_parity;
@@ -1180,6 +1204,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				rd->compute_list_add_barrier(list);
 
 				// Temporal accumulation.
+				profile_split("DDGI NF Temporal");
 				RID temporal_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_NF_TEMPORAL);
 				rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_NF_TEMPORAL]);
 				RD::Uniform u_raw_texture(RD::UNIFORM_TYPE_TEXTURE, 21, raw);
@@ -1196,6 +1221,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				rd->compute_list_dispatch_threads(list, low_size.x, low_size.y, 1);
 				rd->compute_list_add_barrier(list);
 
+				profile_split("DDGI NF Filter");
 				// Smooth (two passes, the first into the raw texture), and put in
 				// place of the light from the probes.
 				RID filter_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_NF_FILTER);
@@ -1222,6 +1248,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 				vd->nf_history_valid = false;
 			}
 
+			profile_split("DDGI Upsample");
 			rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_UPSAMPLE]);
 			RD::Uniform u_ambient(RD::UNIFORM_TYPE_IMAGE, 7, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_AMBIENT, v, 0));
 			RD::Uniform u_reflection(RD::UNIFORM_TYPE_IMAGE, 8, rb->get_texture_slice(RB_SCOPE_GI, RB_TEX_REFLECTION, v, 0));
@@ -1246,7 +1273,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		RendererRD::MaterialStorage::store_transform_transposed_3x4(p_render_data->scene_data->cam_transform, push.cam_rotation);
 		push.screen_size[0] = internal_size.x;
 		push.screen_size[1] = internal_size.y;
-		push.flags = (p_half_resolution ? 1 : 0) | (emitter_count << 16);
+		push.flags = (p_half_resolution ? 1 : 0) | (emitter_count << 16) | reflection_flag;
 		push.debug_mode = uint32_t(s.debug_mode);
 
 		RD::Uniform u_data(RD::UNIFORM_TYPE_UNIFORM_BUFFER, 0, vd->data_buffer);
@@ -1274,6 +1301,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 	// Mark the probes visible surfaces sample, for next frame's schedule
 	// (one pixel per 8x8 tile).
 	{
+		profile_split("DDGI Mark");
 		RID mark_shader = apply_shader.version_get_shader(apply_shader_version, APPLY_MARK);
 		rd->compute_list_bind_compute_pipeline(list, apply_pipelines[APPLY_MARK]);
 		for (uint32_t v = 0; v < p_render_data->scene_data->view_count; v++) {

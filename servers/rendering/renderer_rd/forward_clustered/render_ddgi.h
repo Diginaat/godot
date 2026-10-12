@@ -220,6 +220,11 @@ public:
 		uint32_t nf_parity = 0; // Which history texture is this frame's.
 		bool nf_history_valid = false;
 
+		// The GI reflection buffer holds DDGI's constant (alpha -1) when it
+		// is this texture and DDGI wrote it the frame before.
+		RID reflection_written;
+		uint64_t reflection_frame = 0;
+
 		bool node_volume = false; // The volumes were set up for a DDGIVolume node (fixed), not the camera.
 		uint32_t realtime_offset = 0; // Realtime updates: first probe of the next frame's chunk.
 		uint64_t baked_version = 0; // Baked data uploaded into the atlases, 0 for none.
