@@ -175,6 +175,38 @@ It only works with an editor that includes the PhysX module, such as this one.
 
 The log shows `PhysX 5.10.0 initialized [GPU]` when GPU dynamics are active.
 
+#### Try the GameKit demo projects
+
+GameKit is a set of modular first-person game systems built on this engine: a
+Source-style FPS controller (stairs, slide, mantle, ladders, swimming),
+interaction, moving platforms, PhysX water with caustics and reflections, a
+camera lens look and dynamic weather. The demo project is a playable map that
+shows every module, and it comes in two versions:
+
+| Project | Language | Editor |
+| --- | --- | --- |
+| **[Diginaat/GameKitDemoCSharp](https://github.com/Diginaat/GameKitDemoCSharp)** | C# | .NET (mono) editor; press **Build**, then **F5** |
+| **[Diginaat/GameKitDemoGDScript](https://github.com/Diginaat/GameKitDemoGDScript)** | GDScript | Any editor from the releases; press **F5** |
+
+Both have the same scenes. The main scene is
+`addons/gamekit_demo/scenes/gamekit_demo.tscn`, and each feature has its own
+station scene in `addons/gamekit_demo/stations/` that you can drag into your
+own map:
+
+| Scene | Shows |
+| --- | --- |
+| `surfaces.tscn` | Footstep sounds and friction per surface (concrete, metal, wood, grass, ice, mud) |
+| `stairs.tscn` | Stairs and a 25° slope |
+| `interaction.tscn` | A button that opens a sliding door, and crates to pick up and throw |
+| `ladder.tscn` | A ladder tower |
+| `platforms.tscn` | An elevator and a turntable |
+| `abilities.tscn` | Mantle blocks and slide beams |
+| `weather.tscn` | A shelter that stays dry in the rain (F7 cycles the weather) |
+| `pool.tscn` | A swimmable PhysX water pool with caustics |
+
+They need this engine: the water uses `PhysXWaterSurface3D`, so stock Godot
+won't run them.
+
 ### Changes in this fork
 
 - Merged with the latest Godot `master`, with every conflict resolved by hand
