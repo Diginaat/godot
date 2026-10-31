@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-10-31 (near-field rays removed, glass rays)
+
+* **Added**: ddgi/findings/near-field-camera-spots.md: near-field rays
+  removed from the engine (dark spots moving with the camera).
+* **Added**: ddgi/findings/glass-probe-rays.md: four bugs on DDGI rays at
+  refractive surfaces, fixed.
+* **Updated**: near-field proposal and success marked deprecated.
+
 ## 2026-10-12 (performance and stability pass)
 
 * **Updated**: DDGI.md findings: baseline per pass, apply sub-pass

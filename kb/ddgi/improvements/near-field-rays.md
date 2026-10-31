@@ -3,7 +3,7 @@ type: Proposal
 title: Near-field rays for the DDGI apply pass
 description: One short ray per low resolution block and frame, shaded like a probe ray, accumulated and filtered, in place of the probes' light, so bounce light from nearby objects sits where it belongs and follows them.
 tags: [ddgi, visuals, moving-objects, denoising]
-status: stable
+status: deprecated
 generated: { by: claude_code/claude-opus-5-5, at: 2026-10-12T00:00:00Z }
 sources:
   - id: ddgi-md
@@ -13,6 +13,9 @@ sources:
     resource: /ddgi/findings/near-field-blob.md
     title: Probes put nearby bounce light in the wrong place
 ---
+
+> **Removed 2026-10-31.** The rays made dark spots that moved with the
+> camera; see [the finding](/ddgi/findings/near-field-camera-spots.md).
 
 # Problem
 

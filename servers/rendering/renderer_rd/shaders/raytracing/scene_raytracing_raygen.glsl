@@ -76,7 +76,10 @@ void ddgi_trace_probe_rays() {
 
 	float first_hit = DDGI_MISS_DISTANCE;
 	// A few iterations let probe rays pass through refractive surfaces.
-	[[dont_unroll]] for (uint i = 0u; i < 4u; i++) {
+	[[dont_unroll]] for (uint i = 0u; i < DDGI_MAX_GLASS_SEGMENTS; i++) {
+		// Every hit sets it, so after the trace it is this segment's own
+		// distance, or DDGI_MISS_DISTANCE for a miss, never the last one's.
+		ps.hit_t = DDGI_MISS_DISTANCE;
 		path_pack(payload, ps);
 		// No face culling: back face hits tell that the probe is inside geometry.
 		traceRayEXT(tlas, gl_RayFlagsNoneEXT, rt_cull_mask(), 0, 0, 0, ray_origin, 0.0, ray_dir, 10000.0, 0);
@@ -151,17 +154,37 @@ void ddgi_trace_near_field_rays() {
 	ps.offset_normal = vec3(0.0, 0.0, 1.0);
 	ps.next_ray_dir = ray_dir;
 
-	path_pack(payload, ps);
-	// Back faces count: a ray that starts inside geometry sees no light.
-	traceRayEXT(tlas, gl_RayFlagsNoneEXT, object_ray ? 0xFFu : rt_cull_mask(), 0, 0, 0, ray_origin, 0.0, ray_dir, max_distance, 0);
-	ps = path_unpack(payload);
+	// Glass is passed as the probe rays pass it. A single trace stopped at
+	// the pane, not terminated and with no light: windows near a surface
+	// read as black occluders. The distance stored is the length of the
+	// whole path, the range is shared by its segments.
+	float traveled = 0.0;
+	bool missed = true;
+	[[dont_unroll]] for (uint i = 0u; i < DDGI_MAX_GLASS_SEGMENTS && traveled < max_distance; i++) {
+		ps.hit_t = DDGI_MISS_DISTANCE;
+		path_pack(payload, ps);
+		// Back faces count: a ray that starts inside geometry sees no light.
+		traceRayEXT(tlas, gl_RayFlagsNoneEXT, object_ray ? 0xFFu : rt_cull_mask(), 0, 0, 0, ray_origin, 0.0, ray_dir, max_distance - traveled, 0);
+		ps = path_unpack(payload);
+		if (ps.hit_t >= DDGI_MISS_DISTANCE) {
+			break; // Missed: the far field (the probes) stands for it.
+		}
+		if (is_path_terminated(ps.packed_bounces_flags)) {
+			missed = false;
+			break;
+		}
+		traveled += ps.hit_t;
+		ray_origin = offset_ray_origin(ray_origin + ray_dir * ps.hit_t, ps.offset_normal);
+		ray_dir = ps.next_ray_dir;
+	}
+	// A back face keeps its sign (the ray started inside geometry).
+	float path_length = missed ? DDGI_MISS_DISTANCE : (ps.hit_t < 0.0 ? ps.hit_t - traveled : ps.hit_t + traveled);
 
-	bool missed = ps.hit_t >= DDGI_MISS_DISTANCE;
-	imageStore(ddgi_ray_data, texel, missed ? vec4(0.0, 0.0, 0.0, DDGI_MISS_DISTANCE) : vec4(ps.radiance, ps.hit_t));
+	imageStore(ddgi_ray_data, texel, missed ? vec4(0.0, 0.0, 0.0, DDGI_MISS_DISTANCE) : vec4(ps.radiance, path_length));
 	// z: 1 when the hit object keeps moving.
 	uvec4 bounce = uvec4(0u, 0u, (!missed && (ps.packed_bounces_flags & DDGI_MOVING_HIT_FLAG) != 0u) ? 1u : 0u, 0u);
 	if (!missed && (ps.packed_bounces_flags & DDGI_BOUNCE_FLAG) != 0u) {
-		bounce.xyw = uvec3(packUnorm4x8(vec4(ps.throughput, 1.0)), packUnorm2x16(vec3_to_oct(ps.offset_normal)), floatBitsToUint(ps.hit_t));
+		bounce.xyw = uvec3(packUnorm4x8(vec4(ps.throughput, 1.0)), packUnorm2x16(vec3_to_oct(ps.offset_normal)), floatBitsToUint(path_length));
 	}
 	ddgi_ray_bounce[record] = bounce;
 }

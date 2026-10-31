@@ -3435,8 +3435,12 @@ void RenderRaytracing::_ddgi_add_moving(RID p_mesh, uint32_t p_surface, const Tr
 // moving after moving on 3 frames, until it has stood still for a second
 // (60 frames). Emissive objects stay in the probes, or their light would be
 // lost when emissive lights are off.
+// Disabled with the near-field rays (render_ddgi.cpp): nothing else lights
+// moving objects for DDGI, so the probes keep seeing them (a trailing
+// shadow beats none).
+static constexpr bool DDGI_SKIP_MOVING_OBJECTS = false;
 uint8_t RenderRaytracing::_instance_mask(const void *p_instance, bool p_moved, bool p_emissive) {
-	if (!GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/skip_moving_objects")) {
+	if (!DDGI_SKIP_MOVING_OBJECTS) {
 		return 0xFF;
 	}
 	const uint64_t frame = RSG::rasterizer->get_frame_number();

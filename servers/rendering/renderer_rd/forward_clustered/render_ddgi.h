@@ -309,7 +309,7 @@ private:
 	bool emitters_supported = false;
 	/// rendering/global_illumination/ddgi/emissive_lights, if the GPU can do it.
 	bool _emissive_lights() const;
-	/// rendering/global_illumination/ddgi/near_field_rays.
+	/// Always false: near-field rays are disabled (see render_ddgi.cpp).
 	static bool _near_field_rays();
 
 	Ref<ViewportData> _get_viewport_data(RenderSceneBuffersRD *p_render_buffers);

@@ -888,8 +888,12 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	rd->draw_command_end_label();
 }
 
+// Near-field rays are disabled for good, with no setting to turn them on:
+// they start from the visible surfaces and keep a screen-space history, so
+// the result depended on the camera and moving the view left dark spots
+// that traveled with it. The probes alone are camera independent.
 bool RenderDDGI::_near_field_rays() {
-	return GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/near_field_rays");
+	return false;
 }
 
 bool RenderDDGI::_emissive_lights() const {
@@ -1055,7 +1059,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 		// sunlit ground outside a dark tunnel now and then, which showed as
 		// soft blotches, while the probes give that light smoothly.
 		nf.params[0] = 2.0f * vd->volumes[0].spacing;
-		const float ray_distance = GLOBAL_GET_CACHED(float, "rendering/global_illumination/ddgi/near_field_distance") * vd->volumes[0].spacing;
+		const float ray_distance = 0.5f * vd->volumes[0].spacing;
 		nf.params[1] = float(vd->frame % 65536u);
 		nf.params[2] = 0.06f;
 		nf.params[3] = vd->nf_history_valid ? 1.0f : 0.0f;

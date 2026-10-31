@@ -3,7 +3,7 @@ type: Success
 title: Near-field rays fixed the lagging bounce-light blob
 description: Short per-block rays traced with the existing probe-ray shading, plus a small temporal and spatial filter, put nearby bounce light where it belongs and let it follow a moving object.
 tags: [success, ddgi, visuals]
-status: stable
+status: deprecated
 generated: { by: claude_code/claude-opus-5-5, at: 2026-10-12T00:00:00Z }
 ---
 

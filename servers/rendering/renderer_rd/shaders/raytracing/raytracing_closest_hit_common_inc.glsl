@@ -482,7 +482,7 @@ void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout Pat
 	if (!h.is_front_face && !double_sided) {
 		// The inside of closed geometry: no light, and a negative distance
 		// tells relocation and classification that the probe is inside.
-		ps.radiance = vec3(0.0);
+		// (Light picked up on the way, glass emission, stays.)
 		ps.hit_t = -gl_HitTEXT;
 		return;
 	}
@@ -508,14 +508,20 @@ void ddgi_probe_ray_shade(HitData h, MaterialResult m, vec3 N, vec3 V, inout Pat
 		radiance += lights_evaluate_direct_lighting(hit_pos_offset, N, V, brdf_mat, ps.rng_state, true, rt_light_count, mesh_count);
 	}
 
-	vec3 diffuse_reflectance = baseColorToDiffuseReflectance(m.albedo, m.metalness);
+	// The throughput is what the glass the ray passed through lets through
+	// (1 without glass): the hit's light and its bounce light reach the probe
+	// tinted by it, as the sky does in the miss shader. Replacing the
+	// radiance and throughput here dropped the tint and the glass emission.
+	vec3 tint = ps.throughput;
+	radiance *= tint;
+	ps.radiance += (any(isnan(radiance)) || any(isinf(radiance))) ? vec3(0.0) : radiance;
+
+	vec3 diffuse_reflectance = baseColorToDiffuseReflectance(m.albedo, m.metalness) * tint;
 	if (luminance(diffuse_reflectance) > 0.0) {
 		ps.packed_bounces_flags |= DDGI_BOUNCE_FLAG;
 		ps.throughput = diffuse_reflectance;
 		ps.offset_normal = N;
 	}
-
-	ps.radiance = (any(isnan(radiance)) || any(isinf(radiance))) ? vec3(0.0) : radiance;
 }
 
 // ============================================================================
@@ -706,6 +712,11 @@ void refract_and_bounce(HitData h, MaterialResult m, float ior) {
 	PathState ps = path_unpack(payload);
 	vec3 V = -gl_WorldRayDirectionEXT;
 	uint total_bounces = get_total_bounces(ps.packed_bounces_flags);
+	// Set before any early return: a DDGI ray that ends here hit something at
+	// this distance. Left at DDGI_MISS_DISTANCE, it counted as open space and
+	// the probe saw through the glass in its distance test (light leaks).
+	ps.hit_t = gl_HitTEXT;
+	bool ddgi_ray = is_ddgi_probe_ray(ps.packed_bounces_flags);
 
 	apply_segment_fog(gl_HitTEXT, ps.radiance, ps.throughput);
 	bool emission_sampled_by_nee = is_emissive_sampled(ps.packed_bounces_flags) &&
@@ -726,7 +737,11 @@ void refract_and_bounce(HitData h, MaterialResult m, float ior) {
 	}
 #endif
 
-	if (total_bounces >= RT_GET_MAX_BOUNCES()) {
+	// DDGI rays start at one bounce and their ray generation limits how many
+	// interfaces they pass (DDGI_MAX_GLASS_SEGMENTS). With the path tracer's
+	// bounce limit (1 to 8), a low setting stopped them at the first pane:
+	// windows came out black for the probes.
+	if (!ddgi_ray && total_bounces >= RT_GET_MAX_BOUNCES()) {
 		ps.packed_bounces_flags = set_path_terminated(ps.packed_bounces_flags);
 		path_pack(payload, ps);
 		return;
@@ -776,7 +791,6 @@ void refract_and_bounce(HitData h, MaterialResult m, float ior) {
 	}
 
 	ps.packed_bounces_flags = inc_total_bounce(ps.packed_bounces_flags);
-	ps.hit_t = gl_HitTEXT;
 	ps.offset_normal = offset_normal;
 	ps.next_ray_dir = next_dir;
 	path_pack(payload, ps);

@@ -144,12 +144,6 @@ func _apply_args() -> void:
 		env.tonemap_exposure = float(args["tonemap_exposure"])
 	if args.has("realtime"):
 		env.ddgi_realtime_updates = args["realtime"] == "1"
-	# --skip_moving=0: moving objects stay in the probes (no object rays).
-	if args.has("skip_moving"):
-		ProjectSettings.set_setting("rendering/global_illumination/ddgi/skip_moving_objects", args["skip_moving"] == "1")
-	# --nf=0: DDGI near-field rays off (probes only).
-	if args.has("nf"):
-		ProjectSettings.set_setting("rendering/global_illumination/ddgi/near_field_rays", args["nf"] == "1")
 	if args.has("transition"):
 		ProjectSettings.set_setting("rendering/global_illumination/ddgi/light_transition_time", float(args["transition"]))
 	if args.has("rt_rays"):
@@ -455,8 +449,8 @@ func _run_chaos(p_steps: int) -> void:
 				change = "apply_res=%d" % r
 			2:
 				var on := rng.randi() % 2 == 0
-				ProjectSettings.set_setting("rendering/global_illumination/ddgi/near_field_rays", on)
-				change = "nf=%s" % on
+				ProjectSettings.set_setting("rendering/global_illumination/ddgi/emissive_lights", on)
+				change = "emissive_lights=%s" % on
 			3:
 				env.ddgi_realtime_updates = not env.ddgi_realtime_updates
 				change = "realtime=%s" % env.ddgi_realtime_updates

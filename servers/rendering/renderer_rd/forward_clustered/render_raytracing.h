@@ -465,7 +465,7 @@ class RenderRaytracing {
 	LocalVector<Transform3D> blas_transforms;
 	LocalVector<uint32_t> instance_flags;
 	LocalVector<uint8_t> instance_masks; // Per-instance ray mask (0x00 = invisible to rays, 0xFF = normal, RT_INSTANCE_MASK_MOVING)
-	/// Objects that keep moving, for DDGI (rendering/global_illumination/ddgi/skip_moving_objects):
+	/// Objects that keep moving, for DDGI (DDGI_SKIP_MOVING_OBJECTS, off with the near-field rays):
 	/// per geometry instance, the last frame it moved and on how many frames
 	/// in a row (with gaps under a second) it did.
 	struct MovingInstance {

@@ -119,9 +119,9 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `light_transition_time` | 0.2 s (at 60 fps): how long surfaces take to fade to a probe's new light |
 | `realtime_rays_per_probe` | 64: rays per probe and frame with realtime updates |
 | `emissive_lights` | On: emissive surfaces light pixels directly (sphere lights with a ray traced shadow); the probes carry only their bounce light |
-| `near_field_rays` | On: one short ray per block of the low resolution apply and frame, accumulated and filtered, in place of the probes' light near surfaces (see below) |
-| `near_field_distance` | 0.5: how far the near-field rays reach, in probe spacings of the finest volume (moving objects reach 2 regardless) |
-| `skip_moving_objects` | On: probes and near-field cosine rays skip objects that keep moving; each block takes the light of the one that covers most of its view, from its shape (a sphere, or its oriented box scaled by how much of it the mesh fills), so its shadow and bounce light follow it without noise or smear |
+| `near_field_rays` | **Removed 2026-10-31** (dark spots that moved with the camera; see kb/ddgi/findings/near-field-camera-spots.md). Was: on: one short ray per block of the low resolution apply and frame, accumulated and filtered, in place of the probes' light near surfaces (see below) |
+| `near_field_distance` | **Removed 2026-10-31.** Was 0.5: how far the near-field rays reach, in probe spacings of the finest volume (moving objects reach 2 regardless) |
+| `skip_moving_objects` | **Removed 2026-10-31** (moving objects stay in the probes). Was on: probes and near-field cosine rays skip objects that keep moving; each block takes the light of the one that covers most of its view, from its shape (a sphere, or its oriented box scaled by how much of it the mesh fills), so its shadow and bounce light follow it without noise or smear |
 
 ### Baking
 
@@ -494,7 +494,7 @@ code (`main.gd`):
 | `stress` | 4000 MultiMesh instances, 40 moving slabs, 32 fast-changing omni lights; `--move` orbits the camera |
 | `interior` | Closed house lit only by the sun through one window, and a windowless back room behind a doorway (bounce light only); use `--tod=0` |
 | `tunnel` | A closed 12 m tunnel open at one end onto sunlit ground: dark indirect light only. Use `--tonemap_exposure=6`; `--plain` without the grid texture (path tracer), `--overlap` lets the walls reach into the roof |
-| `bleed` | A red ball bouncing in front of a 2 m white wall; bright sun from the side and slightly behind the wall lights the ball, the wall front stays out of direct sun (`--sun=<energy>`, default 4). `--shape=box|pole|plank|capsule` for other shapes (they also turn), `--jitter` with `--anim=0` keeps the object in place but moving (path tracer comparisons), `--nf=0` (near-field rays off), `--skip_moving=0` |
+| `bleed` | A red ball bouncing in front of a 2 m white wall; bright sun from the side and slightly behind the wall lights the ball, the wall front stays out of direct sun (`--sun=<energy>`, default 4). `--shape=box|pole|plank|capsule` for other shapes (they also turn), `--jitter` with `--anim=0` keeps the object in place but moving (path tracer comparisons), (`--nf` and `--skip_moving` were removed with the near-field rays) |
 
 ```
 bin\godot.windows.editor.x86_64.exe --path misc\ddgi_test_project

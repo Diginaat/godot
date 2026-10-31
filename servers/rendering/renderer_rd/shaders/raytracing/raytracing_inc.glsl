@@ -166,6 +166,11 @@ const uint DDGI_BOUNCE_FLAG = (1u << 29);
 // moving (FLAG_MOVING): near-field rays then let go of their history faster.
 const uint DDGI_MOVING_HIT_FLAG = (1u << 30);
 
+// Ray segments a DDGI ray may trace: each glass interface it passes takes
+// one, the surface behind takes the last. A double glazed window has four
+// interfaces.
+#define DDGI_MAX_GLASS_SEGMENTS 6u
+
 // Bounce limits
 #define MAX_DIFFUSE_BOUNCES 2u
 #define MAX_DENOISER_SPECULAR_HIT_THRESHOLD 0.25
