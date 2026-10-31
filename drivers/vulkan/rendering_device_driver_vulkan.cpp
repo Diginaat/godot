@@ -606,6 +606,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device_extensions() {
 		_register_requested_device_extension(VK_NV_RAY_TRACING_VALIDATION_EXTENSION_NAME, false);
 	}
 	_register_requested_device_extension(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, false);
+	_register_requested_device_extension(VK_KHR_SPIRV_1_4_EXTENSION_NAME, false);
 
 	// We don't actually use this extension, but some runtime components on some platforms
 	// can and will fill the validation layers with useless info otherwise if not enabled.
@@ -1944,7 +1945,7 @@ void RenderingDeviceDriverVulkan::_set_object_name(VkObjectType p_object_type, u
 		// Debug marker extensions.
 		CharString obj_data = p_object_name.utf8();
 		VkDebugMarkerObjectNameInfoEXT name_info;
-		name_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+		name_info.sType = VK_STRUCTURE_TYPE_DEBUG_MARKER_OBJECT_NAME_INFO_EXT;
 		name_info.pNext = nullptr;
 		name_info.objectType = _convert_to_debug_report_objectType(p_object_type);
 		name_info.object = p_object_handle;
@@ -5095,8 +5096,8 @@ RDD::UniformSetID RenderingDeviceDriverVulkan::uniform_set_create(VectorView<Bou
 				acceleration_structure_write->accelerationStructureCount = 1;
 				acceleration_structure_write->pAccelerationStructures = &accel_info->vk_acceleration_structure;
 
-				vk_writes[i].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-				vk_writes[i].pNext = acceleration_structure_write;
+				vk_writes[writes_amount].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+				vk_writes[writes_amount].pNext = acceleration_structure_write;
 			} break;
 			default: {
 				DEV_ASSERT(false);

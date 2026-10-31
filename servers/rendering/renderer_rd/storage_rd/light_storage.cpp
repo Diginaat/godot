@@ -846,7 +846,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 						Projection shadow_mtx = rectm * bias * matrix * modelview;
 						light_data.shadow_split_offsets[j] = split;
-						float bias_scale = light_instance->shadow_transform[j].bias_scale * light_data.soft_shadow_scale;
+						const float bias_scale = light_instance->shadow_transform[j].bias_scale * MAX(light_data.soft_shadow_scale, 1.0f);
 						light_data.shadow_bias[j] = light->param[RSE::LIGHT_PARAM_SHADOW_BIAS] / 100.0 * bias_scale;
 						light_data.shadow_normal_bias[j] = light->param[RSE::LIGHT_PARAM_SHADOW_NORMAL_BIAS] * light_instance->shadow_transform[j].shadow_texel_size;
 						light_data.shadow_transmittance_bias[j] = light->param[RSE::LIGHT_PARAM_TRANSMITTANCE_BIAS] / 100.0 * bias_scale;
@@ -1248,7 +1248,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					light_data.soft_shadow_size = 0.0;
 					light_data.soft_shadow_scale *= RendererSceneRenderRD::get_singleton()->shadows_quality_radius_get(); // Only use quality radius for PCF
 				}
-				light_data.shadow_bias *= light_data.soft_shadow_scale;
+				light_data.shadow_bias *= MAX(light_data.soft_shadow_scale, 1.0f);
 			}
 		} else {
 			light_data.shadow_opacity = 0.0;
@@ -1575,6 +1575,9 @@ void LightStorage::reflection_atlas_free(RID p_ref_atlas) {
 void LightStorage::_reflection_atlas_clear(ReflectionAtlas *p_reflection_atlas) {
 	RD::get_singleton()->free_rid(p_reflection_atlas->reflection);
 	p_reflection_atlas->reflection = RID();
+
+	RD::get_singleton()->free_rid(p_reflection_atlas->color_buffer);
+	p_reflection_atlas->color_buffer = RID();
 
 	RD::get_singleton()->free_rid(p_reflection_atlas->depth_fb);
 	p_reflection_atlas->depth_fb = RID();

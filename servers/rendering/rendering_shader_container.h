@@ -42,7 +42,7 @@ class RenderingShaderContainer : public RefCounted {
 
 public:
 	static const uint32_t CONTAINER_MAGIC_NUMBER = 0x43535247;
-	static const uint32_t CONTAINER_VERSION = 5; // Bumped for unbounded uniforms, texture type/format reflection and physical storage buffer addresses.
+	static const uint32_t CONTAINER_VERSION = 6; // Above both sides: this fork (5: unbounded uniforms, texture type/format reflection, physical storage buffer addresses) and upstream (container header).
 
 protected:
 	using RDC = RenderingDeviceCommons;
@@ -100,6 +100,7 @@ protected:
 		uint32_t code_decompressed_size = 0;
 	};
 
+	ContainerHeader container_header;
 	ReflectionData reflection_data;
 	Vector<uint32_t> reflection_binding_set_uniforms_count;
 	Vector<ReflectionBindingData> reflection_binding_set_uniforms_data;
@@ -315,5 +316,5 @@ class RenderingShaderContainerFormat : public RenderingDeviceCommons {
 public:
 	virtual Ref<RenderingShaderContainer> create_container() const = 0;
 	virtual ShaderLanguageVersion get_shader_language_version() const = 0;
-	virtual ShaderSpirvVersion get_shader_spirv_version() const = 0;
+	virtual ShaderSpirvVersion get_shader_spirv_version(ShaderStage p_stage) const = 0;
 };

@@ -277,16 +277,16 @@ String EditorExportPlatformIOS::_process_config_file_line(const Ref<EditorExport
 
 		// MoltenVK Framework
 	} else if (p_line.contains("$moltenvk_buildfile")) {
-		String value = "9039D3BE24C093AC0020482C /* MoltenVK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9039D3BD24C093AC0020482C /* MoltenVK.xcframework */; };";
+		String value = p_config.has_moltenvk ? "9039D3BE24C093AC0020482C /* MoltenVK.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9039D3BD24C093AC0020482C /* MoltenVK.xcframework */; };" : "";
 		strnew += p_line.replace("$moltenvk_buildfile", value) + "\n";
 	} else if (p_line.contains("$moltenvk_fileref")) {
-		String value = "9039D3BD24C093AC0020482C /* MoltenVK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MoltenVK; path = MoltenVK.xcframework; sourceTree = \"<group>\"; };";
+		String value = p_config.has_moltenvk ? "9039D3BD24C093AC0020482C /* MoltenVK.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = MoltenVK; path = MoltenVK.xcframework; sourceTree = \"<group>\"; };" : "";
 		strnew += p_line.replace("$moltenvk_fileref", value) + "\n";
 	} else if (p_line.contains("$moltenvk_buildphase")) {
-		String value = "9039D3BE24C093AC0020482C /* MoltenVK.xcframework in Frameworks */,";
+		String value = p_config.has_moltenvk ? "9039D3BE24C093AC0020482C /* MoltenVK.xcframework in Frameworks */," : "";
 		strnew += p_line.replace("$moltenvk_buildphase", value) + "\n";
 	} else if (p_line.contains("$moltenvk_buildgrp")) {
-		String value = "9039D3BD24C093AC0020482C /* MoltenVK.xcframework */,";
+		String value = p_config.has_moltenvk ? "9039D3BD24C093AC0020482C /* MoltenVK.xcframework */," : "";
 		strnew += p_line.replace("$moltenvk_buildgrp", value) + "\n";
 
 		// Launch Storyboard
@@ -308,21 +308,7 @@ String EditorExportPlatformIOS::_process_config_file_line(const Ref<EditorExport
 
 		// Launch Storyboard customization
 	} else if (p_line.contains("$launch_screen_image_mode")) {
-		int image_scale_mode = p_preset->get("storyboard/image_scale_mode");
-		String value;
-
-		switch (image_scale_mode) {
-			case 0: {
-				String logo_path = get_project_setting(p_preset, "application/boot_splash/image");
-				bool is_on = get_project_setting(p_preset, "application/boot_splash/fullsize");
-				// If custom logo is not specified, Godot does not scale default one, so we should do the same.
-				value = (is_on && logo_path.length() > 0) ? "scaleAspectFit" : "center";
-			} break;
-			default: {
-				value = storyboard_image_scale_mode[image_scale_mode - 1];
-			}
-		}
-
+		String value = get_custom_project_settings(p_preset)["ios/launch_screen_image_mode"];
 		strnew += p_line.replace("$launch_screen_image_mode", value).replace("$launch_screen_image_file_name", launch_screen_image_file_name) + "\n";
 	} else if (p_line.contains("$launch_screen_image_file_name")) {
 		strnew += p_line.replace("$launch_screen_image_file_name", launch_screen_image_file_name) + "\n";

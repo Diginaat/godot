@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import atexit
 import contextlib
 import glob
@@ -25,7 +23,7 @@ compiler_version_cache = None
 
 # Listing all the folders we have converted
 # for SCU in scu_builders.py
-_scu_folders = set()
+_scu_folders = set[str]()
 
 
 def set_scu_folders(scu_folders):
@@ -1579,6 +1577,29 @@ def generated_wrapper(
 def get_buffer(path: str) -> bytes:
     with open(path, "rb") as file:
         return file.read()
+
+
+def compress_buffer_zstd(buffer: bytes, env):
+    # Levels selected for a good tradeoff between compression speed and size reduction,
+    # being more aggressive on production builds.
+    # Long-distance matching helps a lot with the editor translations on lower levels,
+    # but costs some extra decompression time (+30%). It's not helping at high levels.
+    level = 20 if env["production"] else 7
+    ldm = False if env["production"] or env.dev_build else True
+    if sys.version_info >= (3, 14):
+        import compression.zstd
+
+        CP = compression.zstd.CompressionParameter
+        options = {CP.compression_level: level, CP.enable_long_distance_matching: ldm}
+        return compression.zstd.compress(buffer, options=options)
+    else:
+        try:
+            import zstandard
+        except ImportError:
+            print_error("Python versions earlier than 3.14 require the `zstandard` module")
+            sys.exit(255)
+        params = zstandard.ZstdCompressionParameters.from_level(level, enable_ldm=ldm)
+        return zstandard.ZstdCompressor(compression_params=params).compress(buffer)
 
 
 def compress_buffer(buffer: bytes) -> bytes:
