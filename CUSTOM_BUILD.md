@@ -216,6 +216,7 @@ Releases on GitHub name the Godot base and the own version:
 | 0.7.0 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.7.0` | DDGI: near-field rays (bounce light from nearby objects in place, following them), moving objects lit without smears or noise, emissive surfaces as direct lights, low resolution apply (faster), least-squares baking, visible probes updated first |
 | 0.7.1 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.7.1` | DDGI: moving objects of any shape (boxes, poles, planks, capsules), not only spheres; fix: ray tracing output binding format in DDGI dispatches |
 | 0.7.3 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.7.3` | DDGI fixes: no flicker or blotches in dark places, no white dots near bright openings, near-field rays shorter (0.5 spacings); tunnel test view |
+| 0.8.0 | 4.8-beta | `godot4.8-beta-nvidia-rt-dlss-physx-v0.8.0` | Godot 4.8-beta base, PhysX module `97bd583c28`; DDGI: near-field rays removed (dark spots that moved with the camera), DDGI rays through glass fixed |
 
 ## Release packages (Windows)
 
