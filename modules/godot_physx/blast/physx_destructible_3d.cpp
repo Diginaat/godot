@@ -1092,7 +1092,7 @@ real_t PhysXDestructible3D::_ground_below(const Vector3 &p_from, real_t p_fallba
 	if (space == nullptr) {
 		return p_fallback;
 	}
-	PhysicsDirectSpaceState3D::RayParameters ray;
+	PS3DT::RayParameters ray;
 	ray.from = p_from;
 	ray.to = p_from - Vector3(0, 50, 0);
 	ray.collision_mask = collision_mask;
@@ -1101,7 +1101,7 @@ real_t PhysXDestructible3D::_ground_below(const Vector3 &p_from, real_t p_fallba
 			ray.exclude.insert(other.body);
 		}
 	}
-	PhysicsDirectSpaceState3D::RayResult hit;
+	PS3DT::RayResult hit;
 	return space->intersect_ray(ray, hit) ? hit.position.y : p_fallback;
 }
 

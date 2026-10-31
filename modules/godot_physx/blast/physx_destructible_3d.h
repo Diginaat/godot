@@ -35,6 +35,7 @@
 #include "core/templates/local_vector.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/material.h"
+#include "servers/physics_3d/physics_server_3d.h"
 
 struct NvBlastAsset;
 struct NvBlastFamily;

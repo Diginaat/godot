@@ -1755,7 +1755,7 @@ void PhysXParticleFluid3D::_screen_space_publish(const float *p_transforms, int 
 	}
 	// 10 cm of fluid lets screen_space_tint through.
 	for (int c = 0; c < 3; c++) {
-		s.absorption.components[c] = -Math::log(CLAMP(screen_space_tint.components[c], 0.01f, 1.0f)) / 0.1f;
+		s.absorption[c] = -Math::log(CLAMP(screen_space_tint[c], 0.01f, 1.0f)) / 0.1f;
 	}
 	s.refraction = screen_space_refraction;
 	// A StandardMaterial3D (or ORMMaterial3D) override is translated; anything
