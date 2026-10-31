@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-10-31 (sync)
+
+* **Updated**: CUSTOM_BUILD.md sync log: upstream `95c0fa5fe8` (4.8-beta),
+  physx module `97bd583c28`. Shader `CONTAINER_VERSION` 5 -> 6 (upstream
+  added a container header). Smoke: PhysX GPU, path tracer and DDGI pass;
+  the PhysX tests report one error only because the checkout's `bin/` has
+  no Streamline DLLs.
+
 ## 2026-10-31 (near-field rays removed, glass rays)
 
 * **Added**: ddgi/findings/near-field-camera-spots.md: near-field rays
