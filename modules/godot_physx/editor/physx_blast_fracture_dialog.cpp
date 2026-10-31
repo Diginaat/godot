@@ -92,12 +92,19 @@ void PhysXBlastFractureDialog::_regenerate() {
 	authored_asset = authoring->fracture_mesh(source_mesh, site_count, seed, pattern, cutout_pattern);
 
 	if (authored_asset.is_null()) {
+		// Why, in the dialog itself (it was only in the Output panel), and no preview of the last good result.
+		String reason = authoring->get_last_error();
+		if (pattern == PhysXBlastAuthoring::PATTERN_CUTOUT && cutout_pattern.is_null()) {
+			reason = TTR("Cutout needs a pattern texture -- pick one above.");
+		} else if (reason.is_empty()) {
+			reason = TTR("Check the mesh has real geometry.");
+		}
 		if (chunk_count_label) {
-			if (pattern == PhysXBlastAuthoring::PATTERN_CUTOUT && cutout_pattern.is_null()) {
-				chunk_count_label->set_text(TTR("Cutout needs a pattern texture -- pick one above."));
-			} else {
-				chunk_count_label->set_text(TTR("Fracture failed -- check the mesh has real geometry."));
-			}
+			chunk_count_label->set_text(TTR("Fracture failed"));
+		}
+		_show_status(reason, get_theme_color(SNAME("error_color"), EditorStringName(Editor)));
+		if (preview) {
+			preview->set_visible(false);
 		}
 		get_ok_button()->set_disabled(true);
 		return;
@@ -108,10 +115,23 @@ void PhysXBlastFractureDialog::_regenerate() {
 	if (chunk_count_label) {
 		chunk_count_label->set_text(vformat(TTR("%d pieces"), piece_count));
 	}
+	// Fractured, but with something worth knowing (the mesh cleaner dropped loose parts, ...).
+	const PackedStringArray warnings = authoring->get_last_warnings();
+	_show_status(String("\n").join(warnings), get_theme_color(SNAME("warning_color"), EditorStringName(Editor)));
 
 	if (preview) {
+		preview->set_visible(true);
 		preview->edit(physx_blast_build_preview_mesh(authored_asset));
 	}
+}
+
+void PhysXBlastFractureDialog::_show_status(const String &p_text, const Color &p_color) {
+	if (!status_label) {
+		return;
+	}
+	status_label->set_text(p_text);
+	status_label->add_theme_color_override(SceneStringName(font_color), p_color);
+	status_label->set_visible(!p_text.is_empty());
 }
 
 void PhysXBlastFractureDialog::_on_confirmed() {
@@ -239,6 +259,13 @@ PhysXBlastFractureDialog::PhysXBlastFractureDialog() {
 	cutout_pattern_picker->connect(SNAME("resource_changed"), callable_mp(this, &PhysXBlastFractureDialog::_regenerate).unbind(1));
 	cutout_pattern_picker->set_visible(false); // default pattern is Voronoi
 	cutout_row->add_child(cutout_pattern_picker);
+
+	// Why a fracture failed, or what it warned about.
+	status_label = memnew(Label);
+	status_label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+	status_label->set_custom_minimum_size(Size2(600, 0) * EDSCALE);
+	status_label->set_visible(false);
+	root->add_child(status_label);
 
 	set_ok_button_text(TTR("Accept"));
 }

@@ -139,6 +139,11 @@ public:
 	// from the seabed) leave a foamy sheet at the waterline. 0 = none.
 	void set_shore_foam_band(float p_depth);
 	float get_shore_foam_band() const { return shore_foam_band; }
+	void set_open_sea_beyond(bool p_open);
+	// Wind / direction / height / fetch at once — ONE in-place spectrum update (no rebuild once built).
+	void set_sea_state(float p_wind_speed, Vector2 p_wind_direction, float p_wave_amplitude, float p_fetch);
+	void recenter(Vector3 p_world_position);
+	bool get_open_sea_beyond() const { return open_sea_beyond; }
 	// Shore foam moves with the water: each crest pushes it up the beach and
 	// the backwash drags it back out, plus this steady seaward undertow (m/s)
 	// that slides it back into the water over time.
@@ -218,6 +223,8 @@ public:
 	// The same, leaving out one wake (a boat's buoyancy reading the water
 	// under it shouldn't sink into its own wake's dip).
 	float sample_height_excluding_wake(Vector3 p_world_pos, ObjectID p_wake) const;
+	// Script-side: the wake as a node (null leaves nothing out).
+	float _sample_height_excluding_wake_bind(Vector3 p_world_pos, Object *p_wake) const;
 	// Moving wake grids (PhysXWaterWake3D): up to MAX_WAKES are drawn and
 	// sampled. register_wake() returns a slot (-1 when full).
 	static constexpr int MAX_WAKES = 4;
@@ -262,6 +269,10 @@ private:
 	float foam_threshold = 0.7f;
 	float foam_persistence = 2.5f;
 	float shore_foam_band = 0.5f;
+	// Open water past the simulated square (render_extent > domain, no surface_mesh): true = it is open, deep sea
+	// everywhere past the square (full chop, wet, never lifted onto the ground) -- for a sea whose ripple square
+	// follows a focus that may sit over land; false = the square's edge seabed carries on outward (a beach scene).
+	bool open_sea_beyond = false;
 	float shore_undertow = 0.3f;
 	float swash_run_up = 0.3f;
 	float swash_drain_speed = 0.12f;
@@ -316,7 +327,7 @@ private:
 	// of drawing with freed textures.
 	void _detach_textures();
 
-	bool caustics_enabled = true;
+	bool caustics_enabled = false; // off by default: a draw pass every frame, only worth it over a visible floor
 	Vector3 caustics_sun_direction = Vector3(-0.35f, -1.0f, -0.25f);
 	float caustics_reference_depth = 2.5f;
 
@@ -340,6 +351,7 @@ private:
 	// Footprint triangles of surface_mesh in node-local XZ (degenerates dropped).
 	Vector<Vector2> _collect_footprint() const;
 	void _configure_solver();
+	void _reinit_spectrum();
 	// Casts the seabed rays; fills cell_depth.
 	void _sample_seabed();
 	static PackedByteArray _rasterize_wet_mask(const Vector<Vector2> &p_tris, Vector2 p_center, Vector2 p_domain, int p_n);

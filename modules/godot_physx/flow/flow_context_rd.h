@@ -64,6 +64,8 @@ void flush(Context *p_context);
 void *import_texture(Context *p_context, uint64_t p_rid, uint32_t p_width, uint32_t p_height, int p_format);
 // The RenderingDevice texture behind a transient Flow returned.
 uint64_t transient_texture_rid(void *p_transient);
+// The RenderingDevice storage buffer behind a buffer transient Flow returned.
+uint64_t transient_buffer_rid(void *p_transient);
 
 // Diagnostics.
 struct Stats {

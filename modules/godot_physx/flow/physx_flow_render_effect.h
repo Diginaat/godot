@@ -30,6 +30,9 @@
 
 #pragma once
 
+#include "flow_scatter_rd.h"
+
+#include "core/os/mutex.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
 #include "scene/resources/compositor.h"
@@ -45,35 +48,38 @@ class RenderData;
 // transparent geometry.
 //
 // While a world has flows, the effect is made to run without touching
-// anything the user owns or saves: with no Compositor on the world, one is
-// created on the World3D (never on the WorldEnvironment, never saved); a
-// user's Compositor (world or camera) gets the effect added at the
-// RenderingServer level only -- its effects array stays as the user made
-// it -- unless it already holds a PhysXFlowRenderEffect. When the world's
-// last flow leaves, all of that is undone.
+// anything the user owns or saves (see PhysXCompositorEffects). A
+// screen-space fluid writes its surface into the depth before transparent
+// geometry, so the gas is marched up to the liquid.
+// When the world's last flow leaves, all of that is undone.
 class PhysXFlowRenderEffect : public CompositorEffect {
 	GDCLASS(PhysXFlowRenderEffect, CompositorEffect);
 
 	static LocalVector<PhysXFlow3D *> flows;
+	// Registered on the main thread, drawn on the render thread: held while a frame draws them.
+	static Mutex flows_mutex;
 
-	struct WorldState {
-		int flows = 0;
-		Ref<Compositor> created; // installed on the World3D by us
-		// User compositors the effect was added to, with their own effect
-		// RIDs as last seen (a change means the user re-set them).
-		HashMap<ObjectID, LocalVector<RID>> injected;
-	};
-	static HashMap<ObjectID, WorldState> worlds;
-	static void _inject(WorldState &r_state, const Ref<Compositor> &p_compositor);
-	static void _restore(const ObjectID &p_compositor);
+	static HashMap<ObjectID, int> worlds; // flows per world
 
 	// Copies Flow's composited result into Godot's color buffer, which
 	// RenderingDevice won't copy into directly (no copy-to usage) but a
 	// compute pass can write.
 	RID copy_shader;
 	RID copy_pipeline;
+	RID copy_sampler;
 	bool copy_failed = false;
 	bool _ensure_copy_pipeline(RenderingDevice *p_rd);
+	// A frame that can't be written from a compute pass (the Mobile renderer's,
+	// also stored halved): the gas is drawn on this full-brightness copy, then
+	// written back by a fullscreen draw.
+	RID work;
+	Size2i work_size;
+	RID write_back_shader;
+	HashMap<int64_t, RID> write_back_pipelines; // per framebuffer format
+	void _write_back(RenderingDevice *p_rd, const RID &p_src, const RID &p_color, float p_scale);
+
+	// PhysXFlow3D.light_scattering's pass (shared by every flow).
+	FlowScatterRD scatter;
 
 	void _render(int p_callback_type, const RenderData *p_render_data);
 
@@ -81,8 +87,11 @@ protected:
 	static void _bind_methods();
 
 public:
-	// Writes p_src over p_dst (both RGBA16F, p_size), on the render thread.
-	void copy_texture(RenderingDevice *p_rd, const RID &p_src, const RID &p_dst, const Size2i &p_size);
+	// Writes p_src (sampled) over p_dst (an RGBA16F storage image), rgb scaled
+	// by p_scale, on the render thread.
+	void copy_texture(RenderingDevice *p_rd, const RID &p_src, const RID &p_dst, const Size2i &p_size, float p_scale = 1.0f);
+	// Adds point / spot light scattering in a flow's gas onto p_color.
+	FlowScatterRD &get_scatter() { return scatter; }
 
 	static void register_flow(PhysXFlow3D *p_flow);
 	static void unregister_flow(PhysXFlow3D *p_flow);

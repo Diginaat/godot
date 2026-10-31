@@ -119,7 +119,12 @@ public:
 	RID buf_bhash; // block-sparse: block keys (open addressing)
 	RID buf_bhash_val; // hash slot -> block-pool slot
 	RID buf_bkey; // block key per block-pool slot
-	RID buf_bcounts; // [0] active blocks, [1..3] indirect dispatch (needs DISPATCH_INDIRECT usage)
+	RID buf_bcounts; // [0] active blocks
+	// The per-block passes' indirect dispatch args, written by PASS_BS_BDISPATCH
+	// alone. A buffer of its own: Godot's render graph tracks one usage per
+	// buffer per compute list, so args a pass also binds as storage (bcounts)
+	// lose their indirect-read barrier and the dispatch reads stale counts.
+	RID buf_bargs;
 
 	bool block_sparse = false; // this build uses the mpm_bs_* passes (fluid, boundless-capable)
 	int capacity = 0;
@@ -259,11 +264,16 @@ public:
 	int get_capacity() const { return capacity; } // buffer / MultiMesh size
 	double get_last_step_msec() const;
 
-	// 12 floats / particle: MultiMesh TRANSFORM_3D rows, from the last reaped
-	// step. Empty until the first readback lands.
+	// 12 floats / particle: MultiMesh TRANSFORM_3D rows (origin at 3, 7, 11), from
+	// the last reaped step. Empty until the first readback lands.
 	PackedFloat32Array get_multimesh_buffer() const;
 	// Blocking: forces a render sync. Test / query helper only.
 	PackedVector3Array get_positions() const;
+	// The volume of fluid one particle stands for at rest (particles are seeded, and given mass, at dx / 2 spacing).
+	float get_particle_volume() const {
+		const float s = dx * 0.5f;
+		return s * s * s;
+	}
 
 	// GPU-marched isosurface geometry from the last reaped step run with
 	// p_want_surface = true. Non-indexed triangle soup, world space; returns the

@@ -591,9 +591,12 @@ void GodotPhysXParticleFluid3D::_destroy() {
 	active_count = 0;
 	foam_count = 0;
 	read_scratch.clear();
-	read_positions.clear();
 	foam_scratch.clear();
-	foam_positions.clear();
+	{
+		MutexLock lock(read_mutex);
+		read_positions.clear();
+		foam_positions.clear();
+	}
 	dirty_material = true;
 	dirty_foam = true;
 }
@@ -630,7 +633,7 @@ void GodotPhysXParticleFluid3D::_ensure_system() {
 	ERR_FAIL_NULL(scene);
 
 	px_material = physics->createPBDMaterial(
-			granular ? CLAMP((PxReal)granular_friction, 0.0f, 2.0f) : 0.05f, // friction
+			CLAMP((PxReal)(granular ? granular_friction : friction), 0.0f, 2.0f), // friction
 			0.0f, // damping
 			granular ? 0.0f : (PxReal)adhesion,
 			granular ? 0.0f : (PxReal)viscosity,
@@ -641,6 +644,11 @@ void GodotPhysXParticleFluid3D::_ensure_system() {
 			0.0f); // drag (deprecated)
 	ERR_FAIL_NULL(px_material);
 	px_material->setGravityScale((PxReal)gravity_scale);
+	// Adhesion only acts within restOffset * adhesionRadiusScale of a collider,
+	// and PhysX defaults the scale to 0: without this, adhesion does nothing.
+	// 2 reaches past the particle contact offset, which is the real limit (a
+	// particle further out has no contact to pull on); 3 measured the same.
+	px_material->setAdhesionRadiusScale(2.0f);
 	if (granular) {
 		// Grain-on-grain friction is a separate scale from the base coefficient;
 		// PBD particle friction is weak for piling, so crank it hard (the range
@@ -705,6 +713,7 @@ void GodotPhysXParticleFluid3D::_apply_material() {
 		px_material->setAdhesion(0.0f);
 		px_material->setVorticityConfinement(0.0f);
 	} else {
+		px_material->setFriction(CLAMP((PxReal)friction, 0.0f, 2.0f));
 		px_material->setViscosity((PxReal)viscosity);
 		px_material->setSurfaceTension((PxReal)surface_tension);
 		px_material->setCohesion((PxReal)cohesion);
@@ -747,6 +756,9 @@ void GodotPhysXParticleFluid3D::set_param(Param p_param, real_t p_value) {
 		case PARAM_PARTICLE_SIZE:
 			particle_size = MAX(p_value, (real_t)0.001);
 			break;
+		case PARAM_FRICTION:
+			friction = MAX(p_value, (real_t)0.0);
+			break;
 		default:
 			return;
 	}
@@ -764,6 +776,8 @@ real_t GodotPhysXParticleFluid3D::get_param(Param p_param) const {
 			return cohesion;
 		case PARAM_ADHESION:
 			return adhesion;
+		case PARAM_FRICTION:
+			return friction;
 		case PARAM_VORTICITY:
 			return vorticity;
 		case PARAM_GRAVITY_SCALE:
@@ -813,8 +827,9 @@ void GodotPhysXParticleFluid3D::clear() {
 	write_head = 0;
 	foam_count = 0;
 	read_scratch.clear();
-	read_positions.clear();
 	foam_scratch.clear();
+	MutexLock lock(read_mutex);
+	read_positions.clear();
 	foam_positions.clear();
 }
 
@@ -995,6 +1010,7 @@ void GodotPhysXParticleFluid3D::read_back() {
 	}
 	active_count = px_buffer->getNbActiveParticles();
 	if (active_count == 0) {
+		MutexLock lock(read_mutex);
 		read_positions.clear();
 		return;
 	}
@@ -1004,6 +1020,7 @@ void GodotPhysXParticleFluid3D::read_back() {
 			px_buffer->getPositionInvMasses(),
 			active_count);
 
+	MutexLock lock(read_mutex);
 	read_positions.resize(active_count);
 	for (uint32_t i = 0; i < active_count; i++) {
 		const Vector4 &p = read_scratch[i];
@@ -1028,6 +1045,7 @@ void GodotPhysXParticleFluid3D::read_back() {
 }
 
 real_t GodotPhysXParticleFluid3D::get_submersion(const AABB &p_world_aabb) const {
+	MutexLock lock(read_mutex);
 	const real_t box_vol = p_world_aabb.get_volume();
 	if (box_vol <= 0.0 || read_positions.is_empty()) {
 		return 0.0;
@@ -1094,6 +1112,9 @@ void GodotPhysXParticleFluid3D::set_param(Param p_param, real_t p_value) {
 		case PARAM_PARTICLE_SIZE:
 			particle_size = MAX(p_value, (real_t)0.001);
 			break;
+		case PARAM_FRICTION:
+			friction = MAX(p_value, (real_t)0.0);
+			break;
 		default:
 			break;
 	}
@@ -1109,6 +1130,8 @@ real_t GodotPhysXParticleFluid3D::get_param(Param p_param) const {
 			return cohesion;
 		case PARAM_ADHESION:
 			return adhesion;
+		case PARAM_FRICTION:
+			return friction;
 		case PARAM_VORTICITY:
 			return vorticity;
 		case PARAM_GRAVITY_SCALE:
@@ -1134,8 +1157,9 @@ void GodotPhysXParticleFluid3D::clear() {
 	write_head = 0;
 	foam_count = 0;
 	read_scratch.clear();
-	read_positions.clear();
 	foam_scratch.clear();
+	MutexLock lock(read_mutex);
+	read_positions.clear();
 	foam_positions.clear();
 }
 
@@ -1193,3 +1217,23 @@ real_t GodotPhysXParticleFluid3D::get_submersion(const AABB &p_world_aabb) const
 }
 
 #endif // GODOT_PHYSX_GPU
+
+Vector<Vector3> GodotPhysXParticleFluid3D::copy_positions() const {
+	MutexLock lock(read_mutex);
+	Vector<Vector3> out;
+	out.resize(read_positions.size());
+	if (!read_positions.is_empty()) {
+		memcpy(out.ptrw(), read_positions.ptr(), read_positions.size() * sizeof(Vector3));
+	}
+	return out;
+}
+
+Vector<Vector3> GodotPhysXParticleFluid3D::copy_foam_positions() const {
+	MutexLock lock(read_mutex);
+	Vector<Vector3> out;
+	out.resize(foam_positions.size());
+	if (!foam_positions.is_empty()) {
+		memcpy(out.ptrw(), foam_positions.ptr(), foam_positions.size() * sizeof(Vector3));
+	}
+	return out;
+}

@@ -112,13 +112,10 @@ bool PhysXCloth3D::_try_build_gpu() {
 	if (!server || !server->has_gpu() || get_world_3d().is_null()) {
 		return false;
 	}
-	gpu_cloth = server->cloth_create();
-	if (gpu_cloth.is_null()) {
+	const RID cloth = server->cloth_create();
+	if (cloth.is_null()) {
 		return false;
 	}
-	server->cloth_set_space(gpu_cloth, get_world_3d()->get_space());
-	const float th = MAX(solver.vertex_radius() * 0.5f, 0.004f);
-	server->cloth_set_params(gpu_cloth, th, density, stiffness, bend_stiffness, damping, collision_mask);
 
 	// World-space rest mesh + topology from the solver.
 	const LocalVector<Vector3> &wp = solver.get_positions();
@@ -133,18 +130,31 @@ bool PhysXCloth3D::_try_build_gpu() {
 	for (uint32_t i = 0; i < tri.size(); i++) {
 		idx.write[i] = tri[i];
 	}
-	server->cloth_build(gpu_cloth, positions, idx, get_global_transform());
-	if (!server->cloth_is_ready(gpu_cloth)) {
-		server->free_rid(gpu_cloth);
-		gpu_cloth = RID();
-		return false;
-	}
-
 	Vector<int32_t> pins;
 	for (uint32_t i = 0; i < pinned_index_cache.size(); i++) {
 		pins.push_back(pinned_index_cache[i]);
 	}
-	server->cloth_set_pinned(gpu_cloth, pins);
+	const RID space = get_world_3d()->get_space();
+	const float th = MAX(solver.vertex_radius() * 0.5f, 0.004f);
+	const Transform3D xform = get_global_transform();
+	bool ready = false;
+	// Built where the scene may be touched, and waited for: whether PhysX took the mesh decides the CPU fallback.
+	server->run_on_physics_thread([&]() {
+		server->cloth_set_space(cloth, space);
+		server->cloth_set_params(cloth, th, density, stiffness, bend_stiffness, damping, collision_mask);
+		server->cloth_build(cloth, positions, idx, xform);
+		ready = server->cloth_is_ready(cloth);
+		if (ready) {
+			server->cloth_set_pinned(cloth, pins);
+		} else {
+			server->free_rid(cloth);
+		}
+	},
+			true);
+	if (!ready) {
+		return false;
+	}
+	gpu_cloth = cloth;
 	gpu_mesh_version = 0;
 	// Keep the solver's rest data around for the gizmo and vertex count; it is
 	// just not stepped while the GPU owns the simulation.

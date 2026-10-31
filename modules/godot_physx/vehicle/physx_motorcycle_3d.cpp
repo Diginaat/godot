@@ -38,6 +38,7 @@
 #include "physx_vehicle_wheel_3d.h"
 
 #include "core/config/engine.h"
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "scene/3d/physics/collision_shape_3d.h"
 #include "scene/resources/3d/box_shape_3d.h"
@@ -61,6 +62,7 @@ PhysXMotorcycle3D::PhysXMotorcycle3D() {
 
 PhysXMotorcycle3D::~PhysXMotorcycle3D() {
 	_destroy();
+	_control_free();
 	memdelete(impl);
 }
 
@@ -141,6 +143,12 @@ bool PhysXMotorcycle3D::_build() {
 	cfg.max_steer_angle = max_steer_angle;
 	cfg.collision_layer = collision_layer;
 	cfg.collision_mask = collision_mask;
+	{
+		real_t friction, bounce;
+		_chassis_material(friction, bounce);
+		cfg.chassis_friction = (float)friction;
+		cfg.chassis_bounce = (float)bounce;
+	}
 
 	PhysXVehicleWheel3D *front_wheel = wheels[front_idx];
 	PhysXVehicleWheel3D *rear_wheel = wheels[rear_idx];
@@ -149,8 +157,9 @@ bool PhysXMotorcycle3D::_build() {
 	for (int i = 0; i < 2; i++) {
 		Vehicle2WWheelConfig &wc = *wheel_cfgs[i];
 		PhysXVehicleWheel3D *w = wheel_nodes[i];
-		wc.position = w->get_position();
-		wc.basis = w->get_transform().basis;
+		// The rest pose, not the node's current (simulated) one -- see get_rest_transform().
+		wc.position = w->get_rest_transform().origin;
+		wc.basis = w->get_rest_transform().basis;
 		wc.radius = w->get_radius();
 		wc.half_width = w->get_half_width();
 		wc.wheel_mass = w->get_wheel_mass();
@@ -167,32 +176,44 @@ bool PhysXMotorcycle3D::_build() {
 		wc.tire_slide_grip = w->get_tire_slide_grip();
 	}
 
-	if (!configure_vehicle2w(impl->vehicle, cfg, *physics, *scene, impl->simulationContext)) {
-		return false;
-	}
-
-	Vehicle2W &v = impl->vehicle;
-	v.physxActor.rigidBody->setGlobalPose(to_px(get_global_transform()));
 	impl->sleep_threshold = (PxReal)space->get_sleep_energy_threshold();
 	impl->time_before_sleep = (PxReal)space->get_time_before_sleep();
-	PxRigidDynamic *dynamic_body = v.physxActor.rigidBody->is<PxRigidDynamic>();
-	ERR_FAIL_NULL_V(dynamic_body, false);
-	dynamic_body->setSleepThreshold(can_sleep && GodotPhysXProjectSettings::allow_sleep ? impl->sleep_threshold : 0.0f);
-	dynamic_body->setWakeCounter(impl->time_before_sleep);
-	scene->addActor(*v.physxActor.rigidBody);
-	v.physxActor.rigidBody->setName("PhysXMotorcycle3D");
+	const PxTransform pose = to_px(get_global_transform());
+	// Made and added where the scene may be touched, and waited for (see GodotPhysXServer3D::run_on_physics_thread()).
+	GodotPhysXServer3D::run_on_physics_thread([&]() {
+		if (!configure_vehicle2w(impl->vehicle, cfg, *physics, *scene, impl->simulationContext)) {
+			return;
+		}
+		Vehicle2W &v = impl->vehicle;
+		v.physxActor.rigidBody->setGlobalPose(pose);
+		PxRigidDynamic *dynamic_body = v.physxActor.rigidBody->is<PxRigidDynamic>();
+		ERR_FAIL_NULL(dynamic_body);
+		dynamic_body->setSleepThreshold(can_sleep && GodotPhysXProjectSettings::allow_sleep ? impl->sleep_threshold : 0.0f);
+		dynamic_body->setWakeCounter(impl->time_before_sleep);
+		scene->addActor(*v.physxActor.rigidBody);
+		v.physxActor.rigidBody->setName("PhysXMotorcycle3D");
 
-	impl->scene = scene;
-	impl->built = true;
-	return true;
+		impl->scene = scene;
+		impl->built = true;
+		_control_built();
+		_cache_chassis();
+	},
+			true);
+	return impl->built;
 }
+
+PHYSX_VEHICLE_CONTROL_DEFINE(PhysXMotorcycle3D, 2)
 
 void PhysXMotorcycle3D::_destroy() {
 	if (impl->built) {
-		if (impl->scene) {
-			impl->scene->removeActor(*impl->vehicle.physxActor.rigidBody);
-		}
-		impl->vehicle.destroy();
+		GodotPhysXServer3D::run_on_physics_thread([&]() {
+			_control_unbind();
+			if (impl->scene) {
+				impl->scene->removeActor(*impl->vehicle.physxActor.rigidBody);
+			}
+			impl->vehicle.destroy();
+		},
+				true);
 		impl->built = false;
 		impl->scene = nullptr;
 	}
@@ -222,7 +243,9 @@ void PhysXMotorcycle3D::_notification(int p_what) {
 			Vehicle2W &v = impl->vehicle;
 			v.commandState.throttle = (PxReal)throttle;
 			v.commandState.brakes[0] = (PxReal)brake;
-			v.commandState.nbBrakes = 1;
+			// The second brake response is the rear wheel's only (configure_vehicle2w).
+			v.commandState.brakes[1] = (PxReal)handbrake;
+			v.commandState.nbBrakes = 2;
 			v.commandState.steer = (PxReal)steer;
 			v.transmissionCommandState.gear = reverse ? PxVehicleDirectDriveTransmissionCommandState::eREVERSE : PxVehicleDirectDriveTransmissionCommandState::eFORWARD;
 			v.step((PxReal)get_physics_process_delta_time(), impl->simulationContext);
@@ -232,19 +255,11 @@ void PhysXMotorcycle3D::_notification(int p_what) {
 			set_global_transform(to_godot(v.physxActor.rigidBody->getGlobalPose()));
 			const PxTransform cmass_local_pose = v.physxActor.rigidBody->getCMassLocalPose();
 			for (uint32_t i = 0; i < 2; i++) {
-				wheels[impl->wheel_order[i]]->set_transform(to_godot(cmass_local_pose * v.wheelLocalPoses[i].localPose));
+				wheels[impl->wheel_order[i]]->_set_simulated_transform(to_godot(cmass_local_pose * v.wheelLocalPoses[i].localPose));
 			}
+			_cache_chassis();
 		} break;
 	}
-}
-
-void PhysXMotorcycle3D::apply_torque_impulse(const Vector3 &p_impulse) {
-	if (!impl->built) {
-		return;
-	}
-	PxRigidDynamic *dynamic_body = impl->vehicle.physxActor.rigidBody->is<PxRigidDynamic>();
-	ERR_FAIL_NULL(dynamic_body);
-	dynamic_body->addTorque(to_px(p_impulse), PxForceMode::eIMPULSE);
 }
 
 void PhysXMotorcycle3D::apply_force_at_local_position(const Vector3 &p_force, const Vector3 &p_local_position) {
@@ -259,58 +274,41 @@ void PhysXMotorcycle3D::apply_force_at_local_position(const Vector3 &p_force, co
 	// mismatch wrong with the sibling PxRigidBodyExt overloads. eFORCE (not
 	// eIMPULSE) since this is meant to be applied continuously across ticks
 	// (e.g. a small ongoing rear-wheel slide force), not a one-shot kick.
-	PxRigidBodyExt::addForceAtLocalPos(*dynamic_body, to_px(p_force), to_px(p_local_position), PxForceMode::eFORCE);
-}
-
-void PhysXMotorcycle3D::set_angular_velocity(const Vector3 &p_angular_velocity) {
-	if (!impl->built) {
-		return;
-	}
-	PxRigidDynamic *dynamic_body = impl->vehicle.physxActor.rigidBody->is<PxRigidDynamic>();
-	ERR_FAIL_NULL(dynamic_body);
-	dynamic_body->setAngularVelocity(to_px(p_angular_velocity));
-}
-
-Vector3 PhysXMotorcycle3D::get_angular_velocity() const {
-	if (!impl->built) {
-		return Vector3();
-	}
-	PxRigidDynamic *dynamic_body = impl->vehicle.physxActor.rigidBody->is<PxRigidDynamic>();
-	ERR_FAIL_NULL_V(dynamic_body, Vector3());
-	return to_godot(dynamic_body->getAngularVelocity());
+	GodotPhysXServer3D::run_on_physics_thread([=]() { PxRigidBodyExt::addForceAtLocalPos(*dynamic_body, to_px(p_force), to_px(p_local_position), PxForceMode::eFORCE); });
 }
 
 Vector3 PhysXMotorcycle3D::get_up() const {
 	if (!impl->built) {
 		return Vector3(0, 1, 0);
 	}
-	const PxTransform actor_pose = impl->vehicle.physxActor.rigidBody->getGlobalPose();
+	const PxTransform actor_pose = _chassis_pose();
 	return to_godot(actor_pose.q.getBasisVector1());
 }
 
 Vector3 PhysXMotorcycle3D::get_forward() const {
+	// Local +Z, as VehicleBody3D (Vector3.MODEL_FRONT).
 	if (!impl->built) {
-		return -get_global_transform().basis.get_column(2);
+		return get_global_transform().basis.get_column(2).normalized();
 	}
-	const PxTransform actor_pose = impl->vehicle.physxActor.rigidBody->getGlobalPose();
-	return -to_godot(actor_pose.q.getBasisVector2());
+	const PxTransform actor_pose = _chassis_pose();
+	return to_godot(actor_pose.q.getBasisVector2());
 }
 
 real_t PhysXMotorcycle3D::get_roll_angle() const {
 	if (!impl->built) {
 		return 0.0;
 	}
-	const PxTransform actor_pose = impl->vehicle.physxActor.rigidBody->getGlobalPose();
+	const PxTransform actor_pose = _chassis_pose();
 	const PxVec3 right = actor_pose.q.getBasisVector0();
 	const PxVec3 up = actor_pose.q.getBasisVector1();
 	return (real_t)Math::atan2((double)right.y, (double)up.y);
 }
 
 Vector3 PhysXMotorcycle3D::get_linear_velocity() const {
-	if (!impl->built) {
-		return Vector3();
-	}
-	return to_godot(impl->vehicle.rigidBodyState.linearVelocity);
+	// The chassis actor's own velocity, not the vehicle state's copy (that one is
+	// refreshed only when the vehicle steps, so a velocity just set or an impulse
+	// just applied would read back a step late).
+	return _control_body() != nullptr ? to_godot(_chassis_linear_velocity()) : Vector3();
 }
 
 real_t PhysXMotorcycle3D::get_forward_speed() const {
@@ -325,7 +323,7 @@ real_t PhysXMotorcycle3D::get_forward_speed() const {
 	// vehicle yaws further away from its start heading -- the actual cause
 	// of "leans in for the first half of a held turn, leans out for the
 	// second half," since this feeds target_lean's banking-angle formula).
-	const PxTransform actor_pose = impl->vehicle.physxActor.rigidBody->getGlobalPose();
+	const PxTransform actor_pose = _chassis_pose();
 	const PxVec3 fwd = actor_pose.q.rotate(impl->vehicle.frame.getLngAxis());
 	return (real_t)impl->vehicle.rigidBodyState.linearVelocity.dot(fwd);
 }
@@ -364,7 +362,7 @@ real_t PhysXMotorcycle3D::get_wheel_lateral_force(int p_wheel) const {
 	for (uint32_t i = 0; i < 2; i++) {
 		if (impl->wheel_order[i] == (uint32_t)p_wheel) {
 			const Vector3 lateral_force_world = to_godot(impl->vehicle.tireForces[i].forces[PxVehicleTireDirectionModes::eLATERAL]);
-			const PxTransform actor_pose = impl->vehicle.physxActor.rigidBody->getGlobalPose();
+			const PxTransform actor_pose = _chassis_pose();
 			const Vector3 right_now = to_godot(actor_pose.q.getBasisVector0());
 			return lateral_force_world.dot(right_now);
 		}
@@ -442,7 +440,7 @@ Vector3 PhysXMotorcycle3D::get_actor_position() const {
 	if (!impl->built) {
 		return Vector3();
 	}
-	return to_godot(impl->vehicle.physxActor.rigidBody->getGlobalPose().p);
+	return to_godot(_chassis_pose().p);
 }
 
 PackedStringArray PhysXMotorcycle3D::get_configuration_warnings() const {
@@ -518,17 +516,20 @@ void PhysXMotorcycle3D::set_can_sleep(bool p_can_sleep) {
 	if (impl->built) {
 		PxRigidDynamic *body = impl->vehicle.physxActor.rigidBody->is<PxRigidDynamic>();
 		ERR_FAIL_NULL(body);
-		body->setSleepThreshold(can_sleep && GodotPhysXProjectSettings::allow_sleep ? impl->sleep_threshold : 0.0f);
-		body->setWakeCounter(impl->time_before_sleep);
-		if (!can_sleep) {
-			body->wakeUp();
-		}
+		const PxReal threshold = can_sleep && GodotPhysXProjectSettings::allow_sleep ? impl->sleep_threshold : 0.0f;
+		const PxReal wake_counter = impl->time_before_sleep;
+		GodotPhysXServer3D::run_on_physics_thread([=]() {
+			body->setSleepThreshold(threshold);
+			body->setWakeCounter(wake_counter);
+			if (!p_can_sleep) {
+				body->wakeUp();
+			}
+		});
 	}
 }
 
 bool PhysXMotorcycle3D::is_sleeping() const {
-	PxRigidDynamic *body = impl->built ? impl->vehicle.physxActor.rigidBody->is<PxRigidDynamic>() : nullptr;
-	return body && body->isSleeping();
+	return impl->built && _chassis_sleeping();
 }
 PHYSX_MOTORCYCLE_SETTER(max_engine_torque, max_engine_torque)
 PHYSX_MOTORCYCLE_SETTER(max_brake_torque, max_brake_torque)
@@ -543,6 +544,48 @@ void PhysXMotorcycle3D::set_collision_layer(uint32_t p_layer) {
 void PhysXMotorcycle3D::set_collision_mask(uint32_t p_mask) {
 	collision_mask = p_mask;
 	_rebuild_if_live();
+}
+
+void PhysXMotorcycle3D::set_physics_material_override(const Ref<PhysicsMaterial> &p_material) {
+	if (physics_material_override == p_material) {
+		return;
+	}
+	if (physics_material_override.is_valid()) {
+		physics_material_override->disconnect_changed(callable_mp(this, &PhysXMotorcycle3D::_chassis_material_changed));
+	}
+	physics_material_override = p_material;
+	if (physics_material_override.is_valid()) {
+		physics_material_override->connect_changed(callable_mp(this, &PhysXMotorcycle3D::_chassis_material_changed));
+	}
+	_chassis_material_changed();
+}
+
+void PhysXMotorcycle3D::_chassis_material(real_t &r_friction, real_t &r_bounce) const {
+	if (physics_material_override.is_valid()) {
+		r_friction = physics_material_override->computed_friction();
+		r_bounce = physics_material_override->computed_bounce();
+	} else {
+		r_friction = 0.5;
+		r_bounce = 0.1;
+	}
+}
+
+// The chassis material is the vehicle's own (see configure_*()), so it is edited in place -- no rebuild.
+void PhysXMotorcycle3D::_chassis_material_changed() {
+	if (!impl->built) {
+		return; // the next build reads it
+	}
+	real_t friction, bounce;
+	_chassis_material(friction, bounce);
+	PxRigidActor *actor = impl->vehicle.physxActor.rigidBody;
+	GodotPhysXServer3D::run_on_physics_thread([=]() {
+		godot_physx_apply_material_to_simulation_shapes(actor, friction, bounce);
+		// A material change doesn't wake the actor: one resting on its roof would keep sleeping on the old grip.
+		PxRigidDynamic *body = actor ? actor->is<PxRigidDynamic>() : nullptr;
+		if (body && body->getScene()) {
+			body->wakeUp();
+		}
+	});
 }
 
 void PhysXMotorcycle3D::_bind_methods() {
@@ -586,6 +629,9 @@ void PhysXMotorcycle3D::_bind_methods() {
 	ADD_GROUP("Controls", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "throttle", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_throttle", "get_throttle");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "brake", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_brake", "get_brake");
+	ClassDB::bind_method(D_METHOD("set_handbrake", "value"), &PhysXMotorcycle3D::set_handbrake);
+	ClassDB::bind_method(D_METHOD("get_handbrake"), &PhysXMotorcycle3D::get_handbrake);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "handbrake", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_handbrake", "get_handbrake");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "steer", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_steer", "get_steer");
 	ClassDB::bind_method(D_METHOD("set_reverse", "value"), &PhysXMotorcycle3D::set_reverse);
 	ClassDB::bind_method(D_METHOD("is_reverse"), &PhysXMotorcycle3D::is_reverse);
@@ -597,6 +643,9 @@ void PhysXMotorcycle3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_mask"), &PhysXMotorcycle3D::get_collision_mask);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
+	ClassDB::bind_method(D_METHOD("set_physics_material_override", "physics_material_override"), &PhysXMotorcycle3D::set_physics_material_override);
+	ClassDB::bind_method(D_METHOD("get_physics_material_override"), &PhysXMotorcycle3D::get_physics_material_override);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "physics_material_override", PROPERTY_HINT_RESOURCE_TYPE, PhysicsMaterial::get_class_static()), "set_physics_material_override", "get_physics_material_override");
 
 	ClassDB::bind_method(D_METHOD("get_linear_velocity"), &PhysXMotorcycle3D::get_linear_velocity);
 	ClassDB::bind_method(D_METHOD("get_forward_speed"), &PhysXMotorcycle3D::get_forward_speed);
@@ -610,10 +659,9 @@ void PhysXMotorcycle3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_wheel_camber_angle", "wheel"), &PhysXMotorcycle3D::get_wheel_camber_angle);
 	ClassDB::bind_method(D_METHOD("get_actor_position"), &PhysXMotorcycle3D::get_actor_position);
 
-	ClassDB::bind_method(D_METHOD("apply_torque_impulse", "impulse"), &PhysXMotorcycle3D::apply_torque_impulse);
 	ClassDB::bind_method(D_METHOD("apply_force_at_local_position", "force", "local_position"), &PhysXMotorcycle3D::apply_force_at_local_position);
-	ClassDB::bind_method(D_METHOD("set_angular_velocity", "angular_velocity"), &PhysXMotorcycle3D::set_angular_velocity);
-	ClassDB::bind_method(D_METHOD("get_angular_velocity"), &PhysXMotorcycle3D::get_angular_velocity);
+	ADD_GROUP("", "");
+	PHYSX_VEHICLE_CONTROL_BIND(PhysXMotorcycle3D)
 	ClassDB::bind_method(D_METHOD("get_up"), &PhysXMotorcycle3D::get_up);
 	ClassDB::bind_method(D_METHOD("get_forward"), &PhysXMotorcycle3D::get_forward);
 	ClassDB::bind_method(D_METHOD("get_roll_angle"), &PhysXMotorcycle3D::get_roll_angle);

@@ -12,6 +12,35 @@
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="add_collision_exception_with">
+			<return type="void" />
+			<param index="0" name="body" type="Node" />
+			<description>
+				Stops the motorcycle and [param body] (a [PhysicsBody3D] or another PhysX vehicle) colliding: they pass through each other, its wheels included, as with [method PhysicsBody3D.add_collision_exception_with]. Either side having the exception is enough, so a [RigidBody3D] or [CharacterBody3D] needs nothing of its own.
+			</description>
+		</method>
+		<method name="apply_central_force">
+			<return type="void" />
+			<param index="0" name="force" type="Vector3" />
+			<description>
+				Applies a world-space force at the chassis's center of mass for this physics step (call it every step to keep pushing), as [method RigidBody3D.apply_central_force]. For autopilot steering and docking assists, wind, gravity wells.
+			</description>
+		</method>
+		<method name="apply_central_impulse">
+			<return type="void" />
+			<param index="0" name="impulse" type="Vector3" />
+			<description>
+				Applies a one-off world-space impulse at the center of mass, as [method RigidBody3D.apply_central_impulse]: the velocity changes by [param impulse] / [member mass] at once.
+			</description>
+		</method>
+		<method name="apply_force">
+			<return type="void" />
+			<param index="0" name="force" type="Vector3" />
+			<param index="1" name="position" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Applies a world-space force at [param position] for this physics step, as [method RigidBody3D.apply_force]: [param position] is an offset from the motorcycle's origin, in world axes. Off the center of mass it also turns the motorcycle.
+			</description>
+		</method>
 		<method name="apply_force_at_local_position">
 			<return type="void" />
 			<param index="0" name="force" type="Vector3" />
@@ -20,11 +49,26 @@
 				Applies a continuous world-space [param force] at [param local_position] (in the body's own local/rotated frame, e.g. [member Node3D.position] of a wheel child) -- useful for a script-side balance controller to push at a specific wheel's contact point, such as simulating a rear-wheel slide under hard braking.
 			</description>
 		</method>
+		<method name="apply_impulse">
+			<return type="void" />
+			<param index="0" name="impulse" type="Vector3" />
+			<param index="1" name="position" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Applies a one-off world-space impulse at [param position] (an offset from the motorcycle's origin, in world axes), as [method RigidBody3D.apply_impulse].
+			</description>
+		</method>
+		<method name="apply_torque">
+			<return type="void" />
+			<param index="0" name="torque" type="Vector3" />
+			<description>
+				Applies a world-space torque for this physics step, as [method RigidBody3D.apply_torque].
+			</description>
+		</method>
 		<method name="apply_torque_impulse">
 			<return type="void" />
 			<param index="0" name="impulse" type="Vector3" />
 			<description>
-				Applies an instantaneous world-space angular impulse -- one of the tools a script-side lean/balance controller can use to correct roll.
+				Applies a one-off world-space angular impulse, as [method RigidBody3D.apply_torque_impulse].
 			</description>
 		</method>
 		<method name="get_actor_position" qualifiers="const">
@@ -36,13 +80,19 @@
 		<method name="get_angular_velocity" qualifiers="const">
 			<return type="Vector3" />
 			<description>
-				Current world-space angular velocity of the chassis -- read this every tick in a balance controller to measure the current roll/pitch/yaw rate.
+				The chassis's world-space angular velocity, in radians per second.
+			</description>
+		</method>
+		<method name="get_collision_exceptions" qualifiers="const">
+			<return type="Node[]" />
+			<description>
+				The bodies and vehicles this motorcycle has collision exceptions with.
 			</description>
 		</method>
 		<method name="get_forward" qualifiers="const">
 			<return type="Vector3" />
 			<description>
-				Current world-space forward direction of the chassis.
+				Current world-space forward direction of the chassis: its local +Z axis, the same forward as [VehicleBody3D] ([constant Vector3.MODEL_FRONT]).
 			</description>
 		</method>
 		<method name="get_forward_speed" qualifiers="const">
@@ -54,7 +104,13 @@
 		<method name="get_linear_velocity" qualifiers="const">
 			<return type="Vector3" />
 			<description>
-				Current world-space linear velocity of the chassis.
+				The chassis's world-space linear velocity. It reads the chassis itself, so a velocity just set with [method set_linear_velocity] or changed by an impulse reads back at once.
+			</description>
+		</method>
+		<method name="get_rid" qualifiers="const">
+			<return type="RID" />
+			<description>
+				The motorcycle's identity in the physics server: a raycast or shape query that hits it, or a [CharacterBody3D] that bumps into it, reports this RID as the collider's (and the motorcycle node as the collider). Put it in a query's [code]exclude[/code] list to see past the motorcycle, or pass it to [method PhysicsServer3D.body_add_collision_exception] to make a body ignore it. It stands for the motorcycle only: setting its state through [PhysicsServer3D] doesn't move the motorcycle.
 			</description>
 		</method>
 		<method name="get_roll_angle" qualifiers="const">
@@ -131,11 +187,33 @@
 				Returns whether the underlying PhysX vehicle actor is currently sleeping.
 			</description>
 		</method>
+		<method name="remove_collision_exception_with">
+			<return type="void" />
+			<param index="0" name="body" type="Node" />
+			<description>
+				Removes an exception added with [method add_collision_exception_with].
+			</description>
+		</method>
 		<method name="set_angular_velocity">
 			<return type="void" />
-			<param index="0" name="angular_velocity" type="Vector3" />
+			<param index="0" name="velocity" type="Vector3" />
 			<description>
-				Directly sets the chassis's world-space angular velocity -- the main tool a script-side lean/balance controller uses to correct roll every tick.
+				Sets the chassis's world-space angular velocity (radians per second) directly.
+			</description>
+		</method>
+		<method name="set_linear_velocity">
+			<return type="void" />
+			<param index="0" name="velocity" type="Vector3" />
+			<description>
+				Sets the chassis's world-space linear velocity directly. [method get_linear_velocity] reads it back at once.
+			</description>
+		</method>
+		<method name="teleport">
+			<return type="void" />
+			<param index="0" name="transform" type="Transform3D" />
+			<param index="1" name="keep_velocity" type="bool" default="false" />
+			<description>
+				Moves the motorcycle to [param transform] at once, without rebuilding it (the same chassis, wheels and settings carry on). Unless [param keep_velocity] is [code]true[/code], it arrives at rest, its wheels no longer spinning. Moving the node itself doesn't move a motorcycle that is simulating: its transform follows the chassis.
 			</description>
 		</method>
 	</methods>
@@ -156,7 +234,10 @@
 			Same meaning as [member CollisionObject3D.collision_layer]. Applies to the chassis only -- the wheels do not have their own collision shapes (their ground contact is handled entirely by the suspension, not by a physical wheel shape touching the road).
 		</member>
 		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">
-			Same meaning as [member CollisionObject3D.collision_mask]. Applies to the chassis only, see [member collision_layer].
+			Same meaning as [member CollisionObject3D.collision_mask]. Applies to the chassis (see [member collision_layer]) and to the wheels' ground raycasts: like a [RayCast3D], a wheel only rests on a shape whose collision layer is in this mask, and never on an [Area3D].
+		</member>
+		<member name="handbrake" type="float" setter="set_handbrake" getter="get_handbrake" default="0.0">
+			Brake input for the rear wheel only, from [code]0[/code] to [code]1[/code], on top of [member brake] (up to [member max_brake_torque]): a parking brake, or to lock the rear wheel into a slide.
 		</member>
 		<member name="mass" type="float" setter="set_mass" getter="get_mass" default="220.0">
 			Total mass of the motorcycle, in kg.
@@ -173,6 +254,9 @@
 		<member name="moment_of_inertia" type="Vector3" setter="set_moment_of_inertia" getter="get_moment_of_inertia" default="Vector3(40, 55, 20)">
 			The vehicle's own rotational inertia around its X/Y/Z axes. Higher values resist rotation (pitch/yaw/roll) more -- a real motorcycle's roll inertia is much lower than a car's, so this defaults far smaller than [member PhysXVehicle3D.moment_of_inertia].
 		</member>
+		<member name="physics_material_override" type="PhysicsMaterial" setter="set_physics_material_override" getter="get_physics_material_override">
+			The contact material of the chassis box: what the vehicle feels like when its body, not its wheels, touches something -- on its roof or side after a flip, grinding along a wall, bottoming out. [member PhysicsMaterial.friction], [member PhysicsMaterial.rough], [member PhysicsMaterial.bounce] and [member PhysicsMaterial.absorbent] combine with the other side the same way as for any [RigidBody3D] on this module. If [code]null[/code], the chassis uses friction [code]0.5[/code] and bounce [code]0.1[/code]; lower the friction for a body that skids further after a flip. Changes (including edits to the assigned material) apply immediately, without rebuilding the vehicle. Tire grip is not affected; it comes from the wheels' tire settings.
+		</member>
 		<member name="reverse" type="bool" setter="set_reverse" getter="is_reverse" default="false">
 			Switches the drivetrain's gear between forward and reverse -- a real gear change (PxVehicle2 has no neutral-coast/instant-reverse shortcut), so [member throttle] in reverse gear still needs to first bring the bike to a stop if it was moving forward, same as a real vehicle. Check [method get_forward_speed] before engaging this from a driving script.
 		</member>
@@ -181,6 +265,9 @@
 		</member>
 		<member name="throttle" type="float" setter="set_throttle" getter="get_throttle" default="0.0">
 			Throttle input, [code]0[/code] to [code]1[/code]. Scales up to [member max_engine_torque] of drive torque at the rear wheel, in whichever direction [member reverse] currently selects. Set every physics tick from script.
+		</member>
+		<member name="tire_grip" type="float" setter="set_tire_grip" getter="get_tire_grip" default="1.0">
+			A live multiplier on every tire's grip: below [code]1[/code] for ice, mud or wet roads, above for sticky tires. It takes effect at once, without rebuilding the vehicle (the wheels' own [code]tire_*[/code] properties rebuild it), so it can follow the ground the vehicle is on every frame.
 		</member>
 	</members>
 	<constants>

@@ -97,6 +97,8 @@ public:
 	void clear();
 	void rebuild(); // called when a jointed body's actor changes
 	void body_removed(GodotPhysXBody3D *p_body);
+	// A motor with a non-zero target is on: its bodies stay awake (GodotPhysXBody3D::update_motor_driven).
+	bool has_running_motor() const;
 
 	void make_pin(GodotPhysXBody3D *p_a, const Vector3 &p_local_a, GodotPhysXBody3D *p_b, const Vector3 &p_local_b);
 	void make_hinge(GodotPhysXBody3D *p_a, const Transform3D &p_frame_a, GodotPhysXBody3D *p_b, const Transform3D &p_frame_b);

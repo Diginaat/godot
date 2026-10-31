@@ -8,7 +8,7 @@
 		Particles can also be streamed in over time by enabling [member emitting], which turns the node into a faucet or hose: particles spawn near the node origin at [member emission_rate] per second with [member emission_velocity] (in node-local space) and, once [member particle_count] is reached, the oldest particles are recycled.
 		Two solvers back the node, chosen by [member solver]. The [b]PBD[/b] solver is PhysX 5's position-based fluid and needs a usable CUDA device; it supports foam ([member foam_enabled]) and the anisotropic surface ([member surface_anisotropy]). The [b]MPM[/b] solver is a material-point-method fluid that runs on any GPU through plain compute shaders, for machines without CUDA; its grid is block-sparse and boundless (it follows the fluid — [member mpm_domain_size] no longer confines it), it couples with the bodies listed in [member mpm_colliders] (or, with [member mpm_auto_colliders], every nearby body), and it has its own tuning under the [b]MPM[/b] group. On [code]Auto[/code] the node picks PBD when CUDA is available and MPM otherwise.
 		For sand, gravel or snow instead of a liquid, use [PhysXGranular3D] -- it shares this node's machinery but simulates the material as grains that pile and hold a slope.
-		This node only does anything when [member ProjectSettings.physics/3d/physics_engine] is set to [code]PhysX[/code]. If it resolves to the PBD solver without a CUDA device it is inert and emits a warning.
+		The [b]PBD[/b] solver only does anything when [member ProjectSettings.physics/3d/physics_engine] is set to [code]PhysX[/code] (it runs through the Godot PhysX physics server). If it resolves to the PBD solver without a CUDA device it is inert and emits a warning. The [b]MPM solver is the exception[/b]: it runs on any GPU through its own compute shaders and works regardless of the physics engine setting -- only the PBD path requires the PhysX engine.
 	</description>
 	<tutorials>
 	</tutorials>
@@ -48,6 +48,7 @@
 			<param index="0" name="world_aabb" type="AABB" />
 			<description>
 				Returns the fraction (0 to 1) of the given world-space box currently filled with fluid, estimated from the number of particles inside it. A cheap probe for script-side buoyancy: PhysX PBD collides rigid bodies with the fluid but does not float or sink them by density, so apply your own buoyant force based on this value.
+				Works with both solvers. On the MPM solver it counts the particle positions the solver already reads back for drawing (so it doesn't wait for the GPU; they're a frame or two behind). A settled MPM pool is slightly denser than when it was seeded, so a box inside it reads full and one across its surface reads a little over its submerged share. Boxes much smaller than about twice the particle spacing give lumpy readings.
 			</description>
 		</method>
 		<method name="spawn">
@@ -58,6 +59,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="adhesion" type="float" setter="set_adhesion" getter="get_adhesion" default="0.0">
+			PBD solver only. How much the fluid sticks to the surfaces it touches: [code]0[/code] runs off cleanly like water, higher values cling like honey or blood on a wall. It pulls fluid that touches a surface back onto it, so a thin film under a ceiling hangs there instead of dripping (a single layer of particles drips below about [code]0.1[/code] and holds from about [code]0.2[/code]); thicker fluid needs more to hold its own weight. The MPM solver ignores it.
+		</member>
 		<member name="cohesion" type="float" setter="set_cohesion" getter="get_cohesion" default="0.02">
 			How strongly particles clump together. Higher values give a more gel-like fluid.
 		</member>
@@ -77,7 +81,7 @@
 			How strongly bubble-type foam particles (those below the surface) rise back up, from 0 to 1. Only used when [member foam_enabled] is set.
 		</member>
 		<member name="foam_enabled" type="bool" setter="set_foam_enabled" getter="is_foam_enabled" default="false">
-			When enabled, the solver spawns diffuse particles — foam, spray and bubbles — wherever the fluid is agitated enough (splashes, streams hitting a pool, fast-moving crests). They do not affect the fluid. With [member surface_mesh] on they are drawn as their own coarse isosurface layer — a whiter, rougher froth that sits on the water and depth-sorts with it; otherwise they are drawn as a cloud of small spheres. Toggling this or changing [member foam_particle_count] rebuilds the particle buffer.
+			When enabled, the solver spawns diffuse particles — foam, spray and bubbles — wherever the fluid is agitated enough (splashes, streams hitting a pool, fast-moving crests). They do not affect the fluid. With [constant RENDER_MODE_ISOSURFACE] they are drawn as their own coarse isosurface layer — a whiter, rougher froth that sits on the water and depth-sorts with it; with [constant RENDER_MODE_SCREEN_SPACE] as soft white flecks over the surface (foam below the surface fades with its depth); otherwise as a cloud of small spheres. The MPM solver makes no foam. Toggling this or changing [member foam_particle_count] rebuilds the particle buffer.
 		</member>
 		<member name="foam_lifetime" type="float" setter="set_foam_lifetime" getter="get_foam_lifetime" default="1.5">
 			How long, in seconds, a diffuse particle lives before it disappears. Only used when [member foam_enabled] is set.
@@ -90,6 +94,9 @@
 		</member>
 		<member name="foam_threshold" type="float" setter="set_foam_threshold" getter="get_foam_threshold" default="300.0">
 			How agitated the fluid must be locally before diffuse particles spawn there. Lower values produce foam more readily. Only used when [member foam_enabled] is set.
+		</member>
+		<member name="gravity_scale" type="float" setter="set_gravity_scale" getter="get_gravity_scale" default="1.0">
+			Multiplies the gravity the fluid falls with. The PBD solver takes a change at once; the MPM solver takes it at its next configure ([method spawn], or a grid rebuild), like [member viscosity].
 		</member>
 		<member name="mpm_auto_colliders" type="bool" setter="set_mpm_auto_colliders" getter="is_mpm_auto_colliders" default="false">
 			MPM solver only. When enabled, the fluid also collides with every non-static [PhysicsBody3D] overlapping [member mpm_domain_size] each step — the player, thrown objects, moving platforms — without listing them in [member mpm_colliders], the way the PBD solver collides with the whole space automatically. Static bodies (walls, a floor) are skipped; put those in [member mpm_colliders] once. The nearest bodies are taken up to a shared limit of 32 colliders. Costs one overlap query per step.
@@ -115,8 +122,26 @@
 		<member name="particle_size" type="float" setter="set_particle_size" getter="get_particle_size" default="0.1">
 			Rest distance between neighboring particles, in meters. Also the diameter of the rendered spheres. Drives the fluid's rest density.
 		</member>
+		<member name="render_mode" type="int" setter="set_render_mode" getter="get_render_mode" enum="PhysXParticleFluid3D.RenderMode" default="0">
+			How the fluid is drawn. [constant RENDER_MODE_ISOSURFACE] marches a mesh every few steps (the most expensive on the CPU (PBD) path, but a real mesh: it casts shadows and shows in reflections and other cameras); [constant RENDER_MODE_SCREEN_SPACE] builds the surface from the particles each frame on the screen instead, much cheaper (see [member screen_space_resolution]), and has the scene light it: its lights and their shadows, ambient light and reflections light the surface like any other, so it darkens in shadow and at night instead of glowing. Screen Space draws in the frame just before transparent geometry and writes the liquid's depth: transparent objects (and a [PhysXFlow3D]'s smoke and fire) in front of the liquid draw over it, and those behind it are hidden where it's solid rather than seen through it. It shows only in the camera that renders it (it casts no shadow, isn't seen in reflections or in what a screen-reading material such as refractive glass samples, and isn't fogged), and every screen-space fluid in view merges into one surface shaded with the nearest one's look. Scenes saved with the older [code]surface_mesh = true[/code] load as [constant RENDER_MODE_ISOSURFACE].
+		</member>
+		<member name="screen_space_radius" type="float" setter="set_screen_space_radius" getter="get_screen_space_radius" default="1.5">
+			With [constant RENDER_MODE_SCREEN_SPACE], each particle's sphere, in [member particle_size]: larger merges sparse particles (a fast stream) into one surface.
+		</member>
+		<member name="screen_space_refraction" type="float" setter="set_screen_space_refraction" getter="get_screen_space_refraction" default="0.04">
+			With [constant RENDER_MODE_SCREEN_SPACE] and no material override, how much the fluid bends what is behind it. A [StandardMaterial3D] override with refraction on uses its own refraction scale instead.
+		</member>
+		<member name="screen_space_resolution" type="int" setter="set_screen_space_resolution" getter="get_screen_space_resolution" enum="PhysXParticleFluid3D.ScreenSpaceResolution" default="1">
+			With [constant RENDER_MODE_SCREEN_SPACE], the resolution the particles are splatted and smoothed at; the surface is still shaded at full resolution, and its edge against the scene's geometry stays sharp. Half reads smoother than Full (the smoothing covers more of the surface) and costs about three quarters as much; Quarter suits distant fluid, where a close stream would turn soft.
+		</member>
+		<member name="screen_space_smoothing" type="float" setter="set_screen_space_smoothing" getter="get_screen_space_smoothing" default="3.0">
+			With [constant RENDER_MODE_SCREEN_SPACE], how far the surface is smoothed, in [member particle_size]: higher melts the spheres into a calmer surface.
+		</member>
+		<member name="screen_space_tint" type="Color" setter="set_screen_space_tint" getter="get_screen_space_tint" default="Color(0.53, 0.85, 0.92, 1)">
+			With [constant RENDER_MODE_SCREEN_SPACE] and no material override, the colour 10 cm of fluid lets through: what's behind it is tinted by that through 10 cm and more deeply through more (the default takes out red first, so deep water turns blue-green). A [StandardMaterial3D] override instead mixes what's behind with its own lit albedo colour, as the same material on a mesh does.
+		</member>
 		<member name="solver" type="int" setter="set_solver" getter="get_solver" enum="PhysXParticleFluid3D.SolverBackend" default="0">
-			Which fluid solver simulates the particles. [code]Auto[/code] uses the PBD solver when a CUDA device is present and falls back to the MPM compute solver otherwise. See the class description for the differences.
+			Which fluid solver simulates the particles. [code]Auto[/code] uses the PBD solver when a CUDA device is present and falls back to the MPM compute solver otherwise; the dropdown shows which one it picks on this machine. The Inspector shows only the chosen solver's settings (the MPM group, or the PBD-only fluid, foam and anisotropy settings); the others keep their values and are still saved, for when the scene runs where Auto picks the other solver. See the class description for the differences.
 		</member>
 		<member name="spawn_on_ready" type="bool" setter="set_spawn_on_ready" getter="get_spawn_on_ready" default="true">
 			When enabled, [method spawn] runs automatically the first time the node enters the world outside the editor.
@@ -128,8 +153,11 @@
 			Only used when [member surface_mesh] is enabled. Anisotropy is PhysX computing a per-particle ellipsoid from each particle's neighbor distribution instead of treating every particle as a sphere: a particle deep in the fluid stays round, while one on the surface or in a thin sheet is flattened and aligned to that surface. Feeding those ellipsoids to the isosurface extractor gives sharper wave crests and thinner splash sheets, so the surface looks less like a cluster of blobs.
 			The trade-off is that a fast-moving or isolated particle gets a strongly stretched ellipsoid that marching cubes can mesh as a thin spike, so this is off by default and best reserved for a settled pool. Leave it disabled while the fluid is actively emitting or splashing.
 		</member>
-		<member name="surface_mesh" type="bool" setter="set_surface_mesh" getter="is_surface_mesh" default="false">
-			When enabled, PhysX marching-cubes a smooth triangle mesh from the particles on the GPU (position smoothing + [code]PxIsosurfaceExtractor[/code], plus optional [member surface_anisotropy]) and this node draws that instead of the sphere [MultiMesh]. Apply a water look with [member GeometryInstance3D.material_override] (transparency + refraction).
+		<member name="surface_friction" type="float" setter="set_surface_friction" getter="get_surface_friction" default="0.2">
+			PBD solver only. Friction between the fluid and the surfaces it flows over. Low values let particles keep sliding once the fluid has thinned out to a single layer, so a pool frays into stray droplets creeping across the floor; the default holds a pool together while still letting it spread and run down slopes. The MPM solver ignores it.
+		</member>
+		<member name="surface_mesh" type="bool" setter="set_surface_mesh" getter="is_surface_mesh" deprecated="Use [member render_mode] instead.">
+			[code]true[/code] is [member render_mode] [constant RENDER_MODE_ISOSURFACE], [code]false[/code] [constant RENDER_MODE_PARTICLES]. Still read from scenes saved with it; no longer saved.
 		</member>
 		<member name="surface_tension" type="float" setter="set_surface_tension" getter="get_surface_tension" default="0.006">
 			Strength of the force that minimizes the fluid's surface area, rounding off droplets and edges.
@@ -150,6 +178,24 @@
 		</constant>
 		<constant name="SOLVER_MPM" value="2" enum="SolverBackend">
 			Material-point-method fluid on plain GPU compute, for machines without CUDA. Block-sparse boundless grid; couples through [member mpm_colliders] / [member mpm_auto_colliders].
+		</constant>
+		<constant name="RENDER_MODE_PARTICLES" value="0" enum="RenderMode">
+			A small sphere per particle.
+		</constant>
+		<constant name="RENDER_MODE_ISOSURFACE" value="1" enum="RenderMode">
+			A smooth mesh marched from the particles (see [member render_mode]). Draw it with [member GeometryInstance3D.material_override] (transparency + refraction for water).
+		</constant>
+		<constant name="RENDER_MODE_SCREEN_SPACE" value="2" enum="RenderMode">
+			The particles are splatted, smoothed and shaded on the screen each frame: refraction, absorption by thickness, a fresnel reflection, the sun's highlight, thin fluid fading out. No mesh, so no shadows and nothing in reflections or other cameras. Every screen-space fluid in view merges into one surface. A [StandardMaterial3D] [member GeometryInstance3D.material_override] sets its look (albedo colour and alpha, roughness, refraction, emission); without one, the [code]screen_space_*[/code] settings do.
+		</constant>
+		<constant name="SCREEN_SPACE_RESOLUTION_FULL" value="0" enum="ScreenSpaceResolution">
+			Splat and smooth at the frame's resolution.
+		</constant>
+		<constant name="SCREEN_SPACE_RESOLUTION_HALF" value="1" enum="ScreenSpaceResolution">
+			Half the resolution each way (the default).
+		</constant>
+		<constant name="SCREEN_SPACE_RESOLUTION_QUARTER" value="2" enum="ScreenSpaceResolution">
+			A quarter of the resolution each way.
 		</constant>
 	</constants>
 </class>

@@ -79,6 +79,8 @@ class PhysXBlastFractureDialog : public ConfirmationDialog {
 	// grayscale bitmap directly.
 	EditorResourcePicker *cutout_pattern_picker = nullptr;
 	Label *chunk_count_label = nullptr;
+	Label *status_label = nullptr; // why a fracture failed, or its warnings
+	void _show_status(const String &p_text, const Color &p_color);
 
 	int seed = 1;
 	Ref<PhysXBlastAsset> authored_asset;

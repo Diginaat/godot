@@ -57,6 +57,16 @@ public:
 		SOLVER_PBD,
 		SOLVER_MPM,
 	};
+	enum RenderMode {
+		RENDER_MODE_PARTICLES, // a sphere per particle (MultiMesh)
+		RENDER_MODE_ISOSURFACE, // a marched mesh
+		RENDER_MODE_SCREEN_SPACE, // splatted, smoothed and shaded each frame (PhysXFluidRenderEffect)
+	};
+	enum ScreenSpaceResolution {
+		SCREEN_SPACE_RESOLUTION_FULL,
+		SCREEN_SPACE_RESOLUTION_HALF,
+		SCREEN_SPACE_RESOLUTION_QUARTER,
+	};
 
 protected:
 	// PhysXGranular3D overrides these to run the material as Drucker-Prager
@@ -134,6 +144,9 @@ private:
 	float surface_tension = 0.006;
 	float cohesion = 0.02;
 	float vorticity = 8.0;
+	float adhesion = 0.0; // PBD: how much the fluid sticks to the surfaces it touches (honey, blood on a wall)
+	float surface_friction = 0.2; // PBD: friction against the surfaces it flows over
+	float gravity_scale = 1.0; // gravity x (PBD material; MPM at configure time)
 	Vector3 spawn_region_size = Vector3(1, 1, 1);
 	bool spawn_on_ready = true;
 
@@ -148,6 +161,22 @@ private:
 	// Opt-in: feed PhysX per-particle anisotropy to the isosurface extractor.
 	// Crisper crests, but it needles fast particles, so keep it off while emitting.
 	bool surface_anisotropy = false;
+	// render_mode is one choice, kept as these two flags (surface_mesh is also the old property, still loaded):
+	// screen_space -- the particles are splatted, smoothed and shaded each frame (PhysXFluidRenderEffect)
+	// instead of an isosurface mesh being marched every step.
+	bool screen_space = false;
+	ScreenSpaceResolution screen_space_resolution = SCREEN_SPACE_RESOLUTION_HALF;
+	float screen_space_radius = 1.5f; // splat radius, in particle_size
+	float screen_space_smoothing = 3.0f; // depth smoothing radius, in particle_size
+	float screen_space_refraction = 0.04f;
+	Color screen_space_tint = Color(0.53, 0.85, 0.92); // what 10 cm of fluid lets through
+	ObjectID screen_space_world;
+	// The isosurface mesh is on (surface_mesh, unless screen_space draws the fluid instead).
+	bool _iso() const { return surface_mesh && !screen_space; }
+	void _screen_space_attach();
+	void _screen_space_detach();
+	void _screen_space_publish(const float *p_transforms, int p_count);
+	void _set_screen_space(bool p_enabled);
 	RID array_mesh;
 	// Own world-space instance, like foam_mesh_instance below -- isosurface
 	// vertices come back in world space, and the mesh is only re-marched every
@@ -241,6 +270,12 @@ public:
 	float get_cohesion() const { return cohesion; }
 	void set_vorticity(float p_v);
 	float get_vorticity() const { return vorticity; }
+	void set_adhesion(float p_v);
+	float get_adhesion() const { return adhesion; }
+	void set_surface_friction(float p_v);
+	float get_surface_friction() const { return surface_friction; }
+	void set_gravity_scale(float p_v);
+	float get_gravity_scale() const { return gravity_scale; }
 	void set_spawn_region_size(const Vector3 &p_size);
 	Vector3 get_spawn_region_size() const { return spawn_region_size; }
 	void set_spawn_on_ready(bool p_enable);
@@ -259,6 +294,18 @@ public:
 	bool is_surface_mesh() const { return surface_mesh; }
 	void set_surface_anisotropy(bool p_enabled);
 	bool is_surface_anisotropy() const { return surface_anisotropy; }
+	void set_render_mode(RenderMode p_mode);
+	RenderMode get_render_mode() const { return screen_space ? RENDER_MODE_SCREEN_SPACE : (surface_mesh ? RENDER_MODE_ISOSURFACE : RENDER_MODE_PARTICLES); }
+	void set_screen_space_resolution(ScreenSpaceResolution p_resolution) { screen_space_resolution = p_resolution; }
+	ScreenSpaceResolution get_screen_space_resolution() const { return screen_space_resolution; }
+	void set_screen_space_radius(float p_radius) { screen_space_radius = MAX(p_radius, 0.05f); }
+	float get_screen_space_radius() const { return screen_space_radius; }
+	void set_screen_space_smoothing(float p_smoothing) { screen_space_smoothing = MAX(p_smoothing, 0.0f); }
+	float get_screen_space_smoothing() const { return screen_space_smoothing; }
+	void set_screen_space_refraction(float p_refraction) { screen_space_refraction = p_refraction; }
+	float get_screen_space_refraction() const { return screen_space_refraction; }
+	void set_screen_space_tint(const Color &p_tint) { screen_space_tint = p_tint; }
+	Color get_screen_space_tint() const { return screen_space_tint; }
 
 	void set_foam_enabled(bool p_enabled);
 	bool is_foam_enabled() const { return foam_enabled; }
@@ -295,3 +342,5 @@ public:
 };
 
 VARIANT_ENUM_CAST(PhysXParticleFluid3D::SolverBackend);
+VARIANT_ENUM_CAST(PhysXParticleFluid3D::ScreenSpaceResolution);
+VARIANT_ENUM_CAST(PhysXParticleFluid3D::RenderMode);

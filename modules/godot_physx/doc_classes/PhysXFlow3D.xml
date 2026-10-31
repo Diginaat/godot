@@ -16,7 +16,7 @@
 		<method name="get_stats" qualifiers="const">
 			<return type="Dictionary" />
 			<description>
-				Diagnostics: [code]running[/code], [code]error[/code], [code]start_ms[/code] (grid creation), [code]step_ms[/code], [code]render_calls[/code], [code]render_outputs[/code], [code]readback_bytes[/code], [code]bounds[/code] (the gas, with [member cpu_readback]), [code]active_blocks[/code] (sparse blocks in use, of [member max_blocks]), and Flow's pipeline / pass / resource counts.
+				Diagnostics: [code]running[/code], [code]error[/code], [code]start_ms[/code] (grid creation), [code]step_ms[/code], [code]render_calls[/code], [code]render_outputs[/code], [code]readback_bytes[/code], [code]bounds[/code] (the gas, with [member cpu_readback]), [code]active_blocks[/code] (sparse blocks in use, of [member max_blocks]), [code]scatter_lights[/code] / [code]scatter_passes[/code] / [code]scatter_no_source[/code] (see [member light_scattering]: lights picked last step, scattering passes run, frames Flow had no volume to hand over), and Flow's pipeline / pass / resource counts.
 			</description>
 		</method>
 		<method name="is_running" qualifiers="const">
@@ -30,6 +30,13 @@
 			<param index="0" name="position" type="Vector3" />
 			<description>
 				The smoke at [param position] (world space), from the last CPU readback. Needs [member cpu_readback]; returns [code]-1.0[/code] without it. The readback lags a few frames behind the simulation.
+			</description>
+		</method>
+		<method name="sample_temperature" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="position" type="Vector3" />
+			<description>
+				The temperature at [param position] (world space), from the last CPU readback, in the same units as [member PhysXFlowEmitter3D.temperature], [member ignition_temperature] and [member temperature_range] -- e.g. how much a fire hurts or how hot a sensor reads. Needs [member cpu_readback]; returns [code]-1.0[/code] without it. The readback lags a few frames behind the simulation.
 			</description>
 		</method>
 	</methods>
@@ -56,10 +63,16 @@
 			How fast the gas cools (exponential, per second).
 		</member>
 		<member name="cpu_readback" type="bool" setter="set_cpu_readback" getter="is_cpu_readback" default="false">
-			Copy temperature and smoke back to the CPU every few steps, for [method sample_smoke] and the [code]bounds[/code] in [method get_stats]. Off by default: it costs a full field copy each time and isn't needed for rendering.
+			Copy temperature and smoke back to the CPU every few steps, for [method sample_smoke], [method sample_temperature] and the [code]bounds[/code] in [method get_stats]. Off by default: it costs a full field copy each time and isn't needed for rendering.
 		</member>
 		<member name="emission_strength" type="float" setter="set_emission_strength" getter="get_emission_strength" default="4.0">
 			How bright the [member heat_ramp] glow is. [code]0[/code] turns glowing off.
+		</member>
+		<member name="floor_enabled" type="bool" setter="set_floor_enabled" getter="is_floor_enabled" default="false">
+			When enabled, gas never goes below [member floor_height]: a wide solid lies under it (it reserves no blocks and holds no gas). Colliders can't describe terrain heightmaps or trimeshes, so without a floor gas sinks into the ground and spends the grid's blocks there.
+		</member>
+		<member name="floor_height" type="float" setter="set_floor_height" getter="get_floor_height" default="0.0">
+			The world height of the floor's top (used when [member floor_enabled] is on).
 		</member>
 		<member name="heat_ramp" type="Gradient" setter="set_heat_ramp" getter="get_heat_ramp">
 			How the gas glows by temperature, from [code]0[/code] to [member temperature_range]: each color is the glow at that temperature, its alpha how much it glows instead of showing the lit smoke. Empty uses a built-in fire ramp (transparent when cool, deep orange when warm, yellow-white when hot).
@@ -67,8 +80,34 @@
 		<member name="ignition_temperature" type="float" setter="set_ignition_temperature" getter="get_ignition_temperature" default="0.05">
 			The temperature above which fuel burns (see [member combustion]).
 		</member>
+		<member name="light_scattering" type="bool" setter="set_light_scattering" getter="is_light_scattering" default="false">
+			When enabled, nearby [OmniLight3D] and [SpotLight3D] nodes light the gas: each glows in the smoke in its own color, fading with distance the way it fades on surfaces (its [member Light3D.omni_range] / [member Light3D.spot_range], [member Light3D.omni_attenuation], spot cone), dimmed by the gas between it and each point and by the gas in front of the camera. Flow's own renderer only lights the gas with the scene's first [DirectionalLight3D]; this is an extra pass over the pixels the gas covers, so it's off by default.
+			Up to [member scattering_max_lights] lights are used, the strongest at the gas first. Each light's [member Light3D.light_volumetric_fog_energy] scales its glow, as it does for Godot's volumetric fog: set it to [code]0[/code] to keep a light out of the gas.
+		</member>
 		<member name="max_blocks" type="int" setter="set_max_blocks" getter="get_max_blocks" default="1024">
 			The most sparse blocks the gas may take up -- a GPU memory budget, since Flow reserves memory for all of them when the grid starts (about 0.45 MB a block: the default 1024 is roughly 0.5 GB). A small plume uses a few hundred; [method get_stats] reports [code]active_blocks[/code]. Gas that would need more is cut off, with a warning. Changing it restarts the simulation.
+		</member>
+		<member name="scattering_anisotropy" type="float" setter="set_scattering_anisotropy" getter="get_scattering_anisotropy" default="0.4">
+			With [member light_scattering], how much the gas scatters light forward (toward a camera looking at the light) rather than evenly in every direction: [code]0[/code] glows the same from every side, higher values make a bright halo when looking toward a light, negative values light the gas most when the light is behind the camera.
+		</member>
+		<member name="scattering_max_lights" type="int" setter="set_scattering_max_lights" getter="get_scattering_max_lights" default="4">
+			With [member light_scattering], the most lights that glow in the gas at once (the strongest at it). Each one costs a short march toward it for every step of every pixel the gas covers.
+		</member>
+		<member name="scattering_receive_shadows" type="int" setter="set_scattering_receive_shadows" getter="get_scattering_receive_shadows" enum="PhysXFlow3D.ScatteringShadowFlags" is_bitfield="true" default="3">
+			With [member light_scattering], which kinds of light have their glow in the gas blocked by scene objects: each point reads the light's own shadow (the one Godot already renders for meshes, so only for lights with [member Light3D.shadow_enabled]), the way Godot's volumetric fog does, so pillars in front of a light cast dark shafts through the gas. One shadow lookup per shadowed light per step; untick a kind to save it. (The [DirectionalLight3D] already shades the gas through the gas itself; its scene shadows aren't read yet.)
+			To light the gas from inside an object (a lamp in a glowing block), keep the object from shadowing its own light: put it on a render layer of its own and leave that layer out of the light's [member Light3D.shadow_caster_mask].
+		</member>
+		<member name="scattering_resolution" type="int" setter="set_scattering_resolution" getter="get_scattering_resolution" enum="PhysXFlow3D.ScatteringResolution" default="2">
+			With [member light_scattering], the resolution the glow is worked out at. Scattered light and its shadows in a gas are soft, so [constant SCATTERING_RESOLUTION_QUARTER] (the default) reads the same as full at about a sixth of the cost; the result is scaled up depth-aware, so the glow doesn't bleed onto the edges of objects in front of the gas. [constant SCATTERING_RESOLUTION_HALF] or [constant SCATTERING_RESOLUTION_FULL] sharpen the edges of the shadows in the glow, for close-ups.
+		</member>
+		<member name="scattering_shadow_reach" type="float" setter="set_scattering_shadow_reach" getter="get_scattering_shadow_reach" default="4.0">
+			With [member light_scattering], how far (in meters) each point looks toward a light for gas that dims it. Beyond that, gas between a point and the light is ignored.
+		</member>
+		<member name="scattering_shadow_steps" type="int" setter="set_scattering_shadow_steps" getter="get_scattering_shadow_steps" default="4">
+			With [member light_scattering], the steps of the march toward each light that lets the gas shade itself (a light inside thick smoke glows near it and dims further in). [code]0[/code] skips it: cheaper, but light then reaches every point as if through clear air.
+		</member>
+		<member name="scattering_strength" type="float" setter="set_scattering_strength" getter="get_scattering_strength" default="1.0">
+			With [member light_scattering], a multiplier on the light the gas scatters. The glow is colored by [member smoke_color].
 		</member>
 		<member name="shadow_steps" type="int" setter="set_shadow_steps" getter="get_shadow_steps" default="48">
 			How far the self-shadowing reaches toward the light, in steps of three quarters of a cell (48 is about 1.8 m at the default [member cell_size]). Too few for the gas's width leaves it lit almost evenly. [code]0[/code] turns self-shadowing off.
@@ -92,4 +131,21 @@
 			Vorticity confinement: keeps small swirls alive for rolling, billowing gas.
 		</member>
 	</members>
+	<constants>
+		<constant name="SCATTERING_RESOLUTION_FULL" value="0" enum="ScatteringResolution">
+			The glow is worked out for every pixel.
+		</constant>
+		<constant name="SCATTERING_RESOLUTION_HALF" value="1" enum="ScatteringResolution">
+			Half the resolution each way (a quarter of the pixels), scaled up depth-aware.
+		</constant>
+		<constant name="SCATTERING_RESOLUTION_QUARTER" value="2" enum="ScatteringResolution">
+			A quarter of the resolution each way, scaled up depth-aware.
+		</constant>
+		<constant name="SCATTERING_SHADOW_OMNI" value="1" enum="ScatteringShadowFlags" is_bitfield="true">
+			[OmniLight3D] shadows block their glow in the gas.
+		</constant>
+		<constant name="SCATTERING_SHADOW_SPOT" value="2" enum="ScatteringShadowFlags" is_bitfield="true">
+			[SpotLight3D] shadows block their glow in the gas.
+		</constant>
+	</constants>
 </class>

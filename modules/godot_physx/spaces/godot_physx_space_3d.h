@@ -42,6 +42,7 @@ class PxScene;
 class PxDefaultCpuDispatcher;
 class PxPhysics;
 class PxMaterial;
+class PxRigidActor;
 class PxCudaContextManager;
 } //namespace physx
 
@@ -83,6 +84,8 @@ class GodotPhysXSpace3D {
 	HashSet<GodotPhysXBody3D *> force_integrators; // bodies driving their own _integrate_forces
 	HashSet<GodotPhysXBody3D *> constant_force_bodies; // bodies with a nonzero constant force/torque
 	HashSet<GodotPhysXBody3D *> separation_ray_bodies; // dynamic bodies with a SeparationRayShape3D
+	HashSet<GodotPhysXBody3D *> gravity_scaled_bodies; // rigid bodies whose gravity_scale is neither 0 nor 1
+	HashSet<GodotPhysXBody3D *> motor_driven_bodies; // turned by a running joint motor: kept awake
 	// physics/3d/default_linear_damp / default_angular_damp, which the scene
 	// tree sends to the space RID (the space's default area), and the bodies
 	// an Area3D currently overrides that area-level damping for.
@@ -91,6 +94,21 @@ class GodotPhysXSpace3D {
 	HashSet<GodotPhysXBody3D *> area_damped_bodies;
 
 public:
+	// The bodies PhysX reported moving in the last step (eENABLE_ACTIVE_ACTORS): what the module's GI refreshes.
+	const HashSet<GodotPhysXBody3D *> &get_awake_bodies() const { return awake_bodies; }
+
+	// A body's PxMaterial is released here, not on the spot: the release waits for the start of the next step (just
+	// before PxScene::simulate). PhysX hands a released material's handle to the very next createMaterial(), but a GPU
+	// scene learns of the removal only at its next simulate -- a shape made in between maps the reused handle onto the
+	// OLD material's GPU slot, which the sync then drops, so the new body collides with the dead material's friction /
+	// bounce for good (a frictionless body freed-and-made in one frame slid at friction 1). Released right before the
+	// simulate, nothing can be created between the removal and its sync.
+	static void defer_material_release(physx::PxMaterial *p_material);
+	static void flush_material_releases();
+	// The same for an actor about to be released whose shapes hold the last references to their materials (a PhysX
+	// vehicle's chassis / wheel materials): each is kept alive (one reference each) until the next step.
+	static void hold_actor_materials(physx::PxRigidActor *p_actor);
+
 	void set_self(const RID &p_self) { self = p_self; }
 	RID get_self() const { return self; }
 
@@ -122,6 +140,8 @@ public:
 		force_integrators.erase(p_body);
 		constant_force_bodies.erase(p_body);
 		separation_ray_bodies.erase(p_body);
+		gravity_scaled_bodies.erase(p_body);
+		motor_driven_bodies.erase(p_body);
 		area_damped_bodies.erase(p_body);
 	}
 
@@ -134,6 +154,22 @@ public:
 			separation_ray_bodies.insert(p_body);
 		} else {
 			separation_ray_bodies.erase(p_body);
+		}
+	}
+
+	void set_body_motor_driven(GodotPhysXBody3D *p_body, bool p_enabled) {
+		if (p_enabled) {
+			motor_driven_bodies.insert(p_body);
+		} else {
+			motor_driven_bodies.erase(p_body);
+		}
+	}
+
+	void set_body_gravity_scaled(GodotPhysXBody3D *p_body, bool p_enabled) {
+		if (p_enabled) {
+			gravity_scaled_bodies.insert(p_body);
+		} else {
+			gravity_scaled_bodies.erase(p_body);
 		}
 	}
 
@@ -173,6 +209,11 @@ public:
 
 	// Drop a body from every area's overlap set (body leaving the simulation).
 	void body_removed_from_areas(GodotPhysXBody3D *p_body);
+	// A body's actor is destroyed (rebuilt / removed): every area takes its overlaps back (see GodotPhysXArea3D).
+	void body_actor_gone(GodotPhysXBody3D *p_body);
+	// One of a body's shapes is detached from its live actor (a shape swapped / disabled in place): the same, for
+	// the overlaps of that shape only.
+	void body_shape_gone(GodotPhysXBody3D *p_body, int p_shape);
 
 	void step(real_t p_step);
 	void call_queries();

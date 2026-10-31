@@ -4,7 +4,7 @@
 		A mesh that fractures into real rigid-body debris at runtime, provided by the PhysX module's NvBlast integration.
 	</brief_description>
 	<description>
-		Author one by selecting a [MeshInstance3D] and using [b]Mesh → Fracture with Blast[/b] (or right-clicking a [Mesh] resource in the FileSystem dock) -- a live in-viewport dialog lets you pick a fracture pattern and Accept replaces the node with a [PhysXDestructible3D] using the result, saved as a [member blast_asset] resource next to the scene.
+		Author one by right-clicking a [MeshInstance3D] in the Scene tree dock (or a [Mesh] resource in the FileSystem dock) and picking [b]Fracture with Blast...[/b] -- a live in-viewport dialog lets you pick a fracture pattern and Accept replaces the node with a [PhysXDestructible3D] using the result, saved as a [member blast_asset] resource next to the scene. Script-side authoring goes through [PhysXBlastAuthoring.fracture_mesh].
 		While intact, it renders and collides as the whole unfractured mesh through one [PhysicsServer3D] body. [method apply_radial_damage] breaks it explicitly -- an explosion, a weapon hit -- and each newly detached piece becomes its own real rigid body with a cooked convex collision hull, kicked outward from the damage origin at [member shatter_speed]. [member dynamic] additionally makes the intact object fall and collide like any other rigid body, and lets a hard enough physical impact fracture it on its own via [member impact_strength] / [member impact_damage_scale] / [member impact_radius], the way stacked destructible props behave in other engines' Blast integrations.
 		[b]How damage, health, and radius actually interact:[/b] every bond holding two pieces of the mesh together starts with [member health] "hit points." A single [method apply_radial_damage] call applies its [code]damage[/code] amount [i]in full[/i] to every bond within [code]min_radius[/code] of the hit, falling off linearly to zero by [code]max_radius[/code] (nothing beyond that radius is touched at all). A bond breaks once the damage it has received -- from one hit or accumulated across several -- reaches its [member health]. So [code]damage &gt;= health[/code] at full strength (inside [code]min_radius[/code]) breaks that bond outright in one hit; a weaker or more distant hit only chips at it, leaving it standing until a harder or closer follow-up (or several weaker ones) finishes the job. A piece only visibly detaches once every bond connecting it to the rest of the structure has broken -- a hit that weakens several bonds without fully breaking any of them can leave the object looking untouched even though it took real damage.
 		[member dynamic]'s auto-fracture path feeds the exact same pipeline: a collision whose impulse clears [member impact_strength] is converted to [code]damage = (impulse - impact_strength) * impact_damage_scale[/code] (floored so it always at least matches [member health] × 1.5, guaranteeing a real break rather than a hit that looked hard but silently did nothing) and applied via [method apply_radial_damage] at the contact point with [code]min_radius = 0[/code] and [code]max_radius = [/code][member impact_radius].
@@ -24,8 +24,23 @@
 				Each newly detached piece gets a real outward velocity -- radial direction from [param world_position] to that piece's own centroid, scaled by [member shatter_speed] and the same distance falloff the damage itself used, plus a slight upward bias.
 			</description>
 		</method>
+		<method name="get_piece_count">
+			<return type="int" />
+			<description>
+				Returns how many pieces are live right now: [code]1[/code] while intact (the chunk-0 placeholder), then one per still-simulating piece, dropping as debris passes [member kill_y] or reaches its [member piece_lifetime]. A chunk's piece is always freed before that chunk can be spawned again (e.g. when a still-bonded group's later split re-emits chunks that were already live), so this never exceeds the asset's visible chunk count no matter how many times it fractures.
+			</description>
+		</method>
+		<method name="is_fractured" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] once a hit has broken anything off this object. It stays [code]true[/code] from then on, even after every piece is gone. See also [signal fractured].
+			</description>
+		</method>
 	</methods>
 	<members>
+		<member name="anchor" type="int" setter="set_anchor" getter="get_anchor" enum="PhysXDestructible3D.Anchor" default="0">
+			Only used when [member dynamic] is [code]false[/code]: which of the remaining pieces stay in place once the object breaks. Single-chunk debris always falls. A piece counts as held when one of its chunks touches a held outer face of the intact mesh's bounds, in the node's local axes (left/right is -X/+X, bottom/top is -Y/+Y; the front and back faces never hold). A piece that loses every held face falls, keeping its pose and velocity. See [enum Anchor].
+		</member>
 		<member name="asset_path" type="String" setter="set_asset_path" getter="get_asset_path" default="&quot;&quot;">
 			Legacy loading path: a [code].asset[/code] file (raw [code]NvBlastAsset[/code] bytes), paired with [member chunks_path]. Prefer [member blast_asset] for anything authored through the in-editor fracture dialog; this remains only for assets authored before [PhysXBlastAsset] existed as a real [Resource] type.
 		</member>
@@ -33,7 +48,7 @@
 			When [code]true[/code], [member mass] is recomputed from the intact mesh's real volume (times its node scale) every time the asset (re)loads, and shown read-only in the Inspector -- "here's what this object would actually weigh." Uncheck it for a true, freely-editable override that survives reloads; checking it again immediately recomputes fresh and discards that override.
 		</member>
 		<member name="blast_asset" type="PhysXBlastAsset" setter="set_blast_asset" getter="get_blast_asset">
-			The fractured mesh data to use, saved by the in-editor fracture dialog (or [PhysXBlastAuthoring] directly). Preferred over [member asset_path] / [member chunks_path] when set.
+			The fractured mesh data to use, saved by the in-editor fracture dialog (or [code]PhysXBlastAuthoring[/code] directly). Preferred over [member asset_path] / [member chunks_path] when set.
 		</member>
 		<member name="cast_shadow" type="int" setter="set_cast_shadow" getter="get_cast_shadow" enum="PhysXDestructible3D.ShadowCastingSetting" default="1">
 			Shadow-casting behavior for every piece's render mesh, the same four settings as [member GeometryInstance3D.cast_shadow]. Applies uniformly, intact or fractured -- changing it re-pushes to every already-existing piece immediately.
@@ -52,6 +67,9 @@
 		</member>
 		<member name="extra_cull_margin" type="float" setter="set_extra_cull_margin" getter="get_extra_cull_margin" default="0.0">
 			Widens the bounds used for frustum culling on every piece, the same as [member GeometryInstance3D.extra_cull_margin]. Raise it if a fast-moving piece pops in/out of view near the screen edge.
+		</member>
+		<member name="freeze_when_asleep" type="bool" setter="set_freeze_when_asleep" getter="get_freeze_when_asleep" default="false">
+			When [code]true[/code], this object's moving pieces become kinematic once all of them have settled and PhysX has put them to sleep (all at once, so freezing one doesn't disturb the others while they settle): each stays exactly where it landed and never wakes again, but is still solid -- things rest on and bump into it without moving it, and a later hit still breaks it (its pieces fall loose). Use it for rubble that should stay put once it has landed, e.g. so players or vehicles can't shove a collapsed wall around. It isn't a performance setting: PhysX already makes sleeping pieces nearly free. Combine it with [member piece_lifetime] to keep settled pieces for a while and then clear them.
 		</member>
 		<member name="gi_mode" type="int" setter="set_gi_mode" getter="get_gi_mode" enum="PhysXDestructible3D.GIMode" default="1">
 			Controls VoxelGI baking for every piece's render mesh, the same two settings as [member GeometryInstance3D.gi_mode]. Defaults to [constant GI_MODE_STATIC], matching a plain [MeshInstance3D]'s default. Consider [constant GI_MODE_DYNAMIC] for an object that's expected to move once fractured -- but a single fracture can spawn many pieces at once, and a VoxelGI's dynamic-object tracking cost scales with how many it has to follow every frame, so it isn't the default.
@@ -86,11 +104,17 @@
 		<member name="material_override" type="Material" setter="set_material_override" getter="get_material_override">
 			Material applied to every piece's render mesh, intact or fractured, in place of the source mesh's own materials (which aren't carried over by the fracture process).
 		</member>
+		<member name="piece_lifetime" type="float" setter="set_piece_lifetime" getter="get_piece_lifetime" default="0.0">
+			Seconds a moving piece lives after it breaks off before it's removed, so debris doesn't pile up forever. [code]0[/code] (the default) keeps pieces until they pass [member kill_y]. Only debris ages: a static piece, such as the anchored remainder of a chipped wall, stays. A piece that breaks again starts its own children's clocks afresh. See also [member piece_shrink_time].
+		</member>
+		<member name="piece_shrink_time" type="float" setter="set_piece_shrink_time" getter="get_piece_shrink_time" default="0.0">
+			With a [member piece_lifetime], the last this-many seconds of a piece's life it shrinks to nothing instead of popping out of existence. Once it starts shrinking it stops simulating and colliding, so it no longer blocks players or anything else (and can't be broken again), and it shrinks toward the ground straight below it (past this object's other pieces, within 50 m, using [member collision_mask]), so it sinks into the ground rather than hovering -- also a piece that was resting on top of another. With nothing below, it shrinks toward its own bottom. [code]0[/code] pops it.
+		</member>
 		<member name="shatter_speed" type="float" setter="set_shatter_speed" getter="get_shatter_speed" default="8.0">
 			Speed (m/s, before falloff) each newly detached piece is kicked away from the damage origin -- see [method apply_radial_damage]'s own note on the exact direction/falloff shape. Purely a "how violently does debris scatter on break" feel knob, not a physically derived value.
 		</member>
 		<member name="transparency" type="float" setter="set_transparency" getter="get_transparency" default="0.0">
-			Transparency of the rendered chunks, from [code]0.0[/code] (opaque) to [code]1.0[/code] (invisible), like [member GeometryInstance3D.transparency].
+			Transparency of every piece's render mesh, 0.0 (opaque) to 1.0 (fully invisible) -- the same value [method RenderingServer.instance_geometry_set_transparency] takes. Applies to the intact object and to all current and future pieces (changing it re-pushes to every already-existing piece immediately). Useful for ghost/preview placements of a destructible.
 		</member>
 		<member name="visibility_range_begin" type="float" setter="set_visibility_range_begin" getter="get_visibility_range_begin" default="0.0">
 			Distance from the camera at which every piece starts being visible, the same as [member GeometryInstance3D.visibility_range_begin]. [code]0.0[/code] disables the near limit.
@@ -108,6 +132,14 @@
 			How pieces fade in/out at the edges of [member visibility_range_begin]/[member visibility_range_end], the same as [member GeometryInstance3D.visibility_range_fade_mode].
 		</member>
 	</members>
+	<signals>
+		<signal name="fractured">
+			<param index="0" name="new_pieces" type="int" />
+			<description>
+				Emitted every time a hit breaks pieces off (the first break and each later one), with how many new pieces that hit made -- the same number [method apply_radial_damage] returns, and also for breaks from impacts. For a break sound, an effect or a score. [method is_fractured] tells whether it has broken at all.
+			</description>
+		</signal>
+	</signals>
 	<constants>
 		<constant name="GI_MODE_DISABLED" value="0" enum="GIMode">
 			Pieces neither receive nor are captured by baked or dynamic GI.
@@ -138,6 +170,15 @@
 		</constant>
 		<constant name="VISIBILITY_RANGE_FADE_DEPENDENCIES" value="2" enum="VisibilityRangeFadeMode">
 			Pieces this object is visually linked to (via a shared LOD group) fade together instead of independently.
+		</constant>
+		<constant name="ANCHOR_FRAMED" value="0" enum="Anchor">
+			Pieces still touching the bottom, top, left or right edge stay in place; a piece cut free of all four falls. For a wall that is part of a building, a door, a window or a panel in a frame: its upper part can hang from the frame, but a chunk punched out of the middle drops.
+		</constant>
+		<constant name="ANCHOR_GROUNDED" value="1" enum="Anchor">
+			Only pieces still touching the bottom stay in place. For a freestanding wall, a pillar, a statue or a fence: cut through, the upper part falls.
+		</constant>
+		<constant name="ANCHOR_NONE" value="2" enum="Anchor">
+			Static only until the first break: every remaining piece then falls.
 		</constant>
 	</constants>
 </class>

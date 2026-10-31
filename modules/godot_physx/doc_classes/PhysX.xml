@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PhysX" inherits="Object" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Script queries about the PhysX physics backend.
+	</brief_description>
+	<description>
+		Static queries about the PhysX backend as a whole, for a game that adapts to the machine it runs on, e.g. choosing [PhysXParticleFluid3D]'s solver or how much debris to spawn:
+		[codeblock]
+		if PhysX.is_gpu_available():
+		    print("GPU physics on ", PhysX.get_gpu_device_name())
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_gpu_device_name" qualifiers="static">
+			<return type="String" />
+			<description>
+				Returns the name of the CUDA device GPU dynamics runs on (for example [code]"NVIDIA GeForce RTX 5070"[/code]), or an empty string when [method is_gpu_available] is [code]false[/code].
+			</description>
+		</method>
+		<method name="is_gpu_available" qualifiers="static">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when PhysX is the active physics engine and is running GPU dynamics on a CUDA device. It is [code]false[/code] in a build without GPU support, on a machine without a usable NVIDIA GPU or without [code]PhysXGpu[/code] shipped next to the executable, with [code]physics/physx_3d/simulation/enhanced_determinism[/code] on or [code]physics/physx_3d/simulation/gpu_dynamics[/code] off, or when another physics engine is selected. Without it, GPU-only features fall back or stay inert: [PhysXParticleFluid3D] with the PBD solver, GPU cloth and so on. Valid once the physics server has started (from any node's [code]_ready[/code] on).
+			</description>
+		</method>
+	</methods>
+</class>

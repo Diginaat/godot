@@ -213,6 +213,10 @@ public:
 	void rt_free(Ref<WaterSolverGPU> p_self);
 	void rt_set_foam(Ref<WaterSolverGPU> p_self, bool p_enabled, float p_choppiness, float p_threshold, float p_persistence, float p_shore_band, float p_shore_undertow);
 	void rt_set_swash(Ref<WaterSolverGPU> p_self, float p_run_up, float p_drain_speed, float p_dry_time);
+	void rt_reinit_spectrum(Ref<WaterSolverGPU> p_self, float p_wind_speed, Vector2 p_wind_direction, float p_wave_amplitude, float p_fetch);
+	// The ripple layer moved (a re-centre): its state + composed height zeroed in place -- the ocean, its textures and
+	// every other buffer stay (see WaterSolver::recenter).
+	void rt_clear_ripples(Ref<WaterSolverGPU> p_self);
 
 	// Async readback callbacks: RenderingDevice invokes them with the data as
 	// the runtime arg; Callable::bind APPENDS the bound args, so the data
@@ -246,6 +250,7 @@ private:
 
 	void _rt_free_buffers();
 	void _rt_build_buffers();
+	void _rt_spectrum_init();
 	void _rt_build_caustics_grid();
 };
 
@@ -326,6 +331,11 @@ public:
 	bool is_available() const { return has_device() && gpu->built.is_set(); }
 
 	void configure(const Settings &p_settings);
+	// The ocean's sea state in place (h0 only — no rebuild; see WaterSolverGPU::rt_reinit_spectrum).
+	void reinit_spectrum(float p_wind_speed, Vector2 p_wind_direction, float p_wave_amplitude, float p_fetch);
+	// The ripple grid's centre moved (a constant-depth square only): no rebuild -- the ripples are cleared, the ocean
+	// (world-anchored) carries on; bodies' spheres / pending impulses are dropped (they were relative to the old centre).
+	void recenter(Vector2 p_grid_center);
 	void step(double p_delta);
 
 	// Persistent body proxy, world space, keyed by an arbitrary caller-chosen

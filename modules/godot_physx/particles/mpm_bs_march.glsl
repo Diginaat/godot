@@ -86,7 +86,9 @@ void write_tri(vec3 p0, vec3 p1, vec3 p2, vec3 f0, vec3 f1, vec3 f2, float cv[8]
 	}
 	vec3 fn = cross(p1 - p0, p2 - p0);
 	vec3 outn = cell_gradient((f0 + f1 + f2) * (1.0 / 3.0), cv);
-	if (dot(fn, outn) < 0.0) {
+	// Godot's front faces wind CLOCKWISE seen from outside: cross(p1 - p0, p2 - p0) must point INTO the
+	// fluid, so a back-face-culled material shows the outside and DO_SIDE_CHECK keeps the outward normal.
+	if (dot(fn, outn) > 0.0) {
 		vec3 tp = p1;
 		p1 = p2;
 		p2 = tp;

@@ -165,11 +165,11 @@ void PhysXWaterSpray3D::_add_emitters(const TypedArray<NodePath> &p_paths, Role 
 					Vector3 d;
 					const int from = g * count / groups;
 					const int to = (g + 1) * count / groups;
-					for (int i = from; i < to; i++) {
-						const Color c = points->get_pixel(i % points->get_width(), i / points->get_width());
+					for (int k = from; k < to; k++) {
+						const Color c = points->get_pixel(k % points->get_width(), k / points->get_width());
 						p += Vector3(c.r, c.g, c.b);
 						if (directed) {
-							const Color n = normals->get_pixel(i % normals->get_width(), i / normals->get_width());
+							const Color n = normals->get_pixel(k % normals->get_width(), k / normals->get_width());
 							d += Vector3(n.r, n.g, n.b);
 						}
 					}

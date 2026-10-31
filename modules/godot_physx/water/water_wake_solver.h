@@ -105,7 +105,7 @@ public:
 	// foam is pushed out from the bow-stern line at p_foam_spread m/s, fading
 	// over p_foam_spread_falloff m. The hull churns p_hull_foam per
 	// second (at the bow) into a band just outside p_hull_half_beam.
-	void step(double p_delta, const Vector2 &p_center, const Vector<Source> &p_sources, float p_wave_speed, float p_damping, float p_border_damping, float p_border_width, float p_foam_persistence, float p_foam_slope, float p_foam_slope_gain, const Vector2 &p_bow, const Vector2 &p_stern, float p_foam_spread, float p_foam_spread_falloff, float p_hull_half_beam, float p_hull_foam);
+	void step(double p_delta, const Vector2 &p_center, const Vector<Source> &p_sources, float p_wave_speed, float p_damping, float p_border_damping, float p_border_width, float p_foam_persistence, float p_foam_slope, float p_foam_slope_gain, const Vector2 &p_bow, const Vector2 &p_stern, float p_foam_spread, float p_foam_spread_falloff, float p_hull_half_beam, float p_hull_foam, const PackedFloat32Array &p_hull_profile = PackedFloat32Array());
 
 	int get_cells() const { return n; }
 	float get_size() const { return size; }

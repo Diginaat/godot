@@ -30,9 +30,11 @@
 
 #pragma once
 
+#include "core/os/thread.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/rid_owner.h"
+#include "core/variant/callable.h"
 #include "servers/physics_3d/physics_server_3d_dummy.h"
 
 namespace physx {
@@ -50,6 +52,30 @@ class GodotPhysXJoint3D;
 class GodotPhysXParticleFluid3D;
 class GodotPhysXCloth3D;
 class GodotPhysXSoftBody3D;
+
+// A call queued for the physics thread (GodotPhysXServer3D::run_on_physics_thread).
+template <typename F>
+class GodotPhysXQueuedCall : public CallableCustom {
+	mutable F func;
+
+	static bool _compare_equal(const CallableCustom *p_a, const CallableCustom *p_b) { return p_a == p_b; }
+	static bool _compare_less(const CallableCustom *p_a, const CallableCustom *p_b) { return p_a < p_b; }
+
+public:
+	virtual uint32_t hash() const override { return hash_murmur3_one_64((uint64_t)this); }
+	virtual String get_as_text() const override { return "GodotPhysXQueuedCall"; }
+	virtual CompareEqualFunc get_compare_equal_func() const override { return _compare_equal; }
+	virtual CompareLessFunc get_compare_less_func() const override { return _compare_less; }
+	virtual bool is_valid() const override { return true; }
+	virtual ObjectID get_object() const override { return ObjectID(); }
+	virtual void call(const Variant **p_arguments, int p_argcount, Variant &r_return_value, Callable::CallError &r_call_error) const override {
+		func();
+		r_call_error.error = Callable::CallError::CALL_OK;
+	}
+
+	GodotPhysXQueuedCall(const F &p_func) :
+			func(p_func) {}
+};
 
 // PhysX 5 implementation of PhysicsServer3D, built on top of PhysicsServer3DDummy
 // so that only the methods the backend actually implements need to be overridden;
@@ -80,6 +106,13 @@ class GodotPhysXServer3D : public PhysicsServer3DDummy {
 	bool flushing_queries = false;
 	int active_objects = 0;
 
+	// With physics/3d/run_on_separate_thread the server runs on its own thread; the main thread may touch the scenes
+	// only between sync() and end_sync(), while that thread is parked (physics process).
+	Thread::ID server_thread = Thread::MAIN_ID;
+	bool syncing = false;
+	// Carries run_on_physics_thread()'s calls through PhysicsServer3DWrapMT's command queue (a body in no space).
+	RID dispatch_body;
+
 	RID _shape_create(PS3DE::ShapeType p_type);
 
 public:
@@ -94,6 +127,30 @@ public:
 	GodotPhysXSpace3D *get_space(RID p_rid) const { return space_owner.get_or_null(p_rid); }
 
 	physx::PxPhysics *get_px_physics() const { return px_physics; }
+
+	// Whether this thread may touch the PhysX scenes now: the physics thread, or the main thread while that thread
+	// is parked (physics process) or when physics doesn't run on its own thread. The module's nodes reach PhysX
+	// directly (vehicles, fluids, cloth), so anything they do outside physics process goes through
+	// run_on_physics_thread().
+	static bool can_touch_scene() {
+		return singleton == nullptr || Thread::get_caller_id() == singleton->server_thread || (Thread::is_main_thread() && singleton->syncing);
+	}
+	// Runs p_func where the scenes may be touched: right away if this thread may (see can_touch_scene()), else queued
+	// in order behind the physics thread's other commands. p_wait waits for it to have run -- a sync with the physics
+	// thread, as any PhysicsServer3D getter called outside physics process. p_func mustn't touch the scene tree or
+	// wait on the main thread (it may run on the physics thread while the main thread waits for it).
+	template <typename F>
+	static void run_on_physics_thread(const F &p_func, bool p_wait = false) {
+		if (can_touch_scene() || !singleton->dispatch_body.is_valid()) {
+			p_func();
+			return;
+		}
+		PhysicsServer3D *wrapper = PhysicsServer3D::get_singleton();
+		wrapper->body_set_state_sync_callback(singleton->dispatch_body, Callable(memnew(GodotPhysXQueuedCall<F>(p_func))));
+		if (p_wait) {
+			wrapper->body_get_space(singleton->dispatch_body); // returns once the queue has run up to it
+		}
+	}
 
 	/* SHAPE API */
 	virtual RID world_boundary_shape_create() override;
@@ -296,6 +353,7 @@ public:
 	bool cloth_is_ready(RID p_cloth) const;
 	int cloth_get_mesh(RID p_cloth, PackedVector3Array &r_positions, PackedInt32Array &r_indices, uint32_t &r_version) const;
 	bool has_gpu() const { return px_cuda != nullptr; }
+	String get_gpu_device_name() const; // the CUDA device GPU dynamics runs on, or empty without one
 
 	/* SOFT BODY */
 	// Backs the stock SoftBody3D node with the module's CPU XPBD solver.
@@ -350,7 +408,9 @@ public:
 	virtual void set_active(bool p_active) override;
 	virtual void init() override;
 	virtual void step(real_t p_step) override;
+	virtual void sync() override;
 	virtual void flush_queries() override;
+	virtual void end_sync() override;
 	virtual void finish() override;
 	virtual bool is_flushing_queries() const override { return flushing_queries; }
 	virtual int get_process_info(PS3DE::ProcessInfo p_info) override;

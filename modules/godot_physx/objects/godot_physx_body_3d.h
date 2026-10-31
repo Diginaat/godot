@@ -40,7 +40,10 @@
 
 namespace physx {
 class PxRigidActor;
+class PxRigidDynamic;
 class PxMaterial;
+class PxShape;
+struct PxFilterData;
 } //namespace physx
 
 class GodotPhysXSpace3D;
@@ -83,8 +86,13 @@ private:
 	PS3DE::BodyMode mode = PS3DE::BODY_MODE_RIGID;
 	GodotPhysXSpace3D *space = nullptr;
 	physx::PxRigidActor *px_actor = nullptr;
+	// set_vehicle_actor(): the PhysX vehicle chassis this body stands for (it has no actor of its own then).
+	physx::PxRigidDynamic *vehicle_actor = nullptr;
 
 	LocalVector<ShapeRef> shapes;
+	// The PhysX shape built for each entry of `shapes` (nullptr: disabled, invalid, a separation ray, or a mesh a
+	// dynamic body can't carry), while the actor exists -- so a shape edit updates it in place instead of rebuilding.
+	LocalVector<physx::PxShape *> px_shapes;
 
 	Transform3D body_transform;
 	// Node scale baked into the shapes on the last _build_actor(); a change
@@ -101,8 +109,8 @@ private:
 	// RigidBody3D only ever sends this (via PS3DE::BODY_PARAM_CENTER_OF_MASS) when
 	// center_of_mass_mode is CUSTOM -- there's no separate "mode" param, so a
 	// value having been sent at all IS the "custom" signal. _build_actor()
-	// destroys and recreates px_actor on almost any shape/mode change, which
-	// would otherwise silently drop this back to the shape-auto-computed
+	// recreates px_actor (a static <-> dynamic switch, a removed shape, ...),
+	// which would otherwise silently drop this back to the shape-auto-computed
 	// pose every time -- reapplied there too, not just in set_param().
 	bool has_custom_center_of_mass = false;
 	Vector3 center_of_mass;
@@ -173,7 +181,17 @@ private:
 	void _destroy_actor();
 	void _apply_solver_iterations();
 	void _build_actor();
+	physx::PxShape *_create_px_shape(uint32_t p_idx);
+	bool _shape_wanted(uint32_t p_idx) const;
+	bool _edit_shape_in_place(uint32_t p_idx);
+	void _shapes_edited();
+	void _apply_dynamic_flags();
+	bool _has_static_only_shape() const;
+	physx::PxFilterData _filter_data() const;
+	void _gravity_scale_changed();
 	void _apply_filter_data();
+	// The actor whose state this body reports: its own, or the vehicle chassis it stands for.
+	physx::PxRigidActor *_state_actor() const;
 	void _collision_exceptions_changed();
 	void _apply_damping();
 	void _apply_axis_lock();
@@ -198,6 +216,13 @@ public:
 
 	void set_space(GodotPhysXSpace3D *p_space);
 
+	// A PhysX vehicle (PhysXVehicle3D, PhysXTank3D, PhysXMotorcycle3D) is a node with its own chassis actor, not a
+	// server body. Each keeps a body with no shapes, space or actor of its own as its identity. Bound here, the
+	// chassis actor's userData points at it, so scene queries, motion tests, contacts and collision exceptions see
+	// the vehicle as this body: its RID, layer and mask, the node's instance ID, the chassis's pose and velocity.
+	void set_vehicle_actor(physx::PxRigidDynamic *p_actor);
+	bool is_vehicle_proxy() const { return vehicle_actor != nullptr; }
+
 	void set_mode(PS3DE::BodyMode p_mode);
 	PS3DE::BodyMode get_mode() const { return mode; }
 
@@ -210,6 +235,8 @@ public:
 	int get_shape_count() const { return shapes.size(); }
 	const ShapeRef *get_shape_ref(int p_idx) const;
 	void shape_changed(GodotPhysXShape3D *p_shape);
+	// The shape is being freed: drop every entry using it.
+	void shape_freed(GodotPhysXShape3D *p_shape);
 
 	void set_param(PS3DE::BodyParameter p_param, const Variant &p_value);
 	Variant get_param(PS3DE::BodyParameter p_param) const;
@@ -293,6 +320,9 @@ public:
 	bool has_constant_forces() const { return !constant_force.is_zero_approx() || !constant_torque.is_zero_approx(); }
 	// Called by the space before simulate() for bodies with constant forces.
 	void apply_constant_forces();
+	// Called by the space before simulate() for a body whose gravity_scale isn't 0 or 1: PhysX gives it the full
+	// gravity, this adds the rest (`p_force` = (scale - 1) x gravity x mass); a sleeping body stays asleep.
+	void apply_gravity_delta(const Vector3 &p_force);
 
 	void set_axis_velocity(const Vector3 &p_axis_velocity);
 	void reset_mass_properties();
@@ -304,19 +334,26 @@ public:
 	Vector3 get_center_of_mass_local() const;
 	Basis get_principal_inertia_axes() const;
 	Vector3 get_inverse_inertia() const;
-	// Velocity of the body's material at a world-space point, spin included.
+	// Velocity of the body's material at a world-space point, spin included (above MIN_CARRIED_SPIN).
 	Vector3 get_velocity_at_position(const Vector3 &p_position) const;
+	static constexpr real_t MIN_CARRIED_SPIN = 0.05; // rad/s
 
 	GodotPhysXDirectBodyState3D *get_direct_state();
 
 	void add_joint(GodotPhysXJoint3D *p_joint) {
 		joints.insert(p_joint);
 		_apply_solver_iterations();
+		update_motor_driven();
 	}
 	void remove_joint(GodotPhysXJoint3D *p_joint) {
 		joints.erase(p_joint);
 		_apply_solver_iterations();
+		update_motor_driven();
 	}
+	// A body a joint motor turns stays awake: PhysX drives don't wake a sleeping body, and a slow motor (a low force
+	// limit on a heavy body) let it fall asleep before it got going, where Jolt keeps turning it.
+	void update_motor_driven();
+	void keep_awake();
 
 	GodotPhysXBody3D();
 	~GodotPhysXBody3D();

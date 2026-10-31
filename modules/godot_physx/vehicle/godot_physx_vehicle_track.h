@@ -31,6 +31,9 @@
 #pragma once
 
 #include "../godot_physx_conversions.h"
+#include "../objects/godot_physx_material.h"
+#include "godot_physx_wheel_query_filter.h"
+#include "../spaces/godot_physx_space_3d.h"
 
 #include "core/error/error_macros.h"
 #include "core/math/basis.h"
@@ -142,6 +145,7 @@ public:
 
 	// --- PhysX integration (PhysXIntegrationParams/State) ------------------
 	PxVehiclePhysXRoadGeometryQueryParams physxRoadGeometryQueryParams;
+	GodotPhysXWheelQueryFilter wheelQueryFilter; // physxRoadGeometryQueryParams.filterCallback points here
 	PxVehiclePhysXMaterialFrictionParams physxMaterialFrictionParams[MAX_WHEELS];
 	PxVehiclePhysXSuspensionLimitConstraintParams physxSuspensionLimitConstraintParams[MAX_WHEELS];
 	PxTransform physxActorCMassLocalPose;
@@ -493,6 +497,7 @@ public:
 
 	void destroy() {
 		PxVehicleConstraintsDestroy(physxConstraints);
+		GodotPhysXSpace3D::hold_actor_materials(physxActor.rigidBody); // (no material handle reused before a step)
 		PxVehiclePhysXActorDestroy(physxActor);
 	}
 };
@@ -556,6 +561,10 @@ struct VehicleTrackConfig {
 
 	uint32_t collision_layer = 1;
 	uint32_t collision_mask = 1;
+	// Chassis box contact material, signed like PhysicsMaterial::computed_friction() / computed_bounce() (the
+	// node's physics_material_override, or these defaults).
+	float chassis_friction = 0.5f;
+	float chassis_bounce = 0.1f;
 };
 
 // Same role as configure_vehicle2w()/configure_vehicle4w() (see either
@@ -585,7 +594,12 @@ inline bool configure_vehicle_track(VehicleTrack &v, const VehicleTrackConfig &c
 	v.numWheels = wheel_count;
 	v.setToDefault();
 
-	v.frame.lngAxis = PxVehicleAxes::eNegZ;
+	// Godot's vehicle convention: forward = +Z (VehicleBody3D: "the local forward
+	// for this node is Vector3.MODEL_FRONT"), left = +X, up = +Y -- also PhysX's own
+	// default frame, and a 1:1 component mapping (godot_physx_conversions.h), so no
+	// axis remap reading the chassis pose back out. (Was declared -Z while the
+	// vehicles drove +Z anyway: only get_forward_speed() read the declaration.)
+	v.frame.lngAxis = PxVehicleAxes::ePosZ;
 	v.frame.latAxis = PxVehicleAxes::ePosX;
 	v.frame.vrtAxis = PxVehicleAxes::ePosY;
 	v.scale.scale = 1.0f;
@@ -598,7 +612,7 @@ inline bool configure_vehicle_track(VehicleTrack &v, const VehicleTrackConfig &c
 			ERR_PRINT(vformat("PhysX tank: wheel %d sits exactly on the centerline (local X = 0) -- can't tell which track it belongs to.", i));
 			return false;
 		}
-		v.wheelIsLeftTrack[i] = cfg.wheels[i].position.x < 0.0f;
+		v.wheelIsLeftTrack[i] = cfg.wheels[i].position.x > 0.0f; // the driver's left is +X (forward is +Z)
 		if (v.wheelIsLeftTrack[i]) {
 			v.numLeftWheels++;
 		} else {
@@ -704,8 +718,9 @@ inline bool configure_vehicle_track(VehicleTrack &v, const VehicleTrackConfig &c
 	}
 
 	v.physxRoadGeometryQueryParams.roadGeometryQueryType = PxVehiclePhysXRoadGeometryQueryType::eRAYCAST;
-	v.physxRoadGeometryQueryParams.defaultFilterData = PxQueryFilterData(PxFilterData(0, 0, 0, 0), PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC);
-	v.physxRoadGeometryQueryParams.filterCallback = nullptr;
+	v.physxRoadGeometryQueryParams.defaultFilterData = PxQueryFilterData(PxFilterData(0, 0, 0, 0), PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER);
+	v.wheelQueryFilter.collision_mask = (PxU32)cfg.collision_mask;
+	v.physxRoadGeometryQueryParams.filterCallback = &v.wheelQueryFilter;
 	v.physxRoadGeometryQueryParams.filterDataEntries = nullptr;
 
 	v.physxActorCMassLocalPose = PxTransform(to_px(cfg.chassis_com_local));
@@ -717,7 +732,14 @@ inline bool configure_vehicle_track(VehicleTrack &v, const VehicleTrackConfig &c
 	// chassis box is a real simulation shape, but deliberately low-friction
 	// so it never fights the drivetrain if suspension settling lets it graze
 	// the ground.
-	PxMaterial *chassis_material = physics.createMaterial(0.0f, 0.0f, 0.1f);
+	// Not 0, though: bodies combine friction by MIN (Godot's rule, see godot_physx_material.h), so a 0 here made a
+	// flipped vehicle slide on its roof forever. The default 0.5 is what the roof used to get against a default
+	// (1.0) ground under PhysX's AVERAGE; the node's physics_material_override replaces it. Combined the same
+	// way as every other body. Created per vehicle, so the node can edit it in place.
+	PxMaterial *chassis_material = physics.createMaterial(Math::abs(cfg.chassis_friction), Math::abs(cfg.chassis_friction), CLAMP(cfg.chassis_bounce, 0.0f, 1.0f));
+	if (chassis_material) {
+		godot_physx_apply_material(chassis_material, cfg.chassis_friction, cfg.chassis_bounce);
+	}
 	if (!wheel_material || !chassis_material) {
 		ERR_PRINT("PhysX tank: failed to create material.");
 		return false;
@@ -725,12 +747,10 @@ inline bool configure_vehicle_track(VehicleTrack &v, const VehicleTrackConfig &c
 	PxCookingParams cookingParams(physics.getTolerancesScale());
 
 	{
-		// Same eSIMULATION_SHAPE-only, non-scene-query chassis convention as
-		// configure_vehicle2w()/configure_vehicle4w() -- see either
-		// function's own comment on why eSCENE_QUERY_SHAPE would break the
-		// wheels' own road-geometry raycasts.
+		// A simulation and scene-query hull, as configure_vehicle4w()'s
+		// chassis (see its comment: the wheel filter skips the tank's own actor).
 		const PxFilterData chassisFilterData((PxU32)cfg.collision_layer, (PxU32)cfg.collision_mask, 0, 0);
-		const PxShapeFlags chassisShapeFlags(PxShapeFlag::eSIMULATION_SHAPE | PxShapeFlag::eVISUALIZATION);
+		const PxShapeFlags chassisShapeFlags(PxShapeFlag::eSIMULATION_SHAPE | PxShapeFlag::eSCENE_QUERY_SHAPE | PxShapeFlag::eVISUALIZATION);
 		const PxVehiclePhysXRigidActorParams actorParams(v.rigidBodyParams, nullptr);
 		const PxBoxGeometry boxGeom(v.physxActorBoxShapeHalfExtents);
 		const PxVehiclePhysXRigidActorShapeParams actorShapeParams(boxGeom, v.physxActorBoxShapeLocalPose, *chassis_material, chassisShapeFlags, chassisFilterData, chassisFilterData);
@@ -751,6 +771,7 @@ inline bool configure_vehicle_track(VehicleTrack &v, const VehicleTrackConfig &c
 		ERR_PRINT("PhysX tank: PxVehiclePhysXActorCreate failed.");
 		return false;
 	}
+	v.wheelQueryFilter.self_actor = v.physxActor.rigidBody;
 
 	PxVehicleConstraintsCreate(v.axleDescription, physics, *v.physxActor.rigidBody, v.physxConstraints);
 

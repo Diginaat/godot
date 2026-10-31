@@ -51,7 +51,7 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, std140) uniform Params {
 	ivec4 counts; // x particles, y self-collision hash size (power of two), z substeps, w unused
-	ivec4 counts2; // x capsules, y texture width, z bones, w unused
+	ivec4 counts2; // x capsules, y texture width, z bones, w boxes
 	vec4 step; // x dt (substep), y damping (velocity kept per substep), z animation drive (fraction pulled to the target per substep), w stiffness
 	vec4 gravity; // xyz gravity (m/s^2), w thickness (m)
 	vec4 limits; // x tether slack (allowed stretch, e.g. 1.03), y tether stiffness, z capsule friction, w backstop distance (m, < 0 = off)
@@ -106,7 +106,8 @@ layout(set = 0, binding = 10, std430) restrict readonly buffer Tethers {
 	vec2 tethers[]; // x anchor particle (float bits; ~0 = none), y rest distance
 };
 layout(set = 0, binding = 11, std430) restrict readonly buffer Capsules {
-	vec4 capsules[]; // per capsule: previous frame (a.xyz, ra), (b.xyz, rb), then this frame's
+	vec4 capsules[]; // per capsule: previous frame (a.xyz, ra), (b.xyz, rb), then this frame's;
+	// boxes from BOX_BASE: previous frame (centre.xyz, active), half-axes x, y, z, then this frame's
 };
 layout(set = 0, binding = 12, std430) restrict readonly buffer AdjOffsets {
 	uint adj_offsets[]; // particle -> start in adj_pairs, count = next - this
@@ -243,6 +244,60 @@ void project_capsules(inout vec3 p, vec3 prev_p, float frac) {
 			p = q + n * r;
 		}
 		// Friction: bleed off tangential motion against the capsule.
+		vec3 v = p - prev_p;
+		vec3 vt = v - n * dot(v, n);
+		p -= vt * limits.z;
+	}
+}
+
+// Where the boxes start in the collider buffer (SkinnedClothSolverGPU::MAX_CAPSULES * 4).
+#define BOX_BASE 256
+
+// Keeps p outside the body boxes (box collision shapes on physical bones).
+// A particle that crossed into a box this substep is stopped on the face it
+// came through; one that was already inside leaves through the nearest face.
+void project_boxes(inout vec3 p, vec3 prev_p, float frac) {
+	float thickness = gravity.w;
+	for (int k = 0; k < counts2.w; k++) {
+		int base = BOX_BASE + k * 8;
+		vec4 c = mix(capsules[base], capsules[base + 4], frac);
+		if (c.w < 0.5) {
+			continue; // disabled shape
+		}
+		vec3 u[3];
+		vec3 e;
+		for (int j = 0; j < 3; j++) {
+			vec3 ax = mix(capsules[base + 1 + j].xyz, capsules[base + 5 + j].xyz, frac);
+			float h = length(ax);
+			u[j] = h > 1e-6 ? ax / h : vec3(0.0);
+			e[j] = h + thickness;
+		}
+		vec3 d = p - c.xyz;
+		vec3 lp = vec3(dot(d, u[0]), dot(d, u[1]), dot(d, u[2]));
+		if (any(greaterThanEqual(abs(lp), e))) {
+			continue;
+		}
+		vec3 dq = prev_p - c.xyz;
+		vec3 lq = vec3(dot(dq, u[0]), dot(dq, u[1]), dot(dq, u[2]));
+		int axis = 0;
+		float side = 1.0;
+		if (any(greaterThanEqual(abs(lq), e))) {
+			// Came from outside: the face it was furthest outside of.
+			vec3 out_by = abs(lq) / max(e, vec3(1e-6));
+			axis = out_by.y > out_by.x ? 1 : 0;
+			axis = out_by.z > out_by[axis] ? 2 : axis;
+			side = lq[axis] < 0.0 ? -1.0 : 1.0;
+		} else {
+			// Already inside: the nearest face.
+			vec3 depth = e - abs(lp);
+			axis = depth.y < depth.x ? 1 : 0;
+			axis = depth.z < depth[axis] ? 2 : axis;
+			side = lp[axis] < 0.0 ? -1.0 : 1.0;
+		}
+		lp[axis] = side * e[axis];
+		vec3 n = u[axis] * side;
+		p = c.xyz + u[0] * lp.x + u[1] * lp.y + u[2] * lp.z;
+		// Friction: bleed off tangential motion against the face.
 		vec3 v = p - prev_p;
 		vec3 vt = v - n * dot(v, n);
 		p -= vt * limits.z;
@@ -439,6 +494,7 @@ void main() {
 		// max distance allows (a leg swinging through a skirt), the cloth goes
 		// past the limit rather than letting the limb show through.
 		project_capsules(q, prev[i].xyz, pass.frac);
+		project_boxes(q, prev[i].xyz, pass.frac);
 		pos[i].xyz = q;
 		return;
 	}

@@ -66,7 +66,8 @@ void PhysXGranular3D::_validate_property(PropertyInfo &p_property) const {
 	if (n == SNAME("viscosity") || n == SNAME("surface_tension") || n == SNAME("cohesion") ||
 			n == SNAME("vorticity") || n == SNAME("surface_mesh") || n == SNAME("surface_anisotropy") ||
 			n == SNAME("foam_enabled") || n == SNAME("foam_particle_count") || n == SNAME("foam_lifetime") ||
-			n == SNAME("foam_threshold") || n == SNAME("foam_buoyancy") || n == SNAME("foam_size")) {
+			n == SNAME("foam_threshold") || n == SNAME("foam_buoyancy") || n == SNAME("foam_size") ||
+			n == SNAME("adhesion") || n == SNAME("surface_friction")) { // grains use their own friction, no adhesion
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 	}
 }

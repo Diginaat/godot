@@ -84,7 +84,7 @@ layout(set = 0, binding = 10, std430) restrict buffer BKey {
 }; // block key per pool slot
 layout(set = 0, binding = 11, std430) restrict buffer BCounts {
 	uint bcounts[];
-}; // [0] active blocks, [1..3] indirect dispatch
+}; // [0] active blocks
 
 #define DT (gravity_dt.w)
 #define GRAV (gravity_dt.xyz)

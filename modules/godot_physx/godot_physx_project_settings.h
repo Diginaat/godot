@@ -43,6 +43,14 @@ public:
 	// solver even when a CUDA device is available.
 	inline static bool enhanced_determinism = false;
 
+	// physics/physx_3d/simulation/gpu_dynamics
+	//
+	// When false, no CUDA context is made: rigid bodies and joints run on the
+	// CPU solver, as on a machine without CUDA. Worth it when the GPU is busy
+	// with other work (fetchResults waits on it every step) or the scene has
+	// few awake bodies. GPU-build only.
+	inline static bool gpu_dynamics = true;
+
 	// physics/physx_3d/simulation/solver_type
 	//
 	// 0 = PGS (Projected Gauss-Seidel, default) -- PhysX's classic solver.
@@ -71,6 +79,12 @@ public:
 	// 0 = auto (most of the machine for the CPU solver, a small pool for the
 	// GPU path). A fixed value is useful for reproducible profiling.
 	inline static int cpu_worker_threads = 0;
+
+	// physics/physx_3d/simulation/max_depenetration_velocity
+	// How fast (m/s) overlapping dynamic bodies are pushed apart at most. PhysX's default is unbounded -- bodies that
+	// start overlapping (spawns, crowds, a capsule growing) pop apart in one step. 0 = unbounded, the default: a cap
+	// lets stacks and piles sink into each other and slump (a tall wall of loose boxes no longer holds).
+	inline static float max_depenetration_velocity = 0.0f;
 
 	// physics/physx_3d/soft_body/mode
 	//

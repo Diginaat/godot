@@ -38,7 +38,9 @@ void GodotPhysXProjectSettings::register_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/physx_3d/simulation/allow_sleep"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/physx_3d/simulation/stabilization"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/physx_3d/simulation/cpu_worker_threads", PROPERTY_HINT_RANGE, U"0,32,1"), 0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "physics/physx_3d/simulation/max_depenetration_velocity", PROPERTY_HINT_RANGE, "0,100,0.1,suffix:m/s"), 0.0);
 #ifdef GODOT_PHYSX_GPU
+	GLOBAL_DEF(PropertyInfo(Variant::BOOL, "physics/physx_3d/simulation/gpu_dynamics"), true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/physx_3d/soft_body/mode", PROPERTY_HINT_ENUM, "Auto,CPU,GPU"), 0);
 #else
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "physics/physx_3d/soft_body/mode", PROPERTY_HINT_ENUM, "Auto,CPU"), 0);
@@ -47,9 +49,13 @@ void GodotPhysXProjectSettings::register_settings() {
 
 void GodotPhysXProjectSettings::read_settings() {
 	enhanced_determinism = GLOBAL_GET("physics/physx_3d/simulation/enhanced_determinism");
+#ifdef GODOT_PHYSX_GPU
+	gpu_dynamics = GLOBAL_GET("physics/physx_3d/simulation/gpu_dynamics");
+#endif
 	solver_type = GLOBAL_GET("physics/physx_3d/simulation/solver_type");
 	allow_sleep = GLOBAL_GET("physics/physx_3d/simulation/allow_sleep");
 	stabilization = GLOBAL_GET("physics/physx_3d/simulation/stabilization");
 	cpu_worker_threads = GLOBAL_GET("physics/physx_3d/simulation/cpu_worker_threads");
+	max_depenetration_velocity = GLOBAL_GET("physics/physx_3d/simulation/max_depenetration_velocity");
 	soft_body_mode = GLOBAL_GET("physics/physx_3d/soft_body/mode");
 }

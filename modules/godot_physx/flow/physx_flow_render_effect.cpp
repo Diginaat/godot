@@ -30,6 +30,9 @@
 
 #include "physx_flow_render_effect.h"
 
+#include "../godot_physx_render_thread.h"
+#include "../nodes/physx_compositor_effects.h"
+#include "../nodes/physx_light_shafts_effect.h"
 #include "flow_backend.h"
 #include "physx_flow_3d.h"
 
@@ -37,6 +40,8 @@
 #include "core/object/class_db.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/resources/3d/world_3d.h"
+#include "servers/rendering/renderer_rd/framebuffer_cache_rd.h"
+#include "servers/rendering/renderer_rd/storage_rd/render_data_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_data_rd.h"
 #include "servers/rendering/rendering_device.h"
@@ -45,7 +50,8 @@
 #include "servers/rendering/storage/render_data.h"
 
 LocalVector<PhysXFlow3D *> PhysXFlowRenderEffect::flows;
-HashMap<ObjectID, PhysXFlowRenderEffect::WorldState> PhysXFlowRenderEffect::worlds;
+Mutex PhysXFlowRenderEffect::flows_mutex;
+HashMap<ObjectID, int> PhysXFlowRenderEffect::worlds;
 
 namespace {
 
@@ -57,12 +63,15 @@ const char *COPY_SHADER = R"(
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba16f) uniform restrict readonly image2D src;
+// The source is sampled, not loaded as an image: the Mobile renderer's color
+// buffer can't be a storage image.
+layout(set = 0, binding = 0) uniform sampler2D src;
 layout(set = 0, binding = 1, rgba16f) uniform restrict writeonly image2D dst;
 
 layout(push_constant, std430) uniform Params {
 	ivec2 size;
-	ivec2 pad;
+	float scale; // on rgb
+	float pad;
 } params;
 
 void main() {
@@ -70,7 +79,31 @@ void main() {
 	if (p.x >= params.size.x || p.y >= params.size.y) {
 		return;
 	}
-	imageStore(dst, p, imageLoad(src, p));
+	vec4 c = texelFetch(src, p, 0);
+	imageStore(dst, p, vec4(c.rgb * params.scale, c.a));
+}
+)";
+
+// Writes the gas, drawn on a copy of the frame, back into a frame that can't be
+// written from a compute pass (the Mobile renderer's): a fullscreen draw.
+const char *WRITE_BACK_SHADER = R"(
+#[vertex]
+#version 450
+void main() {
+	vec2 p = vec2((gl_VertexIndex << 1) & 2, gl_VertexIndex & 2);
+	gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}
+#[fragment]
+#version 450
+layout(set = 0, binding = 0) uniform sampler2D src;
+layout(push_constant, std430) uniform Params {
+	float scale; // on rgb
+	float pad[3];
+} params;
+layout(location = 0) out vec4 frag;
+void main() {
+	vec4 c = texelFetch(src, ivec2(gl_FragCoord.xy), 0);
+	frag = vec4(c.rgb * params.scale, c.a);
 }
 )";
 
@@ -87,126 +120,40 @@ void to_flow(const Projection &p_m, float r_out[16]) {
 } // namespace
 
 void PhysXFlowRenderEffect::register_flow(PhysXFlow3D *p_flow) {
+	MutexLock lock(flows_mutex);
 	if (flows.find(p_flow) < 0) {
 		flows.push_back(p_flow);
 	}
 }
 
 void PhysXFlowRenderEffect::unregister_flow(PhysXFlow3D *p_flow) {
+	// Waits for a frame drawing it: after this the render thread never touches it.
+	MutexLock lock(flows_mutex);
 	flows.erase(p_flow);
 }
 
 namespace {
 
-// The RIDs of a compositor's own (valid) effects, in order; whether one of
-// them is a PhysXFlowRenderEffect.
-LocalVector<RID> own_effect_rids(const Ref<Compositor> &p_compositor, bool &r_has_flow_effect) {
-	LocalVector<RID> rids;
-	r_has_flow_effect = false;
-	const TypedArray<CompositorEffect> effects = p_compositor->get_compositor_effects();
-	for (int i = 0; i < effects.size(); i++) {
-		Ref<CompositorEffect> e = effects[i];
-		if (e.is_valid()) {
-			rids.push_back(e->get_rid());
-			r_has_flow_effect = r_has_flow_effect || Object::cast_to<PhysXFlowRenderEffect>(e.ptr()) != nullptr;
-		}
-	}
-	return rids;
-}
-
-bool same_rids(const LocalVector<RID> &p_a, const LocalVector<RID> &p_b) {
-	if (p_a.size() != p_b.size()) {
-		return false;
-	}
-	for (uint32_t i = 0; i < p_a.size(); i++) {
-		if (p_a[i] != p_b[i]) {
-			return false;
-		}
-	}
-	return true;
-}
-
-void push_effects(RID p_compositor, const LocalVector<RID> &p_rids, RID p_extra) {
-	TypedArray<RID> rids;
-	for (const RID &r : p_rids) {
-		rids.push_back(r);
-	}
-	if (p_extra.is_valid()) {
-		rids.push_back(p_extra);
-	}
-	RenderingServer::get_singleton()->compositor_set_compositor_effects(p_compositor, rids);
-}
-
 } // namespace
-
-void PhysXFlowRenderEffect::_inject(WorldState &r_state, const Ref<Compositor> &p_compositor) {
-	if (p_compositor.is_null() || p_compositor == r_state.created) {
-		return;
-	}
-	bool has_flow_effect = false;
-	const LocalVector<RID> own = own_effect_rids(p_compositor, has_flow_effect);
-	if (has_flow_effect) {
-		return; // the user added it themselves
-	}
-	const ObjectID id = p_compositor->get_instance_id();
-	LocalVector<RID> *seen = r_state.injected.getptr(id);
-	if (seen != nullptr && same_rids(*seen, own)) {
-		return; // already in, and the user hasn't re-set the effects since
-	}
-	push_effects(p_compositor->get_rid(), own, get_shared()->get_rid());
-	r_state.injected[id] = own;
-}
-
-void PhysXFlowRenderEffect::_restore(const ObjectID &p_compositor) {
-	Compositor *compositor = Object::cast_to<Compositor>(ObjectDB::get_instance(p_compositor));
-	if (compositor == nullptr) {
-		return;
-	}
-	// Exactly what the user's resource says, i.e. without ours.
-	bool has_flow_effect = false;
-	push_effects(compositor->get_rid(), own_effect_rids(Ref<Compositor>(compositor), has_flow_effect), RID());
-}
 
 void PhysXFlowRenderEffect::attach_world(World3D *p_world) {
 	ERR_FAIL_NULL(p_world);
-	worlds[p_world->get_instance_id()].flows++;
+	worlds[p_world->get_instance_id()]++;
 }
 
 void PhysXFlowRenderEffect::detach_world(const ObjectID &p_world) {
-	WorldState *state = worlds.getptr(p_world);
-	if (state == nullptr || --state->flows > 0) {
+	int *count = worlds.getptr(p_world);
+	if (count == nullptr || --(*count) > 0) {
 		return;
 	}
-	for (const KeyValue<ObjectID, LocalVector<RID>> &kv : state->injected) {
-		_restore(kv.key);
-	}
-	World3D *world = Object::cast_to<World3D>(ObjectDB::get_instance(p_world));
-	if (world != nullptr && state->created.is_valid() && world->get_compositor() == state->created) {
-		world->set_compositor(Ref<Compositor>());
-	}
 	worlds.erase(p_world);
+	PhysXCompositorEffects::uninstall(p_world, get_shared());
 }
 
 void PhysXFlowRenderEffect::install(World3D *p_world, Camera3D *p_camera) {
 	ERR_FAIL_NULL(p_world);
-	WorldState *state = worlds.getptr(p_world->get_instance_id());
-	ERR_FAIL_NULL(state);
-	Ref<Compositor> world_compositor = p_world->get_compositor();
-	if (world_compositor.is_null()) {
-		if (state->created.is_null()) {
-			state->created.instantiate();
-			TypedArray<CompositorEffect> effects;
-			effects.push_back(get_shared());
-			state->created->set_compositor_effects(effects);
-		}
-		p_world->set_compositor(state->created);
-	} else {
-		_inject(*state, world_compositor);
-	}
-	// A camera's own compositor replaces the world's for that camera.
-	if (p_camera != nullptr) {
-		_inject(*state, p_camera->get_compositor());
-	}
+	ERR_FAIL_COND(!worlds.has(p_world->get_instance_id()));
+	PhysXCompositorEffects::install(p_world, p_camera, get_shared(), PhysXCompositorEffects::ORDER_FLOW);
 }
 
 Ref<Compositor> PhysXFlowRenderEffect::get_world_compositor(const Ref<World3D> &p_world) {
@@ -237,15 +184,24 @@ PhysXFlowRenderEffect::PhysXFlowRenderEffect() {
 }
 
 PhysXFlowRenderEffect::~PhysXFlowRenderEffect() {
-	RenderingDevice *rd = RenderingServer::get_singleton() ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
-	if (rd != nullptr) {
-		if (copy_pipeline.is_valid()) {
-			rd->free_rid(copy_pipeline);
+	// Freed on the render thread, wherever the last reference goes.
+	godot_physx_run_on_render_thread([this]() {
+		RenderingDevice *rd = RenderingServer::get_singleton() ? RenderingServer::get_singleton()->get_rendering_device() : nullptr;
+		if (rd != nullptr) {
+			if (copy_pipeline.is_valid()) {
+				rd->free_rid(copy_pipeline);
+			}
+			for (const KeyValue<int64_t, RID> &kv : write_back_pipelines) {
+				rd->free_rid(kv.value);
+			}
+			for (RID r : { copy_shader, copy_sampler, write_back_shader, work }) {
+				if (r.is_valid()) {
+					rd->free_rid(r);
+				}
+			}
+			scatter.free(rd);
 		}
-		if (copy_shader.is_valid()) {
-			rd->free_rid(copy_shader);
-		}
-	}
+	});
 }
 
 bool PhysXFlowRenderEffect::_ensure_copy_pipeline(RenderingDevice *p_rd) {
@@ -265,32 +221,66 @@ bool PhysXFlowRenderEffect::_ensure_copy_pipeline(RenderingDevice *p_rd) {
 	if (copy_shader.is_valid()) {
 		copy_pipeline = p_rd->compute_pipeline_create(copy_shader);
 	}
-	copy_failed = !copy_pipeline.is_valid();
-	return !copy_failed;
+	Ref<RDShaderFile> write_file;
+	write_file.instantiate();
+	if (write_file->parse_versions_from_text(WRITE_BACK_SHADER) == OK) {
+		write_back_shader = p_rd->shader_create_from_spirv(write_file->get_spirv_stages());
+	}
+	copy_sampler = p_rd->sampler_create(RD::SamplerState());
+	copy_failed = !copy_pipeline.is_valid() || !write_back_shader.is_valid();
+	ERR_FAIL_COND_V_MSG(copy_failed, false, "PhysXFlowRenderEffect: copy shaders failed to compile.");
+	return true;
 }
 
-void PhysXFlowRenderEffect::copy_texture(RenderingDevice *p_rd, const RID &p_src, const RID &p_dst, const Size2i &p_size) {
+void PhysXFlowRenderEffect::copy_texture(RenderingDevice *p_rd, const RID &p_src, const RID &p_dst, const Size2i &p_size, float p_scale) {
 	if (!_ensure_copy_pipeline(p_rd)) {
 		return;
 	}
-	RD::Uniform src(RD::UNIFORM_TYPE_IMAGE, 0, p_src);
+	RD::Uniform src(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ copy_sampler, p_src }));
 	RD::Uniform dst(RD::UNIFORM_TYPE_IMAGE, 1, p_dst);
 	LocalVector<RD::Uniform> uniforms;
 	uniforms.push_back(src);
 	uniforms.push_back(dst);
 	const RID set = p_rd->uniform_set_create(uniforms, copy_shader, 0);
 	ERR_FAIL_COND(!set.is_valid());
-	const int32_t push[4] = { p_size.x, p_size.y, 0, 0 };
+	struct {
+		int32_t size[2];
+		float scale;
+		float pad;
+	} push = { { p_size.x, p_size.y }, p_scale, 0.0f };
 	const RD::ComputeListID list = p_rd->compute_list_begin();
 	p_rd->compute_list_bind_compute_pipeline(list, copy_pipeline);
 	p_rd->compute_list_bind_uniform_set(list, set, 0);
-	p_rd->compute_list_set_push_constant(list, push, sizeof(push));
+	p_rd->compute_list_set_push_constant(list, &push, sizeof(push));
 	p_rd->compute_list_dispatch(list, (p_size.x + 7) / 8, (p_size.y + 7) / 8, 1);
 	p_rd->compute_list_end();
 	p_rd->free_rid(set);
 }
 
+void PhysXFlowRenderEffect::_write_back(RenderingDevice *p_rd, const RID &p_src, const RID &p_color, float p_scale) {
+	const RID framebuffer = FramebufferCacheRD::get_singleton()->get_cache(p_color);
+	ERR_FAIL_COND(!framebuffer.is_valid());
+	const RD::FramebufferFormatID format = p_rd->framebuffer_get_format(framebuffer);
+	RID *pipeline = write_back_pipelines.getptr(format);
+	if (pipeline == nullptr) {
+		const RID created = p_rd->render_pipeline_create(write_back_shader, format, RD::INVALID_ID, RD::RENDER_PRIMITIVE_TRIANGLES, RD::PipelineRasterizationState(), RD::PipelineMultisampleState(), RD::PipelineDepthStencilState(), RD::PipelineColorBlendState::create_disabled());
+		ERR_FAIL_COND(!created.is_valid());
+		pipeline = &write_back_pipelines.insert(format, created)->value;
+	}
+	const RID set = p_rd->uniform_set_create(Vector<RD::Uniform>({ RD::Uniform(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 0, Vector<RID>({ copy_sampler, p_src })) }), write_back_shader, 0);
+	ERR_FAIL_COND(!set.is_valid());
+	const float push[4] = { p_scale, 0.0f, 0.0f, 0.0f };
+	const RD::DrawListID list = p_rd->draw_list_begin(framebuffer, RD::DRAW_DEFAULT_ALL);
+	p_rd->draw_list_bind_render_pipeline(list, *pipeline);
+	p_rd->draw_list_bind_uniform_set(list, set, 0);
+	p_rd->draw_list_set_push_constant(list, push, sizeof(push));
+	p_rd->draw_list_draw(list, false, 1, 3);
+	p_rd->draw_list_end();
+	p_rd->free_rid(set);
+}
+
 void PhysXFlowRenderEffect::_render(int p_callback_type, const RenderData *p_render_data) {
+	MutexLock lock(flows_mutex);
 	if (flows.is_empty() || p_render_data == nullptr) {
 		return;
 	}
@@ -301,33 +291,16 @@ void PhysXFlowRenderEffect::_render(int p_callback_type, const RenderData *p_ren
 		return;
 	}
 	const Size2i size = buffers->get_internal_size();
-	const RID color = buffers->get_internal_texture();
-	const RID depth = buffers->get_depth_texture();
-	if (size.x <= 0 || size.y <= 0 || !color.is_valid() || !depth.is_valid()) {
+	// An XR camera renders its eyes as the layers of one frame, each with its
+	// own projection (on top of the shared camera transform): every eye gets
+	// its own pass, on its own slice of the color and depth.
+	const uint32_t view_count = MAX(buffers->get_view_count(), 1u);
+	if (size.x <= 0 || size.y <= 0 || !buffers->get_internal_texture().is_valid() || !buffers->get_depth_texture().is_valid()) {
 		return;
 	}
-
-	// The projection the depth buffer was rendered with: Godot's camera
-	// projection already carries its depth correction (reverse Z in 0..1, Y
-	// as this target needs) and TAA jitter, so Flow reconstructs scene
-	// positions from depth exactly.
-	Projection projection = scene->get_cam_projection();
-	// Flow reads its targets with row 0 at clip-space +Y; Godot's are the
-	// other way up (checked on screen: without this the plume is upside down).
-	Projection y_flip;
-	y_flip.columns[1][1] = -1.0;
-	projection = y_flip * projection;
-	// Flow's world is in its own units: scale down to meters first.
-	Projection to_meters;
-	const real_t inv = 1.0 / FlowBackend::UNITS_PER_METER;
-	to_meters.columns[0][0] = inv;
-	to_meters.columns[1][1] = inv;
-	to_meters.columns[2][2] = inv;
-	const Projection view = Projection(scene->get_cam_transform().affine_inverse()) * to_meters;
-	float view_f[16];
-	float projection_f[16];
-	to_flow(view, view_f);
-	to_flow(projection, projection_f);
+	if (!_ensure_copy_pipeline(rd)) {
+		return;
+	}
 
 	// Each flow composites over what's drawn so far, so far ones go first.
 	const Vector3 eye = scene->get_cam_transform().origin;
@@ -343,7 +316,80 @@ void PhysXFlowRenderEffect::_render(int p_callback_type, const RenderData *p_ren
 			SWAP(sorted[j - 1], sorted[j]);
 		}
 	}
-	for (PhysXFlow3D *flow : sorted) {
-		flow->render_rd(this, rd, view_f, projection_f, size, depth, color);
+	// Flow's world is in its own units: scale down to meters first.
+	Projection to_meters;
+	const real_t inv = 1.0 / FlowBackend::UNITS_PER_METER;
+	to_meters.columns[0][0] = inv;
+	to_meters.columns[1][1] = inv;
+	to_meters.columns[2][2] = inv;
+	const Projection world_to_camera = Projection(scene->get_cam_transform().affine_inverse());
+	const Projection view = world_to_camera * to_meters;
+	float view_f[16];
+	to_flow(view, view_f);
+	// Flow reads its targets with row 0 at clip-space +Y; Godot's are the
+	// other way up (checked on screen: without this the plume is upside down).
+	Projection y_flip;
+	y_flip.columns[1][1] = -1.0;
+	// The frame's lights and shadow atlas, for the scattering pass's shadows.
+	const RenderDataRD *render_data_rd = dynamic_cast<const RenderDataRD *>(p_render_data);
+	const float luminance = buffers->get_luminance_multiplier();
+
+	for (uint32_t v = 0; v < view_count; v++) {
+		const RID color = view_count > 1 ? buffers->get_internal_texture(v) : buffers->get_internal_texture();
+		// (A screen-space fluid has written its surface into this depth: the gas
+		// is marched up to the liquid.)
+		const RID depth = view_count > 1 ? buffers->get_depth_texture(v) : buffers->get_depth_texture();
+		if (!color.is_valid() || !depth.is_valid()) {
+			continue;
+		}
+		// The projection the depth buffer was rendered with: Godot's camera
+		// projection already carries its depth correction (reverse Z in 0..1, Y
+		// as this target needs) and TAA jitter, so Flow reconstructs scene
+		// positions from depth exactly. An eye's has the eye's offset in it.
+		const Projection camera_projection = view_count > 1 ? scene->get_view_projection(v) : scene->get_cam_projection();
+		float projection_f[16];
+		to_flow(y_flip * camera_projection, projection_f);
+		// For the light scattering pass: clip space (as the depth buffer has it)
+		// straight back to world meters.
+		const Projection inv_view_projection = (camera_projection * world_to_camera).inverse();
+		const Vector3 view_eye = view_count > 1 ? scene->get_cam_transform().xform(scene->get_view_eye_offset(v)) : eye;
+
+		// The gas is drawn straight into the frame when it can be written from a
+		// compute pass (Forward+). The Mobile renderer's can't, and holds color
+		// halved: the gas is drawn on a full-brightness RGBA16F copy then, written
+		// back after.
+		const bool direct = rd->texture_get_format(color).usage_bits & RD::TEXTURE_USAGE_STORAGE_BIT;
+		RID target = color;
+		if (!direct) {
+			if (!work.is_valid() || work_size != size) {
+				if (work.is_valid()) {
+					rd->free_rid(work);
+				}
+				RD::TextureFormat tf;
+				tf.width = size.x;
+				tf.height = size.y;
+				tf.format = RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+				tf.usage_bits = RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_SAMPLING_BIT;
+				work = rd->texture_create(tf, RD::TextureView());
+				work_size = size;
+			}
+			copy_texture(rd, color, work, size, luminance);
+			target = work;
+		}
+		// The light shafts (drawn next) take their light from the frame without the
+		// gas: glowing gas isn't the sun. (As the frame holds it: halved on Mobile.)
+		// They draw one view, the first.
+		if (v == 0) {
+			const RID backdrop = PhysXLightShaftsEffect::gas_backdrop(rd, size);
+			if (backdrop.is_valid()) {
+				copy_texture(rd, target, backdrop, size, direct ? 1.0f : 1.0f / luminance);
+			}
+		}
+		for (PhysXFlow3D *flow : sorted) {
+			flow->render_rd(this, rd, view_f, projection_f, size, depth, target, inv_view_projection, view_eye, render_data_rd != nullptr ? render_data_rd->lights : nullptr, render_data_rd != nullptr ? render_data_rd->shadow_atlas : RID(), v == 0, v + 1 == view_count);
+		}
+		if (!direct) {
+			_write_back(rd, work, color, 1.0f / luminance);
+		}
 	}
 }

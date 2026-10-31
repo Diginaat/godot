@@ -238,6 +238,19 @@ public:
 	void set_dynamic(bool p_dynamic) { dynamic = p_dynamic; }
 	bool get_dynamic() const { return dynamic; }
 
+	// Static (non-dynamic) only: which of the remaining pieces stay put once it
+	// breaks. Leaf debris always falls. An island is "anchored" when one of its
+	// chunks touches an anchored outer face of the intact mesh's bounds (local
+	// axes: left/right = -X/+X, bottom/top = -Y/+Y; the faces of the thickness,
+	// +-Z, never anchor).
+	enum Anchor {
+		ANCHOR_FRAMED, // held at the bottom, top, left or right edge: walls in a building, doors, windows
+		ANCHOR_GROUNDED, // held at the bottom only: freestanding walls, pillars, statues
+		ANCHOR_NONE, // static until the first break, then every island falls
+	};
+	void set_anchor(Anchor p_anchor) { anchor = p_anchor; }
+	Anchor get_anchor() const { return anchor; }
+
 	// Initial NvBlast bond/chunk health (both, uniformly) -- how much
 	// cumulative damage the support structure can absorb before bonds start
 	// breaking. Higher health needs more damage (a harder impact, or more of
@@ -272,6 +285,22 @@ public:
 	void set_kill_y(float p_y) { kill_y = p_y; }
 	float get_kill_y() const { return kill_y; }
 
+	// Debris clean-up, all off by default. A moving piece is removed
+	// piece_lifetime seconds after it broke off (0 = never), shrinking to
+	// nothing over the last piece_shrink_time of them instead of popping out.
+	// freeze_when_asleep makes the moving pieces kinematic once PhysX has put
+	// all of them to sleep: they stay, solid, but never move or wake again. Static pieces (a chipped
+	// wall's anchored remainder) never age.
+	void set_piece_lifetime(float p_seconds) { piece_lifetime = MAX(p_seconds, 0.0f); }
+	float get_piece_lifetime() const { return piece_lifetime; }
+	void set_piece_shrink_time(float p_seconds) { piece_shrink_time = MAX(p_seconds, 0.0f); }
+	float get_piece_shrink_time() const { return piece_shrink_time; }
+	void set_freeze_when_asleep(bool p_freeze) { freeze_when_asleep = p_freeze; }
+	bool get_freeze_when_asleep() const { return freeze_when_asleep; }
+
+	// True once a hit has broken anything off (stays true).
+	bool is_fractured() const { return fractured; }
+
 	// p_world_position: world-space damage origin (converted to this node's
 	// local space internally, since chunk geometry is authored local-space).
 	// Returns how many new rigid-body pieces this call produced. Each new
@@ -282,6 +311,26 @@ public:
 	// just computed here so it's intrinsic to fracturing, not a separate
 	// demo-script concern layered on top.
 	int apply_radial_damage(const Vector3 &p_world_position, float p_damage, float p_min_radius, float p_max_radius);
+
+	// Live piece count right now: 1 while intact (the chunk-0 placeholder),
+	// then one per still-simulating piece, dropping as debris passes kill_y.
+	// Because _spawn_piece() frees a chunk's previous piece before spawning
+	// its replacement, this can never exceed the asset's visible (leaf)
+	// chunk count no matter how many times actors split -- the observable
+	// form of the one-body-per-chunk invariant (U24: island actors used to
+	// re-spawn already-live chunks as second overlapping bodies).
+	int get_piece_count() const { return (int)pieces.size(); }
+
+	// Read-only inspection of one live piece (regression tests, debug
+	// overlays). Indexes follow the internal piece array: 0 is the intact
+	// placeholder until it is retired; after fracture each entry is one
+	// leaf chunk's live body. The transform comes from the physics server,
+	// so it is the body's real simulated pose -- not the node's frozen
+	// post-fracture transform. Returns identity for an out-of-range index
+	// or a dead body (call get_piece_count() first); get_piece_chunk()
+	// returns UINT32_MAX there.
+	Transform3D get_piece_transform(int p_index) const;
+	uint32_t get_piece_chunk(int p_index) const;
 
 	PackedStringArray get_configuration_warnings() const override;
 
@@ -335,11 +384,16 @@ private:
 	float mass = 1.0f;
 	bool auto_mass = true;
 	bool dynamic = false;
+	Anchor anchor = ANCHOR_FRAMED;
 	float health = 1.0f;
 	float impact_strength = 5.0f;
 	float impact_damage_scale = 1.0f;
 	float impact_radius = 5.0f;
 	float kill_y = -1000.0f;
+	float piece_lifetime = 0.0f;
+	float piece_shrink_time = 0.0f;
+	bool freeze_when_asleep = false;
+	double piece_clock = 0.0; // seconds of physics since the node started processing; pieces' birth times use it
 
 	void *asset_mem = nullptr;
 	void *family_mem = nullptr;
@@ -359,15 +413,87 @@ private:
 	// computed once in _compute_chunk_volumes(), called from _load(). See
 	// set_mass() for why.
 	LocalVector<double> chunk_volumes;
+	// chunk_faces[chunk_index] = the ANCHOR_FACE_* bits of the intact mesh's
+	// bounds that chunk touches (computed once per load, object-local).
+	LocalVector<uint8_t> chunk_faces;
+	static constexpr uint8_t ANCHOR_FACE_LEFT = 1 << 0; // -X
+	static constexpr uint8_t ANCHOR_FACE_RIGHT = 1 << 1; // +X
+	static constexpr uint8_t ANCHOR_FACE_BOTTOM = 1 << 2; // -Y
+	static constexpr uint8_t ANCHOR_FACE_TOP = 1 << 3; // +Y
+	void _compute_chunk_faces();
+	// Per-chunk collision shapes, cooked once on first use and shared by every
+	// piece carrying that chunk -- hull points are in the asset frame, so one
+	// shape fits any piece's body. Re-cooking an island's every hull on each
+	// split cost ~5 ms per chip on a ~190-chunk wall. Freed with the asset.
+	LocalVector<RID> chunk_shapes;
+	RID _chunk_shape(uint32_t p_chunk);
+	// Per-chunk render data, by material slot, computed once per load. A
+	// piece's mesh gets ONE surface per slot (not per chunk: an island of
+	// ~190 chunks was ~190 draw calls). Every chunk is slot 0 today -- the
+	// asset keeps positions only; an interior-face slot (Blast's
+	// kMaterialInteriorId) slots in here once authoring keeps it.
+	struct ChunkSurface {
+		int slot = 0;
+		PackedVector3Array vertices;
+		PackedVector3Array normals;
+	};
+	LocalVector<LocalVector<ChunkSurface>> chunk_surfaces;
+	void _compute_chunk_surfaces();
+	void _free_chunk_cache();
+	// Whether an island made of p_chunks stays STATIC under `anchor`.
+	bool _island_anchored(const LocalVector<uint32_t> &p_chunks) const;
 	double total_leaf_volume = 0.0;
 
 	struct ChunkVisual {
-		RID body;
-		RID shape;
+		RID body; // its shapes are the shared chunk_shapes[] of chunk_indices, not owned
 		RID mesh;
 		RID instance;
+		// Which asset chunks this piece renders/collides, aligned with
+		// `shapes`. One entry while intact (chunk 0, the placeholder) and
+		// for a single-chunk (leaf) split product; an island split product
+		// carries every visible chunk of its actor. _spawn_piece() uses
+		// these to free a chunk's superseded piece before spawning a new
+		// one, keeping the one-live-piece-per-chunk invariant below.
+		LocalVector<uint32_t> chunk_indices;
+		// The Blast actor this piece is the body of (one piece per actor). A
+		// piece leaving (kill_y) retires its actor too, and an actor with no
+		// piece after the first break is dead -- without this a later hit could
+		// split an actor whose debris was long gone and re-spawn its chunks.
+		NvBlastActor *actor = nullptr;
+		// The body's velocity as of the end of the previous physics tick --
+		// i.e. BEFORE the step whose contacts trigger an impact fracture. A
+		// split hands these to its children: the live velocity already holds
+		// that impact's push, which on a rigid intact body reaches every
+		// chunk, so a car ramming a wall sent its far edges flying with it.
+		Vector3 last_linear_velocity;
+		Vector3 last_angular_velocity;
+		// piece_clock when it spawned (piece_lifetime), and the middle of its
+		// chunks in the body's frame -- the body's origin is the whole
+		// object's, so a piece shrinks about this point instead.
+		double born = 0.0;
+		Vector3 center_local;
+		bool frozen = false; // freeze_when_asleep made it kinematic
+		// In its piece_shrink_time: kinematic with no collision (nothing bumps
+		// into a piece that's on its way out), shrinking toward shrink_pivot,
+		// the ground under its middle (past the other pieces), so a piece
+		// sinks into the ground instead of hovering -- also one that was
+		// resting on another piece.
+		bool shrinking = false;
+		Vector3 shrink_pivot;
 	};
+	// Frees pieces[p_index] and retires its Blast actor (so a later hit can't
+	// split it and bring its chunks back): kill_y and piece_lifetime.
+	void _retire_piece(uint32_t p_index);
+	// The height of whatever is straight below p_from (this node's own pieces
+	// ignored), or p_fallback when there's nothing within 50 m.
+	real_t _ground_below(const Vector3 &p_from, real_t p_fallback) const;
 	LocalVector<ChunkVisual> pieces;
+	// The index in `pieces` of p_actor's piece, or -1.
+	int _piece_of_actor(const NvBlastActor *p_actor) const;
+	// Store each piece's live velocity as its last_* (end of a physics tick).
+	void _record_piece_velocities();
+	// Frees piece p_index (body, shapes, mesh, instance) and removes it (unordered).
+	void _free_piece(uint32_t p_index);
 
 	bool loaded = false;
 	bool fractured = false;
@@ -393,19 +519,29 @@ private:
 	// total_leaf_volume (floored so a sliver never gets a near-zero mass),
 	// except chunk 0 (the whole intact mesh), which just gets `mass` itself.
 	float _chunk_mass(uint32_t p_chunk_index) const;
-	// Tears down any existing family/pieces and, if already inside the world,
-	// immediately re-loads and re-spawns from whatever asset_path/chunks_path/
+	// Tears down any existing family/pieces and, if already inside the world,	// immediately re-loads and re-spawns from whatever asset_path/chunks_path/
 	// blast_asset now point at -- called from those setters so assigning a
 	// new asset (or dragging one onto an empty node already in the tree)
 	// shows up right away instead of only on the next time the node enters
 	// the tree (e.g. reopening the scene).
 	void _reload();
 	void _spawn_intact();
+	// Spawns ONE piece for ONE new (island) actor from a split -- see the
+	// definition for why the old one-body-per-chunk spawning had to go.
+	// Returns 1 if a piece was spawned, 0 otherwise.
+	int _spawn_island_piece(NvBlastActor *p_actor, PhysicsServer3D *p_ps, const Transform3D &p_base_transform, const Vector3 &p_base_linear, const Vector3 &p_base_angular, const Vector3 &p_damage_world_origin, real_t p_max_radius, PS3DE::BodyMode p_body_mode);
 	// p_physics: create a PhysicsServer3D body+shape for this piece too, not
 	// just its RenderingServer mesh instance. False in the editor (no physics
 	// simulation runs there anyway) so the node still shows *something* in
-	// the viewport -- ChunkVisual::body/shape stay RID() in that case.
-	void _spawn_piece(uint32_t p_chunk_index, const Transform3D &p_transform, const Vector3 &p_linear_velocity, bool p_physics = true);
+	// the viewport -- ChunkVisual::body/shapes stay RID() in that case.
+	// p_body_mode: RIGID for a free-flying piece, STATIC for a piece of an
+	// anchored (static) destructible -- the caller passes its predecessor's
+	// mode down so chipping a static wall never wakes the remainder island
+	// as one dynamic body.
+	// Returns the pushed piece's index into `pieces` (the U24 dedup inside
+	// may have swapped entries around, so callers can't assume a fixed
+	// position), or -1 if the chunk was rejected.
+	int _spawn_piece(const LocalVector<uint32_t> &p_chunk_indices, const Transform3D &p_transform, const Vector3 &p_linear_velocity, bool p_physics = true, PS3DE::BodyMode p_body_mode = PS3DE::BODY_MODE_RIGID, NvBlastActor *p_actor = nullptr);
 	// See set_gi_mode()'s own note on why this is needed at all.
 	void _apply_gi_mode(RenderingServer *p_rs, RID p_instance) const;
 	// Same idea as _apply_gi_mode(), covering the rest of the
@@ -430,3 +566,4 @@ private:
 VARIANT_ENUM_CAST(PhysXDestructible3D::GIMode);
 VARIANT_ENUM_CAST(PhysXDestructible3D::ShadowCastingSetting);
 VARIANT_ENUM_CAST(PhysXDestructible3D::VisibilityRangeFadeMode);
+VARIANT_ENUM_CAST(PhysXDestructible3D::Anchor);

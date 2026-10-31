@@ -30,9 +30,12 @@
 
 #pragma once
 
+#include "godot_physx_vehicle_control.h"
+
 #include "core/math/vector3.h"
 #include "core/templates/local_vector.h"
 #include "scene/3d/node_3d.h"
+#include "scene/resources/physics_material.h"
 
 class PhysXVehicleWheel3D;
 
@@ -113,6 +116,9 @@ public:
 	real_t get_throttle() const { return throttle; }
 	void set_brake(real_t p_v) { brake = p_v; }
 	real_t get_brake() const { return brake; }
+	// The rear wheel(s) only, on top of brake: a parking brake, or a slide.
+	void set_handbrake(real_t p_v) { handbrake = p_v; }
+	real_t get_handbrake() const { return handbrake; }
 	void set_steer(real_t p_v) { steer = p_v; }
 	real_t get_steer() const { return steer; }
 	void set_reverse(bool p_v) { reverse = p_v; }
@@ -123,6 +129,11 @@ public:
 	void set_collision_mask(uint32_t p_mask);
 	uint32_t get_collision_mask() const { return collision_mask; }
 
+	// The chassis box's contact material (friction / rough / bounce / absorbent); null = friction 0.5, bounce 0.1.
+	// Edited live in place, no rebuild. The wheels' grip is the tire model's, not this.
+	void set_physics_material_override(const Ref<PhysicsMaterial> &p_material);
+	Ref<PhysicsMaterial> get_physics_material_override() const { return physics_material_override; }
+
 	Vector3 get_linear_velocity() const;
 	real_t get_forward_speed() const;
 
@@ -130,10 +141,8 @@ public:
 	// controller (e.g. a lean_controller.gd attached to this node) reads the
 	// orientation getters and calls apply_torque_impulse()/
 	// set_angular_velocity() every physics tick to keep the bike upright.
-	void apply_torque_impulse(const Vector3 &p_impulse);
 	void apply_force_at_local_position(const Vector3 &p_force, const Vector3 &p_local_position);
-	void set_angular_velocity(const Vector3 &p_angular_velocity);
-	Vector3 get_angular_velocity() const;
+	PHYSX_VEHICLE_CONTROL_DECLARE()
 	Vector3 get_up() const;
 	Vector3 get_forward() const;
 	real_t get_roll_angle() const;
@@ -170,10 +179,12 @@ private:
 
 	real_t throttle = 0.0f;
 	real_t brake = 0.0f;
+	real_t handbrake = 0.0f;
 	real_t steer = 0.0f;
 	bool reverse = false;
 	uint32_t collision_layer = 1;
 	uint32_t collision_mask = 1;
+	Ref<PhysicsMaterial> physics_material_override;
 
 	// Opaque pointer to the real Vehicle2W composition (kept out of this
 	// header so nothing outside physx_motorcycle_3d.cpp needs
@@ -182,6 +193,8 @@ private:
 	Impl *impl = nullptr;
 
 	void _rebuild_if_live();
+	void _chassis_material(real_t &r_friction, real_t &r_bounce) const;
+	void _chassis_material_changed();
 	bool _build();
 	void _destroy();
 };

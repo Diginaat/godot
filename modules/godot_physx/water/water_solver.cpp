@@ -236,7 +236,8 @@ void WaterSolverGPU::_rt_build_buffers() {
 	const int on = ocean_grid_resolution;
 	const int ocells = on * on;
 	ocean_log2n = log2i(on);
-	ocean_time_accum = 0.0;
+	// (The ocean clock survives a rebuild: the spectrum is a pure function of its settings, so a re-centre / resize
+	// with the same sea carries on seamlessly instead of every wave jumping back to t = 0.)
 	a_is_current = true;
 
 	buf_params = rd->uniform_buffer_create(PARAMS_BYTES);
@@ -585,6 +586,16 @@ void WaterSolverGPU::_rt_build_buffers() {
 
 	// h0 depends only on static settings (wind/domain/amplitude) -- generate
 	// it once here, not every step.
+	_rt_spectrum_init();
+
+	if (_init_caustics_enabled) {
+		_rt_build_caustics_grid();
+	}
+}
+
+// (Re)generate h0 from the _init_* sea state into the existing buffer.
+void WaterSolverGPU::_rt_spectrum_init() {
+	const int on = ocean_grid_resolution;
 	{
 		Vector<uint8_t> ib;
 		ib.resize(OCEAN_INIT_PARAMS_BYTES);
@@ -624,10 +635,20 @@ void WaterSolverGPU::_rt_build_buffers() {
 		// rt_step() runs, and rt_build()/rt_step() are always posted to the
 		// render thread in that order, so ordering is already guaranteed.
 	}
+}
 
-	if (_init_caustics_enabled) {
-		_rt_build_caustics_grid();
+// A new sea state (wind / direction / height / fetch) WITHOUT a rebuild: only h0 is regenerated, in place. The
+// Gaussian draws are seeded by the mode index alone and the ocean clock carries on, so every wave keeps its phase and
+// just grows / calms / turns -- ripples, wakes and the whitecap foam survive (a storm can ramp the sea smoothly).
+void WaterSolverGPU::rt_reinit_spectrum(Ref<WaterSolverGPU> p_self, float p_wind_speed, Vector2 p_wind_direction, float p_wave_amplitude, float p_fetch) {
+	_init_wind_speed = p_wind_speed;
+	_init_wind_direction = p_wind_direction;
+	_init_wave_amplitude = p_wave_amplitude;
+	_init_fetch = p_fetch;
+	if (rd == nullptr || !buf_h0.is_valid() || !buf_ocean_init_params.is_valid() || !uset_spectrum_init.is_valid()) {
+		return; // not built yet: rt_build() uses these
 	}
+	_rt_spectrum_init();
 }
 
 void WaterSolverGPU::_rt_build_caustics_grid() {
@@ -709,6 +730,16 @@ void WaterSolverGPU::_rt_build_caustics_grid() {
 	depth_uniform.append_id(tex_cell_depth);
 	uniforms.push_back(depth_uniform);
 	uset_caustics = rd->uniform_set_create(uniforms, shader_caustics, 0);
+}
+
+void WaterSolverGPU::rt_clear_ripples(Ref<WaterSolverGPU> p_self) {
+	if (rd == nullptr || !shaders_ok || buf_state_a.is_null()) {
+		return;
+	}
+	const uint32_t cells = (uint32_t)(grid_resolution * grid_resolution);
+	rd->buffer_clear(buf_state_a, 0, cells * 4 * sizeof(float));
+	rd->buffer_clear(buf_state_b, 0, cells * 4 * sizeof(float));
+	rd->buffer_clear(buf_height, 0, cells * sizeof(float));
 }
 
 void WaterSolverGPU::rt_build(Ref<WaterSolverGPU> p_self, int p_grid_resolution, Vector2 p_domain_size, int p_ocean_grid_resolution, Vector2 p_ocean_domain_size, float p_wind_speed, Vector2 p_wind_direction, float p_wave_amplitude, float p_gravity, bool p_caustics_enabled, PackedFloat32Array p_cell_depth, float p_depth, float p_shallow_fade_depth, float p_fetch) {
@@ -1172,12 +1203,35 @@ void WaterSolver::_dispatch(const Callable &p_call) const {
 	}
 }
 
+void WaterSolver::reinit_spectrum(float p_wind_speed, Vector2 p_wind_direction, float p_wave_amplitude, float p_fetch) {
+	settings.wind_speed = p_wind_speed;
+	settings.wind_direction = p_wind_direction;
+	settings.wave_amplitude = p_wave_amplitude;
+	settings.fetch = p_fetch;
+	_dispatch(callable_mp(gpu.ptr(), &WaterSolverGPU::rt_reinit_spectrum).bind(gpu, p_wind_speed, p_wind_direction, p_wave_amplitude, p_fetch));
+}
+
+void WaterSolver::recenter(Vector2 p_grid_center) {
+	settings.grid_center = p_grid_center;
+	for (SphereSlot &s : sphere_slots) {
+		s = SphereSlot();
+	}
+	pending_impulses.clear();
+	if (gpu.is_null()) {
+		return;
+	}
+	_dispatch(callable_mp(gpu.ptr(), &WaterSolverGPU::rt_clear_ripples).bind(gpu));
+}
+
 void WaterSolver::configure(const Settings &p_settings) {
 	settings = p_settings;
 	for (SphereSlot &s : sphere_slots) {
 		s = SphereSlot();
 	}
 	pending_impulses.clear();
+	if (gpu.is_null()) {
+		return; // no device (headless): the callable below would be built on a null object
+	}
 	_dispatch(callable_mp(gpu.ptr(), &WaterSolverGPU::rt_build).bind(gpu, settings.grid_resolution, settings.domain_size, settings.ocean_grid_resolution, settings.ocean_domain_size, settings.wind_speed, settings.wind_direction, settings.wave_amplitude, settings.gravity, settings.caustics_enabled, settings.cell_depth, settings.depth, settings.shallow_fade_depth, settings.fetch));
 }
 
@@ -1299,10 +1353,16 @@ RID WaterSolver::get_ocean_foam_texture_rd_rid() const {
 }
 
 void WaterSolver::set_foam_settings(bool p_enabled, float p_choppiness, float p_threshold, float p_persistence, float p_shore_band, float p_shore_undertow) {
+	if (gpu.is_null()) {
+		return;
+	}
 	_dispatch(callable_mp(gpu.ptr(), &WaterSolverGPU::rt_set_foam).bind(gpu, p_enabled, p_choppiness, p_threshold, p_persistence, p_shore_band, p_shore_undertow));
 }
 
 void WaterSolver::set_swash_settings(float p_run_up, float p_drain_speed, float p_dry_time) {
+	if (gpu.is_null()) {
+		return;
+	}
 	_dispatch(callable_mp(gpu.ptr(), &WaterSolverGPU::rt_set_swash).bind(gpu, p_run_up, p_drain_speed, p_dry_time));
 }
 

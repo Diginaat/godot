@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PhysXLightShafts3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Screen-space light shafts (god rays) from a [DirectionalLight3D], provided by the PhysX module.
+	</brief_description>
+	<description>
+		Screen-space light shafts, as other engines offer them as a post effect (light shaft bloom and light shaft occlusion): where the sky shows near the sun, its light streams outward in rays ([b]bloom[/b]); where something blocks the sun, the open air on the way to it (the sky, distant haze) is darkened along the same rays ([b]occlusion[/b]); the blocking things themselves aren't, so a wall hiding the sun is no darker for it. Add it as a child of the [DirectionalLight3D] (or point [member light] at one); nothing else needs setting up.
+		Not the same as [member Environment.glow_enabled] (Godot's bloom): glow blurs every bright pixel evenly in all directions into a halo, wherever it is. Shaft bloom only takes the unblocked sky around the sun and smears it outward along lines from the sun, so the gaps in what blocks the sun become streaks of light. The two stack (glow runs after the shafts).
+		It works on the rendered frame, so it needs no fog, costs the same at any view distance, and reaches as far as the camera sees. Compare volumetric fog ([member Environment.volumetric_fog_enabled]), which lights real fog in a coarse 3D grid: its shafts are soft, limited to [member Environment.volumetric_fog_length], and need fog density across the whole scene. The two can be combined.
+		Geometry blocks the light, and so does the liquid of a [PhysXParticleFluid3D] in a screen-space render mode (it writes the depth buffer). The gas of [PhysXFlow3D] blocks the light by how much it darkens what's behind it (smoke blocks, fire doesn't), and glowing gas isn't taken for the sun: the light comes from the frame as it was before the gas was drawn.
+		Works with the Forward+ and Mobile renderers, not Compatibility (which has no compositor effects). Volumetric fog is Forward+ only, so on Mobile this is the way to get sun shafts.
+		The rays only show while the sun is on screen or near it: they fade out over [member edge_fade] as the sun leaves the screen, and nothing is drawn while it is behind the camera, with an orthogonal [Camera3D], or while this node or its light is hidden. Only one [PhysXLightShafts3D] is drawn per frame; with several, which one is unspecified.
+	</description>
+	<tutorials>
+	</tutorials>
+	<members>
+		<member name="edge_fade" type="float" setter="set_edge_fade" getter="get_edge_fade" default="0.3">
+			How far off screen (in screen widths / heights) the sun can be before the rays have faded out completely. [code]0[/code] cuts them off as soon as the sun leaves the screen.
+		</member>
+		<member name="light" type="NodePath" setter="set_light" getter="get_light" default="NodePath(&quot;&quot;)">
+			The [DirectionalLight3D] the shafts come from. Empty: the parent node, which must then be a [DirectionalLight3D].
+		</member>
+		<member name="mode" type="int" setter="set_mode" getter="get_mode" enum="PhysXLightShafts3D.ShaftMode" default="0">
+			Which shafts are drawn.
+		</member>
+		<member name="ray_length" type="float" setter="set_ray_length" getter="get_ray_length" default="0.6">
+			How far the rays reach from the sun, as a fraction of the screen.
+		</member>
+		<member name="shaft_bloom_max_brightness" type="float" setter="set_shaft_bloom_max_brightness" getter="get_shaft_bloom_max_brightness" default="8.0">
+			The most any pixel adds to the rays, after [member shaft_bloom_threshold] (keeps a very bright sun disk from blowing the rays out).
+		</member>
+		<member name="shaft_bloom_scale" type="float" setter="set_shaft_bloom_scale" getter="get_shaft_bloom_scale" default="4.0">
+			How bright the rays are.
+		</member>
+		<member name="shaft_bloom_threshold" type="float" setter="set_shaft_bloom_threshold" getter="get_shaft_bloom_threshold" default="0.75">
+			How bright a pixel of unblocked sky must be before it adds to the rays, as a fraction of the light's [member Light3D.light_energy] (the sun's disk in the sky is about that bright): at the default, the sun and the sky right around it stream, ordinary sky doesn't. Lower it to make more of the sky stream.
+		</member>
+		<member name="shaft_bloom_tint" type="Color" setter="set_shaft_bloom_tint" getter="get_shaft_bloom_tint" default="Color(1, 1, 1, 1)">
+			Multiplies the rays' color.
+		</member>
+		<member name="shaft_occlusion_depth_range" type="float" setter="set_shaft_occlusion_depth_range" getter="get_shaft_occlusion_depth_range" default="1000.0">
+			Geometry blocks the sun less the further away it is, not at all from this distance (meters) on: distant terrain and buildings don't darken the frame like nearby ones do. It also sets how much open air a pixel shows, which is what occlusion darkens: the sky all of it, geometry by its distance up to this range. Lower it to darken nearer geometry on the way to a blocked sun too (at [code]50[/code], ground 30 m away darkens by more than half as much as the sky, a wall 5 m away barely).
+		</member>
+		<member name="shaft_occlusion_strength" type="float" setter="set_shaft_occlusion_strength" getter="get_shaft_occlusion_strength" default="0.6">
+			How much the frame is darkened where the way to the sun is blocked ([code]1[/code]: to black, near the sun).
+		</member>
+	</members>
+	<constants>
+		<constant name="SHAFTS_BLOOM_AND_OCCLUSION" value="0" enum="ShaftMode">
+			Bright rays from the sky and darkening where the sun is blocked (the default).
+		</constant>
+		<constant name="SHAFTS_BLOOM" value="1" enum="ShaftMode">
+			Only the bright rays.
+		</constant>
+		<constant name="SHAFTS_OCCLUSION" value="2" enum="ShaftMode">
+			Only the darkening.
+		</constant>
+	</constants>
+</class>

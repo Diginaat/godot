@@ -5,13 +5,64 @@
 	</brief_description>
 	<description>
 		PxVehicle2 has no track/tank primitive of its own. Every wheel is driven and none steer; instead, each wheel's own throttle response is set independently every tick from [member left_ratio]/[member right_ratio], so the two sides of the vehicle can spin in genuinely opposite directions at once for a real pivot turn.
-		Node structure mirrors [PhysXVehicle3D]/[PhysXMotorcycle3D]: add a [CollisionShape3D] child with a [BoxShape3D] for the hull, and 2 to 16 [PhysXVehicleWheel3D] children. Which track a wheel belongs to is inferred automatically from its own local X position sign (negative = left, positive = right) -- there is no explicit per-wheel track-side property, and [member PhysXVehicleWheel3D.use_as_steering]/[member PhysXVehicleWheel3D.use_as_traction] are unused on a tank's wheels. Each wheel's own [member Node3D.position] is where it rests under static load, same convention [PhysXVehicle3D]'s wheels use.
+		Node structure mirrors [PhysXVehicle3D]/[PhysXMotorcycle3D]: add a [CollisionShape3D] child with a [BoxShape3D] for the hull, and 2 to 16 [PhysXVehicleWheel3D] children. Which track a wheel belongs to is inferred automatically from its own local X position sign (positive = left, negative = right: the hull faces local +Z, the same forward as [VehicleBody3D]) -- there is no explicit per-wheel track-side property, and [member PhysXVehicleWheel3D.use_as_steering]/[member PhysXVehicleWheel3D.use_as_traction] are unused on a tank's wheels. Each wheel's own [member Node3D.position] is where it rests under static load, same convention [PhysXVehicle3D]'s wheels use.
 		Drive it every physics tick by setting [member left_ratio], [member right_ratio], and [member brake]. Unlike [member PhysXVehicle3D.throttle]/[member PhysXMotorcycle3D.throttle] ([code]0[/code] to [code]1[/code], direction chosen by a separate reverse gear), [member left_ratio]/[member right_ratio] are signed ([code]-1[/code] to [code]1[/code]): the sign is the direction, so a track can drive forward, reverse, or (with the two tracks at opposite signs) pivot in place, all without a gear change.
 		Only runs in an actual running game, never in the editor -- placing or moving the node in the Inspector does not simulate or fall under gravity.
 	</description>
 	<tutorials>
 	</tutorials>
 	<methods>
+		<method name="add_collision_exception_with">
+			<return type="void" />
+			<param index="0" name="body" type="Node" />
+			<description>
+				Stops the tank and [param body] (a [PhysicsBody3D] or another PhysX vehicle) colliding: they pass through each other, its wheels included, as with [method PhysicsBody3D.add_collision_exception_with]. Either side having the exception is enough, so a [RigidBody3D] or [CharacterBody3D] needs nothing of its own.
+			</description>
+		</method>
+		<method name="apply_central_force">
+			<return type="void" />
+			<param index="0" name="force" type="Vector3" />
+			<description>
+				Applies a world-space force at the chassis's center of mass for this physics step (call it every step to keep pushing), as [method RigidBody3D.apply_central_force]. For autopilot steering and docking assists, wind, gravity wells.
+			</description>
+		</method>
+		<method name="apply_central_impulse">
+			<return type="void" />
+			<param index="0" name="impulse" type="Vector3" />
+			<description>
+				Applies a one-off world-space impulse at the center of mass, as [method RigidBody3D.apply_central_impulse]: the velocity changes by [param impulse] / [member mass] at once.
+			</description>
+		</method>
+		<method name="apply_force">
+			<return type="void" />
+			<param index="0" name="force" type="Vector3" />
+			<param index="1" name="position" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Applies a world-space force at [param position] for this physics step, as [method RigidBody3D.apply_force]: [param position] is an offset from the tank's origin, in world axes. Off the center of mass it also turns the tank.
+			</description>
+		</method>
+		<method name="apply_impulse">
+			<return type="void" />
+			<param index="0" name="impulse" type="Vector3" />
+			<param index="1" name="position" type="Vector3" default="Vector3(0, 0, 0)" />
+			<description>
+				Applies a one-off world-space impulse at [param position] (an offset from the tank's origin, in world axes), as [method RigidBody3D.apply_impulse].
+			</description>
+		</method>
+		<method name="apply_torque">
+			<return type="void" />
+			<param index="0" name="torque" type="Vector3" />
+			<description>
+				Applies a world-space torque for this physics step, as [method RigidBody3D.apply_torque].
+			</description>
+		</method>
+		<method name="apply_torque_impulse">
+			<return type="void" />
+			<param index="0" name="impulse" type="Vector3" />
+			<description>
+				Applies a one-off world-space angular impulse, as [method RigidBody3D.apply_torque_impulse].
+			</description>
+		</method>
 		<method name="get_actor_position" qualifiers="const">
 			<return type="Vector3" />
 			<description>
@@ -21,13 +72,19 @@
 		<method name="get_angular_velocity" qualifiers="const">
 			<return type="Vector3" />
 			<description>
-				Current world-space angular velocity of the hull.
+				The chassis's world-space angular velocity, in radians per second.
+			</description>
+		</method>
+		<method name="get_collision_exceptions" qualifiers="const">
+			<return type="Node[]" />
+			<description>
+				The bodies and vehicles this tank has collision exceptions with.
 			</description>
 		</method>
 		<method name="get_forward" qualifiers="const">
 			<return type="Vector3" />
 			<description>
-				Current world-space forward direction of the hull.
+				Current world-space forward direction of the hull: its local +Z axis, the same forward as [VehicleBody3D] ([constant Vector3.MODEL_FRONT]).
 			</description>
 		</method>
 		<method name="get_forward_speed" qualifiers="const">
@@ -39,7 +96,13 @@
 		<method name="get_linear_velocity" qualifiers="const">
 			<return type="Vector3" />
 			<description>
-				Current world-space linear velocity of the hull.
+				The chassis's world-space linear velocity. It reads the chassis itself, so a velocity just set with [method set_linear_velocity] or changed by an impulse reads back at once.
+			</description>
+		</method>
+		<method name="get_rid" qualifiers="const">
+			<return type="RID" />
+			<description>
+				The tank's identity in the physics server: a raycast or shape query that hits it, or a [CharacterBody3D] that bumps into it, reports this RID as the collider's (and the tank node as the collider). Put it in a query's [code]exclude[/code] list to see past the tank, or pass it to [method PhysicsServer3D.body_add_collision_exception] to make a body ignore it. It stands for the tank only: setting its state through [PhysicsServer3D] doesn't move the tank.
 			</description>
 		</method>
 		<method name="get_up" qualifiers="const">
@@ -68,6 +131,35 @@
 				Returns whether the underlying PhysX vehicle actor is currently sleeping.
 			</description>
 		</method>
+		<method name="remove_collision_exception_with">
+			<return type="void" />
+			<param index="0" name="body" type="Node" />
+			<description>
+				Removes an exception added with [method add_collision_exception_with].
+			</description>
+		</method>
+		<method name="set_angular_velocity">
+			<return type="void" />
+			<param index="0" name="velocity" type="Vector3" />
+			<description>
+				Sets the chassis's world-space angular velocity (radians per second) directly.
+			</description>
+		</method>
+		<method name="set_linear_velocity">
+			<return type="void" />
+			<param index="0" name="velocity" type="Vector3" />
+			<description>
+				Sets the chassis's world-space linear velocity directly. [method get_linear_velocity] reads it back at once.
+			</description>
+		</method>
+		<method name="teleport">
+			<return type="void" />
+			<param index="0" name="transform" type="Transform3D" />
+			<param index="1" name="keep_velocity" type="bool" default="false" />
+			<description>
+				Moves the tank to [param transform] at once, without rebuilding it (the same chassis, wheels and settings carry on). Unless [param keep_velocity] is [code]true[/code], it arrives at rest, its wheels no longer spinning. Moving the node itself doesn't move a tank that is simulating: its transform follows the chassis.
+			</description>
+		</method>
 	</methods>
 	<members>
 		<member name="brake" type="float" setter="set_brake" getter="get_brake" default="0.0">
@@ -86,7 +178,7 @@
 			Same meaning as [member CollisionObject3D.collision_layer]. Applies to the hull only -- the wheels do not have their own collision shapes (their ground contact is handled entirely by the suspension, not by a physical wheel shape touching the road).
 		</member>
 		<member name="collision_mask" type="int" setter="set_collision_mask" getter="get_collision_mask" default="1">
-			Same meaning as [member CollisionObject3D.collision_mask]. Applies to the hull only, see [member collision_layer].
+			Same meaning as [member CollisionObject3D.collision_mask]. Applies to the hull (see [member collision_layer]) and to the wheels' ground raycasts: like a [RayCast3D], a wheel only rests on a shape whose collision layer is in this mask, and never on an [Area3D].
 		</member>
 		<member name="left_ratio" type="float" setter="set_left_ratio" getter="get_left_ratio" default="0.0">
 			Drive input for the left track, [code]-1[/code] to [code]1[/code]. Scales up to [member max_engine_torque] of drive torque, split evenly across the left track's own wheels; sign is direction, not a separate reverse gear. Set every physics tick from script.
@@ -103,8 +195,14 @@
 		<member name="moment_of_inertia" type="Vector3" setter="set_moment_of_inertia" getter="get_moment_of_inertia" default="Vector3(8000, 9000, 9000)">
 			The vehicle's own rotational inertia around its X/Y/Z axes. Higher values resist rotation (pitch/yaw/roll) more.
 		</member>
+		<member name="physics_material_override" type="PhysicsMaterial" setter="set_physics_material_override" getter="get_physics_material_override">
+			The contact material of the hull box: what the vehicle feels like when its body, not its wheels, touches something -- on its roof or side after a flip, grinding along a wall, bottoming out. [member PhysicsMaterial.friction], [member PhysicsMaterial.rough], [member PhysicsMaterial.bounce] and [member PhysicsMaterial.absorbent] combine with the other side the same way as for any [RigidBody3D] on this module. If [code]null[/code], the hull uses friction [code]0.5[/code] and bounce [code]0.1[/code]; lower the friction for a body that skids further after a flip. Changes (including edits to the assigned material) apply immediately, without rebuilding the vehicle. Tire grip is not affected; it comes from the wheels' tire settings.
+		</member>
 		<member name="right_ratio" type="float" setter="set_right_ratio" getter="get_right_ratio" default="0.0">
 			Drive input for the right track, [code]-1[/code] to [code]1[/code]. Same convention as [member left_ratio], applied to the right track's own wheels. Setting [member left_ratio] and [member right_ratio] to opposite signs pivots the vehicle in place.
+		</member>
+		<member name="tire_grip" type="float" setter="set_tire_grip" getter="get_tire_grip" default="1.0">
+			A live multiplier on every tire's grip: below [code]1[/code] for ice, mud or wet roads, above for sticky tires. It takes effect at once, without rebuilding the vehicle (the wheels' own [code]tire_*[/code] properties rebuild it), so it can follow the ground the vehicle is on every frame.
 		</member>
 	</members>
 	<constants>

@@ -59,6 +59,7 @@ PhysXTank3D::PhysXTank3D() {
 
 PhysXTank3D::~PhysXTank3D() {
 	_destroy();
+	_control_free();
 	memdelete(impl);
 }
 
@@ -118,6 +119,12 @@ bool PhysXTank3D::_build() {
 	cfg.max_brake_torque = max_brake_torque;
 	cfg.collision_layer = collision_layer;
 	cfg.collision_mask = collision_mask;
+	{
+		real_t friction, bounce;
+		_chassis_material(friction, bounce);
+		cfg.chassis_friction = (float)friction;
+		cfg.chassis_bounce = (float)bounce;
+	}
 
 	// Unlike PhysXMotorcycle3D's front/rear reordering, wheels are used in
 	// their natural child-registration order directly -- configure_vehicle_track()
@@ -128,8 +135,9 @@ bool PhysXTank3D::_build() {
 	for (uint32_t i = 0; i < wheels.size(); i++) {
 		PhysXVehicleWheel3D *w = wheels[i];
 		VehicleTrackWheelConfig &wc = cfg.wheels[i];
-		wc.position = w->get_position();
-		wc.basis = w->get_transform().basis;
+		// The rest pose, not the node's current (simulated) one -- see get_rest_transform().
+		wc.position = w->get_rest_transform().origin;
+		wc.basis = w->get_rest_transform().basis;
 		wc.radius = w->get_radius();
 		wc.half_width = w->get_half_width();
 		wc.wheel_mass = w->get_wheel_mass();
@@ -146,32 +154,44 @@ bool PhysXTank3D::_build() {
 		wc.tire_slide_grip = w->get_tire_slide_grip();
 	}
 
-	if (!configure_vehicle_track(impl->vehicle, cfg, *physics, *scene, impl->simulationContext)) {
-		return false;
-	}
-
-	VehicleTrack &v = impl->vehicle;
-	v.physxActor.rigidBody->setGlobalPose(to_px(get_global_transform()));
 	impl->sleep_threshold = (PxReal)space->get_sleep_energy_threshold();
 	impl->time_before_sleep = (PxReal)space->get_time_before_sleep();
-	PxRigidDynamic *dynamic_body = v.physxActor.rigidBody->is<PxRigidDynamic>();
-	ERR_FAIL_NULL_V(dynamic_body, false);
-	dynamic_body->setSleepThreshold(can_sleep && GodotPhysXProjectSettings::allow_sleep ? impl->sleep_threshold : 0.0f);
-	dynamic_body->setWakeCounter(impl->time_before_sleep);
-	scene->addActor(*v.physxActor.rigidBody);
-	v.physxActor.rigidBody->setName("PhysXTank3D");
+	const PxTransform pose = to_px(get_global_transform());
+	// Made and added where the scene may be touched, and waited for (see GodotPhysXServer3D::run_on_physics_thread()).
+	GodotPhysXServer3D::run_on_physics_thread([&]() {
+		if (!configure_vehicle_track(impl->vehicle, cfg, *physics, *scene, impl->simulationContext)) {
+			return;
+		}
+		VehicleTrack &v = impl->vehicle;
+		v.physxActor.rigidBody->setGlobalPose(pose);
+		PxRigidDynamic *dynamic_body = v.physxActor.rigidBody->is<PxRigidDynamic>();
+		ERR_FAIL_NULL(dynamic_body);
+		dynamic_body->setSleepThreshold(can_sleep && GodotPhysXProjectSettings::allow_sleep ? impl->sleep_threshold : 0.0f);
+		dynamic_body->setWakeCounter(impl->time_before_sleep);
+		scene->addActor(*v.physxActor.rigidBody);
+		v.physxActor.rigidBody->setName("PhysXTank3D");
 
-	impl->scene = scene;
-	impl->built = true;
-	return true;
+		impl->scene = scene;
+		impl->built = true;
+		_control_built();
+		_cache_chassis();
+	},
+			true);
+	return impl->built;
 }
+
+PHYSX_VEHICLE_CONTROL_DEFINE(PhysXTank3D, impl->vehicle.numWheels)
 
 void PhysXTank3D::_destroy() {
 	if (impl->built) {
-		if (impl->scene) {
-			impl->scene->removeActor(*impl->vehicle.physxActor.rigidBody);
-		}
-		impl->vehicle.destroy();
+		GodotPhysXServer3D::run_on_physics_thread([&]() {
+			_control_unbind();
+			if (impl->scene) {
+				impl->scene->removeActor(*impl->vehicle.physxActor.rigidBody);
+			}
+			impl->vehicle.destroy();
+		},
+				true);
 		impl->built = false;
 		impl->scene = nullptr;
 	}
@@ -223,26 +243,18 @@ void PhysXTank3D::_notification(int p_what) {
 			set_global_transform(to_godot(v.physxActor.rigidBody->getGlobalPose()));
 			const PxTransform cmass_local_pose = v.physxActor.rigidBody->getCMassLocalPose();
 			for (uint32_t i = 0; i < wheels.size(); i++) {
-				wheels[i]->set_transform(to_godot(cmass_local_pose * v.wheelLocalPoses[i].localPose));
+				wheels[i]->_set_simulated_transform(to_godot(cmass_local_pose * v.wheelLocalPoses[i].localPose));
 			}
+			_cache_chassis();
 		} break;
 	}
 }
 
 Vector3 PhysXTank3D::get_linear_velocity() const {
-	if (!impl->built) {
-		return Vector3();
-	}
-	return to_godot(impl->vehicle.rigidBodyState.linearVelocity);
-}
-
-Vector3 PhysXTank3D::get_angular_velocity() const {
-	if (!impl->built) {
-		return Vector3();
-	}
-	PxRigidDynamic *dynamic_body = impl->vehicle.physxActor.rigidBody->is<PxRigidDynamic>();
-	ERR_FAIL_NULL_V(dynamic_body, Vector3());
-	return to_godot(dynamic_body->getAngularVelocity());
+	// The chassis actor's own velocity, not the vehicle state's copy (that one is
+	// refreshed only when the vehicle steps, so a velocity just set or an impulse
+	// just applied would read back a step late).
+	return _control_body() != nullptr ? to_godot(_chassis_linear_velocity()) : Vector3();
 }
 
 real_t PhysXTank3D::get_forward_speed() const {
@@ -253,7 +265,7 @@ real_t PhysXTank3D::get_forward_speed() const {
 	// direction -- rotate it into world space by the actor's current
 	// orientation first (see PhysXVehicle3D::get_forward_speed()'s own
 	// comment for the real bug this was found from).
-	const PxTransform actor_pose = impl->vehicle.physxActor.rigidBody->getGlobalPose();
+	const PxTransform actor_pose = _chassis_pose();
 	const PxVec3 fwd = actor_pose.q.rotate(impl->vehicle.frame.getLngAxis());
 	return (real_t)impl->vehicle.rigidBodyState.linearVelocity.dot(fwd);
 }
@@ -262,16 +274,17 @@ Vector3 PhysXTank3D::get_up() const {
 	if (!impl->built) {
 		return Vector3(0, 1, 0);
 	}
-	const PxTransform actor_pose = impl->vehicle.physxActor.rigidBody->getGlobalPose();
+	const PxTransform actor_pose = _chassis_pose();
 	return to_godot(actor_pose.q.getBasisVector1());
 }
 
 Vector3 PhysXTank3D::get_forward() const {
+	// Local +Z, as VehicleBody3D (Vector3.MODEL_FRONT).
 	if (!impl->built) {
-		return -get_global_transform().basis.get_column(2);
+		return get_global_transform().basis.get_column(2).normalized();
 	}
-	const PxTransform actor_pose = impl->vehicle.physxActor.rigidBody->getGlobalPose();
-	return -to_godot(actor_pose.q.getBasisVector2());
+	const PxTransform actor_pose = _chassis_pose();
+	return to_godot(actor_pose.q.getBasisVector2());
 }
 
 real_t PhysXTank3D::get_wheel_jounce(int p_wheel) const {
@@ -294,7 +307,7 @@ Vector3 PhysXTank3D::get_actor_position() const {
 	if (!impl->built) {
 		return Vector3();
 	}
-	return to_godot(impl->vehicle.physxActor.rigidBody->getGlobalPose().p);
+	return to_godot(_chassis_pose().p);
 }
 
 PackedStringArray PhysXTank3D::get_configuration_warnings() const {
@@ -317,10 +330,10 @@ PackedStringArray PhysXTank3D::get_configuration_warnings() const {
 	} else {
 		int nb_left = 0, nb_right = 0, nb_centerline = 0;
 		for (uint32_t i = 0; i < wheels.size(); i++) {
-			real_t x = wheels[i]->get_position().x;
+			real_t x = wheels[i]->get_rest_transform().origin.x;
 			if (Math::is_zero_approx(x)) {
 				nb_centerline++;
-			} else if (x < 0.0) {
+			} else if (x > 0.0) { // the driver's left is +X
 				nb_left++;
 			} else {
 				nb_right++;
@@ -380,17 +393,20 @@ void PhysXTank3D::set_can_sleep(bool p_can_sleep) {
 	if (impl->built) {
 		PxRigidDynamic *body = impl->vehicle.physxActor.rigidBody->is<PxRigidDynamic>();
 		ERR_FAIL_NULL(body);
-		body->setSleepThreshold(can_sleep && GodotPhysXProjectSettings::allow_sleep ? impl->sleep_threshold : 0.0f);
-		body->setWakeCounter(impl->time_before_sleep);
-		if (!can_sleep) {
-			body->wakeUp();
-		}
+		const PxReal threshold = can_sleep && GodotPhysXProjectSettings::allow_sleep ? impl->sleep_threshold : 0.0f;
+		const PxReal wake_counter = impl->time_before_sleep;
+		GodotPhysXServer3D::run_on_physics_thread([=]() {
+			body->setSleepThreshold(threshold);
+			body->setWakeCounter(wake_counter);
+			if (!p_can_sleep) {
+				body->wakeUp();
+			}
+		});
 	}
 }
 
 bool PhysXTank3D::is_sleeping() const {
-	PxRigidDynamic *body = impl->built ? impl->vehicle.physxActor.rigidBody->is<PxRigidDynamic>() : nullptr;
-	return body && body->isSleeping();
+	return impl->built && _chassis_sleeping();
 }
 PHYSX_TANK_SETTER(max_engine_torque, max_engine_torque)
 PHYSX_TANK_SETTER(max_brake_torque, max_brake_torque)
@@ -404,6 +420,48 @@ void PhysXTank3D::set_collision_layer(uint32_t p_layer) {
 void PhysXTank3D::set_collision_mask(uint32_t p_mask) {
 	collision_mask = p_mask;
 	_rebuild_if_live();
+}
+
+void PhysXTank3D::set_physics_material_override(const Ref<PhysicsMaterial> &p_material) {
+	if (physics_material_override == p_material) {
+		return;
+	}
+	if (physics_material_override.is_valid()) {
+		physics_material_override->disconnect_changed(callable_mp(this, &PhysXTank3D::_chassis_material_changed));
+	}
+	physics_material_override = p_material;
+	if (physics_material_override.is_valid()) {
+		physics_material_override->connect_changed(callable_mp(this, &PhysXTank3D::_chassis_material_changed));
+	}
+	_chassis_material_changed();
+}
+
+void PhysXTank3D::_chassis_material(real_t &r_friction, real_t &r_bounce) const {
+	if (physics_material_override.is_valid()) {
+		r_friction = physics_material_override->computed_friction();
+		r_bounce = physics_material_override->computed_bounce();
+	} else {
+		r_friction = 0.5;
+		r_bounce = 0.1;
+	}
+}
+
+// The chassis material is the vehicle's own (see configure_*()), so it is edited in place -- no rebuild.
+void PhysXTank3D::_chassis_material_changed() {
+	if (!impl->built) {
+		return; // the next build reads it
+	}
+	real_t friction, bounce;
+	_chassis_material(friction, bounce);
+	PxRigidActor *actor = impl->vehicle.physxActor.rigidBody;
+	GodotPhysXServer3D::run_on_physics_thread([=]() {
+		godot_physx_apply_material_to_simulation_shapes(actor, friction, bounce);
+		// A material change doesn't wake the actor: one resting on its roof would keep sleeping on the old grip.
+		PxRigidDynamic *body = actor ? actor->is<PxRigidDynamic>() : nullptr;
+		if (body && body->getScene()) {
+			body->wakeUp();
+		}
+	});
 }
 
 void PhysXTank3D::_bind_methods() {
@@ -445,6 +503,8 @@ void PhysXTank3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "left_ratio", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_left_ratio", "get_left_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "right_ratio", PROPERTY_HINT_RANGE, "-1,1,0.01"), "set_right_ratio", "get_right_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "brake", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_brake", "get_brake");
+	ADD_GROUP("", "");
+	PHYSX_VEHICLE_CONTROL_BIND(PhysXTank3D)
 
 	ClassDB::bind_method(D_METHOD("set_collision_layer", "layer"), &PhysXTank3D::set_collision_layer);
 	ClassDB::bind_method(D_METHOD("get_collision_layer"), &PhysXTank3D::get_collision_layer);
@@ -452,9 +512,11 @@ void PhysXTank3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_collision_mask"), &PhysXTank3D::get_collision_mask);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
+	ClassDB::bind_method(D_METHOD("set_physics_material_override", "physics_material_override"), &PhysXTank3D::set_physics_material_override);
+	ClassDB::bind_method(D_METHOD("get_physics_material_override"), &PhysXTank3D::get_physics_material_override);
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "physics_material_override", PROPERTY_HINT_RESOURCE_TYPE, PhysicsMaterial::get_class_static()), "set_physics_material_override", "get_physics_material_override");
 
 	ClassDB::bind_method(D_METHOD("get_linear_velocity"), &PhysXTank3D::get_linear_velocity);
-	ClassDB::bind_method(D_METHOD("get_angular_velocity"), &PhysXTank3D::get_angular_velocity);
 	ClassDB::bind_method(D_METHOD("get_forward_speed"), &PhysXTank3D::get_forward_speed);
 	ClassDB::bind_method(D_METHOD("get_up"), &PhysXTank3D::get_up);
 	ClassDB::bind_method(D_METHOD("get_forward"), &PhysXTank3D::get_forward);

@@ -62,6 +62,7 @@ class PhysXWaterWake3D : public Node3D {
 	float border_damping = 8.0f;
 	float hull_length = 0.0f; // 0 = from the sibling PhysXBuoyancy3D's sample points
 	float hull_beam = 0.0f;
+	PackedFloat32Array hull_profile; // 8 half-beam fractions bow -> stern (empty = a box): a tapered hull's foam + dip
 	int source_count = 5;
 	float rest_depth = 0.02f;
 	float wake_depth = 0.18f;
@@ -111,6 +112,9 @@ public:
 	float get_hull_length() const { return hull_length; }
 	void set_hull_beam(float p_beam) { hull_beam = MAX(p_beam, 0.0f); }
 	float get_hull_beam() const { return hull_beam; }
+	void set_hull_profile(const PackedFloat32Array &p_profile) { hull_profile = p_profile.size() == 8 ? p_profile : PackedFloat32Array(); }
+	PackedFloat32Array get_hull_profile() const { return hull_profile; }
+	float _profile_at(float p_t) const;
 	static constexpr int MAX_KEEL_SOURCES = 15;
 	void set_source_count(int p_count) { source_count = CLAMP(p_count, 1, MAX_KEEL_SOURCES); }
 	int get_source_count() const { return source_count; }

@@ -31,6 +31,9 @@
 #pragma once
 
 #include "../godot_physx_conversions.h"
+#include "../objects/godot_physx_material.h"
+#include "godot_physx_wheel_query_filter.h"
+#include "../spaces/godot_physx_space_3d.h"
 
 #include "core/error/error_macros.h"
 #include "core/math/basis.h"
@@ -119,6 +122,7 @@ public:
 
 	// --- PhysX integration (PhysXIntegrationParams/State) ------------------
 	PxVehiclePhysXRoadGeometryQueryParams physxRoadGeometryQueryParams;
+	GodotPhysXWheelQueryFilter wheelQueryFilter; // physxRoadGeometryQueryParams.filterCallback points here
 	PxVehiclePhysXMaterialFrictionParams physxMaterialFrictionParams[4];
 	PxVehiclePhysXSuspensionLimitConstraintParams physxSuspensionLimitConstraintParams[4];
 	PxTransform physxActorCMassLocalPose;
@@ -450,6 +454,7 @@ public:
 
 	void destroy() {
 		PxVehicleConstraintsDestroy(physxConstraints);
+		GodotPhysXSpace3D::hold_actor_materials(physxActor.rigidBody); // (no material handle reused before a step)
 		PxVehiclePhysXActorDestroy(physxActor);
 	}
 };
@@ -506,7 +511,7 @@ struct Vehicle4WWheelConfig {
 };
 
 // Everything a caller can tune about a direct-drive 4-wheel vehicle, in Godot
-// units/conventions (meters, kg, radians, Godot's -Z-forward/+X-right/+Y-up).
+// units/conventions (meters, kg, radians, Godot's +Z-forward/+X-left/+Y-up vehicle convention).
 // Shared between the probe (hardcoded sedan-like defaults) and PhysXVehicle3D
 // (these become real exported properties -- chassis_half_extents/
 // chassis_half_extents/chassis_box_center_local come from a real CollisionShape3D child, wheels[] from
@@ -551,6 +556,10 @@ struct Vehicle4WConfig {
 	// note on why the wheel shapes stay non-simulating).
 	uint32_t collision_layer = 1;
 	uint32_t collision_mask = 1;
+	// Chassis box contact material, signed like PhysicsMaterial::computed_friction() / computed_bounce() (the
+	// node's physics_material_override, or these defaults).
+	float chassis_friction = 0.5f;
+	float chassis_bounce = 0.1f;
 };
 
 // Fills every param struct on v from cfg, builds the real PxRigidDynamic
@@ -572,10 +581,12 @@ struct Vehicle4WConfig {
 inline bool configure_vehicle4w(Vehicle4W &v, const Vehicle4WConfig &cfg, PxPhysics &physics, PxScene &scene, PxVehiclePhysXSimulationContext &out_context, PxU32 out_wheel_order[4]) {
 	v.setToDefault();
 
-	// Godot convention: forward = -Z, right = +X, up = +Y (matches
-	// godot_physx_conversions.h's 1:1 PhysX<->Godot component mapping, so no
-	// axis remap is needed when reading the chassis pose back out).
-	v.frame.lngAxis = PxVehicleAxes::eNegZ;
+	// Godot's vehicle convention: forward = +Z (VehicleBody3D: "the local forward
+	// for this node is Vector3.MODEL_FRONT"), left = +X, up = +Y -- also PhysX's own
+	// default frame, and a 1:1 component mapping (godot_physx_conversions.h), so no
+	// axis remap reading the chassis pose back out. (Was declared -Z while the
+	// vehicles drove +Z anyway: only get_forward_speed() read the declaration.)
+	v.frame.lngAxis = PxVehicleAxes::ePosZ;
 	v.frame.latAxis = PxVehicleAxes::ePosX;
 	v.frame.vrtAxis = PxVehicleAxes::ePosY;
 	v.scale.scale = 1.0f;
@@ -744,8 +755,9 @@ inline bool configure_vehicle4w(Vehicle4W &v, const Vehicle4WConfig &cfg, PxPhys
 	}
 
 	v.physxRoadGeometryQueryParams.roadGeometryQueryType = PxVehiclePhysXRoadGeometryQueryType::eRAYCAST;
-	v.physxRoadGeometryQueryParams.defaultFilterData = PxQueryFilterData(PxFilterData(0, 0, 0, 0), PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC);
-	v.physxRoadGeometryQueryParams.filterCallback = nullptr;
+	v.physxRoadGeometryQueryParams.defaultFilterData = PxQueryFilterData(PxFilterData(0, 0, 0, 0), PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER);
+	v.wheelQueryFilter.collision_mask = (PxU32)cfg.collision_mask;
+	v.physxRoadGeometryQueryParams.filterCallback = &v.wheelQueryFilter;
 	v.physxRoadGeometryQueryParams.filterDataEntries = nullptr;
 
 	v.physxActorCMassLocalPose = PxTransform(to_px(cfg.chassis_com_local));
@@ -766,7 +778,14 @@ inline bool configure_vehicle4w(Vehicle4W &v, const Vehicle4WConfig &cfg, PxPhys
 	// just physical bulk for other objects to bump into, not a friction
 	// surface -- the wheels' own tire model is the only thing that should
 	// ever resist the car's own motion.
-	PxMaterial *chassis_material = physics.createMaterial(0.0f, 0.0f, 0.1f);
+	// Not 0, though: bodies combine friction by MIN (Godot's rule, see godot_physx_material.h), so a 0 here made a
+	// flipped vehicle slide on its roof forever. The default 0.5 is what the roof used to get against a default
+	// (1.0) ground under PhysX's AVERAGE; the node's physics_material_override replaces it. Combined the same
+	// way as every other body. Created per vehicle, so the node can edit it in place.
+	PxMaterial *chassis_material = physics.createMaterial(Math::abs(cfg.chassis_friction), Math::abs(cfg.chassis_friction), CLAMP(cfg.chassis_bounce, 0.0f, 1.0f));
+	if (chassis_material) {
+		godot_physx_apply_material(chassis_material, cfg.chassis_friction, cfg.chassis_bounce);
+	}
 	if (!wheel_material || !chassis_material) {
 		ERR_PRINT("PhysX vehicle: failed to create material.");
 		return false;
@@ -778,28 +797,19 @@ inline bool configure_vehicle4w(Vehicle4W &v, const Vehicle4WConfig &cfg, PxPhys
 		// own PxShapeFlags(0)) so the car's body can actually be hit by other
 		// rigid bodies in the scene, using Godot's own layer/mask convention
 		// (word0=layer, word1=mask -- see godot_physx_filter_shader).
-		// Deliberately NOT eSCENE_QUERY_SHAPE: the road-geometry raycast each
-		// wheel casts starts near its own suspension attachment point, which
-		// sits inside this box's own vertical extent -- with the box a valid
-		// query target, every wheel's raycast hit its own car's chassis
-		// instead of the ground (jounce pinned at 0, zero tire load, the
-		// actor's real PxRigidDynamic origin settling flush on the ground
-		// instead of the wheels ever bearing the car's weight -- a real
-		// regression caught by comparing rigidBodyState.pose, which is
-		// CoM-relative, against a raw getGlobalPose() read). Simulation
-		// contacts (blocking other bodies) and scene queries (raycasts
-		// hitting it) are independent PhysX flags; only the former is
-		// wanted here. Trade-off: this also means an ordinary Godot-side
-		// raycast query (e.g. a gameplay "aim" raycast) can't hit this car's
-		// body either -- acceptable for the immediate ask (the car should
-		// physically block/be blocked by other objects), revisit if
-		// raycast-pickability is ever needed too.
+		// Also a scene-query shape, so Godot raycasts, shape queries and
+		// CharacterBody3D motion hit the car (they see it as the node's
+		// stand-in body, see GodotPhysXBody3D::set_vehicle_actor). The road-
+		// geometry raycast each wheel casts starts inside this box, so the
+		// wheel filter skips the car's own actor (self_actor below): without
+		// that every wheel hit its own chassis instead of the ground (jounce
+		// pinned at 0, zero tire load, the car settling flush on the ground).
 		// Wheels stay at flags(0): their ground contact is entirely the
 		// road-geometry raycast + suspension, not real shape collision, and
 		// making them real simulation shapes too would double-apply ground
 		// reaction forces on top of that.
 		const PxFilterData chassisFilterData((PxU32)cfg.collision_layer, (PxU32)cfg.collision_mask, 0, 0);
-		const PxShapeFlags chassisShapeFlags(PxShapeFlag::eSIMULATION_SHAPE | PxShapeFlag::eVISUALIZATION);
+		const PxShapeFlags chassisShapeFlags(PxShapeFlag::eSIMULATION_SHAPE | PxShapeFlag::eSCENE_QUERY_SHAPE | PxShapeFlag::eVISUALIZATION);
 		const PxVehiclePhysXRigidActorParams actorParams(v.rigidBodyParams, nullptr);
 		const PxBoxGeometry boxGeom(v.physxActorBoxShapeHalfExtents);
 		const PxVehiclePhysXRigidActorShapeParams actorShapeParams(boxGeom, v.physxActorBoxShapeLocalPose, *chassis_material, chassisShapeFlags, chassisFilterData, chassisFilterData);
@@ -820,6 +830,7 @@ inline bool configure_vehicle4w(Vehicle4W &v, const Vehicle4WConfig &cfg, PxPhys
 		ERR_PRINT("PhysX vehicle: PxVehiclePhysXActorCreate failed.");
 		return false;
 	}
+	v.wheelQueryFilter.self_actor = v.physxActor.rigidBody;
 
 	PxVehicleConstraintsCreate(v.axleDescription, physics, *v.physxActor.rigidBody, v.physxConstraints);
 

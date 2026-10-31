@@ -23,7 +23,21 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	vec4 foam; // x foam kept per step, y dt (s), z wave slope that starts foaming, w foam per second per unit of slope past it
 	vec4 track; // world xz of the hull's bow (xy) and stern (zw): foam is pushed out from this line
 	vec4 spread; // x outward push speed (m/s), y distance it fades out over (m), z hull half-beam (m), w hull foam per second at the bow
+	vec4 prof_a; // hull_profile: the half-beam as a fraction of z at 8 stations bow -> stern (negative = none: a box)
+	vec4 prof_b;
 };
+
+// The hull's half-beam at `tl` along it (0 bow, 1 stern): spread.z × its profile there (a tapered bow / stern).
+float half_beam_at(float tl) {
+	if (prof_a.x < 0.0) {
+		return spread.z;
+	}
+	float st[8] = float[8](prof_a.x, prof_a.y, prof_a.z, prof_a.w, prof_b.x, prof_b.y, prof_b.z, prof_b.w);
+	float u = clamp(tl, 0.0, 1.0) * 7.0;
+	int i0 = int(floor(u));
+	int i1 = min(i0 + 1, 7);
+	return spread.z * mix(st[i0], st[i1], u - float(i0));
+}
 
 layout(set = 0, binding = 1, std430) restrict readonly buffer StateIn {
 	vec4 state_in[]; // h, h_prev, hull foam (pushed out sideways), propeller foam (stays put)
@@ -101,8 +115,9 @@ void main() {
 	// passed), which leaves the water between the two side bands clear; the
 	// propeller's band runs down the middle on its own.
 	float beside = smoothstep(-0.1, 0.05, tl) * (1.0 - smoothstep(0.85, 1.0, tl));
-	float band = exp(-pow((dist - 1.15 * spread.z) / max(0.3 * spread.z, 0.05), 2.0));
-	float hull_foam = spread.w * mix(1.0, 0.3, clamp(tl, 0.0, 1.0)) * beside * band * smoothstep(0.8 * spread.z, spread.z, dist);
+	float hb = half_beam_at(tl);   // (a tapered hull: the bands follow its sides, meeting at the stem)
+	float band = exp(-pow((dist - 1.15 * hb) / max(0.3 * spread.z, 0.05), 2.0));
+	float hull_foam = spread.w * mix(1.0, 0.3, clamp(tl, 0.0, 1.0)) * beside * band * smoothstep(0.8 * hb, hb, dist);
 	// Foam is pushed out sideways from the hull's line, strongest near it:
 	// read it from where it was a moment ago, nearer the line. Sideways
 	// only, so it peels off in two bands instead of fanning out behind.
@@ -116,8 +131,10 @@ void main() {
 	}
 	f = f * foam.x + hull_foam * foam.y;
 	float pf = st.w * foam.x; // propeller foam: not pushed
+	float dip = 0.0; // the hull's deepest dip this step (sets how high a crest may stand)
 	for (int i = 0; i < grid.y; i++) {
 		vec4 s = sources[i * 2];
+		dip = max(dip, s.w);
 		float t = length(xz - s.xy) / max(s.z, 1e-4);
 		if (t < 2.2) {
 			float w = exp(-pow(t * 1.1, 6.0));
@@ -138,6 +155,17 @@ void main() {
 		}
 	}
 	hn += (target - hn) * weight * cell.y;
+
+	// Breaking: a wave can't stand more than a few hull dips high -- past that it
+	// breaks, its height going into foam. The sim is otherwise linear, and a hull
+	// circling at speed focuses its wake onto the circle's centre lap after lap
+	// (a jetski piled a +2 m spike there).
+	float crest_limit = max(dip * 4.0, 0.3);
+	float over = abs(hn) - crest_limit;
+	if (over > 0.0) {
+		f += over;
+		hn = sign(hn) * (crest_limit + over * 0.25);
+	}
 
 	// Steep wake waves break into foam.
 	float slope = length(vec2(hr - hl, hu - hd)) / (2.0 * cell.x);

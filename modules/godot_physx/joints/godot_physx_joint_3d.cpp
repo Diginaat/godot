@@ -71,6 +71,20 @@ void GodotPhysXJoint3D::clear() {
 	type = PS3DE::JOINT_TYPE_MAX;
 }
 
+bool GodotPhysXJoint3D::has_running_motor() const {
+	if (type == JointType::JOINT_TYPE_HINGE) {
+		return hinge_motor && hinge_motor_velocity != 0.0;
+	}
+	if (type == JointType::JOINT_TYPE_6DOF) {
+		for (const Axis6DOF &ax : axis6) {
+			if ((ax.lin_motor && ax.lin_motor_target != 0.0) || (ax.ang_motor && ax.ang_motor_target != 0.0)) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 void GodotPhysXJoint3D::body_removed(GodotPhysXBody3D *p_body) {
 	if (body_a == p_body || body_b == p_body) {
 		_destroy();
@@ -131,6 +145,12 @@ PxJoint *GodotPhysXJoint3D::_create() const {
 }
 
 void GodotPhysXJoint3D::_apply_params() {
+	if (body_a) {
+		body_a->update_motor_driven();
+	}
+	if (body_b) {
+		body_b->update_motor_driven();
+	}
 	if (!px_joint) {
 		return;
 	}
@@ -188,6 +208,11 @@ void GodotPhysXJoint3D::_apply_params() {
 
 		case PS3DE::JOINT_TYPE_6DOF: {
 			PxD6Joint *j = static_cast<PxD6Joint *>(px_joint);
+			// Start from no drives: a spring or motor switched off at runtime must stop acting (a left-over
+			// velocity drive braked the axis instead of letting it turn freely).
+			for (int d = PxD6Drive::eX; d <= PxD6Drive::eSWING2; d++) {
+				j->setDrive((PxD6Drive::Enum)d, PxD6JointDrive());
+			}
 			const PxD6Axis::Enum lin_axes[3] = { PxD6Axis::eX, PxD6Axis::eY, PxD6Axis::eZ };
 			const PxD6Axis::Enum ang_axes[3] = { PxD6Axis::eTWIST, PxD6Axis::eSWING1, PxD6Axis::eSWING2 };
 			for (int a = 0; a < 3; a++) {
@@ -206,22 +231,27 @@ void GodotPhysXJoint3D::_apply_params() {
 					j->setMotion(ang_axes[a], PxD6Motion::eFREE);
 				}
 			}
-			j->setTwistLimit(PxJointAngularLimitPair((PxReal)axis6[0].ang_lower, (PxReal)axis6[0].ang_upper));
+			// Godot's 6DOF angles run the other way round to PhysX's D6 (as for the hinge above, and as Jolt maps
+			// them): [lower, upper] is [-upper, -lower]. Passed straight through, a ragdoll's asymmetric limits
+			// (knees, elbows) bent the wrong way. The pyramid swing must sit inside (-pi, pi), the twist inside
+			// (-2pi, 2pi): a limit at +-180 deg was silently dropped.
+			const double swing_max = Math::PI - 0.001;
+			const double twist_max = Math::TAU - 0.001;
+			j->setTwistLimit(PxJointAngularLimitPair((PxReal)CLAMP(-axis6[0].ang_upper, -twist_max, twist_max),
+					(PxReal)CLAMP(-axis6[0].ang_lower, -twist_max, twist_max)));
 			j->setPyramidSwingLimit(PxJointLimitPyramid(
-					(PxReal)axis6[1].ang_lower, (PxReal)axis6[1].ang_upper,
-					(PxReal)axis6[2].ang_lower, (PxReal)axis6[2].ang_upper));
+					(PxReal)CLAMP(-axis6[1].ang_upper, -swing_max, swing_max), (PxReal)CLAMP(-axis6[1].ang_lower, -swing_max, swing_max),
+					(PxReal)CLAMP(-axis6[2].ang_upper, -swing_max, swing_max), (PxReal)CLAMP(-axis6[2].ang_lower, -swing_max, swing_max)));
 
 			// Linear drives: a spring (stiffness toward an equilibrium point) and a
 			// velocity motor share the per-axis drive slot.
 			PxVec3 drive_pos(0.0f);
 			PxVec3 lin_vel_target(0.0f);
-			bool any_lin_drive = false;
 			for (int a = 0; a < 3; a++) {
 				const Axis6DOF &ax = axis6[a];
 				if (!ax.lin_spring && !ax.lin_motor) {
 					continue;
 				}
-				any_lin_drive = true;
 				const PxReal k = ax.lin_spring ? (PxReal)ax.lin_spring_stiffness : 0.0f;
 				const PxReal d = ax.lin_spring ? (PxReal)ax.lin_spring_damping : 1.0e6f;
 				const PxReal f = (ax.lin_motor && ax.lin_motor_force > 0.0) ? (PxReal)ax.lin_motor_force : PX_MAX_F32;
@@ -250,17 +280,36 @@ void GodotPhysXJoint3D::_apply_params() {
 					continue;
 				}
 				j->setDrive(ang_drives[a], PxD6JointDrive((PxReal)ax.ang_spring_stiffness, (PxReal)ax.ang_spring_damping, PX_MAX_F32));
-				drive_rot = drive_rot * PxQuat((PxReal)ax.ang_spring_eq, ang_drive_axis[a]);
-				any_lin_drive = true;
+				drive_rot = drive_rot * PxQuat((PxReal)-ax.ang_spring_eq, ang_drive_axis[a]); // (the other way round too)
 				if (!(ax.ang_limit && ax.ang_upper > ax.ang_lower)) {
 					j->setMotion(ang_axes[a], PxD6Motion::eFREE);
 				}
 			}
 
-			if (any_lin_drive) {
-				j->setDrivePosition(PxTransform(drive_pos, drive_rot), true);
-				j->setDriveVelocity(lin_vel_target, PxVec3(0.0f));
+			// Angular motors: a velocity drive on the axis (no stiffness; the damping is the velocity gain, the force
+			// limit the motor's torque). Like Jolt, a motor takes the axis over from a spring.
+			PxVec3 ang_vel_target(0.0f);
+			for (int a = 0; a < 3; a++) {
+				const Axis6DOF &ax = axis6[a];
+				if (!ax.ang_motor) {
+					continue;
+				}
+				const PxReal f = ax.ang_motor_force > 0.0 ? (PxReal)ax.ang_motor_force : PX_MAX_F32;
+				j->setDrive(ang_drives[a], PxD6JointDrive(0.0f, 1.0e6f, f));
+				// Not negated like the limits: PhysX's drive velocity is actor0 relative to actor1, so this already
+				// turns body B the way Jolt does (a positive target spins it clockwise about the axis).
+				(&ang_vel_target.x)[a] = (PxReal)ax.ang_motor_target;
+				if (!(ax.ang_limit && ax.ang_upper > ax.ang_lower)) {
+					j->setMotion(ang_axes[a], PxD6Motion::eFREE);
+				}
 			}
+
+			// Motor limits are a force / torque, as Godot Physics and Jolt read them (PhysX's default is an impulse
+			// per step, which made a linear motor ~60x stronger at 60 Hz).
+			j->setConstraintFlag(PxConstraintFlag::eDRIVE_LIMITS_ARE_FORCES, true);
+			// Always set (zero without drives): it also wakes the bodies, so a change made while they sleep acts.
+			j->setDrivePosition(PxTransform(drive_pos, drive_rot), true);
+			j->setDriveVelocity(lin_vel_target, ang_vel_target, true);
 		} break;
 
 		default:
@@ -542,10 +591,30 @@ void GodotPhysXJoint3D::set_6dof_param(Vector3::Axis p_axis, PS3DE::G6DOFJointAx
 		case PS3DE::G6DOF_JOINT_ANGULAR_SPRING_EQUILIBRIUM_POINT:
 			ax.ang_spring_eq = p_value;
 			break;
-		default:
-			// Bullet-era softness / restitution / ERP / damping -- unsupported here, as in Jolt.
-			WARN_PRINT_ONCE("PhysX: this Generic6DOF joint parameter is not supported and will be ignored.");
-			break;
+		default: {
+			// Bullet-era softness / restitution / ERP / damping -- unsupported here, as in Jolt; a warning only when
+			// set away from Godot's default (the node sends every parameter when it builds the joint).
+			real_t def = 0.0;
+			switch (p_param) {
+				case PS3DE::G6DOF_JOINT_LINEAR_LIMIT_SOFTNESS:
+					def = 0.7;
+					break;
+				case PS3DE::G6DOF_JOINT_LINEAR_RESTITUTION:
+				case PS3DE::G6DOF_JOINT_ANGULAR_LIMIT_SOFTNESS:
+				case PS3DE::G6DOF_JOINT_ANGULAR_ERP:
+					def = 0.5;
+					break;
+				case PS3DE::G6DOF_JOINT_LINEAR_DAMPING:
+				case PS3DE::G6DOF_JOINT_ANGULAR_DAMPING:
+					def = 1.0;
+					break;
+				default:
+					break;
+			}
+			if (!Math::is_equal_approx(p_value, def)) {
+				WARN_PRINT_ONCE("PhysX: this Generic6DOF joint parameter is not supported and will be ignored.");
+			}
+		} break;
 	}
 	_apply_params();
 }

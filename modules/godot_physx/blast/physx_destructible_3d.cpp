@@ -34,6 +34,8 @@
 #include "core/io/file_access.h"
 #include "core/math/triangle_mesh.h"
 #include "core/object/class_db.h"
+#include "core/templates/hash_set.h"
+#include "scene/resources/3d/world_3d.h"
 #include "servers/physics_3d/physics_server_3d.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -129,6 +131,9 @@ void PhysXDestructible3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_kill_y", "y"), &PhysXDestructible3D::set_kill_y);
 	ClassDB::bind_method(D_METHOD("get_kill_y"), &PhysXDestructible3D::get_kill_y);
 	ClassDB::bind_method(D_METHOD("apply_radial_damage", "world_position", "damage", "min_radius", "max_radius"), &PhysXDestructible3D::apply_radial_damage);
+	ClassDB::bind_method(D_METHOD("get_piece_count"), &PhysXDestructible3D::get_piece_count);
+	ClassDB::bind_method(D_METHOD("get_piece_transform", "index"), &PhysXDestructible3D::get_piece_transform);
+	ClassDB::bind_method(D_METHOD("get_piece_chunk", "index"), &PhysXDestructible3D::get_piece_chunk);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "asset_path", PROPERTY_HINT_FILE, "*.asset"), "set_asset_path", "get_asset_path");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "chunks_path", PROPERTY_HINT_FILE, "*.chunks"), "set_chunks_path", "get_chunks_path");
@@ -160,11 +165,27 @@ void PhysXDestructible3D::_bind_methods() {
 	// headroom instead of relying on that alone.
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mass", PROPERTY_HINT_RANGE, "0.001,1000000,0.001,or_greater,exp"), "set_mass", "get_mass");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "dynamic"), "set_dynamic", "get_dynamic");
+	ClassDB::bind_method(D_METHOD("set_anchor", "anchor"), &PhysXDestructible3D::set_anchor);
+	ClassDB::bind_method(D_METHOD("get_anchor"), &PhysXDestructible3D::get_anchor);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "anchor", PROPERTY_HINT_ENUM, "Framed,Grounded,None"), "set_anchor", "get_anchor");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "health", PROPERTY_HINT_RANGE, "0.01,20,0.01"), "set_health", "get_health");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "impact_strength", PROPERTY_HINT_RANGE, "0,200,0.1"), "set_impact_strength", "get_impact_strength");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "impact_damage_scale", PROPERTY_HINT_RANGE, "0,10,0.01"), "set_impact_damage_scale", "get_impact_damage_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "impact_radius", PROPERTY_HINT_RANGE, "0.1,50,0.1"), "set_impact_radius", "get_impact_radius");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "kill_y", PROPERTY_HINT_RANGE, "-10000,100,1,or_less,or_greater"), "set_kill_y", "get_kill_y");
+	ClassDB::bind_method(D_METHOD("set_piece_lifetime", "seconds"), &PhysXDestructible3D::set_piece_lifetime);
+	ClassDB::bind_method(D_METHOD("get_piece_lifetime"), &PhysXDestructible3D::get_piece_lifetime);
+	ClassDB::bind_method(D_METHOD("set_piece_shrink_time", "seconds"), &PhysXDestructible3D::set_piece_shrink_time);
+	ClassDB::bind_method(D_METHOD("get_piece_shrink_time"), &PhysXDestructible3D::get_piece_shrink_time);
+	ClassDB::bind_method(D_METHOD("set_freeze_when_asleep", "freeze"), &PhysXDestructible3D::set_freeze_when_asleep);
+	ClassDB::bind_method(D_METHOD("get_freeze_when_asleep"), &PhysXDestructible3D::get_freeze_when_asleep);
+	ClassDB::bind_method(D_METHOD("is_fractured"), &PhysXDestructible3D::is_fractured);
+	ADD_GROUP("Debris", "");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "piece_lifetime", PROPERTY_HINT_RANGE, "0,120,0.1,or_greater,suffix:s"), "set_piece_lifetime", "get_piece_lifetime");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "piece_shrink_time", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:s"), "set_piece_shrink_time", "get_piece_shrink_time");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "freeze_when_asleep"), "set_freeze_when_asleep", "get_freeze_when_asleep");
+	ADD_GROUP("", "");
+	ADD_SIGNAL(MethodInfo("fractured", PropertyInfo(Variant::INT, "new_pieces")));
 
 	BIND_ENUM_CONSTANT(GI_MODE_DISABLED);
 	BIND_ENUM_CONSTANT(GI_MODE_STATIC);
@@ -178,6 +199,10 @@ void PhysXDestructible3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(VISIBILITY_RANGE_FADE_DISABLED);
 	BIND_ENUM_CONSTANT(VISIBILITY_RANGE_FADE_SELF);
 	BIND_ENUM_CONSTANT(VISIBILITY_RANGE_FADE_DEPENDENCIES);
+
+	BIND_ENUM_CONSTANT(ANCHOR_FRAMED);
+	BIND_ENUM_CONSTANT(ANCHOR_GROUNDED);
+	BIND_ENUM_CONSTANT(ANCHOR_NONE);
 }
 
 PhysXDestructible3D::PhysXDestructible3D() {
@@ -216,6 +241,7 @@ void PhysXDestructible3D::_validate_property(PropertyInfo &p_property) const {
 
 PhysXDestructible3D::~PhysXDestructible3D() {
 	_free_all_pieces();
+	_free_chunk_cache();
 	if (family_mem) {
 		aligned_free_16(family_mem);
 	}
@@ -246,7 +272,7 @@ void PhysXDestructible3D::set_collision_layer(uint32_t p_layer) {
 	collision_layer = p_layer;
 	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
 	for (const ChunkVisual &piece : pieces) {
-		if (piece.body.is_valid()) {
+		if (piece.body.is_valid() && !piece.shrinking) {
 			ps->body_set_collision_layer(piece.body, collision_layer);
 		}
 	}
@@ -256,7 +282,7 @@ void PhysXDestructible3D::set_collision_mask(uint32_t p_mask) {
 	collision_mask = p_mask;
 	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
 	for (const ChunkVisual &piece : pieces) {
-		if (piece.body.is_valid()) {
+		if (piece.body.is_valid() && !piece.shrinking) {
 			ps->body_set_collision_mask(piece.body, collision_mask);
 		}
 	}
@@ -482,6 +508,7 @@ void PhysXDestructible3D::_notification(int p_what) {
 			}
 		} break;
 		case NOTIFICATION_INTERNAL_PHYSICS_PROCESS: {
+			piece_clock += get_physics_process_delta_time();
 			if (fractured) {
 				_sync_transforms();
 			} else if (dynamic && pieces.size() == 1) {
@@ -512,6 +539,7 @@ void PhysXDestructible3D::_notification(int p_what) {
 						set_global_transform(t);
 						RenderingServer::get_singleton()->instance_set_transform(pieces[0].instance, t);
 						_check_impact_fracture();
+						_record_piece_velocities();
 					}
 				}
 			}
@@ -528,6 +556,7 @@ bool PhysXDestructible3D::_load_asset_bytes(const PackedByteArray &p_bytes) {
 	NvBlastAsset *asset = reinterpret_cast<NvBlastAsset *>(asset_mem);
 	asset_chunk_count = NvBlastAssetGetChunkCount(asset, blast_log);
 	asset_bond_count = NvBlastAssetGetBondCount(asset, blast_log);
+
 
 	const size_t family_size = NvBlastAssetGetFamilyMemorySize(asset, blast_log);
 	family_mem = aligned_alloc_16(family_size);
@@ -561,6 +590,8 @@ bool PhysXDestructible3D::_load() {
 			chunk_points[i] = points[i];
 		}
 		_compute_chunk_volumes();
+		_compute_chunk_faces();
+		_compute_chunk_surfaces();
 		return true;
 	}
 
@@ -601,7 +632,132 @@ bool PhysXDestructible3D::_load() {
 	}
 
 	_compute_chunk_volumes();
+	_compute_chunk_faces();
+	_compute_chunk_surfaces();
 	return true;
+}
+
+void PhysXDestructible3D::_compute_chunk_faces() {
+	chunk_faces.resize(chunk_points.size());
+	for (uint32_t c = 0; c < chunk_faces.size(); c++) {
+		chunk_faces[c] = 0;
+	}
+	if (chunk_points.is_empty() || chunk_points[0].is_empty()) {
+		return;
+	}
+	// Chunk 0 is the whole intact mesh: its bounds are the faces.
+	const PackedVector3Array &root = chunk_points[0];
+	AABB bounds(root[0], Vector3());
+	for (int i = 1; i < root.size(); i++) {
+		bounds.expand_to(root[i]);
+	}
+	// A chunk "touches" a face when it reaches within 2% of the size along that
+	// axis (fracture cuts leave edge chunks flush with the original surface,
+	// but not always to the last float).
+	const Vector3 tol = (bounds.size * 0.02).max(Vector3(0.001, 0.001, 0.001));
+	const Vector3 lo = bounds.position;
+	const Vector3 hi = bounds.get_end();
+	for (uint32_t c = 1; c < chunk_points.size(); c++) {
+		const PackedVector3Array &points = chunk_points[c];
+		if (points.is_empty()) {
+			continue;
+		}
+		AABB box(points[0], Vector3());
+		for (int i = 1; i < points.size(); i++) {
+			box.expand_to(points[i]);
+		}
+		uint8_t faces = 0;
+		if (box.position.x <= lo.x + tol.x) {
+			faces |= ANCHOR_FACE_LEFT;
+		}
+		if (box.get_end().x >= hi.x - tol.x) {
+			faces |= ANCHOR_FACE_RIGHT;
+		}
+		if (box.position.y <= lo.y + tol.y) {
+			faces |= ANCHOR_FACE_BOTTOM;
+		}
+		if (box.get_end().y >= hi.y - tol.y) {
+			faces |= ANCHOR_FACE_TOP;
+		}
+		chunk_faces[c] = faces;
+	}
+}
+
+bool PhysXDestructible3D::_island_anchored(const LocalVector<uint32_t> &p_chunks) const {
+	uint8_t wanted = 0;
+	switch (anchor) {
+		case ANCHOR_FRAMED:
+			wanted = ANCHOR_FACE_LEFT | ANCHOR_FACE_RIGHT | ANCHOR_FACE_BOTTOM | ANCHOR_FACE_TOP;
+			break;
+		case ANCHOR_GROUNDED:
+			wanted = ANCHOR_FACE_BOTTOM;
+			break;
+		case ANCHOR_NONE:
+			return false;
+	}
+	for (uint32_t c : p_chunks) {
+		if (c < chunk_faces.size() && (chunk_faces[c] & wanted)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void PhysXDestructible3D::_compute_chunk_surfaces() {
+	// Flat per-triangle normals -- the asset only stores positions -- with the
+	// winding (c-a)x(b-a), not the intuitive (b-a)x(c-a): Blast's
+	// AuthoringResult::geometry triangles are opposite to CCW-front-face here,
+	// and the wrong order cooked clean but rendered every face pitch-black
+	// (normals inward).
+	chunk_surfaces.resize(chunk_points.size());
+	for (uint32_t c = 0; c < chunk_points.size(); c++) {
+		const PackedVector3Array &points = chunk_points[c];
+		const int tri_count = points.size() / 3;
+		ChunkSurface surface;
+		surface.vertices = points;
+		surface.normals.resize(points.size());
+		Vector3 *nw = surface.normals.ptrw();
+		for (int t = 0; t < tri_count; t++) {
+			const Vector3 a = points[t * 3 + 0];
+			const Vector3 b = points[t * 3 + 1];
+			const Vector3 c3 = points[t * 3 + 2];
+			const Vector3 n = (c3 - a).cross(b - a).normalized();
+			nw[t * 3 + 0] = n;
+			nw[t * 3 + 1] = n;
+			nw[t * 3 + 2] = n;
+		}
+		chunk_surfaces[c].clear();
+		chunk_surfaces[c].push_back(surface);
+	}
+}
+
+RID PhysXDestructible3D::_chunk_shape(uint32_t p_chunk) {
+	ERR_FAIL_UNSIGNED_INDEX_V(p_chunk, chunk_points.size(), RID());
+	if (chunk_shapes.size() < chunk_points.size()) {
+		const uint32_t old_size = chunk_shapes.size();
+		chunk_shapes.resize(chunk_points.size());
+		for (uint32_t i = old_size; i < chunk_shapes.size(); i++) {
+			chunk_shapes[i] = RID();
+		}
+	}
+	if (!chunk_shapes[p_chunk].is_valid()) {
+		PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
+		chunk_shapes[p_chunk] = ps->convex_polygon_shape_create();
+		ps->shape_set_data(chunk_shapes[p_chunk], chunk_points[p_chunk]);
+	}
+	return chunk_shapes[p_chunk];
+}
+
+// After _free_all_pieces(): no body may still hold one of these shapes.
+void PhysXDestructible3D::_free_chunk_cache() {
+	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
+	for (const RID &shape : chunk_shapes) {
+		if (shape.is_valid()) {
+			ps->free_rid(shape);
+		}
+	}
+	chunk_shapes.clear();
+	chunk_surfaces.clear();
 }
 
 void PhysXDestructible3D::_compute_chunk_volumes() {
@@ -670,6 +826,7 @@ float PhysXDestructible3D::_chunk_mass(uint32_t p_chunk_index) const {
 
 void PhysXDestructible3D::_reload() {
 	_free_all_pieces();
+	_free_chunk_cache();
 	if (family_mem) {
 		aligned_free_16(family_mem);
 		family_mem = nullptr;
@@ -684,6 +841,7 @@ void PhysXDestructible3D::_reload() {
 	asset_bond_count = 0;
 	chunk_points.clear();
 	chunk_volumes.clear();
+	chunk_faces.clear();
 	total_leaf_volume = 0.0;
 	loaded = false;
 	fractured = false;
@@ -714,7 +872,7 @@ void PhysXDestructible3D::_spawn_intact() {
 	// could ever own this piece's transform, so it's the last clean read of
 	// the node's real intended scale.
 	spawn_scale = get_global_transform().basis.get_scale();
-	_spawn_piece(0, get_global_transform(), Vector3(), physics);
+	_spawn_piece({ 0 }, get_global_transform(), Vector3(), physics, PS3DE::BODY_MODE_RIGID, live_actors.is_empty() ? nullptr : live_actors[0]);
 	if (physics) {
 		PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
 		if (dynamic) {
@@ -728,19 +886,35 @@ void PhysXDestructible3D::_spawn_intact() {
 	}
 }
 
-void PhysXDestructible3D::_spawn_piece(uint32_t p_chunk_index, const Transform3D &p_transform, const Vector3 &p_linear_velocity, bool p_physics) {
-	ERR_FAIL_INDEX(p_chunk_index, chunk_points.size());
-	const PackedVector3Array &points = chunk_points[p_chunk_index];
-	const uint32_t tri_count = points.size() / 3;
-	ERR_FAIL_COND_MSG(points.size() < 4, vformat("PhysXDestructible3D: chunk %d has too few vertices for a convex hull.", p_chunk_index));
+int PhysXDestructible3D::_spawn_piece(const LocalVector<uint32_t> &p_chunk_indices, const Transform3D &p_transform, const Vector3 &p_linear_velocity, bool p_physics, PS3DE::BodyMode p_body_mode, NvBlastActor *p_actor) {
+	// One piece per actor, covering every chunk index in p_chunk_indices on
+	// a single body -- a leaf actor's piece is just the one-chunk case.
+	// Returns the pushed piece's index in `pieces` (freeing superseded
+	// pieces via remove_at_unordered can swap entries around, so callers
+	// can't assume a fixed position), or -1 if every chunk was rejected
+	// below.
+	if (p_chunk_indices.is_empty()) {
+		return -1;
+	}
+	for (uint32_t ci : p_chunk_indices) {
+		if (ci >= chunk_points.size()) {
+			ERR_FAIL_V_MSG(-1, vformat("PhysXDestructible3D: chunk index %d out of range (%d chunks).", (int)ci, (int)chunk_points.size()));
+		}
+		if (chunk_points[ci].size() < 4) {
+			ERR_FAIL_V_MSG(-1, vformat("PhysXDestructible3D: chunk %d has too few vertices for a convex hull.", (int)ci));
+		}
+	}
 
-	RID shape;
+	// A copy is kept because the dedup pass below must not confuse the new
+	// piece's own chunks for a pre-existing overlap once `piece` owns them.
+	LocalVector<uint32_t> chunk_indices_storage(p_chunk_indices);
+
 	RID body;
+	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
 	if (p_physics) {
-		PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
-		shape = ps->convex_polygon_shape_create();
-		ps->shape_set_data(shape, points);
-
+		// Chunk hull points are authored in the actor's frame, so shapes sit
+		// at identity transforms on the body no matter how many chunks it
+		// carries.
 		body = ps->body_create();
 		// A real CollisionObject3D (RigidBody3D, StaticBody3D, ...) always
 		// does this in its constructor -- it's how the *other* body's
@@ -754,11 +928,28 @@ void PhysXDestructible3D::_spawn_piece(uint32_t p_chunk_index, const Transform3D
 		// body_entered (e.g. destructible_demo_rig.gd's bomb): it would
 		// bounce off every time and never register a hit.
 		ps->body_attach_object_instance_id(body, get_instance_id());
-		ps->body_set_mode(body, PS3DE::BODY_MODE_RIGID);
-		ps->body_add_shape(body, shape);
+		ps->body_set_mode(body, p_body_mode);
+		// Contact reporting so _check_impact_fracture() can see every
+		// piece's landing/impact -- without this only the intact
+		// placeholder ever reported contacts, and NO piece spawned after
+		// the first break could fracture from a collision (the other half
+		// of the "the rest got a lot stronger" report). Static bodies
+		// don't generate contact reports, so this is inert for them.
+		if (p_body_mode == PS3DE::BODY_MODE_RIGID) {
+			ps->body_set_max_contacts_reported(body, 8);
+		}
+		for (uint32_t ci : p_chunk_indices) {
+			ps->body_add_shape(body, _chunk_shape(ci));
+		}
 		ps->body_set_collision_layer(body, collision_layer);
 		ps->body_set_collision_mask(body, collision_mask);
-		ps->body_set_param(body, PS3DE::BODY_PARAM_MASS, _chunk_mass(p_chunk_index));
+		// One body per island: its mass is the sum over the chunks it
+		// carries (chunk masses are proportional to per-chunk leaf volume).
+		float piece_mass = 0.0f;
+		for (uint32_t ci : p_chunk_indices) {
+			piece_mass += _chunk_mass(ci);
+		}
+		ps->body_set_param(body, PS3DE::BODY_PARAM_MASS, piece_mass);
 		ps->body_set_state(body, PS3DE::BODY_STATE_TRANSFORM, p_transform);
 		ps->body_set_state(body, PS3DE::BODY_STATE_LINEAR_VELOCITY, p_linear_velocity);
 		if (is_inside_world() && get_world_3d().is_valid()) {
@@ -766,31 +957,54 @@ void PhysXDestructible3D::_spawn_piece(uint32_t p_chunk_index, const Transform3D
 		}
 	}
 
-	// Flat per-triangle normals -- the authoring dump only stores positions.
-	// (c-a).cross(b-a), not the more intuitive (b-a).cross(c-a) -- Blast's
-	// AuthoringResult::geometry triangle winding is the opposite of what
-	// PRIMITIVE_TRIANGLES/CCW-front-face expects here; the wrong order cooked
-	// clean but rendered every visible face pitch-black (normals pointing
-	// inward), confirmed by a real screenshot before/after flipping it.
-	PackedVector3Array normals;
-	normals.resize(points.size());
-	for (uint32_t t = 0; t < tri_count; t++) {
-		const Vector3 a = points[t * 3 + 0];
-		const Vector3 b = points[t * 3 + 1];
-		const Vector3 c = points[t * 3 + 2];
-		const Vector3 n = (c - a).cross(b - a).normalized();
-		normals.write[t * 3 + 0] = n;
-		normals.write[t * 3 + 1] = n;
-		normals.write[t * 3 + 2] = n;
-	}
-
+	// One surface per material slot, concatenating every chunk the piece
+	// carries (see chunk_surfaces) -- all authored in the same frame, so the
+	// single body transform positions all of them.
 	RenderingServer *rs = RenderingServer::get_singleton();
 	RID mesh = rs->mesh_create();
-	Array arrays;
-	arrays.resize(RSE::ARRAY_MAX);
-	arrays[RSE::ARRAY_VERTEX] = points;
-	arrays[RSE::ARRAY_NORMAL] = normals;
-	rs->mesh_add_surface_from_arrays(mesh, RSE::PRIMITIVE_TRIANGLES, arrays);
+	int max_slot = -1;
+	for (uint32_t ci : p_chunk_indices) {
+		if (ci < chunk_surfaces.size()) {
+			for (const ChunkSurface &cs : chunk_surfaces[ci]) {
+				max_slot = MAX(max_slot, cs.slot);
+			}
+		}
+	}
+	for (int slot = 0; slot <= max_slot; slot++) {
+		int count = 0;
+		for (uint32_t ci : p_chunk_indices) {
+			for (const ChunkSurface &cs : chunk_surfaces[ci]) {
+				if (cs.slot == slot) {
+					count += cs.vertices.size();
+				}
+			}
+		}
+		if (count == 0) {
+			continue;
+		}
+		PackedVector3Array vertices;
+		PackedVector3Array normals;
+		vertices.resize(count);
+		normals.resize(count);
+		Vector3 *vw = vertices.ptrw();
+		Vector3 *nw = normals.ptrw();
+		int at = 0;
+		for (uint32_t ci : p_chunk_indices) {
+			for (const ChunkSurface &cs : chunk_surfaces[ci]) {
+				if (cs.slot != slot) {
+					continue;
+				}
+				memcpy(vw + at, cs.vertices.ptr(), sizeof(Vector3) * cs.vertices.size());
+				memcpy(nw + at, cs.normals.ptr(), sizeof(Vector3) * cs.normals.size());
+				at += cs.vertices.size();
+			}
+		}
+		Array arrays;
+		arrays.resize(RSE::ARRAY_MAX);
+		arrays[RSE::ARRAY_VERTEX] = vertices;
+		arrays[RSE::ARRAY_NORMAL] = normals;
+		rs->mesh_add_surface_from_arrays(mesh, RSE::PRIMITIVE_TRIANGLES, arrays);
+	}
 
 	RID instance = rs->instance_create2(mesh, get_world_3d().is_valid() ? get_world_3d()->get_scenario() : RID());
 	rs->instance_set_transform(instance, p_transform);
@@ -800,12 +1014,105 @@ void PhysXDestructible3D::_spawn_piece(uint32_t p_chunk_index, const Transform3D
 	_apply_gi_mode(rs, instance);
 	_apply_extra_render_settings(rs, instance);
 
+	// U24: an island actor's later split re-emits chunks that were already
+	// spawned live when the island itself first formed -- or when a sibling
+	// island piece covering them spawned moments ago in this very loop.
+	// Freeing the superseded piece here -- instead of at each caller --
+	// structurally enforces one live piece per chunk for every spawn path;
+	// without it a re-emitted chunk gets a second overlapping body on top
+	// of the first. Scanning backwards so remove_at_unordered() (which
+	// swaps in the last element) can't skip an entry that also overlaps.
+	HashSet<uint32_t> chunk_set;
+	for (uint32_t ci : chunk_indices_storage) {
+		chunk_set.insert(ci);
+	}
+	for (int64_t i = (int64_t)pieces.size() - 1; i >= 0; i--) {
+		bool overlaps = false;
+		for (uint32_t ci : pieces[i].chunk_indices) {
+			if (chunk_set.has(ci)) {
+				overlaps = true;
+				break;
+			}
+		}
+		if (!overlaps) {
+			continue;
+		}
+		_free_piece((uint32_t)i);
+	}
+
 	ChunkVisual piece;
 	piece.body = body;
-	piece.shape = shape;
 	piece.mesh = mesh;
 	piece.instance = instance;
+	piece.chunk_indices = chunk_indices_storage;
+	piece.actor = p_actor;
+	piece.last_linear_velocity = p_linear_velocity;
+	piece.born = piece_clock;
+	for (uint32_t ci : chunk_indices_storage) {
+		piece.center_local += _chunk_centroid_local(ci);
+	}
+	piece.center_local /= (real_t)chunk_indices_storage.size();
 	pieces.push_back(piece);
+	return (int)pieces.size() - 1;
+}
+
+int PhysXDestructible3D::_piece_of_actor(const NvBlastActor *p_actor) const {
+	if (p_actor == nullptr) {
+		return -1;
+	}
+	for (uint32_t i = 0; i < pieces.size(); i++) {
+		if (pieces[i].actor == p_actor) {
+			return (int)i;
+		}
+	}
+	return -1;
+}
+
+void PhysXDestructible3D::_free_piece(uint32_t p_index) {
+	ERR_FAIL_UNSIGNED_INDEX(p_index, pieces.size());
+	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
+	RenderingServer *rs = RenderingServer::get_singleton();
+	const ChunkVisual &piece = pieces[p_index];
+	if (piece.body.is_valid()) {
+		ps->free_rid(piece.body);
+	}
+	rs->free_rid(piece.instance);
+	rs->free_rid(piece.mesh);
+	pieces.remove_at_unordered(p_index);
+}
+
+real_t PhysXDestructible3D::_ground_below(const Vector3 &p_from, real_t p_fallback) const {
+	// Straight down from the piece's middle, past this object's own pieces
+	// (a piece resting on another one that is shrinking away too would
+	// otherwise be left hovering at its old height).
+	if (!is_inside_tree() || get_world_3d().is_null()) {
+		return p_fallback;
+	}
+	PhysicsDirectSpaceState3D *space = get_world_3d()->get_direct_space_state();
+	if (space == nullptr) {
+		return p_fallback;
+	}
+	PhysicsDirectSpaceState3D::RayParameters ray;
+	ray.from = p_from;
+	ray.to = p_from - Vector3(0, 50, 0);
+	ray.collision_mask = collision_mask;
+	for (const ChunkVisual &other : pieces) {
+		if (other.body.is_valid()) {
+			ray.exclude.insert(other.body);
+		}
+	}
+	PhysicsDirectSpaceState3D::RayResult hit;
+	return space->intersect_ray(ray, hit) ? hit.position.y : p_fallback;
+}
+
+void PhysXDestructible3D::_retire_piece(uint32_t p_index) {
+	ERR_FAIL_UNSIGNED_INDEX(p_index, pieces.size());
+	NvBlastActor *actor = pieces[p_index].actor;
+	_free_piece(p_index);
+	if (actor != nullptr) {
+		live_actors.erase(actor);
+		NvBlastActorDeactivate(actor, blast_log);
+	}
 }
 
 Vector3 PhysXDestructible3D::_chunk_centroid_local(uint32_t p_chunk_index) const {
@@ -831,9 +1138,6 @@ void PhysXDestructible3D::_free_all_pieces() {
 		if (piece.body.is_valid()) {
 			ps->free_rid(piece.body);
 		}
-		if (piece.shape.is_valid()) {
-			ps->free_rid(piece.shape);
-		}
 		rs->free_rid(piece.instance);
 		rs->free_rid(piece.mesh);
 	}
@@ -843,6 +1147,34 @@ void PhysXDestructible3D::_free_all_pieces() {
 void PhysXDestructible3D::_sync_transforms() {
 	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
 	RenderingServer *rs = RenderingServer::get_singleton();
+	if (freeze_when_asleep) {
+		// Freeze the debris all at once, once every moving piece is asleep:
+		// freezing them one by one as each fell asleep disturbed the pieces
+		// still touching it, and the pile settled all over again.
+		bool any_moving = false;
+		bool all_asleep = true;
+		for (const ChunkVisual &piece : pieces) {
+			if (piece.frozen || piece.shrinking || !piece.body.is_valid() || ps->body_get_mode(piece.body) != PS3DE::BODY_MODE_RIGID) {
+				continue;
+			}
+			any_moving = true;
+			PhysicsDirectBodyState3D *state = ps->body_get_direct_state(piece.body);
+			if (state == nullptr || !state->is_sleeping()) {
+				all_asleep = false;
+				break;
+			}
+		}
+		if (any_moving && all_asleep) {
+			for (ChunkVisual &piece : pieces) {
+				if (!piece.frozen && !piece.shrinking && piece.body.is_valid() && ps->body_get_mode(piece.body) == PS3DE::BODY_MODE_RIGID) {
+					// Kinematic, not static: PhysX flips that in place on the
+					// same actor; static rebuilds it.
+					ps->body_set_mode(piece.body, PS3DE::BODY_MODE_KINEMATIC);
+					piece.frozen = true;
+				}
+			}
+		}
+	}
 	// Backwards so remove_at_unordered() (swaps in the last element) doesn't
 	// skip the piece it just moved into the current slot.
 	for (int64_t i = (int64_t)pieces.size() - 1; i >= 0; i--) {
@@ -857,41 +1189,112 @@ void PhysXDestructible3D::_sync_transforms() {
 			// out of the scene entirely (there's no owning Node a kill-floor
 			// Area3D could catch it with -- these are raw PhysicsServer3D
 			// RIDs) -- without this, debris that misses the level keeps
-			// simulating and consuming memory forever.
-			ps->free_rid(piece.body);
-			ps->free_rid(piece.shape);
-			rs->free_rid(piece.instance);
-			rs->free_rid(piece.mesh);
-			pieces.remove_at_unordered((uint32_t)i);
+			// simulating and consuming memory forever. Its Blast actor goes
+			// with it: left live, a later hit could still split it and
+			// re-spawn chunks that fell out of the world.
+			_retire_piece((uint32_t)i);
 			continue;
+		}
+		const bool moving = !piece.frozen && ps->body_get_mode(piece.body) == PS3DE::BODY_MODE_RIGID;
+		// Only debris ages -- a chipped wall's static remainder stays put
+		// (a frozen or shrinking piece did move, so it still ages).
+		real_t shrink = 1.0;
+		if (piece_lifetime > 0.0f && (moving || piece.frozen || piece.shrinking)) {
+			const double age = piece_clock - piece.born;
+			if (age >= piece_lifetime) {
+				_retire_piece((uint32_t)i);
+				continue;
+			}
+			const double left = piece_lifetime - age;
+			if (piece_shrink_time > 0.0f && left < piece_shrink_time) {
+				shrink = (real_t)(left / piece_shrink_time);
+			}
 		}
 		// t.basis is a pure rotation (see spawn_scale's own note) -- every
 		// piece was authored from the same intact mesh at the same original
 		// scale, so the same spawn_scale applies to all of them here too.
 		t.basis = t.basis.scaled_local(spawn_scale);
+		if (shrink < 1.0) {
+			if (!piece.shrinking) {
+				// On its way out: stop it simulating and colliding (it would
+				// otherwise still block players at full size while it looks
+				// smaller), and pin the point it shrinks toward -- the bottom of
+				// its geometry under its middle, where it touches the ground.
+				ps->body_set_mode(piece.body, PS3DE::BODY_MODE_KINEMATIC); // in place, see the freeze above
+				ps->body_set_collision_layer(piece.body, 0);
+				ps->body_set_collision_mask(piece.body, 0);
+				real_t bottom = Math::INF;
+				for (uint32_t ci : piece.chunk_indices) {
+					const PackedVector3Array &points = chunk_points[ci];
+					for (int k = 0; k < points.size(); k++) {
+						bottom = MIN(bottom, t.xform(points[k]).y);
+					}
+				}
+				const Vector3 middle = t.xform(piece.center_local);
+				pieces[i].shrink_pivot = Vector3(middle.x, _ground_below(middle, bottom), middle.z);
+				pieces[i].shrinking = true;
+			}
+			// In world space about the pivot (the body no longer moves).
+			const Vector3 p = pieces[i].shrink_pivot;
+			t = Transform3D(Basis().scaled(Vector3(shrink, shrink, shrink)), p - p * shrink) * t;
+		}
 		rs->instance_set_transform(piece.instance, t);
+	}
+	// Impact fracture for fractured nodes: the intact single-piece path in
+	// NOTIFICATION_INTERNAL_PHYSICS_PROCESS above only runs while
+	// !fractured && pieces.size() == 1 -- i.e. never again after the first
+	// break. Landing/impacting the chipped island used to be unfracturable
+	// (the "that segment got a lot stronger" report); consult every live
+	// piece's contacts here instead, every tick, same as before the break.
+	_check_impact_fracture();
+	_record_piece_velocities();
+}
+
+void PhysXDestructible3D::_record_piece_velocities() {
+	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
+	for (ChunkVisual &piece : pieces) {
+		if (!piece.body.is_valid()) {
+			continue;
+		}
+		PhysicsDirectBodyState3D *state = ps->body_get_direct_state(piece.body);
+		if (state) {
+			piece.last_linear_velocity = state->get_linear_velocity();
+			piece.last_angular_velocity = state->get_angular_velocity();
+		}
 	}
 }
 
 void PhysXDestructible3D::_check_impact_fracture() {
 	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
-	PhysicsDirectBodyState3D *state = ps->body_get_direct_state(pieces[0].body);
-	if (!state) {
-		return;
-	}
-
-	// The hardest single contact this tick, not the sum of all of them --
-	// resting on a flat floor with several contact points shouldn't add up
-	// to "impact" just because there are multiple points of an otherwise
-	// gentle landing.
+	// The hardest single contact across ALL live pieces this tick -- not
+	// just pieces[0]. pieces[0] is only guaranteed to be the intact
+	// placeholder BEFORE the first fracture; afterwards remove_at_unordered
+	// swaps arbitrary pieces into slot 0, so the big remainder island's own
+	// landing/impact contacts went unchecked entirely once it stopped being
+	// pieces[0] -- a chipped island became effectively unbreakable by
+	// collisions (the "that part got a lot stronger" report). Static bodies
+	// never report contacts here, so an anchored wall can't fracture from
+	// its own (nonexistent) landing.
 	real_t max_impulse = 0.0;
 	Vector3 impact_position = get_global_transform().origin;
-	const int contact_count = state->get_contact_count();
-	for (int i = 0; i < contact_count; i++) {
-		const real_t impulse_len = state->get_contact_impulse(i).length();
-		if (impulse_len > max_impulse) {
-			max_impulse = impulse_len;
-			impact_position = state->get_contact_local_position(i);
+	for (uint32_t i = 0; i < pieces.size(); i++) {
+		if (!pieces[i].body.is_valid()) {
+			continue;
+		}
+		PhysicsDirectBodyState3D *state = ps->body_get_direct_state(pieces[i].body);
+		if (!state) {
+			continue;
+		}
+		const int contact_count = state->get_contact_count();
+		for (int c = 0; c < contact_count; c++) {
+			const real_t impulse_len = state->get_contact_impulse(c).length();
+			if (impulse_len > max_impulse) {
+				max_impulse = impulse_len;
+				// Our PhysX backend reports world-space contact points
+				// (GodotPhysXBody3D::Contact::position) -- apply_radial_damage()
+				// maps it into each actor's asset space itself.
+				impact_position = state->get_contact_local_position(c);
+			}
 		}
 	}
 
@@ -913,25 +1316,105 @@ void PhysXDestructible3D::_check_impact_fracture() {
 	apply_radial_damage(impact_position, damage, 0.0f, impact_radius);
 }
 
+// Spawn ONE piece for ONE new actor produced by NvBlastActorSplit. The
+// actor is an island: a connected sub-graph of the asset's chunk graph that
+// survived its support bonds, carrying every chunk below the bonds that
+// just fractured. Spawning one *body* per visible chunk of that island --
+// the pre-fix behavior -- shatters a large remainder island into hundreds
+// of loose bodies on any hit that severs even one bond: the reported
+// "the entire thing breaks into pieces" binary cliff. Instead, the island
+// becomes one rigid body with one convex shape per visible chunk (hull
+// points are authored in the actor's frame, so shapes sit at identity
+// local transforms) and one mesh surface per chunk, all driven by the
+// shared body transform. A leaf actor (single visible chunk) is just the
+// degenerate case and gets the outward shatter kick. Island pieces
+// inherit their predecessor's live pose/velocity exactly (the body's own
+// transform IS their frame -- more faithful than the old per-chunk
+// approximation, which also mis-pivoted angular velocity on first split).
+// p_body_mode propagates the predecessor's mode: chipping a STATIC wall
+// leaves the remainder island STATIC -- only leaf debris goes RIGID.
+// Each new actor resolves its predecessor pose from the per-actor
+// snapshot apply_radial_damage() captured BEFORE this split started:
+// the dedup inside _spawn_piece() frees superseded pieces during the
+// split, so scanning `pieces` here would miss the predecessor entirely
+// once a sibling consumed it.
+int PhysXDestructible3D::_spawn_island_piece(NvBlastActor *p_actor, PhysicsServer3D *p_ps, const Transform3D &p_base_transform, const Vector3 &p_base_linear, const Vector3 &p_base_angular, const Vector3 &p_damage_world_origin, real_t p_max_radius, PS3DE::BodyMode p_body_mode) {
+	const uint32_t visible_count = NvBlastActorGetVisibleChunkCount(p_actor, blast_log);
+	if (visible_count == 0) {
+		return 0;
+	}
+	LocalVector<uint32_t> visible;
+	visible.resize(visible_count);
+	NvBlastActorGetVisibleChunkIndices(visible.ptr(), visible_count, p_actor, blast_log);
+
+	// Each new actor's predecessor pose comes from the per-actor snapshot
+	// apply_radial_damage() captured BEFORE this split started: the dedup
+	// inside _spawn_piece() frees superseded pieces during the split, so
+	// scanning `pieces` here would miss the predecessor once a sibling's
+	// spawn consumed it.
+	Transform3D piece_transform = p_base_transform;
+	Vector3 piece_linear = p_base_linear;
+	Vector3 piece_angular = p_base_angular;
+
+	// Only a single-chunk (leaf) actor becomes free debris with the
+	// outward shatter kick (radial direction + distance falloff + upward
+	// bias, as demo/cpu/physx_playground.gd's _blast()), and it always
+	// simulates -- even when chipped off a STATIC wall. An island actor
+	// holds together as the piece it already is and inherits its
+	// predecessor's mode (a chipped STATIC wall's remainder stays put);
+	// giving its combined hull a per-chunk kick would tear the one rigid
+	// body apart from the inside.
+	PS3DE::BodyMode child_mode = p_body_mode;
+	if (child_mode == PS3DE::BODY_MODE_STATIC && !_island_anchored(visible)) {
+		// Cut loose from everything `anchor` says holds it: it falls (no
+		// kick -- it was never hit as a piece of debris, just let go).
+		child_mode = PS3DE::BODY_MODE_RIGID;
+	}
+	Vector3 spawn_linear = piece_linear;
+	if (visible_count == 1) {
+		child_mode = PS3DE::BODY_MODE_RIGID;
+		const Vector3 centroid_world = piece_transform.xform(_chunk_centroid_local(visible[0]));
+		const Vector3 offset = centroid_world - p_damage_world_origin;
+		const real_t dist = offset.length();
+		const Vector3 dir = dist > 0.001 ? (offset / dist) : Vector3(0, 1, 0);
+		const real_t falloff = CLAMP(1.0 - dist / p_max_radius, 0.0, 1.0);
+		spawn_linear += (dir + Vector3(0, 0.3, 0)).normalized() * shatter_speed * falloff;
+	}
+
+	const int piece_idx = _spawn_piece(visible, piece_transform, spawn_linear, true, child_mode, p_actor);
+	if (piece_idx < 0) {
+		return 0;
+	}
+	if (pieces[piece_idx].body.is_valid()) {
+		p_ps->body_set_state(pieces[piece_idx].body, PS3DE::BODY_STATE_ANGULAR_VELOCITY, piece_angular);
+		pieces[piece_idx].last_angular_velocity = piece_angular;
+	}
+	return 1;
+}
+
+Transform3D PhysXDestructible3D::get_piece_transform(int p_index) const {
+	if (p_index < 0 || p_index >= (int)pieces.size() || !pieces[p_index].body.is_valid()) {
+		return Transform3D();
+	}
+	return PhysicsServer3D::get_singleton()->body_get_state(pieces[p_index].body, PS3DE::BODY_STATE_TRANSFORM);
+}
+
+uint32_t PhysXDestructible3D::get_piece_chunk(int p_index) const {
+	if (p_index < 0 || p_index >= (int)pieces.size()) {
+		return UINT32_MAX;
+	}
+	// A piece represents one actor; an island piece covers several chunks,
+	// so the first (lowest-index) visible chunk stands in for it.
+	return pieces[p_index].chunk_indices.is_empty() ? UINT32_MAX : pieces[p_index].chunk_indices[0];
+}
+
 int PhysXDestructible3D::apply_radial_damage(const Vector3 &p_world_position, float p_damage, float p_min_radius, float p_max_radius) {
 	ERR_FAIL_NULL_V_MSG(family, 0, "PhysXDestructible3D: node not loaded (missing/invalid asset_path or chunks_path?).");
 
-	const Vector3 local_position = get_global_transform().affine_inverse().xform(p_world_position);
-
-	NvBlastExtRadialDamageDesc damage_desc;
-	damage_desc.damage = p_damage;
-	damage_desc.position[0] = local_position.x;
-	damage_desc.position[1] = local_position.y;
-	damage_desc.position[2] = local_position.z;
-	damage_desc.minRadius = p_min_radius;
-	damage_desc.maxRadius = p_max_radius;
-
-	// The falloff shaders cast programParams to NvBlastExtProgramParams
-	// internally -- passing the bare desc directly is a silent access
-	// violation (found and fixed in the standalone runtime-mechanism
-	// prototype before this bridge was written).
-	NvBlastExtProgramParams program_params(&damage_desc);
-
+	// NOTE: the damage point is mapped into ASSET space per actor below --
+	// after the island-piece fix, different live actors simulate at
+	// different poses, so a single node-transform mapping would aim every
+	// follow-up shot at wherever the wall used to be.
 	NvBlastDamageProgram program;
 	program.graphShaderFunction = NvBlastExtFalloffGraphShader;
 	program.subgraphShaderFunction = NvBlastExtFalloffSubgraphShader;
@@ -942,10 +1425,72 @@ int PhysXDestructible3D::apply_radial_damage(const Vector3 &p_world_position, fl
 	chunk_buf.resize(asset_chunk_count);
 
 	int spawned = 0;
+	PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
+	// Live pose + velocity of the intact placeholder (chunk 0), captured
+	// up front before any split can free anything: this is what a fresh
+	// first split's pieces fall back to when they have no live predecessor,
+	// so even the very first break inherits the island's real motion
+	// instead of resetting to wherever the node's transform is frozen.
+	// Only while intact: after the first break pieces[0] is just whichever
+	// piece remove_at_unordered() left there.
+	Transform3D base_transform = get_global_transform();
+	Vector3 base_linear;
+	Vector3 base_angular;
+	if (!fractured && !pieces.is_empty() && pieces[0].body.is_valid()) {
+		const Transform3D t = ps->body_get_state(pieces[0].body, PS3DE::BODY_STATE_TRANSFORM);
+		if (t != Transform3D()) {
+			base_transform = t;
+			base_linear = pieces[0].last_linear_velocity; // pre-impact, see ChunkVisual
+			base_angular = pieces[0].last_angular_velocity;
+		}
+	}
 	LocalVector<NvBlastActor *> actors_to_process(live_actors);
 	live_actors.clear();
 
 	for (NvBlastActor *actor : actors_to_process) {
+		// Map the world damage point into this actor's asset space through
+		// the live pose of its own piece -- each island piece carries its own
+		// simulated pose; through the node's frozen transform a shot at a
+		// moved island lands nowhere near its bonds (the "pushes about but
+		// never breaks" follow-up-hit report). Each actor is exactly one
+		// piece (see ChunkVisual::actor). Once
+		// fractured, an actor with no piece is dead -- its debris went past
+		// kill_y -- and must not be split again: mapped through some other
+		// piece's pose, a hit there re-spawned the lost chunks out of nowhere.
+		const int actor_piece = _piece_of_actor(actor);
+		if (actor_piece < 0 && fractured) {
+			NvBlastActorDeactivate(actor, blast_log);
+			continue;
+		}
+		if (actor_piece >= 0 && pieces[actor_piece].shrinking) {
+			// On its way out (piece_shrink_time): not breakable any more, or a
+			// fading piece would burst into fresh full-size debris.
+			live_actors.push_back(actor);
+			continue;
+		}
+		Transform3D damage_from_asset = get_global_transform(); // a render-only editor piece
+		if (actor_piece >= 0 && pieces[actor_piece].body.is_valid()) {
+			const Transform3D t = ps->body_get_state(pieces[actor_piece].body, PS3DE::BODY_STATE_TRANSFORM);
+			if (t != Transform3D()) {
+				damage_from_asset = t;
+			}
+		}
+		const Vector3 local_position = damage_from_asset.affine_inverse().xform(p_world_position);
+
+		NvBlastExtRadialDamageDesc damage_desc;
+		damage_desc.damage = p_damage;
+		damage_desc.position[0] = local_position.x;
+		damage_desc.position[1] = local_position.y;
+		damage_desc.position[2] = local_position.z;
+		damage_desc.minRadius = p_min_radius;
+		damage_desc.maxRadius = p_max_radius;
+
+		// The falloff shaders cast programParams to NvBlastExtProgramParams
+		// internally -- passing the bare desc directly is a silent access
+		// violation (found and fixed in the standalone runtime-mechanism
+		// prototype before this bridge was written).
+		NvBlastExtProgramParams program_params(&damage_desc);
+
 		NvBlastFractureBuffers commands;
 		commands.bondFractureCount = bond_buf.size();
 		commands.chunkFractureCount = chunk_buf.size();
@@ -976,63 +1521,53 @@ int PhysXDestructible3D::apply_radial_damage(const Vector3 &p_world_position, fl
 			continue;
 		}
 
+		// Snapshot the actor's own live body state ONCE, before its piece is
+		// freed below: every child inherits pose/velocity/mode from it.
+		Transform3D pred_transform = base_transform;
+		Vector3 pred_linear = base_linear;
+		Vector3 pred_angular = base_angular;
+		PS3DE::BodyMode pred_mode = dynamic ? PS3DE::BODY_MODE_RIGID : PS3DE::BODY_MODE_STATIC;
+		if (actor_piece >= 0 && pieces[actor_piece].body.is_valid()) {
+			const RID body = pieces[actor_piece].body;
+			const Transform3D t = ps->body_get_state(body, PS3DE::BODY_STATE_TRANSFORM);
+			if (t != Transform3D()) {
+				pred_transform = t;
+				// The velocity from before this tick's contacts (see ChunkVisual):
+				// an impact's push stays with the chunks near it (their shatter
+				// kick), not with the whole predecessor.
+				pred_linear = pieces[actor_piece].last_linear_velocity;
+				pred_angular = pieces[actor_piece].last_angular_velocity;
+				pred_mode = ps->body_get_mode(body);
+				if (pred_mode == PS3DE::BODY_MODE_KINEMATIC) {
+					// Frozen (freeze_when_asleep) debris that breaks again: its
+					// children are loose debris, not frozen in mid-air.
+					pred_mode = PS3DE::BODY_MODE_RIGID;
+				}
+			}
+		}
+		// The split released this actor: its piece goes now, before the
+		// children spawn (the intact placeholder too, on the first break).
+		if (actor_piece >= 0) {
+			_free_piece((uint32_t)actor_piece);
+		}
+
 		for (uint32_t i = 0; i < new_count; i++) {
 			NvBlastActor *new_actor = new_actors[i];
 			live_actors.push_back(new_actor);
-
-			const uint32_t visible_count = NvBlastActorGetVisibleChunkCount(new_actor, blast_log);
-			LocalVector<uint32_t> visible;
-			visible.resize(visible_count);
-			NvBlastActorGetVisibleChunkIndices(visible.ptr(), visible_count, new_actor, blast_log);
-			for (uint32_t v = 0; v < visible_count; v++) {
-				// No real pre-fracture body exists to inherit a genuine
-				// per-actor velocity from (chunk 0's intact body was just a
-				// placeholder, freed above) -- instead give each piece an
-				// outward "shatter" kick from the damage origin to its own
-				// centroid, same radial-direction + distance-falloff +
-				// slight-upward-bias shape as demo/cpu/physx_playground.gd's
-				// _blast(), just computed intrinsically here rather than
-				// bolted on by whatever script happens to call this.
-				const Vector3 centroid_world = get_global_transform().xform(_chunk_centroid_local(visible[v]));
-				const Vector3 offset = centroid_world - p_world_position;
-				const real_t dist = offset.length();
-				const Vector3 dir = dist > 0.001 ? (offset / dist) : Vector3(0, 1, 0);
-				const real_t falloff = CLAMP(1.0 - dist / (real_t)p_max_radius, 0.0, 1.0);
-				const Vector3 piece_velocity = (dir + Vector3(0, 0.3, 0)).normalized() * shatter_speed * falloff;
-				_spawn_piece(visible[v], get_global_transform(), piece_velocity);
-				spawned++;
-			}
+			spawned += _spawn_island_piece(new_actor, ps, pred_transform, pred_linear, pred_angular, p_world_position, (real_t)p_max_radius, pred_mode);
 		}
 	}
 
-	// Only now -- having confirmed real chunks actually broke off -- retire
-	// the intact placeholder body/visual and commit to "fractured". Doing
-	// this unconditionally on the *first call* (the old behavior) meant any
-	// hit that reached the object at all, even one whose falloff-scaled
-	// damage was too weak to break a single bond, silently destroyed the
-	// intact piece and spawned nothing: the object would vanish with no
-	// body and no visual, yet `fractured` was already true so it could never
-	// be re-spawned, only (maybe) surfaced later once accumulated bond
-	// damage from a subsequent hit finally cleared a split -- exactly the
-	// "bounces off, then randomly disappears or breaks" behavior reported
-	// against a single static sphere. `pieces[0]` is guaranteed to still be
-	// exactly that placeholder here: nothing else could have been in
-	// `pieces` before this call while `!fractured`.
+	// Only now -- having confirmed real chunks actually broke off -- commit
+	// to "fractured". (The intact placeholder was freed above, with the root
+	// actor it stood for.) A hit too weak to split anything leaves the node
+	// intact, not vanished.
 	if (!fractured && spawned > 0) {
-		PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
-		RenderingServer *rs = RenderingServer::get_singleton();
-		const ChunkVisual &placeholder = pieces[0];
-		if (placeholder.body.is_valid()) {
-			ps->free_rid(placeholder.body);
-		}
-		if (placeholder.shape.is_valid()) {
-			ps->free_rid(placeholder.shape);
-		}
-		rs->free_rid(placeholder.instance);
-		rs->free_rid(placeholder.mesh);
-		pieces.remove_at_unordered(0);
 		fractured = true;
 		set_physics_process_internal(true);
+	}
+	if (spawned > 0) {
+		emit_signal(SNAME("fractured"), spawned);
 	}
 
 	return spawned;

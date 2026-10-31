@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PhysXLensDirt3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Lens dirt lit by the frame's bright light, provided by the PhysX module.
+	</brief_description>
+	<description>
+		Dust, smudges and droplet marks on the camera lens that light up where bright light reaches it: the frame's bright light, spread wide the way a lens scatters it, multiplies [member dirt_texture] and is added on top -- the way other engines' bloom dirt masks work. Any bright light does it (the sky, the sun, fire, headlights, [PhysXLightShafts3D]'s rays, [PhysXLensFlare3D]'s ghosts, [PhysXFlow3D] flames); where the texture is black, or nothing in that part of the screen is bright, the frame is untouched. Add the node anywhere in the scene and give it a texture.
+		Not the same as [member Environment.glow_map], which [i]multiplies[/i] Godot's glow by a texture (dimming the glow where the texture is dark) rather than adding light where the texture has dirt.
+		The texture is stretched over the screen: author it at the screen's aspect ratio (typically 16:9), with the dirt bright on black. The demo project's [code]demo/common/textures/lens_dirt.png[/code] is an example.
+		Works with the Forward+ and Mobile renderers, not Compatibility (which has no compositor effects). Only one [PhysXLensDirt3D] is drawn per frame; with several, which one is unspecified.
+	</description>
+	<tutorials>
+	</tutorials>
+	<members>
+		<member name="dirt_texture" type="Texture2D" setter="set_dirt_texture" getter="get_dirt_texture">
+			The dirt on the lens: bright where there's dirt, black where the glass is clean. Stretched over the screen. Nothing is drawn without one.
+		</member>
+		<member name="intensity" type="float" setter="set_intensity" getter="get_intensity" default="3.0">
+			How bright the lit dirt is.
+		</member>
+		<member name="threshold" type="float" setter="set_threshold" getter="get_threshold" default="0.0">
+			How bright (linear HDR luminance) a part of the frame must be before it lights the dirt. At [code]0[/code] all light counts, more where it's brighter -- a dirty lens shows against a bright sky as well as around the sun. In Godot's default scenes the sky is around [code]0.5[/code] and only the sun's disk goes above [code]1[/code], so raising it toward [code]1[/code] keeps the dirt to the brightest sources.
+		</member>
+		<member name="tint" type="Color" setter="set_tint" getter="get_tint" default="Color(1, 1, 1, 1)">
+			Multiplies the lit dirt's color.
+		</member>
+	</members>
+</class>
