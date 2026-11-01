@@ -49,6 +49,7 @@
 		</member>
 		<member name="auto_planar_reflections" type="bool" setter="set_auto_planar_reflections" getter="is_auto_planar_reflections_enabled" default="true">
 			If [code]true[/code], large flat smooth surfaces in the volume get planar reflections automatically (see [PlanarReflector3D]). Surfaces with a [PlanarReflector3D] of their own are left alone. Forward+ only.
+			The choice follows the material's roughness ([member auto_planar_max_roughness]), the surface's size ([member auto_planar_min_area]) and skips undersides and upright transparent surfaces. To override it for one [MeshInstance3D], set its metadata [code]auto_planar_reflection[/code] to [code]true[/code] (its flat faces always get a reflector, whatever the material) or [code]false[/code] (never).
 		</member>
 		<member name="auto_reflection_probe" type="bool" setter="set_auto_reflection_probe" getter="is_auto_reflection_probe_enabled" default="true">
 			If [code]true[/code], one box-projected reflection probe covers the volume (or follows the camera with [member infinite_world]), captured once and normalized by DDGI. Skipped when the volume contains a [ReflectionProbe].

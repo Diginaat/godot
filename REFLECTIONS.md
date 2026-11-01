@@ -92,7 +92,7 @@ Project settings (`rendering/global_illumination/reflections/`):
 | `planar_enabled` | on | Planar reflections on/off |
 | `planar_max_reflectors` | 4 | Most reflectors per view (nearest first, 1 to 8) |
 | `planar_resolution` | Full | Full or Half |
-| `planar_mirror_render` | Upright Reflectors | Mirror pass: one reflector per view (the one covering most of it) is rendered again from the camera reflected across it. Disabled, Upright Reflectors (mirrors, walls) or All Reflectors (floors and water too) |
+| `planar_mirror_render` | All Reflectors | Mirror pass: one reflector per view (the one covering most of it, upright ones counted four times) is rendered again from the camera reflected across it. Disabled, Upright Reflectors (mirrors, walls) or All Reflectors (floors and water too) |
 | `planar_mirror_scale` | 0.5 | Resolution of the mirror pass relative to the view's 3D resolution (0.25 to 1) |
 
 Probe resolution and count stay in the existing
@@ -341,7 +341,7 @@ Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
   `max_distance` when walls sit on the box), and `blend_distance` fades a
   probe to zero at its box faces.
 
-## Open issues (paused 2026-11-01)
+## Open issues (updated 2026-11-01, evening)
 
 Work on the planar reflections stopped here, to be continued. State: the
 showcase level (a first-person test project outside this repository,
@@ -352,13 +352,13 @@ likely fix:
 
 | # | Issue | How to see it | Likely fix |
 | --- | --- | --- | --- |
-| A | Blocky, jagged edges in a mirror seen from very close at a grazing angle (one source pixel covers up to 24 x 24 screen pixels) | Showcase: `--at=-5,-8.6 --yaw=-80 --pitch=-4` (stand at the mirror's side, look along it) | Fill the footprint with the source's bilinear neighborhood instead of one offset per parallelogram; or a mirrored-camera mode for mirrors (step 8) |
-| B | Small objects above a reflector (hanging lamps, the orb) reflect as a thin ring or a partial shape: their underside, which the reflection shows, is never on screen | Showcase gallery, look at the floor under the lamps; `reflect` view's floor under the pink ball | Only a re-render (step 8) or ray tracing gives the hidden side; screen space can only shade it from the probe. A one-sided dilation was tried and gave cone and ghost artifacts (findings log) |
-| C | Bright emissive objects look dimmer and more orange in floor reflections than the object itself | Showcase: the orb and its floor reflection | Mostly physical (a dielectric floor reflects a few percent; the object itself clips to white). Check the luma/chroma anti-bleeding in the resolve and the HDR range of the last frame copy before changing anything |
-| D | Thin bright lines on the floor at grazing views near the windows | Showcase gallery, morning, low pitch toward the east wall | Believed real (sunlit window sills reflected); confirm against the path tracer (`F3`) before treating it as a bug |
+| A | **Done.** Blocky, jagged edges in a mirror seen from very close at a grazing angle (one source pixel covers up to 24 x 24 screen pixels) | Showcase: `--at=-5,-8.6 --yaw=-80 --pitch=-4` (stand at the mirror's side, look along it) | The mirror pass takes over where the projection is magnified (findings, "magnified projection"). Reflectors without the mirror pass keep the blocks |
+| B | **Done** for the reflector with the mirror pass (floors too since `planar_mirror_render` defaults to All Reflectors). Small objects above a reflector reflected as a thin ring or a partial shape | Showcase: `--at=-2,-6 --yaw=200 --pitch=-12 --still` (lamp over the floor) | The resolve keeps the projection only where its point is at the mirror pass's hit distance. A faint 1 pixel outline can remain at silhouettes (the tolerance spans the neighboring mirror texels) |
+| C | **Closed: physical.** Bright emissive objects look dimmer and more orange in floor reflections than the object itself | Demo level: `--at=1,-2 --yaw=180 --pitch=-15 --moving-emissive --emissive-still`, with and without `--pt` | The path tracer shows the same orange, equally bright reflection on the glossy pad |
+| D | Thin bright lines on the floor at grazing views near the windows | Showcase gallery, morning, low pitch toward the east wall | Believed real (sunlit window sills reflected). Not confirmable with the path tracer yet: it shades the showcase's marble floor differently (rough, no window reflections), so it is no reference there (`--pt` in the showcase) |
 | E | Cost went up with each quality fix: 0.34 ms (first version) to 0.83 ms at 1080p; about 80 MB at full resolution | `misc/ddgi_test_project`: `--view=reflect --res=1920x1080 --bench=300 --gpu-profile` | Ping-pong the history instead of copying it; skip the temporal pass for pixels without a reflector (indirect dispatch over reflector tiles, as the PPR talk suggests); default to half resolution on weak GPUs |
-| F | The automatic scan uses heuristics: undersides, upright glass, thin strips and faces outside the volume are skipped | `DDGIVolume.get_auto_planar_reflectors()` lists what it chose | Expose per-material or per-mesh opt-in/opt-out (a mesh metadata flag) for the cases the heuristics get wrong |
-| G | Planar reflections and the automatic planar scan are not tested in the editor viewport, with XR (not supported), with AMD or Intel GPUs | | Step 10 |
+| F | **Done.** The automatic scan uses heuristics: undersides, upright glass, thin strips and faces outside the volume are skipped | `DDGIVolume.get_auto_planar_reflectors()` lists what it chose | Per mesh: metadata `auto_planar_reflection` true (always, any material) or false (never) on the `MeshInstance3D` |
+| G | Planar reflections and the automatic planar scan are not tested with XR (not supported), with AMD or Intel GPUs. Editor (demo level open 600 frames), Mobile and Compatibility run without errors (2026-11-01; Forward+ is the target) | | Step 10 |
 
 How to test (always with movement: still frames hid the stripes and the
 grid): the showcase records walks with `--move=dx,dz,dyaw` (meters and
@@ -429,6 +429,21 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 ## Findings log
 
 Newest first.
+
+- **2026-11-01, mirror pass on floors (issue B).** `planar_mirror_render`
+  now defaults to All Reflectors: upright reflectors score four times,
+  so a mirror in view wins and a floor gets the pass otherwise. A first
+  try put upright ones strictly first: a door reflector in another room,
+  inside the frustum but behind walls, always won and the floor never got
+  the pass. With occluders in the scene, the occlusion buffer now rejects
+  hidden reflectors too. The lamp's floor reflection was still a thin
+  ring with the pass: the projection's data there was wrong, not missing
+  (silhouette pixels stretched to where the reflected ray hits the
+  ceiling, and the underside's place filled with what is behind it).
+  The resolve now keeps the projection only where its point is at the
+  distance of the mirror pass's hit (within the range of the 4
+  neighboring mirror texels, so true silhouettes stay sharp), shown by
+  painting the decision red and green.
 
 - **2026-11-01, magnified projection (issue A).** Seen from close by at a
   grazing angle, the projection stretches one source pixel over several

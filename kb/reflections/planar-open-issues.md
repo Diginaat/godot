@@ -28,9 +28,10 @@ the runbook.[^runbook]
    misses on the reflector covering most of the view, at about 0.35 to
    0.55 ms (1080p, cropped to the mirror's rectangle, no post-processing).
    Shared shadow maps would cut more.
-3. Hidden undersides of small objects: needs a re-render or ray tracing;
-   screen space can only fall back to the probe.
-4. Per-mesh opt-in/opt-out for the automatic scan.
+3. Hidden undersides of small objects: done where the mirror pass runs
+   (floors included by default); other reflectors still fall back.
+4. Per-mesh opt-in/opt-out for the automatic scan: done (metadata
+   `auto_planar_reflection`).
 
 # Lessons
 

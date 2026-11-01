@@ -2981,7 +2981,10 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 
 	// The reflector covering most of the view: area seen face on, over distance squared.
 	const Transform3D &cam = p_camera_data.main_transform;
+	const Transform3D inv_cam = cam.affine_inverse();
 	Vector<Plane> frustum = p_camera_data.main_projection.get_projection_planes(cam);
+	// Updated for this camera just before (render_camera()).
+	const RendererSceneOcclusionCull::HZBuffer *occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
 	int best = -1;
 	float best_score = 0.0;
 	for (uint32_t i = 0; i < scenario->planar_reflection_data.size(); i++) {
@@ -3021,10 +3024,30 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 		if (culled) {
 			continue;
 		}
+		// Behind walls (only when the scene has occluders: the frustum test alone
+		// takes mirrors in other rooms).
+		if (occlusion_buffer) {
+			AABB box(corners[0], Vector3());
+			for (int c = 1; c < 4; c++) {
+				box.expand_to(corners[c]);
+			}
+			box = box.grow(0.01);
+			InstanceBounds bounds(box);
+			uint64_t timeout = 0;
+			if (occlusion_buffer->is_occluded(bounds.bounds, cam.origin, inv_cam, p_camera_data.main_projection, p_camera_data.main_projection.get_z_near(), false, timeout)) {
+				continue;
+			}
+		}
 		// Distance to the rectangle (not its center), so a large wall seen from close by wins.
 		Vector3 nearest = r.transform.origin + axis_u * CLAMP(to_camera.dot(axis_u), -r.size.x * 0.5f, r.size.x * 0.5f) + axis_v * CLAMP(to_camera.dot(axis_v), -r.size.y * 0.5f, r.size.y * 0.5f);
 		float distance = MAX(cam.origin.distance_to(nearest), 0.25f);
 		float score = r.size.x * r.size.y * (side / to_camera.length()) / (distance * distance);
+		// Mode 2: upright reflectors (mirrors) count four times. A mirror facing the
+		// camera has no other source for what is behind it; a floor lacks only
+		// hidden sides (the undersides of things above it).
+		if (mode == 2 && Math::abs(normal.y) < 0.7) {
+			score *= 4.0;
+		}
 		if (score > best_score) {
 			best_score = score;
 			best = i;

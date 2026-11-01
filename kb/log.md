@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-01 (reflections: open issues)
+
+* **Added**: mistakes/stale-generated-shader-header.md.
+* **Updated**: REFLECTIONS.md open issues (A, B, F done; C physical; D
+  and G status), findings; reflections/planar-open-issues.md.
+
 ## 2026-11-01 (glass research)
 
 * **Added**: research/cheap-glass-shading.md.

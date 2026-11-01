@@ -245,6 +245,13 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 		if (mesh.is_null()) {
 			continue;
 		}
+		// Per mesh override of the heuristics: metadata "auto_planar_reflection"
+		// true (always, any material) or false (never).
+		Variant forced_meta = mi->has_meta(SNAME("auto_planar_reflection")) ? mi->get_meta(SNAME("auto_planar_reflection")) : Variant();
+		const int forced = forced_meta.get_type() == Variant::BOOL ? (bool(forced_meta) ? 1 : -1) : 0;
+		if (forced < 0) {
+			continue;
+		}
 		Transform3D xform = mi->get_global_transform();
 		// Grown: floors usually lie exactly on the volume's bottom face, and touching
 		// doesn't count as intersecting.
@@ -255,7 +262,7 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 		for (int s = 0; s < mesh->get_surface_count(); s++) {
 			Ref<Material> material = mi->get_active_material(s);
 			float roughness = _material_roughness(material);
-			if (roughness < 0.0 || roughness > p_settings.planar_max_roughness) {
+			if (forced == 0 && (roughness < 0.0 || roughness > p_settings.planar_max_roughness)) {
 				continue;
 			}
 			const LocalVector<Cluster> &clusters = _get_clusters(mesh, s);
@@ -271,7 +278,7 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 				Vector3 e_u = corners[1] - corners[0];
 				Vector3 e_v = corners[2] - corners[0];
 				float area = e_u.length() * e_v.length();
-				if (area < p_settings.planar_min_area || MIN(e_u.length(), e_v.length()) < 0.5) {
+				if (forced == 0 && (area < p_settings.planar_min_area || MIN(e_u.length(), e_v.length()) < 0.5)) {
 					continue; // Small, or a thin strip (wall tops, slab edges).
 				}
 				Vector3 face_center = corners[0] + (e_u + e_v) * 0.5;
@@ -279,10 +286,10 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 					continue; // Outside the volume, or a slab's buried side below its floor.
 				}
 				Vector3 normal = normal_basis.xform(c.normal).normalized();
-				if (normal.y < -0.7) {
+				if (forced == 0 && normal.y < -0.7) {
 					continue; // Undersides (of floors and slabs): almost never seen, never worth a reflector.
 				}
-				if (normal.y < 0.7 && _material_is_transparent(material)) {
+				if (forced == 0 && normal.y < 0.7 && _material_is_transparent(material)) {
 					continue; // Upright glass: its faint reflection comes from the probes; a planar one reads as an overlay.
 				}
 				Vector3 x = e_u.normalized();

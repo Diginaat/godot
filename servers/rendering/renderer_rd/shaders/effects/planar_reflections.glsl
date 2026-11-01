@@ -526,6 +526,31 @@ void main() {
 		float source_step = (mirror_virtual_distance / max(length(source_pos - eye), 1e-3)) * (cos_direct / cos_virtual); // Source pixels per target pixel.
 		float mirror_step = float(textureSize(mirror_color, 0).y) / (float(params.target_size.y) * params.mirror_rect.w);
 		projected *= smoothstep(0.6, 1.0, source_step / max(mirror_step, 1e-3));
+
+		// The projection only knows what is on screen. Where the reflected ray's
+		// first hit is hidden from the camera (the underside of a lamp above a
+		// floor) it shows what lies behind it, and stretched silhouettes land where
+		// the ray actually misses the object. The mirror pass sees the first hit:
+		// keep the projection only where its point is at that distance, within the
+		// range of the neighboring mirror texels (their resolution is lower, and
+		// silhouettes must stay sharp).
+		vec3 source_virtual = source_pos - 2.0 * (dot(r.plane.xyz, source_pos) - r.plane.w) * r.plane.xyz;
+		float projected_distance = length(source_virtual - eye);
+		vec2 texel = 1.0 / vec2(textureSize(mirror_depth, 0));
+		float near_hit = mirror_virtual_distance;
+		float far_hit = mirror_virtual_distance;
+		const vec2 corners[4] = vec2[](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(-1.0, 1.0), vec2(1.0, 1.0));
+		for (int k = 0; k < 4; k++) {
+			vec2 muv = clamp(mirror_uv + corners[k] * texel, vec2(0.0), vec2(1.0));
+			float d = textureLod(mirror_depth, muv, 0.0).r;
+			vec2 suv = params.mirror_rect.xy + muv * params.mirror_rect.zw;
+			float dist = (d <= 0.0 && params.orthogonal == 0) ? SKY_DISTANCE : length(view_from_uv_depth(suv, d) - eye);
+			near_hit = min(near_hit, dist);
+			far_hit = max(far_hit, dist);
+		}
+		float tolerance = 0.03 * mirror_virtual_distance + 0.05;
+		float outside = max(near_hit - projected_distance, projected_distance - far_hit);
+		projected *= 1.0 - smoothstep(tolerance, 2.0 * tolerance, outside);
 	}
 	float weight = clamp(r.center.w, 0.0, 1.0) * projected;
 
