@@ -87,4 +87,6 @@ struct SceneData {
 	uint camera_visible_layers;
 	float pass_alpha_multiplier;
 	float fog_sky_affect;
+
+	vec4 clip_plane; // View space; vertices with dot(xyz, vertex) + w < 0 are clipped (mirror passes).
 };

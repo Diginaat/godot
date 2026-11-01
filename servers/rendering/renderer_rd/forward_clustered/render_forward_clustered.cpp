@@ -1648,8 +1648,46 @@ void RenderForwardClustered::_process_planar_reflections(RenderDataRD *p_render_
 	if (normal_roughness.is_null()) {
 		normal_roughness = RendererRD::TextureStorage::get_singleton()->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
 	}
+	// The mirror pass (RendererSceneCull::_render_mirror()), if one of the
+	// reflectors had one: its color, with mipmaps for rough surfaces.
+	int mirror_reflector = -1;
+	RID mirror_color;
+	RID mirror_depth;
+	for (int i = 0; i < planar_reflection_count; i++) {
+		Ref<RenderSceneBuffersRD> mirror_rb = planar_reflection_selection[i]->mirror_buffers;
+		if (mirror_rb.is_null()) {
+			continue;
+		}
+		Size2i size = mirror_rb->get_internal_size();
+		uint32_t mipmaps = MIN(Image::get_image_required_mipmaps(size.x, size.y, Image::FORMAT_RGBAH) + 1, 8);
+		if (rb->has_texture(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR)) {
+			RD::TextureFormat f = rb->get_texture_format(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR);
+			if (int(f.width) != size.x || int(f.height) != size.y || f.mipmaps != mipmaps) {
+				rb->clear_context(RB_SCOPE_PLANAR_MIRROR);
+			}
+		}
+		if (!rb->has_texture(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR)) {
+			rb->create_texture(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, size, 1, mipmaps);
+		}
+		for (uint32_t m = 0; m < mipmaps; m++) {
+			RID dest = rb->get_texture_slice(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR, 0, m);
+			if (m == 0) {
+				copy_effects->copy_to_rect(mirror_rb->get_internal_texture(), dest, Rect2i(Vector2i(), size), false, false, false, false, false, true);
+			} else {
+				copy_effects->make_mipmap(rb->get_texture_slice(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR, 0, m - 1), dest, RD::get_singleton()->texture_size(dest));
+			}
+		}
+		mirror_reflector = i;
+		mirror_color = rb->get_texture(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR);
+		mirror_depth = mirror_rb->get_depth_texture(0);
+		break;
+	}
+	if (mirror_reflector < 0 && rb->has_texture(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR)) {
+		rb->clear_context(RB_SCOPE_PLANAR_MIRROR);
+	}
+
 	bool half_size = GLOBAL_GET_CACHED(int, "rendering/global_illumination/reflections/planar_resolution") == 1;
-	planar_reflections_effect->process(rb, rb->get_depth_texture(0), normal_roughness, rb->get_texture(RB_SCOPE_SSLF, RB_LAST_FRAME), scene_data->cam_projection, scene_data->taa_jitter, scene_data->cam_transform, reprojection, planar_reflection_selection, planar_reflection_count, half_size);
+	planar_reflections_effect->process(rb, rb->get_depth_texture(0), normal_roughness, rb->get_texture(RB_SCOPE_SSLF, RB_LAST_FRAME), scene_data->cam_projection, scene_data->taa_jitter, scene_data->cam_transform, reprojection, planar_reflection_selection, planar_reflection_count, half_size, mirror_reflector, mirror_color, mirror_depth);
 }
 
 void RenderForwardClustered::_copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr) {

@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-01 (mirror pass, step 8)
+
+* **Updated**: REFLECTIONS.md: `planar_mirror_render`, `planar_mirror_scale`,
+  findings (clip distances, light culler winding, DDGI sharing, hybrid
+  resolve, cost); reflections/planar-open-issues.md.
+
 ## 2026-11-01 (reflection resolution, mirrored-camera research)
 
 * **Added**: research/mirrored-camera-reflections.md (step 8 sources).

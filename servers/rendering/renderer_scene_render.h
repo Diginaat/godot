@@ -332,6 +332,12 @@ public:
 		float thickness = 0.05;
 		float normal_distortion = 0.0;
 		float roughness_cutoff = 0.4;
+		// Set on the copy given to the renderer when a mirror pass rendered this
+		// reflector this frame (RendererSceneCull::_render_mirror()): the mirrored
+		// camera's buffers (linear HDR color in the internal texture) and the
+		// world to clip transform of that view.
+		Ref<RenderSceneBuffers> mirror_buffers;
+		Projection mirror_view_projection;
 	};
 
 	struct CameraData {
@@ -349,6 +355,12 @@ public:
 		Projection view_projection[RendererSceneRender::MAX_RENDER_VIEWS];
 		Vector2 taa_jitter;
 		float taa_frame_count = 0.0f;
+
+		// Mirror pass: the camera reflected across a planar reflector. Geometry on
+		// the negative side of clip_plane (world space) isn't drawn; GI isn't
+		// updated, only sampled.
+		bool mirror_pass = false;
+		Plane clip_plane;
 
 		void set_camera(const Transform3D p_transform, const Projection p_projection, bool p_is_orthogonal, bool p_vaspect, const Vector2 &p_taa_jitter = Vector2(), float p_taa_frame_count = 0.0f, uint32_t p_visible_layers = 0xFFFFFFFF);
 		void set_multiview_camera(const Transform3D &p_transform, const LocalVector<Transform3D> &p_offsets, const LocalVector<Projection> &p_projection, bool p_is_orthogonal, bool p_vaspect, uint32_t p_visible_layers = 0xFFFFFFFF);

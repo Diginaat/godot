@@ -31,6 +31,7 @@
 #include "planar_reflections.h"
 
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
+#include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 
 using namespace RendererRD;
@@ -105,7 +106,7 @@ int PlanarReflections::select_reflectors(const LocalVector<RendererSceneRender::
 		}
 		Candidate candidate;
 		candidate.reflector = &r;
-		candidate.distance = MAX(cam_pos.distance_to(origin) - (hu + hv).length(), 0.0f);
+		candidate.distance = r.mirror_buffers.is_valid() ? -1.0f : MAX(cam_pos.distance_to(origin) - (hu + hv).length(), 0.0f);
 		candidates.push_back(candidate);
 	}
 
@@ -117,7 +118,7 @@ int PlanarReflections::select_reflectors(const LocalVector<RendererSceneRender::
 	return count;
 }
 
-void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size) {
+void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size, int p_mirror_reflector, RID p_mirror_color, RID p_mirror_depth) {
 	ERR_FAIL_COND(p_render_buffers.is_null());
 	ERR_FAIL_COND(p_count <= 0 || p_count > MAX_REFLECTORS);
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
@@ -172,6 +173,9 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 	params.max_color_lod = MAX(float(RD::get_singleton()->texture_get_format(p_last_frame).mipmaps) - 1.0f, 0.0f);
 	params.orthogonal = p_projection.is_orthogonal() ? 1 : 0;
 	params.history_valid = history_valid ? 1 : 0;
+	bool use_mirror = p_mirror_reflector >= 0 && p_mirror_reflector < p_count && p_mirror_color.is_valid() && p_mirror_depth.is_valid();
+	params.mirror_reflector = use_mirror ? p_mirror_reflector : -1;
+	params.mirror_max_lod = use_mirror ? MAX(float(RD::get_singleton()->texture_get_format(p_mirror_color).mipmaps) - 1.0f, 0.0f) : 0.0f;
 
 	Transform3D to_view = p_cam_transform.affine_inverse();
 	for (int i = 0; i < p_count; i++) {
@@ -225,12 +229,15 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 	RD::Uniform u_current_out(RD::UNIFORM_TYPE_IMAGE, 5, current);
 	RD::Uniform u_params_out(RD::UNIFORM_TYPE_IMAGE, 6, params_texture);
 	RD::Uniform u_motion_out(RD::UNIFORM_TYPE_IMAGE, 7, motion);
+	RID black = TextureStorage::get_singleton()->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+	RD::Uniform u_mirror_color(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 8, Vector<RID>({ linear_mips, use_mirror ? p_mirror_color : black }));
+	RD::Uniform u_mirror_depth(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 9, Vector<RID>({ nearest, use_mirror ? p_mirror_depth : black }));
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 	for (int mode = MODE_PROJECT; mode <= MODE_RESOLVE; mode++) {
 		RID shader_rid = shader.version_get_shader(shader_version, mode);
 		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[mode]);
-		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader_rid, 0, u_params, u_depth, u_intermediate, u_normal_roughness, u_last_frame, u_current_out, u_params_out, u_motion_out), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader_rid, 0, u_params, u_depth, u_intermediate, u_normal_roughness, u_last_frame, u_current_out, u_params_out, u_motion_out, u_mirror_color, u_mirror_depth), 0);
 		RD::get_singleton()->compute_list_dispatch_threads(compute_list, target_size.x, target_size.y, 1);
 		RD::get_singleton()->compute_list_add_barrier(compute_list);
 	}

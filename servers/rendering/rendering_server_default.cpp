@@ -266,6 +266,7 @@ void RenderingServerDefault::_finish() {
 
 	RSG::canvas->finalize();
 	memdelete(RSG::canvas);
+	RSG::scene->free_mirror_views();
 	RSG::rasterizer->finalize();
 	memdelete(RSG::viewport);
 	memdelete(RSG::rasterizer);

@@ -45,10 +45,14 @@ decides how reflective it is (metallic, roughness, specular).
 | `thickness` | 0.05 m | How far from the plane a surface still counts as the reflector (waves); objects nearer than this aren't reflected |
 | `layers` | 1 | Render layers; cameras whose cull mask shares one use it |
 
-Mirrors that face the camera reflect what is behind it, which is off screen:
-with a `DDGIVolume`, `auto_mirror_probes` puts a box-projected probe in
-front of each mirror for that part; without one, put a box-projected
-`ReflectionProbe` in the room. Water: a
+Mirrors that face the camera reflect what is behind it, which is off screen.
+The mirror pass (`planar_mirror_render`, on for upright reflectors by
+default) renders the scene again from the reflected camera for the
+reflector that covers most of the view, so a mirror seen from close by
+shows the room behind the player, live, with its lighting and shadows.
+Other reflectors fall back to probes there: with a `DDGIVolume`,
+`auto_mirror_probes` puts a box-projected probe in front of each mirror;
+without one, put a box-projected `ReflectionProbe` in the room. Water: a
 transparent material works (the reflector is matched by depth, not by the
 depth buffer).
 
@@ -88,6 +92,8 @@ Project settings (`rendering/global_illumination/reflections/`):
 | `planar_enabled` | on | Planar reflections on/off |
 | `planar_max_reflectors` | 4 | Most reflectors per view (nearest first, 1 to 8) |
 | `planar_resolution` | Full | Full or Half |
+| `planar_mirror_render` | Upright Reflectors | Mirror pass: one reflector per view (the one covering most of it) is rendered again from the camera reflected across it. Disabled, Upright Reflectors (mirrors, walls) or All Reflectors (floors and water too) |
+| `planar_mirror_scale` | 0.5 | Resolution of the mirror pass relative to the view's 3D resolution (0.25 to 1) |
 
 Probe resolution and count stay in the existing
 `rendering/reflections/reflection_atlas/reflection_size` and
@@ -302,10 +308,14 @@ Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
 
 ## Known limitations
 
-- Planar reflections show only what is on screen. Mirrors facing the
-  camera, and parts of objects hidden behind others, fall back to probes
-  and the sky (`auto_mirror_probes` puts one in front of each mirror).
-  There is no mirrored-camera mode yet (see the steps).
+- The screen-space projection shows only what is on screen. One reflector
+  per view gets the mirror pass (what is off screen, behind the camera or
+  hidden); the others fall back to probes and the sky (`auto_mirror_probes`
+  puts one in front of each mirror).
+- The mirror pass costs a second scene render, shadow cascades included:
+  +2.07 ms at 1080p in the demo level (RTX 3060, half resolution). It
+  samples the view's DDGI probes but SDFGI and VoxelGI run again for it.
+  Not in XR, orthogonal cameras, Mobile or Compatibility.
 - The reflected image is last frame's, reprojected: fast moving objects
   lag by a frame in it; disocclusions show the probe.
 - Normal-mapped reflections are approximated by shifting the lookup, not
@@ -374,7 +384,7 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 | 6 | Atlas on demand, LRU fix | Done |
 | 7 | Test view, benchmarks, chaos, docs | Done |
 | 7b | Automatic reflections from the DDGIVolume (`auto_reflections`) | Done |
-| 8 | Optional mirrored-camera mode for mirrors that face the camera (budgeted, low resolution) | Open; meanwhile `auto_mirror_probes` (2026-11-01) |
+| 8 | Mirror pass: the reflector covering most of the view rendered from the reflected camera (`planar_mirror_render`), combined with the projection | Done (2026-11-01); cost reductions open (see findings) |
 | 9 | DDGI irradiance inside probe captures (sample the probes in the capture pass) | Open |
 | 10 | Test on AMD and Intel GPUs, Mobile and Compatibility renderers | Open |
 | 11 | Planar quality: temporal filter, footprint fill, coverage, automatic scan fixes, showcase level | Done (2026-11-01) |
@@ -417,6 +427,41 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 ## Findings log
 
 Newest first.
+
+- **2026-11-01, mirror pass (step 8).** Research: engines render the scene
+  again from the reflected camera, clip at the plane (oblique near plane),
+  flip culling and blur by roughness with contact hardening
+  (kb/research/mirrored-camera-reflections.md). Done here as:
+  - `RendererSceneCull::_render_mirror()` picks the reflector with the
+    largest area x cos / distance squared (upright ones by default),
+    renders it from `R * camera` with the main projection into its own
+    render buffers (`planar_mirror_scale`), before the main view. Same
+    projection, so the mirror image at a pixel's screen position is what
+    the pixel reflects: no extra matrices in the lookup.
+  - Clipping by `gl_ClipDistance` (scene data `clip_plane`, view space),
+    not an oblique projection, which would break the cluster slices, fog
+    and shadow splits that read near and far from the projection. The
+    plane sits a little in front of the reflector so its own surface isn't
+    drawn. Shadow passes have their own scene data: not clipped.
+  - Forward+ already flips culling for a negative determinant. The light
+    culler and the directional cascades build planes from frustum corners
+    by winding and lost casters (the mirror's own shadow was missing in
+    the reflection, compared with the path tracer): they get the same
+    frustum with x flipped back (a proper rotation).
+  - The mirror pass samples the main view's DDGI probes
+    (`RenderSceneBuffers::set_gi_source`); it never updates them.
+    Occlusion culling, motion history and planar reflections are off in it.
+  - Resolve: the projection where it has data (full resolution, last
+    frame), the mirror pass for the rest (off screen, behind the camera,
+    hidden sides), blended by the projection's coverage. The mirror color
+    is copied into a mip chain; the mip follows the GGX cone width over
+    the distance behind the mirror, seen from the camera (sharp contacts,
+    blurred distance, as HDRP does). Its motion comes from the mirror
+    depth, so the temporal pass keeps working.
+  - Demo level, 1080p: 3.62 ms without, 5.69 ms with (+2.07 ms); stable
+    while moving. Next: scissor the render to the mirror's screen
+    rectangle (off-center projection), skip the post-processing and
+    screen-space effects in the mirror pass, share the shadow maps.
 
 - **2026-11-01, mirrors seen from close by.** A mirror seen from 1 to 2 m
   reflects mostly what is behind the camera: the planar pass has nothing

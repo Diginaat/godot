@@ -68,6 +68,7 @@ class RenderSceneBuffersRD : public RenderSceneBuffers {
 	GDCLASS(RenderSceneBuffersRD, RenderSceneBuffers);
 
 private:
+	Ref<RenderSceneBuffersRD> gi_source;
 	bool upscaler_ready = false;
 	bool depth_reconstruct_requested = false;
 	bool can_be_storage = true;
@@ -211,6 +212,10 @@ public:
 	virtual void set_texture_mipmap_bias(float p_texture_mipmap_bias) override;
 	virtual void set_anisotropic_filtering_level(RSE::ViewportAnisotropicFiltering p_anisotropic_filtering_level) override;
 	virtual void set_use_debanding(bool p_use_debanding) override;
+
+	// Mirror passes: the view whose GI (DDGI probes) these buffers sample.
+	virtual void set_gi_source(const Ref<RenderSceneBuffers> &p_source) override { gi_source = p_source; }
+	Ref<RenderSceneBuffersRD> get_gi_source() const { return gi_source; }
 
 #ifdef METAL_ENABLED
 	void ensure_mfx(RendererRD::MFXSpatialEffect *p_effect);

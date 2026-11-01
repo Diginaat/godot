@@ -241,6 +241,16 @@ bool RenderDDGI::debug_shows_gi_buffer(const RenderDataRD *p_render_data) {
 	return mode == DEBUG_INDIRECT_LIGHT || mode == DEBUG_CASCADES;
 }
 
+Ref<RenderDDGI::ViewportData> RenderDDGI::_get_existing_data(RenderSceneBuffersRD *p_render_buffers) {
+	// Mirror passes sample the probes of the view the mirror is in.
+	Ref<RenderSceneBuffersRD> source = p_render_buffers->get_gi_source();
+	RenderSceneBuffersRD *owner = source.is_valid() ? source.ptr() : p_render_buffers;
+	if (!owner->has_custom_data(RB_SCOPE_DDGI)) {
+		return Ref<ViewportData>();
+	}
+	return owner->get_custom_data(RB_SCOPE_DDGI);
+}
+
 Ref<RenderDDGI::ViewportData> RenderDDGI::_get_viewport_data(RenderSceneBuffersRD *p_render_buffers) {
 	if (p_render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
 		return p_render_buffers->get_custom_data(RB_SCOPE_DDGI);
@@ -631,10 +641,10 @@ void RenderDDGI::update_baked(RenderDataRD *p_render_data) {
 
 bool RenderDDGI::get_sampling_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) {
 	ERR_FAIL_NULL_V(p_render_buffers, false);
-	if (!p_render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
+	Ref<ViewportData> vd = _get_existing_data(p_render_buffers);
+	if (vd.is_null()) {
 		return false;
 	}
-	Ref<ViewportData> vd = p_render_buffers->get_custom_data(RB_SCOPE_DDGI);
 	if (!vd->data_buffer.is_valid() || !vd->probe_buffer.is_valid() || !vd->irradiance_display.is_valid() || !vd->distance_atlas.is_valid()) {
 		return false;
 	}
@@ -904,11 +914,8 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 	ERR_FAIL_COND(!initialized);
 	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
 	ERR_FAIL_COND(rb.is_null());
-	if (!rb->has_custom_data(RB_SCOPE_DDGI)) {
-		return;
-	}
-	Ref<ViewportData> vd = rb->get_custom_data(RB_SCOPE_DDGI);
-	if (!vd->data_buffer.is_valid()) {
+	Ref<ViewportData> vd = _get_existing_data(rb.ptr());
+	if (vd.is_null() || !vd->data_buffer.is_valid()) {
 		return;
 	}
 

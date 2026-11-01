@@ -313,6 +313,8 @@ private:
 	static bool _near_field_rays();
 
 	Ref<ViewportData> _get_viewport_data(RenderSceneBuffersRD *p_render_buffers);
+	/// The probe data these buffers sample (their GI source's for a mirror pass), null if none.
+	static Ref<ViewportData> _get_existing_data(RenderSceneBuffersRD *p_render_buffers);
 	void _allocate(ViewportData *p_data, int p_cascades, const Vector3i &p_grid, const Quality &p_quality);
 	/// The buffers that depend on rays per probe and probes per frame only:
 	/// changing those (realtime updates on or off) keeps the probes' light.

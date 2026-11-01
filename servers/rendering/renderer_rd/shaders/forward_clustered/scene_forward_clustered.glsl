@@ -526,6 +526,9 @@ void vertex_shader(vec3 vertex_input,
 	gl_Position = projection_matrix * vec4(vertex_interp, 1.0);
 #endif
 
+	// Mirror passes don't draw what lies behind the mirror (the wall it hangs on).
+	gl_ClipDistance[0] = dot(scene_data.clip_plane.xyz, vertex) + scene_data.clip_plane.w;
+
 #ifdef USE_MULTIVIEW
 	combined_projected = combined_projection * vec4(vertex_interp, 1.0);
 #endif

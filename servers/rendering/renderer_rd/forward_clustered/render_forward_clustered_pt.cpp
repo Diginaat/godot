@@ -592,7 +592,9 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 	RD::get_singleton()->draw_command_begin_label("DDGI");
 	RID tlas;
 	RTViewportState *rt_state = nullptr;
-	if (RenderDDGI::is_baked_only(p_render_data)) {
+	if (p_render_data->scene_data->mirror_pass) {
+		// The view the mirror is in updates the probes; the mirror only samples them.
+	} else if (RenderDDGI::is_baked_only(p_render_data)) {
 		ddgi->update_baked(p_render_data);
 	} else {
 		RENDER_TIMESTAMP("DDGI Build Acceleration Structures");

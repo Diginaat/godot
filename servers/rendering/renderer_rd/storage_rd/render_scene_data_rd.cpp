@@ -150,6 +150,16 @@ void RenderSceneDataRD::update_ubo(RID p_uniform_buffer, RSE::ViewportDebugDraw 
 
 	ubo.time = time;
 
+	if (mirror_pass && clip_plane.normal != Vector3()) {
+		Plane view_plane = cam_transform.affine_inverse().xform(clip_plane); // Keeps which side is positive, mirrored or not.
+		ubo.clip_plane[0] = view_plane.normal.x;
+		ubo.clip_plane[1] = view_plane.normal.y;
+		ubo.clip_plane[2] = view_plane.normal.z;
+		ubo.clip_plane[3] = -view_plane.d;
+	} else {
+		ubo.clip_plane[3] = 1.0; // Never clips.
+	}
+
 	ubo.directional_light_count = directional_light_count;
 	ubo.dual_paraboloid_side = dual_paraboloid_side;
 	ubo.opaque_prepass_threshold = opaque_prepass_threshold;

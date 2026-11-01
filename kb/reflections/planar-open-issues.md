@@ -24,9 +24,10 @@ the runbook.[^runbook]
 1. Cost: ping-pong history, temporal pass only on reflector tiles, half
    resolution by default on weak GPUs (0.83 ms at 1080p now).
 2. Mirrors seen from close by at grazing angles: bilinear footprint fill, or
-   an opt-in mirrored-camera mode for mirrors (step 8). Mirrors facing the
-   camera from close by got `auto_mirror_probes` (a probe captured from the
-   mirror) as a static fallback; step 8 is still the real fix.
+   the mirror pass (step 8, done 2026-11-01) now fills what the projection
+   misses on the reflector covering most of the view. Its cost (+2 ms at
+   1080p) is the next thing to cut: scissor to the mirror's rectangle,
+   no post-processing in it, shared shadow maps.
 3. Hidden undersides of small objects: needs a re-render or ray tracing;
    screen space can only fall back to the probe.
 4. Per-mesh opt-in/opt-out for the automatic scan.

@@ -143,6 +143,21 @@ public:
 	void _planar_reflection_update_scenario(PlanarReflection *p_planar_reflection);
 	LocalVector<RendererSceneRender::RenderPlanarReflection> planar_reflection_render_list; // Per render, filtered by the camera's layers.
 
+	// Mirror passes: one planar reflector per view is rendered from the camera
+	// reflected across it (rendering/global_illumination/reflections/planar_mirror_render).
+	struct MirrorView {
+		Ref<RenderSceneBuffers> render_buffers;
+		RID render_target;
+		Size2i size;
+		uint64_t last_frame = 0;
+	};
+	HashMap<RID, MirrorView> mirror_views; // Per viewport.
+	// The mirror pass of the view being rendered: which reflector of the scenario's
+	// planar_reflection_data (-1: none), its buffers and view-projection.
+	int mirror_reflector = -1;
+	Ref<RenderSceneBuffers> mirror_buffers;
+	Projection mirror_view_projection;
+
 	virtual RID planar_reflection_allocate();
 	virtual void planar_reflection_initialize(RID p_planar_reflection);
 	virtual void planar_reflection_set_scenario(RID p_planar_reflection, RID p_scenario);
@@ -1227,6 +1242,9 @@ public:
 	void _render_scene(const RendererSceneRender::CameraData *p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_force_camera_attributes, RID p_compositor, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, RID p_shadow_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, float p_window_output_max_value, bool p_using_shadows = true, RenderingServerTypes::RenderInfo *r_render_info = nullptr);
 	void render_empty_scene(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_scenario, RID p_shadow_atlas, float p_window_output_max_value);
 
+	void _update_planar_reflection_data(Scenario *p_scenario);
+	void _render_mirror(const RendererSceneRender::CameraData &p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_camera_attributes, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, Size2 p_viewport_size, RID p_shadow_atlas, float p_screen_mesh_lod_threshold, float p_window_output_max_value);
+	virtual void free_mirror_views() override;
 	void render_camera(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_camera, RID p_scenario, RID p_viewport, Size2 p_viewport_size, uint32_t p_jitter_phase_count, float p_screen_mesh_lod_threshold, RID p_shadow_atlas, float p_window_output_max_value, RenderingServerTypes::RenderInfo *r_render_info = nullptr);
 	void update_dirty_instances() const;
 

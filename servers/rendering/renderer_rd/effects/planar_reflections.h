@@ -41,6 +41,10 @@
 #define RB_PLANAR_CURRENT SNAME("current")
 #define RB_PLANAR_MOTION SNAME("motion")
 #define RB_PLANAR_HISTORY SNAME("history")
+// The mirror pass's color with mipmaps (blur by roughness), in its own scope:
+// it follows the mirror render's size, not the screen's.
+#define RB_SCOPE_PLANAR_MIRROR SNAME("rb_planar_mirror")
+#define RB_PLANAR_MIRROR_COLOR SNAME("color")
 
 namespace RendererRD {
 
@@ -77,6 +81,9 @@ private:
 		float max_color_lod;
 		uint32_t orthogonal;
 		uint32_t history_valid;
+		int32_t mirror_reflector;
+		float mirror_max_lod;
+		uint32_t pad[2];
 		ReflectorData reflectors[MAX_REFLECTORS];
 	};
 
@@ -89,13 +96,15 @@ public:
 	PlanarReflections();
 	~PlanarReflections();
 
-	// Reflectors in front of the camera, nearest first, at most MAX_REFLECTORS.
+	// Reflectors in front of the camera, nearest first (the one with a mirror pass
+	// before all), at most MAX_REFLECTORS.
 	static int select_reflectors(const LocalVector<RendererSceneRender::RenderPlanarReflection> &p_reflectors, const Transform3D &p_cam_transform, const Projection &p_cam_projection, uint32_t p_visible_layers, int p_max, const RendererSceneRender::RenderPlanarReflection **r_selected);
 
 	// Allocates the buffers (full or half size) and runs both passes. p_last_frame is the
 	// last frame's color (with mipmaps), p_reprojection maps this frame's clip space to
-	// the last frame's.
-	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size);
+	// the last frame's. p_mirror_color (mipmapped) and p_mirror_depth are the mirror
+	// pass of reflector p_mirror_reflector (-1: none).
+	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size, int p_mirror_reflector = -1, RID p_mirror_color = RID(), RID p_mirror_depth = RID());
 };
 
 } // namespace RendererRD

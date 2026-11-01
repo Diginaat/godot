@@ -35,6 +35,7 @@
 #include "core/math/geometry_3d.h"
 #include "core/object/callable_mp.h"
 #include "core/object/worker_thread_pool.h"
+#include "core/os/os.h"
 #include "servers/rendering/rendering_light_culler.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_default.h"
@@ -2926,8 +2927,173 @@ void RendererSceneCull::render_camera(const Ref<RenderSceneBuffers> &p_render_bu
 	// For now just cull on the first camera
 	RendererSceneOcclusionCull::get_singleton()->buffer_update(p_viewport, camera_data.main_transform, camera_data.main_projection, camera_data.is_orthogonal);
 
+	mirror_reflector = -1;
+	mirror_buffers.unref();
+	if (camera_data.view_count == 1 && !camera_data.is_orthogonal) {
+		_render_mirror(camera_data, p_render_buffers, environment, camera->attributes, camera->visible_layers, p_scenario, p_viewport, p_viewport_size, p_shadow_atlas, p_screen_mesh_lod_threshold, p_window_output_max_value);
+	}
+
 	_render_scene(&camera_data, p_render_buffers, environment, camera->attributes, compositor, camera->visible_layers, p_scenario, p_viewport, p_shadow_atlas, RID(), -1, p_screen_mesh_lod_threshold, p_window_output_max_value, true, r_render_info);
+
+	// Only this frame's render holds the mirror's buffers (they are freed after the views).
+	mirror_reflector = -1;
+	mirror_buffers.unref();
+	for (RendererSceneRender::RenderPlanarReflection &r : planar_reflection_render_list) {
+		r.mirror_buffers.unref();
+	}
 #endif
+}
+
+void RendererSceneCull::_update_planar_reflection_data(Scenario *p_scenario) {
+	if (!p_scenario->planar_reflections_dirty) {
+		return;
+	}
+	p_scenario->planar_reflection_data.clear();
+	for (const RID &rid : p_scenario->planar_reflections) {
+		const PlanarReflection *pr = planar_reflection_owner.get_or_null(rid);
+		if (pr && pr->visible && pr->data.size.x > 0.0 && pr->data.size.y > 0.0) {
+			p_scenario->planar_reflection_data.push_back(pr->data);
+		}
+	}
+	p_scenario->planar_reflections_dirty = false;
+}
+
+void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_camera_attributes, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, Size2 p_viewport_size, RID p_shadow_atlas, float p_screen_mesh_lod_threshold, float p_window_output_max_value) {
+	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
+	ERR_FAIL_NULL(scenario);
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+
+	// Buffers of views that stopped rendering (or stopped needing a mirror) are freed after a while.
+	for (KeyValue<RID, MirrorView> &kv : mirror_views) {
+		if (frame - kv.value.last_frame > 120 && kv.value.render_buffers.is_valid()) {
+			kv.value.render_buffers.unref();
+			RSG::texture_storage->render_target_free(kv.value.render_target);
+			kv.value.render_target = RID();
+			kv.value.size = Size2i();
+		}
+	}
+
+	int mode = GLOBAL_GET_CACHED(int, "rendering/global_illumination/reflections/planar_mirror_render");
+	if (mode == 0 || scenario->planar_reflections.is_empty() || !GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/planar_enabled") || OS::get_singleton()->get_current_rendering_method() != "forward_plus") {
+		return;
+	}
+	_update_planar_reflection_data(scenario);
+
+	// The reflector covering most of the view: area seen face on, over distance squared.
+	const Transform3D &cam = p_camera_data.main_transform;
+	Vector<Plane> frustum = p_camera_data.main_projection.get_projection_planes(cam);
+	int best = -1;
+	float best_score = 0.0;
+	for (uint32_t i = 0; i < scenario->planar_reflection_data.size(); i++) {
+		const RendererSceneRender::RenderPlanarReflection &r = scenario->planar_reflection_data[i];
+		if (!(r.layers & p_visible_layers) || r.intensity <= 0.0) {
+			continue;
+		}
+		const Basis &b = r.transform.basis;
+		Vector3 normal = b.get_column(1).normalized();
+		if (mode == 1 && Math::abs(normal.y) >= 0.7) {
+			continue; // Floors and water: the screen-space pass sees most of what they reflect.
+		}
+		Vector3 to_camera = cam.origin - r.transform.origin;
+		float side = normal.dot(to_camera);
+		if (side <= 0.01) {
+			continue; // Seen from behind.
+		}
+		Vector3 axis_u = b.get_column(0).normalized();
+		Vector3 axis_v = b.get_column(2).normalized();
+		Vector3 hu = axis_u * (r.size.x * 0.5);
+		Vector3 hv = axis_v * (r.size.y * 0.5);
+		Vector3 corners[4] = { r.transform.origin - hu - hv, r.transform.origin + hu - hv, r.transform.origin + hu + hv, r.transform.origin - hu + hv };
+		bool culled = false;
+		for (const Plane &plane : frustum) {
+			bool all_outside = true;
+			for (int c = 0; c < 4; c++) {
+				if (!plane.is_point_over(corners[c])) {
+					all_outside = false;
+					break;
+				}
+			}
+			if (all_outside) {
+				culled = true;
+				break;
+			}
+		}
+		if (culled) {
+			continue;
+		}
+		// Distance to the rectangle (not its center), so a large wall seen from close by wins.
+		Vector3 nearest = r.transform.origin + axis_u * CLAMP(to_camera.dot(axis_u), -r.size.x * 0.5f, r.size.x * 0.5f) + axis_v * CLAMP(to_camera.dot(axis_v), -r.size.y * 0.5f, r.size.y * 0.5f);
+		float distance = MAX(cam.origin.distance_to(nearest), 0.25f);
+		float score = r.size.x * r.size.y * (side / to_camera.length()) / (distance * distance);
+		if (score > best_score) {
+			best_score = score;
+			best = i;
+		}
+	}
+	if (best < 0) {
+		return;
+	}
+
+	const RendererSceneRender::RenderPlanarReflection &r = scenario->planar_reflection_data[best];
+	Vector3 normal = r.transform.basis.get_column(1).normalized();
+	float d = normal.dot(r.transform.origin);
+	// Reflection across the plane: I - 2 n n^T, then 2 d n.
+	Basis reflection(Vector3(1, 0, 0) - 2.0 * normal.x * normal, Vector3(0, 1, 0) - 2.0 * normal.y * normal, Vector3(0, 0, 1) - 2.0 * normal.z * normal);
+	Transform3D mirror_transform = Transform3D(reflection, 2.0 * d * normal) * cam;
+
+	RendererSceneRender::CameraData mirror_camera;
+	// Same projection: the mirror's pixels see the reflection at the same screen
+	// position as the main camera (unjittered; the main view's TAA smooths it).
+	mirror_camera.set_camera(mirror_transform, p_camera_data.main_projection, false, p_camera_data.vaspect, Vector2(), 0.0, p_camera_data.visible_layers);
+	mirror_camera.mirror_pass = true;
+	// Slightly in front of the plane: the reflecting surface itself isn't drawn.
+	mirror_camera.clip_plane = Plane(normal, d + MAX(r.thickness * 0.2f, 0.005f));
+
+	float scale = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_mirror_scale"), 0.25f, 1.0f);
+	Size2i size = Size2i(MAX(int(p_viewport_size.x * scale), 16), MAX(int(p_viewport_size.y * scale), 16));
+	MirrorView &mv = mirror_views[p_viewport];
+	mv.last_frame = frame;
+	if (mv.render_buffers.is_null()) {
+		mv.render_buffers = RSG::scene->render_buffers_create();
+		mv.render_target = RSG::texture_storage->render_target_create();
+		mv.size = Size2i();
+	}
+	if (mv.size != size) {
+		mv.size = size;
+		RSG::texture_storage->render_target_set_size(mv.render_target, size.x, size.y, 1);
+		RenderSceneBuffersConfiguration rb_config;
+		rb_config.set_render_target(mv.render_target);
+		rb_config.set_internal_size(size);
+		rb_config.set_target_size(size);
+		rb_config.set_view_count(1);
+		rb_config.set_scaling_3d_mode(RSE::VIEWPORT_SCALING_3D_MODE_OFF);
+		rb_config.set_msaa_3d(RSE::VIEWPORT_MSAA_DISABLED);
+		rb_config.set_screen_space_aa(RSE::VIEWPORT_SCREEN_SPACE_AA_DISABLED);
+		rb_config.set_texture_mipmap_bias(std::log2(scale));
+		rb_config.set_use_taa(false);
+		mv.render_buffers->configure(&rb_config);
+	}
+	mv.render_buffers->set_gi_source(p_render_buffers);
+
+	RENDER_TIMESTAMP("> Render Planar Mirror");
+	_render_scene(&mirror_camera, mv.render_buffers, p_environment, p_camera_attributes, RID(), p_visible_layers, p_scenario, p_viewport, p_shadow_atlas, RID(), -1, p_screen_mesh_lod_threshold, p_window_output_max_value, true, nullptr);
+	RENDER_TIMESTAMP("< Render Planar Mirror");
+
+	mirror_reflector = best;
+	mirror_buffers = mv.render_buffers;
+	mirror_view_projection = p_camera_data.main_projection * Projection(mirror_transform.affine_inverse());
+}
+
+void RendererSceneCull::free_mirror_views() {
+	mirror_buffers.unref();
+	planar_reflection_render_list.clear();
+	for (KeyValue<RID, MirrorView> &kv : mirror_views) {
+		kv.value.render_buffers.unref();
+		if (kv.value.render_target.is_valid()) {
+			RSG::texture_storage->render_target_free(kv.value.render_target);
+		}
+	}
+	mirror_views.clear();
 }
 
 void RendererSceneCull::_visibility_cull_threaded(uint32_t p_thread, VisibilityCullData *cull_data) {
@@ -3499,8 +3665,16 @@ void RendererSceneCull::_scene_particles_set_view_axis(RID p_particles, const Ve
 void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_force_camera_attributes, RID p_compositor, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, RID p_shadow_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, float p_window_output_max_value, bool p_using_shadows, RenderingServerTypes::RenderInfo *r_render_info) {
 	Instance *render_reflection_probe = instance_owner.get_or_null(p_reflection_probe); //if null, not rendering to it
 
+	// A mirror pass's camera is reflected (negative determinant). The light culler
+	// and the shadow cascades build planes from the frustum's corners by winding:
+	// give them the same frustum (symmetric in x) with a proper rotation.
+	Transform3D frustum_transform = p_camera_data->main_transform;
+	if (frustum_transform.basis.determinant() < 0) {
+		frustum_transform.basis = frustum_transform.basis * Basis::from_scale(Vector3(-1, 1, 1));
+	}
+
 	// Prepare the light - camera volume culling system.
-	light_culler->prepare_camera(p_camera_data->main_transform, p_camera_data->main_projection);
+	light_culler->prepare_camera(frustum_transform, p_camera_data->main_projection);
 
 	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
 	Vector3 camera_position = p_camera_data->main_transform.origin;
@@ -3514,7 +3688,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	if (p_reflection_probe.is_null()) {
 		//no rendering code here, this is only to set up what needs to be done, request regions, etc.
 		scene_render->sdfgi_update(p_render_buffers, p_environment, camera_position); //update conditions for SDFGI (whether its used or not)
-		reflection_probe_camera_position = camera_position; // Update priority of budgeted reflection probe updates.
+		if (!p_camera_data->mirror_pass) {
+			reflection_probe_camera_position = camera_position; // Update priority of budgeted reflection probe updates.
+		}
 	}
 
 	RENDER_TIMESTAMP("Update Visibility Dependencies");
@@ -3599,7 +3775,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		RSG::light_storage->set_directional_shadow_count(lights_with_shadow.size());
 
 		for (int i = 0; i < lights_with_shadow.size(); i++) {
-			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], p_camera_data->main_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect);
+			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], frustum_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect);
 		}
 	}
 
@@ -3643,7 +3819,8 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.cam_transform = p_camera_data->main_transform;
 		cull_data.visible_layers = p_visible_layers;
 		cull_data.render_reflection_probe = render_reflection_probe;
-		cull_data.occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
+		// The occlusion buffer is the main camera's: of no use to a mirror pass.
+		cull_data.occlusion_buffer = p_camera_data->mirror_pass ? nullptr : RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
 		cull_data.camera_matrix = &p_camera_data->main_projection;
 		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
 		cull_data.reflection_probes_enabled = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probes_enabled");
@@ -3913,7 +4090,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	RID occluders_tex;
 	const RendererSceneRender::CameraData *prev_camera_data = p_camera_data;
-	if (p_viewport.is_valid()) {
+	if (p_viewport.is_valid() && !p_camera_data->mirror_pass) {
 		occluders_tex = RSG::viewport->viewport_get_occluder_debug_texture(p_viewport);
 		prev_camera_data = RSG::viewport->viewport_get_prev_camera_data(p_viewport);
 	}
@@ -3921,21 +4098,18 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	RENDER_TIMESTAMP("Render 3D Scene");
 	// Planar reflectors of the scenario seen by this camera's layers (Forward+ culls and picks them).
 	const LocalVector<RendererSceneRender::RenderPlanarReflection> *planar_reflections = nullptr;
-	if (p_reflection_probe.is_null() && !scenario->planar_reflections.is_empty()) {
-		if (scenario->planar_reflections_dirty) {
-			scenario->planar_reflection_data.clear();
-			for (const RID &rid : scenario->planar_reflections) {
-				const PlanarReflection *pr = planar_reflection_owner.get_or_null(rid);
-				if (pr && pr->visible && pr->data.size.x > 0.0 && pr->data.size.y > 0.0) {
-					scenario->planar_reflection_data.push_back(pr->data);
-				}
-			}
-			scenario->planar_reflections_dirty = false;
-		}
+	if (p_reflection_probe.is_null() && !p_camera_data->mirror_pass && !scenario->planar_reflections.is_empty()) {
+		_update_planar_reflection_data(scenario);
 		planar_reflection_render_list.clear();
-		for (const RendererSceneRender::RenderPlanarReflection &r : scenario->planar_reflection_data) {
+		for (uint32_t i = 0; i < scenario->planar_reflection_data.size(); i++) {
+			const RendererSceneRender::RenderPlanarReflection &r = scenario->planar_reflection_data[i];
 			if (r.layers & p_visible_layers) {
 				planar_reflection_render_list.push_back(r);
+				if (int(i) == mirror_reflector) {
+					RendererSceneRender::RenderPlanarReflection &added = planar_reflection_render_list[planar_reflection_render_list.size() - 1];
+					added.mirror_buffers = mirror_buffers;
+					added.mirror_view_projection = mirror_view_projection;
+				}
 			}
 		}
 		if (!planar_reflection_render_list.is_empty()) {
@@ -3945,7 +4119,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info, &scene_cull_result.rt_geometry_instances, &scene_cull_result.rt_light_instances, planar_reflections);
 
-	if (p_viewport.is_valid()) {
+	if (p_viewport.is_valid() && !p_camera_data->mirror_pass) {
 		RSG::viewport->viewport_set_prev_camera_data(p_viewport, p_camera_data);
 	}
 

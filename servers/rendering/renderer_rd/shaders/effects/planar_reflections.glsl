@@ -20,6 +20,12 @@
 // Reflectors are rectangles. A reflector pixel needs no depth of its own: it is where
 // the camera ray meets the rectangle in front of the depth buffer, so transparent
 // reflectors (water) work as well as opaque ones (floors, mirrors).
+//
+// Mirror pass: one reflector per view may also have been rendered from the camera
+// reflected across it (RendererSceneCull::_render_mirror()), with the same projection,
+// so its color at a pixel's screen position is what that pixel reflects. It fills
+// what the projection can't see (off screen, behind the camera, hidden sides),
+// blurred by roughness times the distance behind the mirror (contact hardening).
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -43,6 +49,10 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	float max_color_lod;
 	uint orthogonal;
 	uint history_valid;
+	int mirror_reflector; // Reflector with a mirror pass, -1 for none.
+	float mirror_max_lod;
+	uint pad0;
+	uint pad1;
 	Reflector reflectors[MAX_REFLECTORS];
 }
 params;
@@ -55,6 +65,8 @@ layout(set = 0, binding = 4) uniform sampler2D source_last_frame;
 layout(rgba16f, set = 0, binding = 5) uniform restrict writeonly image2D output_color; // This frame's reflection.
 layout(rgba16f, set = 0, binding = 6) uniform restrict writeonly image2D output_params;
 layout(rg16f, set = 0, binding = 7) uniform restrict writeonly image2D output_motion; // To last frame's position of the reflection, in UV.
+layout(set = 0, binding = 8) uniform sampler2D mirror_color; // Mirror pass color (linear HDR), mipmapped.
+layout(set = 0, binding = 9) uniform sampler2D mirror_depth;
 #endif
 
 #ifdef MODE_TEMPORAL
@@ -340,6 +352,31 @@ void main() {
 
 	imageStore(output_params, target_pos, vec4(plane_depth, r.params.x, r.params.y, r.params.z));
 
+	// The mirror pass, where there is one: what this pixel reflects, at its own
+	// screen position. Premultiplied by the reflector's intensity.
+	vec4 mirror = vec4(0.0);
+	vec2 mirror_motion = vec2(2.0); // Off screen: no history.
+	if (reflector == params.mirror_reflector) {
+		float md = textureLod(mirror_depth, uv, 0.0).r;
+		// In the mirror camera's view space, what it sees is where the main camera
+		// sees its mirror image.
+		vec3 virtual_pos = (md <= 0.0 && params.orthogonal == 0) ? normalize(view_from_uv_depth(uv, 0.5)) * SKY_DISTANCE : view_from_uv_depth(uv, md);
+		float total = length(virtual_pos - eye);
+		float behind = max(total - length(plane_hit - eye), 0.0); // From the mirror to what it reflects.
+		// The reflection cone (GGX alpha as its half-width slope) spreads over
+		// 2 alpha behind; seen from total away, that many mirror texels.
+		float alpha = decode_roughness(textureLod(source_normal_roughness, uv, 0.0).w);
+		alpha *= alpha;
+		float texels = 2.0 * alpha * behind / max(total, 1e-3) * abs(params.projection[1][1]) * 0.5 * float(textureSize(mirror_color, 0).y);
+		float lod = clamp(log2(max(texels, 1.0)), 0.0, params.mirror_max_lod);
+		float w = clamp(r.center.w, 0.0, 1.0);
+		mirror = vec4(textureLod(mirror_color, uv, lod).rgb * w, w);
+		vec4 prev = params.reprojection * vec4(uv * 2.0 - 1.0, md, 1.0);
+		if (prev.w > 0.0) {
+			mirror_motion = prev.xy / prev.w * 0.5 + 0.5 - uv;
+		}
+	}
+
 	// Offset of the reflected pixel; fill holes from the 4 neighbors: take a neighbor's
 	// offset where there is none, or where a neighbor's is clearly shorter (nearer
 	// geometry stretched over this pixel).
@@ -409,8 +446,9 @@ void main() {
 
 	if (stored == 0u) {
 		// Nothing on screen is reflected here (it is off screen or behind the camera):
-		// the scene shader falls back to probes and the sky.
-		imageStore(output_color, target_pos, vec4(0.0));
+		// the mirror pass, else the scene shader falls back to probes and the sky.
+		imageStore(output_color, target_pos, mirror);
+		imageStore(output_motion, target_pos, vec4(mirror_motion, 0.0, 0.0));
 		return;
 	}
 
@@ -418,7 +456,8 @@ void main() {
 	vec2 source_uv = source_px / vec2(params.target_size);
 	vec2 source_uv_point = (floor(source_px) + 0.5) / vec2(params.target_size);
 	if (any(lessThan(source_uv, vec2(0.0))) || any(greaterThan(source_uv, vec2(1.0)))) {
-		imageStore(output_color, target_pos, vec4(0.0));
+		imageStore(output_color, target_pos, mirror);
+		imageStore(output_motion, target_pos, vec4(mirror_motion, 0.0, 0.0));
 		return;
 	}
 
@@ -463,9 +502,14 @@ void main() {
 	}
 	float coverage = bridged ? 1.0 : smoothstep(1.0, 3.0, max(covered_x, covered_y)); // Bridged gaps have data on both sides by construction.
 
-	float weight = clamp(r.center.w, 0.0, 1.0) * edge_fade * coverage;
+	float projected = edge_fade * coverage; // How much the projection is trusted here; the mirror pass (or the probes) fills the rest.
+	float weight = clamp(r.center.w, 0.0, 1.0) * projected;
 
-	imageStore(output_color, target_pos, vec4(color * weight, weight)); // Premultiplied.
+	imageStore(output_color, target_pos, vec4(color * weight, weight) + mirror * (1.0 - projected)); // Premultiplied.
+	if (projected < 0.5 && mirror.a > 0.0) {
+		imageStore(output_motion, target_pos, vec4(mirror_motion, 0.0, 0.0));
+		return;
+	}
 
 	// Where this reflection was last frame: a reflection is seen where the camera
 	// sees the mirror image of the reflected point, which stays put when only the

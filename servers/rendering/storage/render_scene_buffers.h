@@ -118,4 +118,7 @@ public:
 	virtual void set_texture_mipmap_bias(float p_texture_mipmap_bias) = 0;
 	virtual void set_anisotropic_filtering_level(RSE::ViewportAnisotropicFiltering p_anisotropic_filtering_level) = 0;
 	virtual void set_use_debanding(bool p_use_debanding) = 0;
+	// Mirror passes: the buffers of the view the mirror is seen in. Its global
+	// illumination (DDGI) is sampled instead of being updated a second time.
+	virtual void set_gi_source(const Ref<RenderSceneBuffers> &p_source) {}
 };
