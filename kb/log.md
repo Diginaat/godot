@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-01 (brightness against the path tracer)
+
+* **Added**: mistakes/tonemapped-noise-averages-darker.md.
+* **Updated**: REFLECTIONS.md issue I and findings; probe emissive-light limitation.
+
 ## 2026-11-01 (DDGI in probe captures, performance plan)
 
 * **Updated**: REFLECTIONS.md: `probe_capture_ddgi`, step 9 done, issue H

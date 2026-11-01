@@ -364,7 +364,7 @@ likely fix:
 | F | **Done.** The automatic scan uses heuristics: undersides, upright glass, thin strips and faces outside the volume are skipped | `DDGIVolume.get_auto_planar_reflectors()` lists what it chose | Per mesh: metadata `auto_planar_reflection` true (always, any material) or false (never) on the `MeshInstance3D` |
 | G | Planar reflections and the automatic planar scan are not tested with XR (not supported), with AMD or Intel GPUs. Editor (demo level open 600 frames), Mobile and Compatibility run without errors (2026-11-01; Forward+ is the target) | | Step 10 |
 | H | **Done** (step 9). A mirror that loses the mirror pass showed its probe lit wrong: cold and dark, because probe captures got the sky ambient instead of DDGI. Now the probe is DDGI-lit (ceiling 0.27 against 0.29 linear for the mirror pass; was 0.06). Left: box-projection parallax (the probe is captured from the room's middle) | Showcase: `--at=0.5,-3 --yaw=0 --pitch=-5 --still`, against `--mirror-render=1`; `--ps=rendering/global_illumination/reflections/probe_capture_ddgi=false` for the old look | A second mirror pass would make it exact (cost, see the performance plan) |
-| I | Indirect light in the showcase gallery is 3 to 7 times brighter (linear) than the path tracer's: floor in shade, ceiling, walls. Direct sunlight matches. Floors look washed out and their reflections weak against them | Showcase north view, raster against `--pt --still` averaged over 240 frames; the path tracer gives the same with 3 and 8 bounces (`--pt-bounces=`) | A DDGI question, not a reflection one: compare DDGI with the path tracer in a closed bright room. The path tracer renders the polished marble floor matte, so it is no reference for the floor's reflection |
+| I | Mostly a measurement error, see the findings. With linear HDR averages at a fixed exposure, walls and the ceiling are within 10 to 20% of the path tracer, the sun patch within 4%. Left: the floor's diffuse indirect light is 1.8 times the path tracer's (0.030 against 0.016, specular off on both sides), a wall area seen in the mirror 1.6 times | Showcase `--at=0.5,-6.5 --yaw=0 --pitch=-3 --still --warmup=300 --hdr-points=240 --screenshot=<png>`, again with `--pt` (`--floor-spec=0` for diffuse only) | A DDGI question for `dev-ddgi`. Not the cause: the volume's bottom face (`--ddgi-pad=2`), probe spacing, fog, glow, the sun disk in the sky (`--sun-disk=0`), path tracer bounces (3 and 8 agree). Note: DDGI probe rays see metallic mirrors as black (no diffuse bounce, no reflected light), which can only make it darker |
 
 How to test (always with movement: still frames hid the stripes and the
 grid): the showcase records walks with `--move=dx,dz,dyaw` (meters and
@@ -454,6 +454,20 @@ planar passes 0.87 ms, mirror pass 0.35 to 0.55 ms, probe faces about
 ## Findings log
 
 Newest first.
+
+- **2026-11-01, brightness against the path tracer (issue I).** The
+  showcase looked 3 to 7 times brighter than the path tracer. Three test
+  errors made most of it: (1) the path tracer's frames were averaged after
+  the tonemapper; noise averages darker through a compressing curve, so
+  the mean depended on samples per pixel (DDGI test interior: 1 spp 0.031,
+  4 spp 0.034, 8 spp 0.039, 16 spp 0.041 linear; the showcase ceiling 3x
+  between 4 and 16); (2) the showcase has auto exposure, so turning
+  reflections on and off changed the exposure (a mirror showing the room or
+  the sky), which looked like the reflections adding light to the floor;
+  (3) mouse events at window creation turned the camera in some runs. The
+  showcase now has `--hdr-points=N` (linear tonemap, HDR viewport, mean
+  linear luminance of N frames at fixed points, same for 4 and 16 spp) and
+  holds the view given by `--at`/`--yaw`/`--pitch`. Results in issue I.
 
 - **2026-11-01, DDGI in probe captures (step 9, issue H).** Captures had
   no GI buffer, so they were lit by the sky's ambient light: the room in
