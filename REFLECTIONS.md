@@ -430,6 +430,20 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 
 Newest first.
 
+- **2026-11-01, magnified projection (issue A).** Seen from close by at a
+  grazing angle, the projection stretches one source pixel over several
+  (stair-stepped edges in the mirror). Where the mirror pass exists the
+  resolve now prefers whichever has more pixels per screen pixel. A first
+  try measured the projection's density from the neighbors' offsets: noisy
+  (quantized offsets, footprint fill) and it left a dotted grid on the
+  reflected floor. The estimate is now geometric and smooth: a surface
+  seen directly at distance Dd and angle cos_d, and in the mirror at Dv
+  and cos_v, is magnified about (Dd / Dv)(cos_v / cos_d) along its most
+  foreshortened axis. In the showcase's grazing view (`--at=-5,-8.6
+  --yaw=-80 --pitch=-4`) the projection also showed a window that the
+  mirror render hides behind off-screen wall: the exact render wins there
+  now. Stable while moving.
+
 - **2026-11-01, mirror pass cost.** GPU timestamps (demo level, 1080p,
   `--gpu-profile`, `demo_level.gd --timestamps`): the pass took 1.0 ms
   plus about 0.4 ms that showed up at the start of the main pass (the

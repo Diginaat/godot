@@ -357,6 +357,8 @@ void main() {
 	// screen position. Premultiplied by the reflector's intensity.
 	vec4 mirror = vec4(0.0);
 	vec2 mirror_motion = vec2(2.0); // Off screen: no history.
+	float mirror_virtual_distance = 0.0; // From the eye to the mirror image of what this pixel reflects.
+	vec3 mirror_virtual_dir = vec3(0.0, 0.0, -1.0);
 	vec2 mirror_uv = (uv - params.mirror_rect.xy) / params.mirror_rect.zw;
 	if (reflector == params.mirror_reflector && all(greaterThanEqual(mirror_uv, vec2(0.0))) && all(lessThanEqual(mirror_uv, vec2(1.0)))) {
 		// Same depth as the full projection would give: the crop only scales x and y.
@@ -365,6 +367,8 @@ void main() {
 		// sees its mirror image.
 		vec3 virtual_pos = (md <= 0.0 && params.orthogonal == 0) ? normalize(view_from_uv_depth(uv, 0.5)) * SKY_DISTANCE : view_from_uv_depth(uv, md);
 		float total = length(virtual_pos - eye);
+		mirror_virtual_distance = total;
+		mirror_virtual_dir = (virtual_pos - eye) / max(total, 1e-6);
 		float behind = max(total - length(plane_hit - eye), 0.0); // From the mirror to what it reflects.
 		// The reflection cone (GGX alpha as its half-width slope) spreads over
 		// 2 alpha behind; seen from total away, that many mirror texels.
@@ -506,6 +510,23 @@ void main() {
 	float coverage = bridged ? 1.0 : smoothstep(1.0, 3.0, max(covered_x, covered_y)); // Bridged gaps have data on both sides by construction.
 
 	float projected = edge_fade * coverage; // How much the projection is trusted here; the mirror pass (or the probes) fills the rest.
+
+	if (mirror.a > 0.0 && mirror_virtual_distance > 0.0) {
+		// Magnified projection (a mirror seen from close by at a grazing angle: one
+		// source pixel stretched over several, blocky edges): use the mirror pass
+		// where it has more pixels per screen pixel than the projection's source.
+		// A surface seen directly at distance Dd and angle cos_d, and in the mirror
+		// at Dv and cos_v, is magnified about (Dd / Dv) (cos_v / cos_d) along its
+		// most foreshortened axis: smooth from pixel to pixel, unlike neighbor offsets.
+		vec3 source_pos = view_position(source_uv_point);
+		vec3 source_normal = normalize(textureLod(source_normal_roughness, source_uv_point, 0.0).xyz * 2.0 - 1.0);
+		vec3 virtual_normal = source_normal - 2.0 * dot(source_normal, r.plane.xyz) * r.plane.xyz;
+		float cos_direct = max(abs(dot(source_normal, normalize(source_pos - eye))), 0.05);
+		float cos_virtual = max(abs(dot(virtual_normal, mirror_virtual_dir)), 0.05);
+		float source_step = (mirror_virtual_distance / max(length(source_pos - eye), 1e-3)) * (cos_direct / cos_virtual); // Source pixels per target pixel.
+		float mirror_step = float(textureSize(mirror_color, 0).y) / (float(params.target_size.y) * params.mirror_rect.w);
+		projected *= smoothstep(0.6, 1.0, source_step / max(mirror_step, 1e-3));
+	}
 	float weight = clamp(r.center.w, 0.0, 1.0) * projected;
 
 	imageStore(output_color, target_pos, vec4(color * weight, weight) + mirror * (1.0 - projected)); // Premultiplied.
