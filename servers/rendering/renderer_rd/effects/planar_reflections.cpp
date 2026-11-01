@@ -118,6 +118,15 @@ int PlanarReflections::select_reflectors(const LocalVector<RendererSceneRender::
 	return count;
 }
 
+RID PlanarReflections::get_output(const Ref<RenderSceneBuffersRD> &p_render_buffers) {
+	bool output_is_history = false;
+	if (p_render_buffers->has_custom_data(RB_PLANAR_STATE)) {
+		Ref<PlanarReflectionsState> state = p_render_buffers->get_custom_data(RB_PLANAR_STATE);
+		output_is_history = state->output_is_history;
+	}
+	return p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, output_is_history ? RB_PLANAR_HISTORY : RB_PLANAR_COLOR);
+}
+
 void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size, int p_mirror_reflector, RID p_mirror_color, RID p_mirror_depth, const Rect2 &p_mirror_uv_rect) {
 	ERR_FAIL_COND(p_render_buffers.is_null());
 	ERR_FAIL_COND(p_count <= 0 || p_count > MAX_REFLECTORS);
@@ -141,16 +150,28 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 		const uint32_t color_usage = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
 		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_INTERMEDIATE, RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_STORAGE_ATOMIC_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
 		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_CURRENT, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, color_usage, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
-		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, color_usage | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
-		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_HISTORY, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
+		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, color_usage, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
+		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_HISTORY, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, color_usage, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
 		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_PARAMS, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, color_usage, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
 		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_MOTION, RD::DATA_FORMAT_R16G16_SFLOAT, color_usage, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
 		history_valid = false;
 	}
 	RID intermediate = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_INTERMEDIATE);
 	RID current = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_CURRENT);
-	RID color = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR);
-	RID history = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_HISTORY);
+	// The two color textures take turns: last frame's result is this frame's history.
+	Ref<PlanarReflectionsState> state;
+	if (p_render_buffers->has_custom_data(RB_PLANAR_STATE)) {
+		state = p_render_buffers->get_custom_data(RB_PLANAR_STATE);
+	} else {
+		state.instantiate();
+		p_render_buffers->set_custom_data(RB_PLANAR_STATE, state);
+	}
+	if (!history_valid) {
+		state->output_is_history = true; // So that this frame writes RB_PLANAR_COLOR.
+	}
+	state->output_is_history = !state->output_is_history;
+	RID color = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, state->output_is_history ? RB_PLANAR_HISTORY : RB_PLANAR_COLOR);
+	RID history = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, state->output_is_history ? RB_PLANAR_COLOR : RB_PLANAR_HISTORY);
 	RID params_texture = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_PARAMS);
 	RID motion = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_MOTION);
 
@@ -259,7 +280,6 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 		RD::get_singleton()->compute_list_dispatch_threads(compute_list, target_size.x, target_size.y, 1);
 	}
 	RD::get_singleton()->compute_list_end();
-	RD::get_singleton()->texture_copy(color, history, Vector3(), Vector3(), Vector3(target_size.x, target_size.y, 1), 0, 0, 0, 0);
 
 	RD::get_singleton()->draw_command_end_label();
 }

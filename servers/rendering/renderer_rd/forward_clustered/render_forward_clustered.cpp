@@ -4142,7 +4142,7 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		RID planar_color;
 		RID planar_params;
 		if (rb_data.is_valid() && !is_multiview && rb->has_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR)) {
-			planar_color = rb->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR);
+			planar_color = RendererRD::PlanarReflections::get_output(rb);
 			planar_params = rb->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_PARAMS);
 		}
 		RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);

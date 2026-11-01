@@ -41,12 +41,25 @@
 #define RB_PLANAR_CURRENT SNAME("current")
 #define RB_PLANAR_MOTION SNAME("motion")
 #define RB_PLANAR_HISTORY SNAME("history")
+// RB_PLANAR_COLOR and RB_PLANAR_HISTORY take turns as this frame's result and
+// last frame's (no copy); this custom data says which is which.
+#define RB_PLANAR_STATE SNAME("rb_planar_state")
 // The mirror pass's color with mipmaps (blur by roughness), in its own scope:
 // it follows the mirror render's size, not the screen's.
 #define RB_SCOPE_PLANAR_MIRROR SNAME("rb_planar_mirror")
 #define RB_PLANAR_MIRROR_COLOR SNAME("color")
 
 namespace RendererRD {
+
+class PlanarReflectionsState : public RenderBufferCustomDataRD {
+	GDCLASS(PlanarReflectionsState, RenderBufferCustomDataRD)
+
+public:
+	bool output_is_history = false; // This frame's result is in RB_PLANAR_HISTORY.
+
+	virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}
+	virtual void free_data() override {}
+};
 
 // Planar reflections by pixel projection (see planar_reflections.glsl): two compute
 // passes over the screen per frame, no extra scene rendering. Reflectors come from
@@ -96,6 +109,9 @@ private:
 public:
 	PlanarReflections();
 	~PlanarReflections();
+
+	// This frame's result (premultiplied color), for the scene shader.
+	static RID get_output(const Ref<RenderSceneBuffersRD> &p_render_buffers);
 
 	// Reflectors in front of the camera, nearest first (the one with a mirror pass
 	// before all), at most MAX_REFLECTORS.
