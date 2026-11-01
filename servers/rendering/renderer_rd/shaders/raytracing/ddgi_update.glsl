@@ -62,11 +62,13 @@ layout(set = 0, binding = 10, std430) restrict readonly buffer DDGISampledFrame 
 // Persistent across frames. The scheduler multiplies every update rate by
 // rate_scale; the relocate pass raises it while the per-frame budget isn't
 // filled and lowers it when the budget overflows, so the budget gets used.
+// With the adaptive budget, once the updated probes' light has settled (their
+// mean variability is low) it drifts back toward 1 instead.
 layout(set = 0, binding = 5, std430) restrict buffer DDGIStats {
 	float rate_scale;
 	uint traced_last_frame;
-	uint stats_pad0;
-	uint stats_pad1;
+	uint variability_sum; // Of this frame's updated probes, x 1024 (blend pass); reset by the relocate pass.
+	uint variability_count;
 }
 ddgi_stats;
 
@@ -586,7 +588,10 @@ void main() {
 		// rooms lit by a small source darker.)
 		shared_hysteresis = first_update ? 0.0 : clamp(1.0 - (confirmed - 0.1) * 1.5, 0.4, 1.0);
 		// Moving average of how much this probe's light changes per update.
-		ddgi_probes[probe].variability = first_update ? 1.0 : mix(pd.variability, min(signal, 4.0), 0.3);
+		float variability = first_update ? 1.0 : mix(pd.variability, min(signal, 4.0), 0.3);
+		ddgi_probes[probe].variability = variability;
+		atomicAdd(ddgi_stats.variability_sum, uint(variability * 1024.0));
+		atomicAdd(ddgi_stats.variability_count, 1u);
 		ddgi_probes[probe].updates = min(pd.updates + 1u, 255u);
 		ddgi_probes[probe].history_rays = fixed_count;
 	}
@@ -735,8 +740,19 @@ void main() {
 		// Budget feedback for the next frame's scheduler.
 		uint traced = ddgi_traced_count();
 		float scale = ddgi_stats.rate_scale;
+		// Settled: the updated probes' light barely changes (variability is the
+		// change above the noise). The probes are then updated at their own rates
+		// and the rest of the budget stays unused; a change raises their
+		// variability, and so their rates and the budget, again.
+		uint count = ddgi_stats.variability_count;
+		float mean_variability = count > 0u ? float(ddgi_stats.variability_sum) / 1024.0 / float(count) : 1.0;
+		ddgi_stats.variability_sum = 0u;
+		ddgi_stats.variability_count = 0u;
+		bool settled = ddgi.smoothing.y < 0.5 && mean_variability < 0.02;
 		if (traced >= ddgi.counts.w) {
 			scale *= 0.9;
+		} else if (settled) {
+			scale *= 0.95;
 		} else if (float(traced) < 0.9 * float(ddgi.counts.w)) {
 			scale *= 1.15;
 		}

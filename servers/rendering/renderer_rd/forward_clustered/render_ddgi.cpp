@@ -664,7 +664,8 @@ bool RenderDDGI::get_sampling_resources(RenderSceneBuffersRD *p_render_buffers, 
 }
 
 // Directional lights (direction, color, energy) and the background's energy,
-// quantized: a change means reflection probes captured before show the old light.
+// quantized: a change means reflection probes captured before show the old
+// light, and the probes have to follow new light (adaptive budget).
 static uint32_t _ddgi_light_state_hash(const RenderDataRD *p_render_data) {
 	uint32_t h = HASH_MURMUR3_SEED;
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
@@ -804,6 +805,7 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 			capture_generation++;
 		}
 	}
+	uint32_t sweep_frames = capacity > 0 ? (vd->total_probes + capacity - 1) / capacity : 1;
 	// After a light change (time of day, a light switched), ask again once DDGI
 	// has followed it: two updates of every probe plus the display easing; at
 	// most every 2 s while the light keeps changing.
@@ -815,7 +817,6 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 			vd->light_changed_frame = vd->frame;
 		}
 		if (vd->light_recapture_pending) {
-			uint32_t sweep_frames = capacity > 0 ? (vd->total_probes + capacity - 1) / capacity : 1;
 			bool settled = vd->frame - vd->light_changed_frame >= 2 * sweep_frames + 30;
 			bool overdue = vd->frame - vd->light_recapture_frame >= 2 * sweep_frames + 120;
 			if (settled || overdue) {
@@ -824,6 +825,19 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 				capture_generation++;
 			}
 		}
+	}
+	// Adaptive budget (rendering/global_illumination/ddgi/adaptive_budget): once
+	// the probes have settled, the scheduler may leave part of the budget
+	// unused (MODE_RELOCATE_CLASSIFY in ddgi_update.glsl), so a static scene
+	// stops paying for updates that change nothing. The budget stays full for
+	// four updates of every probe after a reset, and for 32 after a light change:
+	// probes that still converge change little per update and would pass for
+	// settled (with 4, the interior view ended 5% off after the sun halved; with
+	// 32, 3%; 0.85 instead of 1.38 ms of DDGI once settled).
+	{
+		bool keep_full = !GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/adaptive_budget") || realtime ||
+				vd->updates_since_reset < uint64_t(vd->total_probes) * 4 || vd->frame - vd->light_changed_frame < 32 * sweep_frames;
+		gpu.smoothing[1] = keep_full ? 1.0f : 0.0f;
 	}
 
 	rd->buffer_update(vd->data_buffer, 0, sizeof(DDGIDataGPU), &gpu);

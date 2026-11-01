@@ -195,6 +195,12 @@ func _apply_args() -> void:
 		ProjectSettings.set_setting(refl + "planar_mirror_render", int(args["mirror_render"]))
 	if args.has("mirror_scale"):
 		ProjectSettings.set_setting(refl + "planar_mirror_scale", float(args["mirror_scale"]))
+	if args.has("adaptive"):
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/adaptive_budget", args["adaptive"] == "1")
+	if args.has("ppf"):
+		# Custom quality with this many probes traced per frame (other values as Medium).
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/quality", 4)
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/custom_probes_per_frame", int(args["ppf"]))
 	_set_gi_mode(args.get("gi", "ddgi"))
 	_set_view(args.get("view", "room"))
 
