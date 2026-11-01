@@ -191,6 +191,10 @@ func _apply_args() -> void:
 		ProjectSettings.set_setting(refl + "planar_resolution", int(args["planar_half"]))
 	if args.has("planar_max"):
 		ProjectSettings.set_setting(refl + "planar_max_reflectors", int(args["planar_max"]))
+	if args.has("mirror_render"):
+		ProjectSettings.set_setting(refl + "planar_mirror_render", int(args["mirror_render"]))
+	if args.has("mirror_scale"):
+		ProjectSettings.set_setting(refl + "planar_mirror_scale", float(args["mirror_scale"]))
 	_set_gi_mode(args.get("gi", "ddgi"))
 	_set_view(args.get("view", "room"))
 

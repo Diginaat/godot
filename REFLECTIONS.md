@@ -287,7 +287,8 @@ bin\godot.windows.editor.x86_64.console.exe --path misc\ddgi_test_project -- --v
 Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
 `--extra_probes=N`, `--norm=0..1`, `--ddgi_ambient=0|1`, `--planar=0|1`,
 `--planar_half=0|1`, `--planar_max=N`, `--mirror=0`, `--pool=0`,
-`--cam=x,y,z,tx,ty,tz` (another camera), `--msaa=0..3`, `--dump_ts` (with
+`--cam=x,y,z,tx,ty,tz` (another camera), `--mirror_render=0..2`,
+`--mirror_scale=0.25..1`, `--msaa=0..3`, `--dump_ts` (with
 `--bench`: the GPU timestamps of the last frame). The BENCH line has
 `refl_probes` and `planar` pass times with `--gpu-profile`.
 `--chaos_refl` adds reflection settings to `--chaos`.
@@ -388,6 +389,27 @@ the showcase's GPU timestamps) and checked for image changes (frame diff
 against the previous build, in motion). Current costs at 1080p, RTX 3060:
 planar passes 0.87 ms, mirror pass 0.35 to 0.55 ms, probe faces about
 0.4 ms per face pair while capturing.
+
+Measured breakdown (2026-11-01, `reflect` view, whole-frame A/B over 300
+frames, repeated; the per-pass GPU timestamps overlap and were not
+reliable): all reflections 1.6 ms of 4.66 ms. Mirror pass 0.69 ms
+(`--mirror_render=0`: 3.97 ms). Planar passes and compositing 0.94 ms
+(`--planar=0`: 3.03 ms), of which project 0.45, resolve 0.25, temporal
+0.15 ms (each skipped in turn). Inside the project pass: the test whether
+another reflector is in front about 0.12 ms, the neighbors' spots 0.16 ms,
+atomics 0.05 ms, the footprint fill about 0.
+
+Done and rejected:
+- The project pass tests only the reflectors whose screen areas overlap
+  (convex clip of their screen quads on the CPU, a bit mask per
+  reflector): 4.66 to 4.62 ms; images within run-to-run noise.
+- Rejected: sharing the neighbors' spots through group shared memory (one
+  computation per pixel instead of three): slower, 4.66 to 4.82 ms (a
+  barrier per reflector).
+- Rejected: the planar compositing in the scene shader behind a
+  specialization constant: no measurable gain (`interior` 3.39 to 3.41 ms
+  before and after), and pipelines would compile when reflectors come
+  into view.
 
 | # | Item | Expected gain | Quality risk |
 | --- | --- | --- | --- |

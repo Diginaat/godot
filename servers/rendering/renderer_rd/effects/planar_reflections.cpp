@@ -36,6 +36,99 @@
 
 using namespace RendererRD;
 
+// A reflector's rectangle on screen (NDC), clipped to the view frustum; at most
+// 4 corners plus one per clip plane.
+static int _planar_screen_polygon(const Projection &p_view_projection, const RendererSceneRender::RenderPlanarReflection &p_reflector, Vector2 *r_polygon) {
+	const Basis &b = p_reflector.transform.basis;
+	Vector3 hu = b.get_column(0).normalized() * (p_reflector.size.x * 0.5);
+	Vector3 hv = b.get_column(2).normalized() * (p_reflector.size.y * 0.5);
+	const Vector3 &o = p_reflector.transform.origin;
+	const Vector3 corners[4] = { o - hu - hv, o + hu - hv, o + hu + hv, o - hu + hv };
+	Vector4 polygon[10];
+	Vector4 clipped[10];
+	int count = 4;
+	for (int c = 0; c < 4; c++) {
+		polygon[c] = p_view_projection.xform(Vector4(corners[c].x, corners[c].y, corners[c].z, 1.0));
+	}
+	static const Vector4 planes[5] = { Vector4(-1, 0, 0, 1), Vector4(1, 0, 0, 1), Vector4(0, -1, 0, 1), Vector4(0, 1, 0, 1), Vector4(0, 0, 1, 1) };
+	for (const Vector4 &plane : planes) {
+		int out = 0;
+		for (int i = 0; i < count; i++) {
+			const Vector4 &a = polygon[i];
+			const Vector4 &c = polygon[(i + 1) % count];
+			float da = plane.dot(a);
+			float dc = plane.dot(c);
+			if (da >= 0.0) {
+				clipped[out++] = a;
+			}
+			if ((da >= 0.0) != (dc >= 0.0)) {
+				clipped[out++] = a + (c - a) * (da / (da - dc));
+			}
+		}
+		count = out;
+		if (count < 3) {
+			return 0;
+		}
+		for (int i = 0; i < count; i++) {
+			polygon[i] = clipped[i];
+		}
+	}
+	for (int i = 0; i < count; i++) {
+		r_polygon[i] = Vector2(polygon[i].x, polygon[i].y) / polygon[i].w;
+	}
+	return count;
+}
+
+// Whether two convex screen polygons overlap by more than a sliver (they may
+// share an edge, as a wall mirror standing on a floor does).
+static bool _planar_polygons_overlap(const Vector2 *p_a, int p_a_count, const Vector2 *p_b, int p_b_count) {
+	if (p_a_count < 3 || p_b_count < 3) {
+		return false;
+	}
+	// Clip a by each edge of b (Sutherland-Hodgman), oriented by b's winding.
+	float b_area = 0.0;
+	for (int i = 0; i < p_b_count; i++) {
+		b_area += p_b[i].cross(p_b[(i + 1) % p_b_count]);
+	}
+	float winding = b_area >= 0.0 ? 1.0 : -1.0;
+	Vector2 polygon[24];
+	Vector2 clipped[24];
+	int count = p_a_count;
+	for (int i = 0; i < count; i++) {
+		polygon[i] = p_a[i];
+	}
+	for (int e = 0; e < p_b_count; e++) {
+		Vector2 e0 = p_b[e];
+		Vector2 e1 = p_b[(e + 1) % p_b_count];
+		Vector2 edge = e1 - e0;
+		int out = 0;
+		for (int i = 0; i < count && out < 22; i++) {
+			const Vector2 &a = polygon[i];
+			const Vector2 &c = polygon[(i + 1) % count];
+			float da = edge.cross(a - e0) * winding;
+			float dc = edge.cross(c - e0) * winding;
+			if (da >= 0.0) {
+				clipped[out++] = a;
+			}
+			if ((da >= 0.0) != (dc >= 0.0)) {
+				clipped[out++] = a + (c - a) * (da / (da - dc));
+			}
+		}
+		count = out;
+		if (count < 3) {
+			return false;
+		}
+		for (int i = 0; i < count; i++) {
+			polygon[i] = clipped[i];
+		}
+	}
+	float area = 0.0;
+	for (int i = 0; i < count; i++) {
+		area += polygon[i].cross(polygon[(i + 1) % count]);
+	}
+	return Math::abs(area) * 0.5 > 1e-6; // Of the 2 x 2 NDC screen.
+}
+
 PlanarReflections::PlanarReflections() {
 	Vector<String> modes;
 	modes.push_back("\n#define MODE_PROJECT\n");
@@ -203,6 +296,29 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 	params.mirror_rect[3] = MAX(p_mirror_uv_rect.size.y, 1e-4f);
 
 	Transform3D to_view = p_cam_transform.affine_inverse();
+
+	// Which reflectors can lie in front of which along a camera ray: only those
+	// whose screen areas overlap. The projection tests every reflector against
+	// the others for every pixel (covered_by_other_reflector()); most pairs, like
+	// a wall mirror standing on a floor, never overlap.
+	uint32_t overlap_masks[MAX_REFLECTORS] = {};
+	{
+		Projection view_projection = p_projection * Projection(to_view);
+		Vector2 polygons[MAX_REFLECTORS][9];
+		int counts[MAX_REFLECTORS];
+		for (int i = 0; i < p_count; i++) {
+			counts[i] = _planar_screen_polygon(view_projection, *p_reflectors[i], polygons[i]);
+		}
+		for (int i = 0; i < p_count; i++) {
+			for (int j = i + 1; j < p_count; j++) {
+				if (_planar_polygons_overlap(polygons[i], counts[i], polygons[j], counts[j])) {
+					overlap_masks[i] |= 1u << j;
+					overlap_masks[j] |= 1u << i;
+				}
+			}
+		}
+	}
+
 	for (int i = 0; i < p_count; i++) {
 		const RendererSceneRender::RenderPlanarReflection &r = *p_reflectors[i];
 		const Basis &b = r.transform.basis;
@@ -235,7 +351,7 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 		d.params[0] = r.thickness;
 		d.params[1] = r.normal_distortion;
 		d.params[2] = r.roughness_cutoff;
-		d.params[3] = 0.0;
+		memcpy(&d.params[3], &overlap_masks[i], sizeof(uint32_t)); // Read as bits by the shader.
 	}
 	RD::get_singleton()->buffer_update(params_buffer, 0, sizeof(Params), &params);
 

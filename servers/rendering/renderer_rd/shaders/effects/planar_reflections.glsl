@@ -36,7 +36,7 @@ struct Reflector {
 	vec4 center; // View space center of the rectangle, w = intensity.
 	vec4 axis_u; // View space unit axis, w = half extent.
 	vec4 axis_v; // View space unit axis, w = half extent.
-	vec4 params; // x = thickness, y = normal distortion, z = roughness cutoff, w = unused.
+	vec4 params; // x = thickness, y = normal distortion, z = roughness cutoff, w = bits: the reflectors whose screen areas overlap this one's.
 };
 
 layout(set = 0, binding = 0, std140) uniform Params {
@@ -135,8 +135,9 @@ vec3 camera_eye(vec3 p) {
 // Whether another reflector, facing the camera, lies in front of reflector i's point
 // hit on the ray from the eye (water over a reflective floor, overlapping mirrors).
 bool covered_by_other_reflector(uint i, vec3 eye, vec3 hit) {
+	uint overlapping = floatBitsToUint(params.reflectors[i].params.w); // Others can't be in front.
 	for (uint j = 0; j < params.reflector_count; j++) {
-		if (j == i || dot(params.reflectors[j].plane.xyz, eye) - params.reflectors[j].plane.w <= 0.0) {
+		if ((overlapping & (1u << j)) == 0u || dot(params.reflectors[j].plane.xyz, eye) - params.reflectors[j].plane.w <= 0.0) {
 			continue;
 		}
 		vec3 other_hit;
