@@ -36,6 +36,7 @@
 #include "servers/rendering/renderer_rd/effects/dlss.h"
 #include "servers/rendering/renderer_rd/effects/fsr2.h"
 #include "servers/rendering/renderer_rd/effects/motion_vectors_store.h"
+#include "servers/rendering/renderer_rd/effects/planar_reflections.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
@@ -311,6 +312,11 @@ protected:
 		SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR = (1 << 2),
 		SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR = (1 << 3),
 		SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS = (1 << 4),
+		SCREEN_SPACE_EFFECTS_FLAGS_USE_PLANAR_REFLECTIONS = (1 << 5),
+	};
+
+	enum {
+		REFLECTION_FLAGS_DDGI_OVERRIDES_PROBE_AMBIENT = (1 << 0),
 	};
 
 	struct SceneState {
@@ -338,6 +344,11 @@ protected:
 			float volumetric_fog_inv_length;
 			float volumetric_fog_detail_spread;
 			uint32_t volumetric_fog_pad;
+
+			float reflection_normalization;
+			float reflection_normalization_max;
+			uint32_t reflection_flags;
+			uint32_t reflection_pad;
 		};
 
 		struct PushConstantUbershader {
@@ -794,6 +805,7 @@ protected:
 	RendererRD::FSR2Effect *fsr2_effect = nullptr;
 	RendererRD::DLSSEffect *dlss_effect = nullptr;
 	RendererRD::SSEffects *ss_effects = nullptr;
+	RendererRD::PlanarReflections *planar_reflections_effect = nullptr;
 
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;
@@ -825,6 +837,7 @@ protected:
 	void _process_ssao(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections);
 	void _process_ssil(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_buffers, const Projection *p_projections, const Transform3D &p_transform);
 	void _process_ssr(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const RID *p_normal_slices, const Projection *p_projections, const Vector3 *p_eye_offsets, const Transform3D &p_transform);
+	void _process_planar_reflections(RenderDataRD *p_render_data, const RID *p_normal_slices);
 	void _process_sscs(Ref<RenderSceneBuffersRD> p_render_buffers, const Projection *p_projections, const Transform3D &p_transform, const LocalVector<int> &p_contact_shadows, const RenderShadowData *p_render_shadows, float p_taa_frame_count);
 	void _copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr);
 	void _setup_lights_cluster_decals(RenderDataRD *p_render_data, uint32_t &r_directional_light_count, uint32_t &r_positional_light_count);
@@ -887,6 +900,11 @@ protected:
 	// The probe resources of this view, for volumetric fog. False when there are none.
 	virtual bool _ddgi_get_fog_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) { return false; }
 	bool ddgi_active_this_frame = false;
+
+	// Planar reflections selected for the view being rendered (set in _render_scene()).
+	bool planar_reflections_active = false;
+	int planar_reflection_count = 0;
+	const RendererSceneRender::RenderPlanarReflection *planar_reflection_selection[RendererRD::PlanarReflections::MAX_REFLECTORS] = {};
 
 	virtual void _render_material(const Transform3D &p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region, float p_exposure_normalization) override;
 	virtual void _render_uv2(const PagedArray<RenderGeometryInstance *> &p_instances, RID p_framebuffer, const Rect2i &p_region) override;

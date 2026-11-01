@@ -801,6 +801,16 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 		scene_state.ubo.ss_effects_flags = 0;
 	}
 
+	if (planar_reflections_active && p_render_data->reflection_probe.is_null() && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
+		scene_state.ubo.ss_effects_flags |= SCREEN_SPACE_EFFECTS_FLAGS_USE_PLANAR_REFLECTIONS;
+	}
+
+	// Reflection probes and DDGI. Both only act on pixels DDGI covers (the GI buffer).
+	scene_state.ubo.reflection_normalization = GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/probe_ddgi_normalization");
+	scene_state.ubo.reflection_normalization_max = GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/probe_normalization_max");
+	scene_state.ubo.reflection_flags = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/ddgi_overrides_probe_ambient") ? REFLECTION_FLAGS_DDGI_OVERRIDES_PROBE_AMBIENT : 0;
+	scene_state.ubo.reflection_pad = 0;
+
 	if (uniform_buffer_index >= scene_state.implementation_uniform_buffers.size()) {
 		uint32_t from = scene_state.implementation_uniform_buffers.size();
 		scene_state.implementation_uniform_buffers.resize(uniform_buffer_index + 1);
@@ -1615,6 +1625,29 @@ void RenderForwardClustered::_process_sscs(Ref<RenderSceneBuffersRD> p_render_bu
 	}
 }
 
+void RenderForwardClustered::_process_planar_reflections(RenderDataRD *p_render_data, const RID *p_normal_slices) {
+	Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	ERR_FAIL_COND(rb.is_null());
+	ERR_FAIL_COND(planar_reflection_count <= 0);
+
+	RENDER_TIMESTAMP("Process Planar Reflections");
+
+	// The reflected color is the last frame's, reprojected from this frame's clip space.
+	const RenderSceneDataRD *scene_data = p_render_data->scene_data;
+	Projection correction;
+	correction.set_depth_correction(true);
+	Projection current = correction * scene_data->cam_projection;
+	Projection previous = correction * scene_data->prev_cam_projection;
+	Projection reprojection = previous * Projection(scene_data->prev_cam_transform.affine_inverse()) * Projection(scene_data->cam_transform) * current.inverse();
+
+	RID normal_roughness = p_normal_slices[0];
+	if (normal_roughness.is_null()) {
+		normal_roughness = RendererRD::TextureStorage::get_singleton()->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+	}
+	bool half_size = GLOBAL_GET_CACHED(int, "rendering/global_illumination/reflections/planar_resolution") == 1;
+	planar_reflections_effect->process(rb, rb->get_depth_texture(0), normal_roughness, rb->get_texture(RB_SCOPE_SSLF, RB_LAST_FRAME), scene_data->cam_projection, scene_data->cam_transform, reprojection, planar_reflection_selection, planar_reflection_count, half_size);
+}
+
 void RenderForwardClustered::_copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr) {
 	ERR_FAIL_NULL(ss_effects);
 	ERR_FAIL_COND(p_render_buffers.is_null());
@@ -1753,8 +1786,8 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		// This should allow most of the processing to happen in parallel even if we're doing
 		// drawcalls per eye/view. It will all sync up at the barrier.
 
-		if (p_use_ssil || p_use_ssr) {
-			ss_effects->allocate_last_frame_buffer(rb, p_use_ssil, p_use_ssr);
+		if (p_use_ssil || p_use_ssr || planar_reflections_active) {
+			ss_effects->allocate_last_frame_buffer(rb, p_use_ssil, p_use_ssr, planar_reflections_active);
 		}
 
 		if (p_use_ssao || p_use_ssil) {
@@ -1779,6 +1812,10 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 		if (p_use_ssr) {
 			_process_ssr(rb, p_render_data->environment, p_normal_roughness_slices, p_render_data->scene_data->view_projection, p_render_data->scene_data->view_eye_offset, p_render_data->scene_data->cam_transform);
+		}
+
+		if (planar_reflections_active) {
+			_process_planar_reflections(p_render_data, p_normal_roughness_slices);
 		}
 	}
 
@@ -2140,6 +2177,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_sdfgi = false;
 	bool using_voxelgi = false;
 	bool using_ddgi = false;
+	bool using_planar = false;
+	planar_reflection_count = 0;
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
 	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
 	bool using_motion_pass = rb_data.is_valid() && using_upscaling;
@@ -2199,6 +2238,15 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			using_voxelgi = false;
 		}
 
+		// Planar reflections: independent of the environment and of DDGI; single view only.
+		if (rb_data.is_valid() && planar_reflections_effect && p_render_data->planar_reflections && p_render_data->scene_data->view_count == 1 && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/planar_enabled")) {
+			planar_reflection_count = RendererRD::PlanarReflections::select_reflectors(*p_render_data->planar_reflections, p_render_data->scene_data->cam_transform, p_render_data->scene_data->cam_projection, 0xFFFFFFFF, GLOBAL_GET_CACHED(int, "rendering/global_illumination/reflections/planar_max_reflectors"), planar_reflection_selection);
+			using_planar = planar_reflection_count > 0;
+		}
+		if (!using_planar && rb->has_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR)) {
+			rb->clear_context(RB_SCOPE_PLANAR_REFLECTIONS); // Free the buffers while no reflector is in view.
+		}
+
 		if (GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/contact_shadow/enabled")) {
 			using_sscs = true;
 		}
@@ -2218,6 +2266,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	}
 
 	p_render_data->scene_data->emissive_exposure_normalization = -1.0;
+	planar_reflections_active = using_planar;
 
 	RD::get_singleton()->draw_command_begin_label("Render Setup");
 
@@ -2245,6 +2294,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			depth_pass_mode = PASS_MODE_DEPTH_NORMAL_ROUGHNESS_VOXEL_GI;
 		} else if (p_render_data->environment.is_valid()) {
 			if (using_ssr ||
+					using_planar ||
 					using_sdfgi ||
 					using_ddgi ||
 					environment_get_ssao_enabled(p_render_data->environment) ||
@@ -2255,7 +2305,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 					scene_state.used_normal_texture) {
 				depth_pass_mode = PASS_MODE_DEPTH_NORMAL_ROUGHNESS;
 			}
-		} else if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_NORMAL_BUFFER || scene_state.used_normal_texture) {
+		} else if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_NORMAL_BUFFER || scene_state.used_normal_texture || using_planar) {
 			depth_pass_mode = PASS_MODE_DEPTH_NORMAL_ROUGHNESS;
 		}
 
@@ -2429,7 +2479,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	bool debug_voxelgis = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_VOXEL_GI_ALBEDO || get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_VOXEL_GI_LIGHTING || get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_VOXEL_GI_EMISSION;
 	bool debug_sdfgi_probes = get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_SDFGI_PROBES;
-	bool force_depth_pre_pass = scene_state.used_opaque_stencil || using_ssao || using_ssr || using_sscs || using_ssil;
+	bool force_depth_pre_pass = scene_state.used_opaque_stencil || using_ssao || using_ssr || using_sscs || using_ssil || using_planar;
 	bool depth_pre_pass = (force_depth_pre_pass || scene_shader.depth_prepass_enabled) && depth_framebuffer.is_valid();
 
 	SceneShaderForwardClustered::ShaderSpecialization base_specialization = scene_shader.default_specialization;
@@ -2454,7 +2504,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index);
 
-		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
+		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || using_planar || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 
@@ -2787,7 +2837,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	}
 
 	RD::get_singleton()->draw_command_begin_label("Copy Framebuffer for SSIL/SSR");
-	if (using_ssil || using_ssr) {
+	if (using_ssil || using_ssr || using_planar) {
 		RENDER_TIMESTAMP("Copy Final Framebuffer (SSIL/SSR)");
 		_copy_framebuffer_to_ss_effects(rb, using_ssil, using_ssr);
 	}
@@ -4038,6 +4088,28 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		RID texture = sscs.is_valid() ? sscs : texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_2D_ARRAY_BLACK);
 		u.append_id(texture);
 		uniforms.push_back(u);
+	}
+	{
+		// Planar reflections (binding 40: color, 41: params); black (no reflector) when unused.
+		RID planar_color;
+		RID planar_params;
+		if (rb_data.is_valid() && !is_multiview && rb->has_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR)) {
+			planar_color = rb->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR);
+			planar_params = rb->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_PARAMS);
+		}
+		RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+
+		RD::Uniform u_color;
+		u_color.binding = 40;
+		u_color.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		u_color.append_id(planar_color.is_valid() ? planar_color : black);
+		uniforms.push_back(u_color);
+
+		RD::Uniform u_params;
+		u_params.binding = 41;
+		u_params.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+		u_params.append_id(planar_params.is_valid() ? planar_params : black);
+		uniforms.push_back(u_params);
 	}
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 	{
@@ -5628,6 +5700,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	fsr2_effect = memnew(RendererRD::FSR2Effect);
 	dlss_effect = memnew(RendererRD::DLSSEffect);
 	ss_effects = memnew(RendererRD::SSEffects);
+	planar_reflections_effect = memnew(RendererRD::PlanarReflections);
 	motion_vectors_store = memnew(RendererRD::MotionVectorsStore);
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	mfx_temporal_effect = memnew(RendererRD::MFXTemporalEffect);
@@ -5640,6 +5713,11 @@ RenderForwardClustered::~RenderForwardClustered() {
 	if (ss_effects != nullptr) {
 		memdelete(ss_effects);
 		ss_effects = nullptr;
+	}
+
+	if (planar_reflections_effect != nullptr) {
+		memdelete(planar_reflections_effect);
+		planar_reflections_effect = nullptr;
 	}
 
 	if (taa != nullptr) {

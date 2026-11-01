@@ -24,8 +24,29 @@
 				The volume must be fixed ([member infinite_world] off) and in a scene with a [WorldEnvironment], and the renderer must support DDGI updates (Forward+, Vulkan, ray tracing). Save the result with [ResourceSaver] to keep it; the editor's Bake DDGI button does that.
 			</description>
 		</method>
+		<method name="get_auto_planar_reflector_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many planar reflectors [member auto_planar_reflections] created.
+			</description>
+		</method>
 	</methods>
 	<members>
+		<member name="auto_planar_max_roughness" type="float" setter="set_auto_planar_max_roughness" getter="get_auto_planar_max_roughness" default="0.3">
+			Surfaces whose material roughness is above this get no automatic planar reflector. Raise it (up to 1) for floors that become glossy at runtime, such as wet floors from a shader.
+		</member>
+		<member name="auto_planar_min_area" type="float" setter="set_auto_planar_min_area" getter="get_auto_planar_min_area" default="2.0">
+			Flat surfaces smaller than this (in square meters) get no automatic planar reflector.
+		</member>
+		<member name="auto_planar_reflections" type="bool" setter="set_auto_planar_reflections" getter="is_auto_planar_reflections_enabled" default="true">
+			If [code]true[/code], large flat smooth surfaces in the volume get planar reflections automatically (see [PlanarReflector3D]). Surfaces with a [PlanarReflector3D] of their own are left alone. Forward+ only.
+		</member>
+		<member name="auto_reflection_probe" type="bool" setter="set_auto_reflection_probe" getter="is_auto_reflection_probe_enabled" default="true">
+			If [code]true[/code], one box-projected reflection probe covers the volume (or follows the camera with [member infinite_world]), captured once and normalized by DDGI. Skipped when the volume contains a [ReflectionProbe].
+		</member>
+		<member name="auto_reflections" type="bool" setter="set_auto_reflections" getter="is_auto_reflections_enabled" default="true">
+			If [code]true[/code], the volume creates reflections automatically: a reflection probe and planar reflectors (see the other [code]auto_*[/code] properties). Nothing is added to the scene.
+		</member>
 		<member name="bake_least_squares" type="bool" setter="set_bake_least_squares" getter="is_bake_least_squares_enabled" default="true">
 			If [code]true[/code], [method bake] refines the baked probes: it bakes the volume a second time with half the probe spacing, then solves for the probe light whose blend between probes, as surfaces see it, best matches the light at the finer probes, while keeping probes that see each other smooth. This reduces seams, blotches and errors between probes, at about nine times the bake time. Volumes with more than 32 probes along any side are baked without it.
 		</member>

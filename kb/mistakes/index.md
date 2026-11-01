@@ -16,4 +16,5 @@ What worked is in [successes](/successes/).
 * [Mixed up an encoding convention](/mistakes/encoding-convention-mismatch.md) - check the value range of shared helpers before pairing them
 * [Quoting broke generated scripts](/mistakes/generated-code-quoting.md) - put code in files, make edits all-or-nothing
 * [A test setting lived in the animation callback](/mistakes/test-setting-in-animation-callback.md) - still tests ran with the wrong sun; check one final image of a new scene
+* [Single-flag benchmark runs measured the defaults](/mistakes/powershell-single-arg-splat.md) - cast splatted arguments to [string[]] and check each flag took effect
 * [Recorded a long run of a scene that couldn't show the problem](/mistakes/long-run-of-an-unfit-scene.md) - check one frame shows the effect before a long run

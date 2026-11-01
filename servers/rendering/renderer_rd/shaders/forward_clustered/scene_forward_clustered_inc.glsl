@@ -202,6 +202,9 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_SSR (1 << 2)
 #define SCREEN_SPACE_EFFECTS_FLAGS_RESOLVE_SSR (1 << 3)
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_SSCS (1 << 4)
+#define SCREEN_SPACE_EFFECTS_FLAGS_USE_PLANAR_REFLECTIONS (1 << 5)
+
+#define REFLECTION_FLAGS_DDGI_OVERRIDES_PROBE_AMBIENT (1 << 0)
 
 layout(set = 0, binding = 3, std430) restrict readonly buffer OmniLights {
 	LightData data[];
@@ -349,6 +352,12 @@ struct ImplementationData {
 	float volumetric_fog_inv_length;
 	float volumetric_fog_detail_spread;
 	uint volumetric_fog_pad;
+
+	// Reflection probes under DDGI (rendering/global_illumination/reflections/).
+	float reflection_normalization; // Strength 0..1 of the DDGI normalization of probe reflections.
+	float reflection_normalization_max; // Upper clamp of the normalization factor.
+	uint reflection_flags;
+	uint reflection_pad;
 };
 
 layout(set = 1, binding = 1, std140) uniform ImplementationDataBlock {
@@ -491,6 +500,12 @@ layout(set = 1, binding = 35) uniform texture2D ssr_buffer;
 layout(set = 1, binding = 36) uniform texture2D ssr_mip_level_buffer;
 layout(set = 1, binding = 37) uniform texture2DArray sscs_buffer;
 #endif // USE_MULTIVIEW
+
+// Planar reflections (pixel-projected, see planar_reflections.glsl); single view only.
+// Color: reflected radiance, alpha = weight. Params: view depth of the reflector
+// plane (0 = no reflector), its thickness, normal distortion, roughness cutoff.
+layout(set = 1, binding = 40) uniform texture2D planar_reflection_color;
+layout(set = 1, binding = 41) uniform texture2D planar_reflection_params;
 
 #endif
 

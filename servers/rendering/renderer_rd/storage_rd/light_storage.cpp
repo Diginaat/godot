@@ -1597,6 +1597,37 @@ void LightStorage::_reflection_atlas_clear(ReflectionAtlas *p_reflection_atlas) 
 	p_reflection_atlas->reflections.clear();
 }
 
+void LightStorage::_reflection_atlas_grow(ReflectionAtlas *p_atlas, int p_capacity) {
+	ERR_FAIL_COND(p_capacity <= p_atlas->capacity || p_atlas->reflection.is_null());
+
+	RD::TextureFormat tf = RD::get_singleton()->texture_get_format(p_atlas->reflection);
+	tf.array_layers = p_capacity;
+	RID texture = RD::get_singleton()->texture_create(tf, RD::TextureView());
+
+	// Keep the captured probes: copy their layers, all mipmaps.
+	for (int i = 0; i < p_atlas->capacity; i++) {
+		if (p_atlas->reflections[i].owner.is_null()) {
+			continue;
+		}
+		for (uint32_t m = 0; m < tf.mipmaps; m++) {
+			uint32_t mip_size = MAX(1u, tf.width >> m);
+			RD::get_singleton()->texture_copy(p_atlas->reflection, texture, Vector3(), Vector3(), Vector3(mip_size, mip_size, 1), m, m, i, i);
+		}
+	}
+
+	// The per layer views and framebuffers belong to the old texture and go with it.
+	for (int i = 0; i < p_atlas->reflections.size(); i++) {
+		p_atlas->reflections.write[i].data.clear_reflection_data();
+	}
+	RD::get_singleton()->free_rid(p_atlas->reflection);
+	p_atlas->reflection = texture;
+	p_atlas->reflections.resize(p_capacity);
+	for (int i = 0; i < p_capacity; i++) {
+		p_atlas->reflections.write[i].data.update_reflection_data(p_atlas->reflection_texture_size, p_atlas->mipmaps, false, p_atlas->reflection, i, p_atlas->update_always, RendererSceneRenderRD::get_singleton()->get_sky()->roughness_layers, RendererSceneRenderRD::get_singleton()->_render_buffers_get_preferred_color_format(), p_atlas->uv_border_size);
+	}
+	p_atlas->capacity = p_capacity;
+}
+
 void LightStorage::reflection_atlas_set_size(RID p_ref_atlas, int p_reflection_size, int p_reflection_count) {
 	ReflectionAtlas *ra = reflection_atlas_owner.get_or_null(p_ref_atlas);
 	ERR_FAIL_NULL(ra);
@@ -1763,15 +1794,18 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 		atlas->uv_border_size = float(padding_pixels) / float(atlas->reflection_texture_size);
 
 		bool use_storage = !copy_effects->get_raster_effects().has_flag(CopyEffects::RASTER_EFFECT_OCTMAP);
+		// Start with a few layers and grow when probes need them (see _reflection_atlas_grow()).
+		atlas->capacity = MIN(atlas->count, REFLECTION_ATLAS_INITIAL_CAPACITY);
+		atlas->mipmaps = mipmaps;
 		{
 			RD::TextureFormat tf;
-			tf.array_layers = atlas->count;
+			tf.array_layers = atlas->capacity;
 			tf.format = get_reflection_probe_color_format();
 			tf.texture_type = RD::TEXTURE_TYPE_2D_ARRAY;
 			tf.mipmaps = mipmaps;
 			tf.width = atlas->reflection_texture_size;
 			tf.height = atlas->reflection_texture_size;
-			tf.usage_bits = get_reflection_probe_color_usage_bits(use_storage);
+			tf.usage_bits = get_reflection_probe_color_usage_bits(use_storage) | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT;
 			atlas->reflection = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		}
 		{
@@ -1792,8 +1826,8 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 			tf.usage_bits = get_reflection_probe_depth_usage_bits();
 			atlas->depth_buffer = RD::get_singleton()->texture_create(tf, RD::TextureView());
 		}
-		atlas->reflections.resize(atlas->count);
-		for (int i = 0; i < atlas->count; i++) {
+		atlas->reflections.resize(atlas->capacity);
+		for (int i = 0; i < atlas->capacity; i++) {
 			atlas->reflections.write[i].data.update_reflection_data(atlas->reflection_texture_size, mipmaps, false, atlas->reflection, i, update_always, RendererSceneRenderRD::get_singleton()->get_sky()->roughness_layers, RendererSceneRenderRD::get_singleton()->_render_buffers_get_preferred_color_format(), atlas->uv_border_size);
 		}
 
@@ -1817,17 +1851,29 @@ bool LightStorage::reflection_probe_instance_begin_render(RID p_instance, RID p_
 				break;
 			}
 		}
+		// Full: grow the texture if the atlas may hold more.
+		if (rpi->atlas_index == -1 && atlas->capacity < atlas->count) {
+			int old_capacity = atlas->capacity;
+			_reflection_atlas_grow(atlas, MIN(atlas->capacity * 2, atlas->count));
+			rpi->atlas_index = old_capacity;
+		}
 		//find the one used last
 		if (rpi->atlas_index == -1) {
 			//everything is in use, find the one least used via LRU
-			uint64_t pass_min = 0;
+			uint64_t pass_min = UINT64_MAX;
 
 			for (int i = 0; i < atlas->reflections.size(); i++) {
 				ReflectionProbeInstance *rpi2 = reflection_probe_instance_owner.get_or_null(atlas->reflections[i].owner);
-				if (rpi2->last_pass < pass_min) {
+				if (rpi2 && rpi2 != rpi && rpi2->last_pass < pass_min) {
 					pass_min = rpi2->last_pass;
 					rpi->atlas_index = i;
 				}
+			}
+			if (rpi->atlas_index != -1) {
+				// The evicted probe loses its slot and is captured again when it needs one.
+				int index = rpi->atlas_index;
+				reflection_probe_release_atlas_index(atlas->reflections[index].owner);
+				rpi->atlas_index = index;
 			}
 		}
 	}

@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "scene/3d/ddgi_auto_reflections.h"
 #include "scene/3d/visual_instance_3d.h"
 #include "scene/resources/environment.h"
 
@@ -93,6 +94,16 @@ private:
 	bool bake_least_squares = true;
 	Ref<DDGIProbeData> probe_data;
 	Ref<Environment> applied_environment;
+
+	// Automatic reflections (see DDGIAutoReflections).
+	bool auto_reflections = true;
+	bool auto_reflection_probe = true;
+	bool auto_planar_reflections = true;
+	float auto_planar_max_roughness = 0.3f;
+	float auto_planar_min_area = 2.0f;
+	DDGIAutoReflections auto_reflector;
+	void _update_auto_reflections();
+	void _on_tree_node_changed(Node *p_node);
 
 	Vector3i _grid_from_size() const;
 	Ref<Environment> _get_environment() const;
@@ -167,6 +178,23 @@ public:
 	/// probe_data. Blocks; renders p_updates_per_probe updates per probe
 	/// (0: a default that suits most scenes).
 	Ref<DDGIProbeData> bake(int p_updates_per_probe = 0);
+
+	void set_auto_reflections(bool p_enabled);
+	bool is_auto_reflections_enabled() const;
+
+	void set_auto_reflection_probe(bool p_enabled);
+	bool is_auto_reflection_probe_enabled() const;
+
+	void set_auto_planar_reflections(bool p_enabled);
+	bool is_auto_planar_reflections_enabled() const;
+
+	void set_auto_planar_max_roughness(float p_roughness);
+	float get_auto_planar_max_roughness() const;
+
+	void set_auto_planar_min_area(float p_area);
+	float get_auto_planar_min_area() const;
+
+	int get_auto_planar_reflector_count() const;
 
 	virtual AABB get_aabb() const override;
 	PackedStringArray get_configuration_warnings() const override;

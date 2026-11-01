@@ -265,10 +265,16 @@ brighter without flicker:
 - **Volumetric fog**: where probes cover it, its ambient light
   (`volumetric_fog_ambient_inject`) comes from the probes instead of the
   unoccluded sky, so fog in caves and interiors stays dark.
-- **Reflections**: DDGI is diffuse only, but it occludes the sky and
-  reflection probe light: the scene shader scales it by the DDGI irradiance
-  over the environment's (unoccluded) ambient light at the surface, about 1
-  in the open and near 0 in caves and tunnels. SSR is unchanged.
+- **Reflections**: DDGI is diffuse only, but it occludes the sky
+  reflection: the scene shader scales it by the DDGI irradiance over the
+  environment's (unoccluded) ambient light at the surface, about 1 in the
+  open and near 0 in caves and tunnels. Reflection probes replace the sky
+  inside their box; their reflections are normalized by the DDGI
+  irradiance instead (`rendering/global_illumination/reflections/probe_ddgi_normalization`),
+  and DDGI's diffuse light wins over a probe's ambient light
+  (`ddgi_overrides_probe_ambient`). Planar reflections (`PlanarReflector3D`)
+  and SSR mirror the lit screen, DDGI included. See
+  [REFLECTIONS.md](REFLECTIONS.md).
 - **SSAO / SSIL** still apply on top.
 - **Path tracing**: when `pathtracing_enabled` is on, the path tracer computes
   all light and DDGI is not used. Select one or the other per environment.

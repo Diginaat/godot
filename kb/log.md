@@ -1,5 +1,22 @@
 # Update log
 
+## 2026-11-01 (automatic reflections)
+
+* **Updated**: REFLECTIONS.md: DDGIVolume `auto_reflections` (volume probe and
+  planar reflectors found from mesh planes and material roughness).
+
+## 2026-10-31 (reflections)
+
+* **Added**: REFLECTIONS.md (runbook) and reflections/: overview and the
+  architecture decision (pixel-projected planar reflections, budgeted and
+  DDGI-normalized reflection probes, atlas on demand).
+* **Added**: research/pixel-projected-reflections.md,
+  research/cubemap-normalization.md.
+* **Added**: mistakes/powershell-single-arg-splat.md,
+  successes/reflection-atlas-on-demand.md.
+* **Updated**: ddgi/improvements/specular-occlusion.md: probe reflections
+  are now normalized by DDGI.
+
 ## 2026-10-31 (sync)
 
 * **Updated**: CUSTOM_BUILD.md sync log: upstream `95c0fa5fe8` (4.8-beta),

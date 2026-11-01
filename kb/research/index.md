@@ -27,6 +27,11 @@ ideas; check the license before taking any code.
 * [DDGI papers and reference code (Majercik 2019, 2021)](/research/majercik-ddgi-reference.md) - our sampling matches the reference; it averages in gamma 5 space and floors visibility at 0.05
 * [O3DE DiffuseProbeGrid](/research/o3de-diffuse-probe-grid.md) - RTXGI in O3DE: thresholds, emissive multiplier, a simpler low resolution composite; no code taken
 
+# Reflections (read 2026-10-31)
+
+* [Pixel-projected reflections](/research/pixel-projected-reflections.md) - planar reflections by scattering with an atomic min on packed offsets; used for PlanarReflector3D
+* [Cubemap normalization](/research/cubemap-normalization.md) - static probes scaled by irradiance at the pixel over the probe's (Black Ops II, Frostbite, AC4, Unity APV); used with DDGI
+
 # What they mean for DDGI
 
 * [DDGI improvement proposals, ranked](/ddgi/improvements/index.md)

@@ -204,6 +204,98 @@ void RendererSceneCull::occluder_set_mesh(RID p_occluder, const PackedVector3Arr
 	RendererSceneOcclusionCull::get_singleton()->occluder_set_mesh(p_occluder, p_vertices, p_indices);
 }
 
+/* PLANAR REFLECTION API */
+
+RID RendererSceneCull::planar_reflection_allocate() {
+	return planar_reflection_owner.allocate_rid();
+}
+
+void RendererSceneCull::planar_reflection_initialize(RID p_planar_reflection) {
+	planar_reflection_owner.initialize_rid(p_planar_reflection);
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	pr->self = p_planar_reflection;
+}
+
+void RendererSceneCull::_planar_reflection_update_scenario(PlanarReflection *p_planar_reflection) {
+	Scenario *scenario = scenario_owner.get_or_null(p_planar_reflection->scenario);
+	if (scenario) {
+		scenario->planar_reflections_dirty = true;
+	}
+}
+
+void RendererSceneCull::planar_reflection_set_scenario(RID p_planar_reflection, RID p_scenario) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	Scenario *old_scenario = scenario_owner.get_or_null(pr->scenario);
+	if (old_scenario) {
+		old_scenario->planar_reflections.erase(p_planar_reflection);
+		old_scenario->planar_reflections_dirty = true;
+	}
+	pr->scenario = RID();
+	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
+	if (scenario) {
+		pr->scenario = p_scenario;
+		scenario->planar_reflections.insert(p_planar_reflection);
+		scenario->planar_reflections_dirty = true;
+	}
+}
+
+void RendererSceneCull::planar_reflection_set_transform(RID p_planar_reflection, const Transform3D &p_transform) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	pr->data.transform = p_transform;
+	_planar_reflection_update_scenario(pr);
+}
+
+void RendererSceneCull::planar_reflection_set_size(RID p_planar_reflection, const Vector2 &p_size) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	pr->data.size = p_size.maxf(0.0);
+	_planar_reflection_update_scenario(pr);
+}
+
+void RendererSceneCull::planar_reflection_set_layer_mask(RID p_planar_reflection, uint32_t p_layers) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	pr->data.layers = p_layers;
+	_planar_reflection_update_scenario(pr);
+}
+
+void RendererSceneCull::planar_reflection_set_visible(RID p_planar_reflection, bool p_visible) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	pr->visible = p_visible;
+	_planar_reflection_update_scenario(pr);
+}
+
+void RendererSceneCull::planar_reflection_set_intensity(RID p_planar_reflection, float p_intensity) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	pr->data.intensity = CLAMP(p_intensity, 0.0f, 1.0f);
+	_planar_reflection_update_scenario(pr);
+}
+
+void RendererSceneCull::planar_reflection_set_thickness(RID p_planar_reflection, float p_thickness) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	pr->data.thickness = MAX(p_thickness, 0.0f);
+	_planar_reflection_update_scenario(pr);
+}
+
+void RendererSceneCull::planar_reflection_set_normal_distortion(RID p_planar_reflection, float p_distortion) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	pr->data.normal_distortion = p_distortion;
+	_planar_reflection_update_scenario(pr);
+}
+
+void RendererSceneCull::planar_reflection_set_roughness_cutoff(RID p_planar_reflection, float p_roughness) {
+	PlanarReflection *pr = planar_reflection_owner.get_or_null(p_planar_reflection);
+	ERR_FAIL_NULL(pr);
+	pr->data.roughness_cutoff = CLAMP(p_roughness, 0.0f, 1.0f);
+	_planar_reflection_update_scenario(pr);
+}
+
 /* SCENARIO API */
 
 void RendererSceneCull::_instance_pair(Instance *p_A, Instance *p_B) {
@@ -671,6 +763,9 @@ void RendererSceneCull::instance_set_base(RID p_instance, RID p_base) {
 				RSG::light_storage->reflection_probe_instance_free(reflection_probe->instance);
 				if (reflection_probe->update_list.in_list()) {
 					reflection_probe_render_list.remove(&reflection_probe->update_list);
+				}
+				if (reflection_probe_capturing == reflection_probe) {
+					reflection_probe_capturing = nullptr;
 				}
 			} break;
 			case RSE::INSTANCE_DECAL: {
@@ -3000,7 +3095,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 					}
 
 				} else if (base_type == RSE::INSTANCE_REFLECTION_PROBE) {
-					if (cull_data.render_reflection_probe != idata.instance) {
+					if (cull_data.reflection_probes_enabled && cull_data.render_reflection_probe != idata.instance) {
 						//avoid entering The Matrix
 
 						if ((idata.flags & InstanceData::FLAG_REFLECTION_PROBE_DIRTY) || RSG::light_storage->reflection_probe_instance_needs_redraw(RID::from_uint64(idata.instance_data_rid))) {
@@ -3419,6 +3514,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	if (p_reflection_probe.is_null()) {
 		//no rendering code here, this is only to set up what needs to be done, request regions, etc.
 		scene_render->sdfgi_update(p_render_buffers, p_environment, camera_position); //update conditions for SDFGI (whether its used or not)
+		reflection_probe_camera_position = camera_position; // Update priority of budgeted reflection probe updates.
 	}
 
 	RENDER_TIMESTAMP("Update Visibility Dependencies");
@@ -3550,6 +3646,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
 		cull_data.camera_matrix = &p_camera_data->main_projection;
 		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
+		cull_data.reflection_probes_enabled = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probes_enabled");
 #ifdef DEBUG_CULL_TIME
 		uint64_t time_from = OS::get_singleton()->get_ticks_usec();
 #endif
@@ -3822,7 +3919,31 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	}
 
 	RENDER_TIMESTAMP("Render 3D Scene");
-	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info, &scene_cull_result.rt_geometry_instances, &scene_cull_result.rt_light_instances);
+	// Planar reflectors of the scenario seen by this camera's layers (Forward+ culls and picks them).
+	const LocalVector<RendererSceneRender::RenderPlanarReflection> *planar_reflections = nullptr;
+	if (p_reflection_probe.is_null() && !scenario->planar_reflections.is_empty()) {
+		if (scenario->planar_reflections_dirty) {
+			scenario->planar_reflection_data.clear();
+			for (const RID &rid : scenario->planar_reflections) {
+				const PlanarReflection *pr = planar_reflection_owner.get_or_null(rid);
+				if (pr && pr->visible && pr->data.size.x > 0.0 && pr->data.size.y > 0.0) {
+					scenario->planar_reflection_data.push_back(pr->data);
+				}
+			}
+			scenario->planar_reflections_dirty = false;
+		}
+		planar_reflection_render_list.clear();
+		for (const RendererSceneRender::RenderPlanarReflection &r : scenario->planar_reflection_data) {
+			if (r.layers & p_visible_layers) {
+				planar_reflection_render_list.push_back(r);
+			}
+		}
+		if (!planar_reflection_render_list.is_empty()) {
+			planar_reflections = &planar_reflection_render_list;
+		}
+	}
+
+	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info, &scene_cull_result.rt_geometry_instances, &scene_cull_result.rt_light_instances, planar_reflections);
 
 	if (p_viewport.is_valid()) {
 		RSG::viewport->viewport_set_prev_camera_data(p_viewport, p_camera_data);
@@ -3912,51 +4033,8 @@ bool RendererSceneCull::_render_reflection_probe_step(Instance *p_instance, int 
 	}
 
 	if (p_step == 0) {
-		static const Vector3 view_normals[6] = {
-			Vector3(+1, 0, 0),
-			Vector3(-1, 0, 0),
-			Vector3(0, +1, 0),
-			Vector3(0, -1, 0),
-			Vector3(0, 0, +1),
-			Vector3(0, 0, -1)
-		};
-		static const Vector3 view_up[6] = {
-			Vector3(0, -1, 0),
-			Vector3(0, -1, 0),
-			Vector3(0, 0, +1),
-			Vector3(0, 0, -1),
-			Vector3(0, -1, 0),
-			Vector3(0, -1, 0)
-		};
-
-		Vector3 probe_size = RSG::light_storage->reflection_probe_get_size(p_instance->base);
-		Vector3 origin_offset = RSG::light_storage->reflection_probe_get_origin_offset(p_instance->base);
-		float max_distance = RSG::light_storage->reflection_probe_get_origin_max_distance(p_instance->base);
-		float atlas_size = RSG::light_storage->reflection_atlas_get_size(scenario->reflection_atlas);
-		float mesh_lod_threshold = RSG::light_storage->reflection_probe_get_mesh_lod_threshold(p_instance->base) / atlas_size;
-		bool use_shadows = RSG::light_storage->reflection_probe_renders_shadows(p_instance->base);
-		RID shadow_atlas = use_shadows ? scenario->reflection_probe_shadow_atlas : RID();
-		RID environment = scenario->environment.is_valid() ? scenario->environment : scenario->fallback_environment;
-		Ref<RenderSceneBuffers> render_buffers = RSG::light_storage->reflection_probe_atlas_get_render_buffers(scenario->reflection_atlas);
-		for (uint32_t face = 0; face < 6; face++) {
-			// Compute distance from origin offset to the actual view distance limit.
-			Vector3 edge = view_normals[face] * probe_size / 2;
-			float distance = Math::abs(view_normals[face].dot(edge) - view_normals[face].dot(origin_offset));
-			max_distance = MAX(max_distance, distance);
-
-			// Render cubemap side.
-			Projection cm;
-			cm.set_perspective(90, 1, 0.01, max_distance);
-
-			Transform3D local_view;
-			local_view.set_look_at(origin_offset, origin_offset + view_normals[face], view_up[face]);
-
-			RendererSceneRender::CameraData camera_data;
-			Transform3D xform = p_instance->transform * local_view;
-			camera_data.set_camera(xform, cm, false, false);
-
-			RENDER_TIMESTAMP("Render ReflectionProbe, Face " + itos(face));
-			_render_scene(&camera_data, render_buffers, environment, RID(), RID(), RSG::light_storage->reflection_probe_get_cull_mask(p_instance->base), p_instance->scenario->self, RID(), shadow_atlas, reflection_probe->instance, face, mesh_lod_threshold, use_shadows);
+		for (int face = 0; face < 6; face++) {
+			_render_reflection_probe_face(p_instance, face);
 		}
 
 		RSG::light_storage->reflection_probe_instance_end_render(reflection_probe->instance, scenario->reflection_atlas);
@@ -3969,6 +4047,160 @@ bool RendererSceneCull::_render_reflection_probe_step(Instance *p_instance, int 
 	return false;
 }
 
+bool RendererSceneCull::_render_reflection_probe_face(Instance *p_instance, int p_face) {
+	InstanceReflectionProbeData *reflection_probe = static_cast<InstanceReflectionProbeData *>(p_instance->base_data);
+	Scenario *scenario = p_instance->scenario;
+	ERR_FAIL_NULL_V(scenario, false);
+
+	static const Vector3 view_normals[6] = {
+		Vector3(+1, 0, 0),
+		Vector3(-1, 0, 0),
+		Vector3(0, +1, 0),
+		Vector3(0, -1, 0),
+		Vector3(0, 0, +1),
+		Vector3(0, 0, -1)
+	};
+	static const Vector3 view_up[6] = {
+		Vector3(0, -1, 0),
+		Vector3(0, -1, 0),
+		Vector3(0, 0, +1),
+		Vector3(0, 0, -1),
+		Vector3(0, -1, 0),
+		Vector3(0, -1, 0)
+	};
+
+	Vector3 probe_size = RSG::light_storage->reflection_probe_get_size(p_instance->base);
+	Vector3 origin_offset = RSG::light_storage->reflection_probe_get_origin_offset(p_instance->base);
+	float max_distance = RSG::light_storage->reflection_probe_get_origin_max_distance(p_instance->base);
+	float atlas_size = RSG::light_storage->reflection_atlas_get_size(scenario->reflection_atlas);
+	float mesh_lod_threshold = RSG::light_storage->reflection_probe_get_mesh_lod_threshold(p_instance->base) / atlas_size;
+	bool use_shadows = RSG::light_storage->reflection_probe_renders_shadows(p_instance->base);
+	RID shadow_atlas = use_shadows ? scenario->reflection_probe_shadow_atlas : RID();
+	RID environment = scenario->environment.is_valid() ? scenario->environment : scenario->fallback_environment;
+	Ref<RenderSceneBuffers> render_buffers = RSG::light_storage->reflection_probe_atlas_get_render_buffers(scenario->reflection_atlas);
+
+	// The view distance limit is the largest of all faces (as when all six are rendered in one go).
+	for (int face = 0; face < 6; face++) {
+		Vector3 edge = view_normals[face] * probe_size / 2;
+		float distance = Math::abs(view_normals[face].dot(edge) - view_normals[face].dot(origin_offset));
+		max_distance = MAX(max_distance, distance);
+	}
+
+	// Render cubemap side.
+	Projection cm;
+	cm.set_perspective(90, 1, 0.01, max_distance);
+
+	Transform3D local_view;
+	local_view.set_look_at(origin_offset, origin_offset + view_normals[p_face], view_up[p_face]);
+
+	RendererSceneRender::CameraData camera_data;
+	Transform3D xform = p_instance->transform * local_view;
+	camera_data.set_camera(xform, cm, false, false);
+
+	RENDER_TIMESTAMP("Render ReflectionProbe, Face " + itos(p_face));
+	_render_scene(&camera_data, render_buffers, environment, RID(), RID(), RSG::light_storage->reflection_probe_get_cull_mask(p_instance->base), p_instance->scenario->self, RID(), shadow_atlas, reflection_probe->instance, p_face, mesh_lod_threshold, use_shadows);
+	return true;
+}
+
+void RendererSceneCull::_render_reflection_probes_budgeted(int p_faces_per_frame) {
+	reflection_probe_frame++;
+
+	Vector<SelfList<InstanceReflectionProbeData> *> done_list;
+
+	// 1. Roughness filtering of probes whose six faces are done: one step per
+	// probe and frame (a single step for realtime probes, one roughness layer
+	// for the others), at most two probes per frame.
+	int filter_steps = 0;
+	for (SelfList<InstanceReflectionProbeData> *rp = reflection_probe_render_list.first(); rp && filter_steps < 2; rp = rp->next()) {
+		InstanceReflectionProbeData *probe = rp->self();
+		// Steps 1 to 5 belong to the probe being captured, except for probes that
+		// were filtering when the budget was switched on (legacy steps count from 1).
+		if (probe->render_step < 1 || (probe->render_step < 6 && probe == reflection_probe_capturing)) {
+			continue;
+		}
+		if (!RSG::light_storage->reflection_probe_has_atlas_index(probe->instance)) {
+			done_list.push_back(rp); // Atlas reset: the probe is marked dirty and queued again.
+			continue;
+		}
+		RENDER_TIMESTAMP("Post-Process ReflectionProbe, Step " + itos(probe->render_step));
+		RenderingServerDefault::redraw_request();
+		if (RSG::light_storage->reflection_probe_instance_postprocess_step(probe->instance)) {
+			probe->last_capture_frame = reflection_probe_frame;
+			done_list.push_back(rp);
+		} else {
+			probe->render_step++;
+		}
+		filter_steps++;
+	}
+
+	// 2. Faces: continue the probe being captured, then start the most urgent
+	// waiting probe, until the frame's face budget is used.
+	int faces_left = p_faces_per_frame;
+	while (faces_left > 0) {
+		if (!reflection_probe_capturing) {
+			// Probes that have no reflection yet, moved or changed come first (only
+			// they are queued for "Once" probes); realtime probes are refreshed by
+			// age over distance, so near probes refresh more often and none starves.
+			float best_score = -1.0;
+			for (SelfList<InstanceReflectionProbeData> *rp = reflection_probe_render_list.first(); rp; rp = rp->next()) {
+				InstanceReflectionProbeData *probe = rp->self();
+				if (probe->render_step != 0 || done_list.has(rp)) {
+					continue;
+				}
+				Instance *owner = probe->owner;
+				bool update_always = RSG::light_storage->reflection_probe_get_update_mode(owner->base) == RSE::REFLECTION_PROBE_UPDATE_ALWAYS;
+				float radius = MAX(RSG::light_storage->reflection_probe_get_size(owner->base).length() * 0.5f, 0.1f);
+				float distance = MAX(owner->transform.origin.distance_to(reflection_probe_camera_position) - radius, 0.0f);
+				float age = float(reflection_probe_frame - probe->last_capture_frame);
+				float score = age / (1.0f + distance / radius);
+				if (!update_always || probe->last_capture_frame == 0) {
+					score += 1e6f;
+				}
+				if (score > best_score) {
+					best_score = score;
+					reflection_probe_capturing = probe;
+				}
+			}
+			if (!reflection_probe_capturing) {
+				break; // Nothing to capture.
+			}
+		}
+
+		InstanceReflectionProbeData *probe = reflection_probe_capturing;
+		Instance *owner = probe->owner;
+		Scenario *scenario = owner->scenario;
+		bool abort = !scenario;
+		if (!abort && probe->render_step == 0) {
+			RenderingServerDefault::redraw_request();
+			abort = !RSG::light_storage->reflection_probe_instance_begin_render(probe->instance, scenario->reflection_atlas); // All full, no atlas entry to render to.
+		} else if (!abort) {
+			// The atlas may have been reset (the probe is then marked dirty and starts over).
+			abort = !RSG::light_storage->reflection_probe_has_atlas_index(probe->instance);
+		}
+		if (abort) {
+			done_list.push_back(&probe->update_list);
+			reflection_probe_capturing = nullptr;
+			continue;
+		}
+
+		_render_reflection_probe_face(owner, probe->render_step);
+		probe->render_step++;
+		faces_left--;
+
+		if (probe->render_step == 6) {
+			RSG::light_storage->reflection_probe_instance_end_render(probe->instance, scenario->reflection_atlas);
+			reflection_probe_capturing = nullptr; // Filtered from the next frame on.
+		}
+	}
+
+	for (SelfList<InstanceReflectionProbeData> *rp : done_list) {
+		if (rp->in_list()) {
+			reflection_probe_render_list.remove(rp);
+		}
+		rp->self()->render_step = -1;
+	}
+}
+
 void RendererSceneCull::render_probes() {
 	/* REFLECTION PROBES */
 
@@ -3976,6 +4208,24 @@ void RendererSceneCull::render_probes() {
 	Vector<SelfList<InstanceReflectionProbeData> *> done_list;
 
 	bool busy = false;
+
+	// 0 = legacy behavior: "Once" probes render all six faces in one frame
+	// (one probe at a time), "Always" probes render every frame.
+	int faces_per_frame = GLOBAL_GET_CACHED(int, "rendering/global_illumination/reflections/probe_update_faces_per_frame");
+	if (!GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probes_enabled")) {
+		ref_probe = nullptr;
+	} else if (faces_per_frame > 0) {
+		if (ref_probe || reflection_probe_capturing) {
+			RENDER_TIMESTAMP("Render ReflectionProbes (budgeted)");
+			_render_reflection_probes_budgeted(faces_per_frame);
+			RENDER_TIMESTAMP("Render ReflectionProbes Done");
+		}
+		ref_probe = nullptr;
+	} else if (reflection_probe_capturing) {
+		// Switched to legacy updates mid-capture: start that probe over.
+		reflection_probe_capturing->render_step = 0;
+		reflection_probe_capturing = nullptr;
+	}
 
 	if (ref_probe) {
 		RENDER_TIMESTAMP("Render ReflectionProbes");
@@ -4018,6 +4268,7 @@ void RendererSceneCull::render_probes() {
 		for (SelfList<InstanceReflectionProbeData> *rp : done_list) {
 			reflection_probe_render_list.remove(rp);
 		}
+		RENDER_TIMESTAMP("Render ReflectionProbes Done");
 	}
 
 	/* VOXEL GIS */
@@ -4520,11 +4771,22 @@ bool RendererSceneCull::free(RID p_rid) {
 		scenario->instance_data.reset();
 		scenario->instance_visibility.reset();
 
+		for (const RID &rid : scenario->planar_reflections) {
+			PlanarReflection *pr = planar_reflection_owner.get_or_null(rid);
+			if (pr) {
+				pr->scenario = RID();
+			}
+		}
+		scenario->planar_reflections.clear();
+
 		RSG::light_storage->shadow_atlas_free(scenario->reflection_probe_shadow_atlas);
 		RSG::light_storage->reflection_atlas_free(scenario->reflection_atlas);
 		scenario_owner.free(p_rid);
 		RendererSceneOcclusionCull::get_singleton()->remove_scenario(p_rid);
 
+	} else if (planar_reflection_owner.owns(p_rid)) {
+		planar_reflection_set_scenario(p_rid, RID());
+		planar_reflection_owner.free(p_rid);
 	} else if (RendererSceneOcclusionCull::get_singleton() && RendererSceneOcclusionCull::get_singleton()->is_occluder(p_rid)) {
 		RendererSceneOcclusionCull::get_singleton()->free_occluder(p_rid);
 	} else if (instance_owner.owns(p_rid)) {

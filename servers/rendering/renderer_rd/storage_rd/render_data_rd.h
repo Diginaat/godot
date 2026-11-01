@@ -102,4 +102,6 @@ public:
 	/* RT-extra: AABB-culled instances/lights outside frustum for TLAS and light gathering. */
 	const PagedArray<RenderGeometryInstance *> *rt_instances = nullptr;
 	const PagedArray<RID> *rt_lights = nullptr;
+	// Planar reflectors in the scenario (PlanarReflector3D), unculled; Forward+ selects the visible ones.
+	const LocalVector<RendererSceneRender::RenderPlanarReflection> *planar_reflections = nullptr;
 };

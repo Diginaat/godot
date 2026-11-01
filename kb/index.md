@@ -8,7 +8,7 @@ Everything this project learns and decides, as an Open Knowledge Format
 (OKF) v0.2 bundle: one markdown file per concept, YAML
 frontmatter, links between concepts. Read [how to maintain it](/kb-howto.md)
 before adding to it. The runbooks stay where they are
-([CUSTOM_BUILD.md](../CUSTOM_BUILD.md), [DDGI.md](../DDGI.md),
+([CUSTOM_BUILD.md](../CUSTOM_BUILD.md), [DDGI.md](../DDGI.md), [REFLECTIONS.md](../REFLECTIONS.md),
 [PATHTRACER_TESTING.md](../PATHTRACER_TESTING.md),
 [AGENT_MEMORY.md](../AGENT_MEMORY.md)); this bundle links to them and holds
 what doesn't fit a runbook: research, findings, decisions and ideas.
@@ -23,6 +23,7 @@ what doesn't fit a runbook: research, findings, decisions and ideas.
 
 * [Project](/project/) - the fork, branches, workflow
 * [DDGI](/ddgi/) - the probe GI system: state, findings, improvement ideas
+* [Reflections](/reflections/) - reflection probes with DDGI, planar reflections
 * [XeGTAO](/xegtao/) - screen-space ambient occlusion on the Environment
 * [Research](/research/) - papers and talks read, with what they mean for this fork
 * [Tooling](/tooling/) - testing, measuring and debugging techniques that worked

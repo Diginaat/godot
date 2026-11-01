@@ -1876,7 +1876,7 @@ void main() {
 #ifdef LIGHT_CLEARCOAT_USED
 					cc_ref_vec, mix(half(0.001), half(0.1), clearcoat_roughness), cc_reflection_accum,
 #endif
-					ambient_accum, reflection_accum);
+					hvec4(0.0), half(1.0), ambient_accum, reflection_accum);
 		}
 
 		if (ambient_accum.a < half(1.0)) {

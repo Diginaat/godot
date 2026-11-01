@@ -1775,6 +1775,10 @@ void fragment_shader(in SceneData scene_data) {
 /// GI ///
 #if !defined(MODE_RENDER_DEPTH) && !defined(MODE_UNSHADED)
 #ifndef AMBIENT_LIGHT_DISABLED
+	// How much DDGI covers this pixel (the GI buffer weight) and its irradiance,
+	// for the reflection probes below.
+	float ddgi_coverage = 0.0;
+	vec3 ddgi_irradiance = vec3(0.0);
 #ifdef USE_LIGHTMAP
 
 	//lightmap
@@ -2069,6 +2073,8 @@ void fragment_shader(in SceneData scene_data) {
 			float specular_visibility = open_ambient > 1e-5 ? clamp(ddgi_ambient / open_ambient, 0.0, 1.0) : 1.0;
 			indirect_specular_light *= mix(1.0, specular_visibility, buffer_ambient.a);
 			ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
+			ddgi_coverage = buffer_ambient.a;
+			ddgi_irradiance = buffer_ambient.rgb;
 		} else {
 			ambient_light = mix(ambient_light, buffer_ambient.rgb, buffer_ambient.a);
 			indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
@@ -2119,6 +2125,9 @@ void fragment_shader(in SceneData scene_data) {
 		// Interpolate between mirror and rough reflection by using linear_roughness * linear_roughness.
 		ref_vec = mix(ref_vec, bent_normal, roughness * roughness * roughness * roughness);
 
+		// Under DDGI, probe reflections are normalized by the DDGI irradiance (see reflection_process()).
+		vec4 probe_normalization = vec4(ddgi_irradiance, ddgi_coverage * implementation_data.reflection_normalization);
+
 		for (uint i = item_from; i < item_to; i++) {
 			uint mask = cluster_buffer.data[cluster_reflection_offset + i];
 			mask &= cluster_get_range_clip_mask(i, item_min, item_max);
@@ -2152,7 +2161,7 @@ void fragment_shader(in SceneData scene_data) {
 #ifdef LIGHT_CLEARCOAT_USED
 						cc_ref_vec, mix(0.001, 0.1, clearcoat_roughness), cc_reflection_accum,
 #endif
-						ambient_accum, reflection_accum);
+						probe_normalization, implementation_data.reflection_normalization_max, ambient_accum, reflection_accum);
 			}
 		}
 
@@ -2182,7 +2191,10 @@ void fragment_shader(in SceneData scene_data) {
 
 #if !defined(USE_LIGHTMAP)
 		if (ambient_accum.a > 0.0) {
-			ambient_light = ambient_accum.rgb;
+			// DDGI is the better diffuse source where it covers the pixel (dynamic,
+			// occluded per probe): keep it instead of the probe's blurred cubemap.
+			float ddgi_keep = bool(implementation_data.reflection_flags & REFLECTION_FLAGS_DDGI_OVERRIDES_PROBE_AMBIENT) ? ddgi_coverage : 0.0;
+			ambient_light = mix(ambient_accum.rgb, ambient_light, ddgi_keep);
 		}
 #endif
 	}
@@ -2289,6 +2301,29 @@ void fragment_shader(in SceneData scene_data) {
 
 			// Alpha is premultiplied.
 			indirect_specular_light = indirect_specular_light * (1.0 - ssr.a) + ssr.rgb;
+		}
+
+		// Planar reflections: the screen mirrored across a reflector plane (computed
+		// before this pass). They replace the incoming specular light like SSR, so the
+		// BRDF below weights them and no energy is counted twice. Only fragments on the
+		// reflector receive them: objects in front of it and the ground under
+		// transparent water don't.
+		if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_PLANAR_REFLECTIONS)) {
+			vec4 planar_params = textureLod(sampler2D(planar_reflection_params, SAMPLER_NEAREST_CLAMP), screen_uv, 0.0);
+			float fragment_depth = -vertex.z;
+			float depth_tolerance = planar_params.y + 0.002 * fragment_depth + 0.01;
+			if (planar_params.x > 0.0 && abs(fragment_depth - planar_params.x) <= depth_tolerance && roughness < planar_params.w) {
+				// Normal maps and waves move the lookup by how far the normal leans from the surface's.
+				vec2 lean = normal.xy - geo_normal.xy;
+				vec2 planar_uv = screen_uv + vec2(lean.x, -lean.y) * planar_params.z * 0.1;
+				vec4 planar = textureLod(sampler2D(planar_reflection_color, SAMPLER_LINEAR_CLAMP), planar_uv, 0.0);
+				if (planar.a < 0.01) {
+					planar = textureLod(sampler2D(planar_reflection_color, SAMPLER_LINEAR_CLAMP), screen_uv, 0.0);
+				}
+				float roughness_fade = 1.0 - smoothstep(planar_params.w * 0.6, planar_params.w, roughness);
+				// Color is premultiplied by alpha.
+				indirect_specular_light = indirect_specular_light * (1.0 - planar.a * roughness_fade) + planar.rgb * roughness_fade;
+			}
 		}
 	}
 #endif // AMBIENT_LIGHT_DISABLED

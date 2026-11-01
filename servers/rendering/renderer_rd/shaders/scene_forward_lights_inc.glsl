@@ -1312,10 +1312,16 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 #endif // LIGHT_CODE_USED
 }
 
+// p_normalization: irradiance at the pixel from a dynamic GI (DDGI) in rgb, strength in a
+// (0 = off). The probe's reflection is then scaled by that irradiance over the probe's
+// own (its roughest level in the normal direction), clamped to p_normalization_max:
+// probes captured once follow light changes and are darkened where the GI is occluded
+// ("cubemap normalization", Lazarov 2013; Lagarde and de Rousiers 2014).
 void reflection_process(uint ref_index, vec3 vertex, hvec3 ref_vec, hvec3 normal, half roughness, hvec3 ambient_light,
 #ifdef LIGHT_CLEARCOAT_USED
 		hvec3 cc_ref_vec, half cc_roughness, inout hvec4 cc_reflection_accum,
 #endif
+		hvec4 p_normalization, half p_normalization_max,
 		inout hvec4 ambient_accum, inout hvec4 reflection_accum) {
 	vec3 box_extents = reflections.data[ref_index].box_extents;
 	vec3 local_pos = (reflections.data[ref_index].local_matrix * vec4(vertex, 1.0)).xyz;
@@ -1334,6 +1340,19 @@ void reflection_process(uint ref_index, vec3 vertex, hvec3 ref_vec, hvec3 normal
 	}
 
 	vec2 border_size = scene_data_block.data.reflection_atlas_border_size;
+
+	half normalization = half(1.0);
+	if (p_normalization.a > half(0.0) && reflections.data[ref_index].intensity > 0.0) {
+		vec3 local_irr_vec = (reflections.data[ref_index].local_matrix * vec4(normal, 0.0)).xyz;
+		vec2 irr_uv = vec3_to_oct_with_border(local_irr_vec, border_size);
+		vec3 probe_irradiance = textureLod(sampler2DArray(reflection_atlas, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), vec3(irr_uv, reflections.data[ref_index].index), MAX_ROUGHNESS_LOD).rgb * reflections.data[ref_index].exposure_normalization;
+		const vec3 luminance_weights = vec3(0.2126, 0.7152, 0.0722);
+		float probe_luminance = dot(probe_irradiance, luminance_weights);
+		float pixel_luminance = dot(vec3(p_normalization.rgb), luminance_weights);
+		half ratio = half(clamp(pixel_luminance / max(probe_luminance, 1e-4), 0.0, float(p_normalization_max)));
+		normalization = mix(half(1.0), ratio, p_normalization.a);
+	}
+
 	if (reflections.data[ref_index].intensity > 0.0 && reflection_accum.a < half(1.0)) { // compute reflection
 
 		vec3 local_ref_vec = (reflections.data[ref_index].local_matrix * vec4(ref_vec, 0.0)).xyz;
@@ -1357,7 +1376,7 @@ void reflection_process(uint ref_index, vec3 vertex, hvec3 ref_vec, hvec3 normal
 		float roughness_lod = sqrt(roughness) * MAX_ROUGHNESS_LOD;
 		vec2 reflection_uv = vec3_to_oct_with_border(local_ref_vec, border_size);
 		reflection.rgb = hvec3(textureLod(sampler2DArray(reflection_atlas, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), vec3(reflection_uv, reflections.data[ref_index].index), roughness_lod).rgb) * REFLECTION_MULTIPLIER;
-		reflection.rgb *= half(reflections.data[ref_index].exposure_normalization);
+		reflection.rgb *= half(reflections.data[ref_index].exposure_normalization) * normalization;
 		reflection.a = reflection_blend * half(reflections.data[ref_index].intensity);
 
 		reflection.rgb *= reflection.a;
@@ -1388,7 +1407,7 @@ void reflection_process(uint ref_index, vec3 vertex, hvec3 ref_vec, hvec3 normal
 		float cc_roughness_lod = sqrt(cc_roughness) * MAX_ROUGHNESS_LOD;
 		vec2 cc_reflection_uv = vec3_to_oct_with_border(local_cc_ref_vec, border_size);
 		cc_reflection.rgb = hvec3(textureLod(sampler2DArray(reflection_atlas, DEFAULT_SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP), vec3(cc_reflection_uv, reflections.data[ref_index].index), cc_roughness_lod).rgb) * REFLECTION_MULTIPLIER;
-		cc_reflection.rgb *= half(reflections.data[ref_index].exposure_normalization);
+		cc_reflection.rgb *= half(reflections.data[ref_index].exposure_normalization) * normalization;
 		cc_reflection.a = cc_reflection_blend * half(reflections.data[ref_index].intensity);
 
 		cc_reflection.rgb *= cc_reflection.a;

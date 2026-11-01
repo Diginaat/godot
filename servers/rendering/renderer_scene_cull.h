@@ -131,6 +131,30 @@ public:
 	virtual void occluder_initialize(RID p_occluder);
 	virtual void occluder_set_mesh(RID p_occluder, const PackedVector3Array &p_vertices, const PackedInt32Array &p_indices);
 
+	/* PLANAR REFLECTION API */
+
+	struct PlanarReflection {
+		RID self;
+		RID scenario;
+		bool visible = true;
+		RendererSceneRender::RenderPlanarReflection data;
+	};
+	mutable RID_Owner<PlanarReflection, true> planar_reflection_owner;
+	void _planar_reflection_update_scenario(PlanarReflection *p_planar_reflection);
+	LocalVector<RendererSceneRender::RenderPlanarReflection> planar_reflection_render_list; // Per render, filtered by the camera's layers.
+
+	virtual RID planar_reflection_allocate();
+	virtual void planar_reflection_initialize(RID p_planar_reflection);
+	virtual void planar_reflection_set_scenario(RID p_planar_reflection, RID p_scenario);
+	virtual void planar_reflection_set_transform(RID p_planar_reflection, const Transform3D &p_transform);
+	virtual void planar_reflection_set_size(RID p_planar_reflection, const Vector2 &p_size);
+	virtual void planar_reflection_set_layer_mask(RID p_planar_reflection, uint32_t p_layers);
+	virtual void planar_reflection_set_visible(RID p_planar_reflection, bool p_visible);
+	virtual void planar_reflection_set_intensity(RID p_planar_reflection, float p_intensity);
+	virtual void planar_reflection_set_thickness(RID p_planar_reflection, float p_thickness);
+	virtual void planar_reflection_set_normal_distortion(RID p_planar_reflection, float p_distortion);
+	virtual void planar_reflection_set_roughness_cutoff(RID p_planar_reflection, float p_roughness);
+
 	/* VISIBILITY NOTIFIER API */
 
 	RendererSceneOcclusionCull *dummy_occlusion_culling = nullptr;
@@ -355,6 +379,11 @@ public:
 		SelfList<Instance>::List instances;
 
 		LocalVector<RID> dynamic_lights;
+
+		// Visible planar reflectors of this scenario (rebuilt when one changes).
+		HashSet<RID> planar_reflections;
+		LocalVector<RendererSceneRender::RenderPlanarReflection> planar_reflection_data;
+		bool planar_reflections_dirty = false;
 
 		PagedArray<InstanceBounds> instance_aabbs;
 		PagedArray<InstanceData> instance_data;
@@ -650,6 +679,9 @@ public:
 		SelfList<InstanceReflectionProbeData> update_list;
 
 		int render_step;
+		// Frame (RendererSceneCull::reflection_probe_frame) of the last finished
+		// capture, for the update priority of budgeted (time-sliced) updates.
+		uint64_t last_capture_frame = 0;
 
 		InstanceReflectionProbeData() :
 				update_list(this) {
@@ -1171,6 +1203,7 @@ public:
 		const RendererSceneOcclusionCull::HZBuffer *occlusion_buffer;
 		const Projection *camera_matrix;
 		uint64_t visibility_viewport_mask;
+		bool reflection_probes_enabled = true; // rendering/global_illumination/reflections/probes_enabled
 	};
 
 	void _scene_cull_threaded(uint32_t p_thread, CullData *cull_data);
@@ -1179,6 +1212,17 @@ public:
 	_FORCE_INLINE_ bool _visibility_parent_check(const CullData &p_cull_data, const InstanceData &p_instance_data);
 
 	bool _render_reflection_probe_step(Instance *p_instance, int p_step);
+
+	// Budgeted (time-sliced) reflection probe updates: each frame renders at
+	// most rendering/global_illumination/reflections/probe_update_faces_per_frame
+	// cubemap faces. The faces go to the atlas' shared cubemap and are converted
+	// to the probe's octahedral map after the sixth, so one probe captures at a
+	// time and the visible reflection never mixes old and new faces.
+	InstanceReflectionProbeData *reflection_probe_capturing = nullptr;
+	Vector3 reflection_probe_camera_position;
+	uint64_t reflection_probe_frame = 0;
+	bool _render_reflection_probe_face(Instance *p_instance, int p_face);
+	void _render_reflection_probes_budgeted(int p_faces_per_frame);
 
 	void _render_scene(const RendererSceneRender::CameraData *p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_force_camera_attributes, RID p_compositor, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, RID p_shadow_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, float p_window_output_max_value, bool p_using_shadows = true, RenderingServerTypes::RenderInfo *r_render_info = nullptr);
 	void render_empty_scene(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_scenario, RID p_shadow_atlas, float p_window_output_max_value);

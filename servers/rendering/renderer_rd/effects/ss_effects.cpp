@@ -389,16 +389,17 @@ SSEffects::SSEffects() {
 	}
 }
 
-void SSEffects::allocate_last_frame_buffer(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr) {
+void SSEffects::allocate_last_frame_buffer(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr, bool p_use_planar_reflections) {
 	Size2i last_frame_size = p_render_buffers->get_internal_size();
 	uint32_t mipmaps = 1;
 	uint32_t view_count = p_render_buffers->get_view_count();
 
-	if (!p_use_ssil && p_use_ssr && ssr_half_size) {
+	if (!p_use_ssil && !p_use_planar_reflections && p_use_ssr && ssr_half_size) {
 		last_frame_size /= 2;
 	}
 
-	if (p_use_ssil) {
+	// Planar reflections need the full size (sharp mirrors) and mipmaps (rough surfaces).
+	if (p_use_ssil || p_use_planar_reflections) {
 		mipmaps = 6;
 	}
 

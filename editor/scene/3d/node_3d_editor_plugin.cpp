@@ -79,6 +79,7 @@
 #include "editor/scene/3d/gizmos/physics/soft_body_3d_gizmo_plugin.h"
 #include "editor/scene/3d/gizmos/physics/spring_arm_3d_gizmo_plugin.h"
 #include "editor/scene/3d/gizmos/physics/vehicle_body_3d_gizmo_plugin.h"
+#include "editor/scene/3d/gizmos/planar_reflector_3d_gizmo_plugin.h"
 #include "editor/scene/3d/gizmos/reflection_probe_gizmo_plugin.h"
 #include "editor/scene/3d/gizmos/rt_procedural_instance_3d_gizmo_plugin.h"
 #include "editor/scene/3d/gizmos/spring_bone_3d_gizmo_plugin.h"
@@ -3012,6 +3013,7 @@ void Node3DEditor::_register_all_gizmos() {
 	add_gizmo_plugin(Ref<Particles3DEmissionShapeGizmoPlugin>(memnew(Particles3DEmissionShapeGizmoPlugin)));
 	add_gizmo_plugin(Ref<CPUParticles3DGizmoPlugin>(memnew(CPUParticles3DGizmoPlugin)));
 	add_gizmo_plugin(Ref<ReflectionProbeGizmoPlugin>(memnew(ReflectionProbeGizmoPlugin)));
+	add_gizmo_plugin(Ref<PlanarReflector3DGizmoPlugin>(memnew(PlanarReflector3DGizmoPlugin)));
 	add_gizmo_plugin(Ref<DecalGizmoPlugin>(memnew(DecalGizmoPlugin)));
 	add_gizmo_plugin(Ref<VoxelGIGizmoPlugin>(memnew(VoxelGIGizmoPlugin)));
 	add_gizmo_plugin(Ref<LightmapGIGizmoPlugin>(memnew(LightmapGIGizmoPlugin)));

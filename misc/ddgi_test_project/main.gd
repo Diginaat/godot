@@ -18,6 +18,9 @@ extends Node3D
 ##            sunlit ground: inside, all light is indirect and dark (noise,
 ##            blotches); the camera looks from deep inside toward the opening;
 ##            --plain without the grid texture (path tracer comparisons)
+##   reflect  a showroom with a glossy floor, a mirror and a water pool
+##            (planar reflections), metal spheres and a box-projected
+##            reflection probe, a skylight, a moving light and ball
 
 const VIEWS := {
 	"room": [Vector3(0, 2.0, 3.6), Vector3(0, 1.6, -2.0)],
@@ -26,8 +29,9 @@ const VIEWS := {
 	"interior": [Vector3(395.0, 1.6, -4.0), Vector3(401.5, 1.0, 0.5)],
 	"bleed": [Vector3(600.0, 1.6, -5.0), Vector3(600.0, 1.1, 2.0)],
 	"tunnel": [Vector3(800.0, 1.4, 4.5), Vector3(800.3, 1.0, -6.0)],
+	"reflect": [Vector3(1001.5, 1.7, 4.2), Vector3(1000.0, 0.9, -2.0)],
 }
-const VIEW_KEYS := ["room", "outdoor", "stress", "interior", "bleed", "tunnel"]
+const VIEW_KEYS := ["room", "outdoor", "stress", "interior", "bleed", "tunnel", "reflect"]
 const GI_MODES := ["none", "sdfgi", "ddgi"]
 const DEBUG_MODE_COUNT := 7
 
@@ -75,6 +79,7 @@ func _ready() -> void:
 	_build_interior(Vector3(400, 0, 0))
 	_build_bleed(Vector3(600, 0, 0))
 	_build_tunnel(Vector3(800, 0, 0))
+	_build_reflect(Vector3(1000, 0, 0))
 
 	camera = Camera3D.new()
 	camera.fov = 60.0
@@ -158,6 +163,8 @@ func _apply_args() -> void:
 	if args.has("bounces"):
 		env.pathtracing_max_bounces = int(args["bounces"])
 	env.pathtracing_denoiser = int(args.get("denoiser", "0"))
+	if args.has("msaa"):
+		vp.msaa_3d = int(args["msaa"]) # 0 off, 1 2x, 2 4x, 3 8x.
 	if args.has("scale3d"):
 		# 0 bilinear, 1 FSR1, 2 FSR2, 6 DLSS (see Viewport.Scaling3DMode).
 		vp.scaling_3d_mode = int(args["scale3d"])
@@ -165,6 +172,25 @@ func _apply_args() -> void:
 	if args.has("linear"):
 		env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 		env.tonemap_exposure = float(args.get("exposure", "1.0"))
+	# Reflections (rendering/global_illumination/reflections/): --probes=0|1,
+	# --probe_faces=N (cubemap faces per frame, 0 = legacy), --norm=0..1 (DDGI
+	# normalization of probes), --ddgi_ambient=0|1 (DDGI overrides probe
+	# ambient), --planar=0|1, --planar_half=0|1, --planar_max=N.
+	var refl := "rendering/global_illumination/reflections/"
+	if args.has("probes"):
+		ProjectSettings.set_setting(refl + "probes_enabled", args["probes"] == "1")
+	if args.has("probe_faces"):
+		ProjectSettings.set_setting(refl + "probe_update_faces_per_frame", int(args["probe_faces"]))
+	if args.has("norm"):
+		ProjectSettings.set_setting(refl + "probe_ddgi_normalization", float(args["norm"]))
+	if args.has("ddgi_ambient"):
+		ProjectSettings.set_setting(refl + "ddgi_overrides_probe_ambient", args["ddgi_ambient"] == "1")
+	if args.has("planar"):
+		ProjectSettings.set_setting(refl + "planar_enabled", args["planar"] == "1")
+	if args.has("planar_half"):
+		ProjectSettings.set_setting(refl + "planar_resolution", int(args["planar_half"]))
+	if args.has("planar_max"):
+		ProjectSettings.set_setting(refl + "planar_max_reflectors", int(args["planar_max"]))
 	_set_gi_mode(args.get("gi", "ddgi"))
 	_set_view(args.get("view", "room"))
 
@@ -183,6 +209,10 @@ func _set_view(p_view: String) -> void:
 		p_view = "room"
 	view = p_view
 	camera.look_at_from_position(VIEWS[view][0], VIEWS[view][1])
+	# --cam=x,y,z,tx,ty,tz: another camera position and target for the view.
+	if args.has("cam"):
+		var c: PackedStringArray = args["cam"].split(",")
+		camera.look_at_from_position(Vector3(float(c[0]), float(c[1]), float(c[2])), Vector3(float(c[3]), float(c[4]), float(c[5])))
 	if view == "bleed":
 		# A bright sun from the side and a little behind the wall (see
 		# _build_bleed()).
@@ -194,7 +224,7 @@ func _set_view(p_view: String) -> void:
 
 func _update_hud() -> void:
 	var q: int = ProjectSettings.get_setting("rendering/global_illumination/ddgi/quality")
-	hud.text = "view: %s   GI: %s   DDGI quality: %s   debug: %d   animation: %s   path tracing: %s\n1-6 views   G GI mode   U quality   Tab debug   L animation   M camera path   P path tracing\nfly: hold right mouse to look, WASD move, Q/E down/up, Shift faster" % [
+	hud.text = "view: %s   GI: %s   DDGI quality: %s   debug: %d   animation: %s   path tracing: %s\n1-7 views   G GI mode   U quality   Tab debug   L animation   M camera path   P path tracing\nfly: hold right mouse to look, WASD move, Q/E down/up, Shift faster" % [
 		view, gi_mode, ["Low", "Medium", "High", "Ultra", "Custom"][q], env.ddgi_debug_mode,
 		"on" if animate else "off", "on" if env.pathtracing_enabled else "off"]
 
@@ -269,7 +299,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if key.keycode >= KEY_1 and key.keycode <= KEY_6:
+	if key.keycode >= KEY_1 and key.keycode <= KEY_7:
 		_set_view(VIEW_KEYS[key.keycode - KEY_1])
 	elif key.keycode == KEY_G:
 		_set_gi_mode(GI_MODES[(GI_MODES.find(gi_mode) + 1) % GI_MODES.size()])
@@ -307,6 +337,7 @@ func _setup_volume() -> void:
 	volume.realtime_updates = env.ddgi_realtime_updates
 	# --bake_ls=0|1: least-squares refinement of the bake (default on).
 	volume.bake_least_squares = args.get("bake_ls", "1") == "1"
+	volume.auto_reflections = args.get("auto_refl", "1") == "1"
 	add_child(volume)
 	if args.has("baked"):
 		volume.probe_data = load(args["baked"])
@@ -335,6 +366,9 @@ func _run_capture() -> void:
 		print("BAKE %s in %d ms: %s, %d bytes" % [args["bake"], bake_ms, error_string(err), FileAccess.get_file_as_bytes(args["bake"]).size() if err == OK else 0])
 	for i in int(args.get("frames", "120")):
 		await RenderingServer.frame_post_draw
+	# --auto_refl=0|1 (with --volume): the volume's automatic reflections.
+	if volume:
+		print("AUTO_REFL enabled=%s planar_reflectors=%d" % [volume.auto_reflections, volume.get_auto_planar_reflector_count()])
 
 	if args.has("bench"):
 		var frames := int(args["bench"])
@@ -350,11 +384,17 @@ func _run_capture() -> void:
 			for k in p:
 				passes[k] = passes.get(k, 0.0) + p[k]
 		var wall_ms := (Time.get_ticks_usec() - start) / 1000.0 / frames
+		# --dump_ts: the GPU timestamps of the last frame (names and ms), to find passes.
+		if args.has("dump_ts"):
+			var rd := RenderingServer.get_rendering_device()
+			for i in rd.get_captured_timestamps_count() - 1:
+				print("TS %3d %.3f %s" % [i, (rd.get_captured_timestamp_gpu_time(i + 1) - rd.get_captured_timestamp_gpu_time(i)) / 1000000.0, rd.get_captured_timestamp_name(i)])
 		var pass_text := ""
 		var ddgi_total := 0.0
 		for k in passes:
 			pass_text += "  %s=%.3f" % [k, passes[k] / frames]
-			ddgi_total += passes[k] / frames
+			if k != "refl_probes" and k != "planar":
+				ddgi_total += passes[k] / frames
 		var vram := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0
 		var tex_mem := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED) / 1048576.0
 		var buf_mem := RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED) / 1048576.0
@@ -438,7 +478,7 @@ func _run_chaos(p_steps: int) -> void:
 		for i in 20:
 			await RenderingServer.frame_post_draw
 		var change := ""
-		match rng.randi() % 13:
+		match rng.randi() % (17 if args.has("chaos_refl") else 13):
 			0:
 				var q := rng.randi() % 5
 				ProjectSettings.set_setting("rendering/global_illumination/ddgi/quality", q)
@@ -485,6 +525,27 @@ func _run_chaos(p_steps: int) -> void:
 				var g := [Vector3i(24, 12, 24), Vector3i(16, 8, 16), Vector3i(32, 16, 32)]
 				env.ddgi_probe_grid = g[rng.randi() % g.size()]
 				change = "grid=%s" % env.ddgi_probe_grid
+			# --chaos_refl: reflection settings too (and only the reflect view).
+			13:
+				var on := rng.randi() % 3 != 0
+				ProjectSettings.set_setting("rendering/global_illumination/reflections/planar_enabled", on)
+				change = "planar=%s" % on
+			14:
+				var r := rng.randi() % 2
+				ProjectSettings.set_setting("rendering/global_illumination/reflections/planar_resolution", r)
+				change = "planar_resolution=%d" % r
+			15:
+				var f: int = [0, 1, 2, 6][rng.randi() % 4]
+				ProjectSettings.set_setting("rendering/global_illumination/reflections/probe_update_faces_per_frame", f)
+				change = "probe_faces=%d" % f
+			16:
+				var on := rng.randi() % 3 != 0
+				ProjectSettings.set_setting("rendering/global_illumination/reflections/probes_enabled", on)
+				for probe in find_children("*", "ReflectionProbe", true, false):
+					(probe as ReflectionProbe).update_mode = rng.randi() % 2
+				change = "probes=%s, modes changed" % on
+		if args.has("chaos_refl") and view != "reflect" and rng.randi() % 2 == 0:
+			_set_view("reflect")
 		print("CHAOS %d %s" % [step, change])
 	for i in 60:
 		await RenderingServer.frame_post_draw
@@ -629,11 +690,20 @@ func _ddgi_pass_times() -> Dictionary:
 		return result
 	var count := rd.get_captured_timestamps_count()
 	var in_as := false
+	var in_probes := false
 	for i in count - 1:
 		var name := rd.get_captured_timestamp_name(i)
 		# GPU times are in nanoseconds.
 		var ms := (rd.get_captured_timestamp_gpu_time(i + 1) - rd.get_captured_timestamp_gpu_time(i)) / 1000000.0
 		var key := ""
+		if name.begins_with("Render ReflectionProbes"):
+			in_probes = name != "Render ReflectionProbes Done"
+		if in_probes:
+			result["refl_probes"] = result.get("refl_probes", 0.0) + ms
+			continue
+		if name == "Process Planar Reflections":
+			result["planar"] = result.get("planar", 0.0) + ms
+			continue
 		if name == "DDGI Build Acceleration Structures":
 			in_as = true
 			key = "as"
@@ -999,3 +1069,156 @@ func _build_tunnel(o: Vector3) -> void:
 	_box(tunnel, Vector3(-1.5 - t * 0.5, wall_h * 0.5, 0), Vector3(t, wall_h, 12), grid) # Left wall.
 	_box(tunnel, Vector3(1.5 + t * 0.5, wall_h * 0.5, 0), Vector3(t, wall_h, 12), grid) # Right wall.
 	_box(tunnel, Vector3(0, 1.3 + t * 0.5, 6 + t * 0.5), Vector3(3 + 2 * t, 2.6 + t, t), grid) # Closed end.
+
+
+# Reflections (see REFLECTIONS.md): a showroom, 12 x 10 m and 4 m high, with
+# a skylight. A glossy dark floor and a water pool (normal-mapped ripples)
+# reflect through PlanarReflector3D nodes, a mirror on the back wall through
+# a vertical one; metal spheres and a chrome pillar use a box-projected
+# ReflectionProbe. An omni light and a colored ball move through the room.
+# --probe_mode=once|always (default once), --mirror=0 and --pool=0 leave
+# those reflectors out.
+func _build_reflect(o: Vector3) -> void:
+	var room := Node3D.new()
+	room.name = "Reflect"
+	room.position = o
+	add_child(room)
+	var white := _mat(Color(0.8, 0.8, 0.78))
+	var t := 0.3
+	var hgt := 4.0
+	_box(room, Vector3(0, -0.5, 0), Vector3(40, 1, 40), _mat(Color(0.4, 0.42, 0.36))) # Ground outside.
+	# Floor: dark polished stone.
+	var floor_mat := _mat(Color(0.08, 0.08, 0.09), 0.08)
+	_box(room, Vector3(0, 0.0, 0), Vector3(12, 0.02, 10), floor_mat)
+	# Walls: white, a red and a blue one; the front (+z) is open toward the camera side.
+	_box(room, Vector3(0, hgt * 0.5, -5 - t * 0.5), Vector3(12 + 2 * t, hgt, t), white) # Back.
+	_box(room, Vector3(-6 - t * 0.5, hgt * 0.5, 0), Vector3(t, hgt, 10), _mat(Color(0.75, 0.12, 0.1))) # Left.
+	_box(room, Vector3(6 + t * 0.5, hgt * 0.5, 0), Vector3(t, hgt, 10), _mat(Color(0.12, 0.25, 0.75))) # Right.
+	_box(room, Vector3(0, hgt * 0.5, 5 + t * 0.5), Vector3(12 + 2 * t, hgt, t), white) # Front (behind the camera).
+	# Ceiling with a 3 x 3 m skylight over the center-left.
+	_box(room, Vector3(-4.5, hgt + t * 0.5, 0), Vector3(3 + 2 * t, t, 10 + 2 * t), white)
+	_box(room, Vector3(2.5, hgt + t * 0.5, 0), Vector3(7 + 2 * t, t, 10 + 2 * t), white)
+	_box(room, Vector3(-1.5, hgt + t * 0.5, -3.25), Vector3(3, t, 3.5 + t), white)
+	_box(room, Vector3(-1.5, hgt + t * 0.5, 3.25), Vector3(3, t, 3.5 + t), white)
+
+	# Objects to reflect.
+	_box(room, Vector3(-4.0, 0.5, -3.0), Vector3(1.0, 1.0, 1.0), _mat(Color(0.9, 0.7, 0.1)))
+	_box(room, Vector3(4.2, 0.75, -3.5), Vector3(0.8, 1.5, 0.8), _mat(Color(0.1, 0.7, 0.3)))
+	_sphere(room, Vector3(-1.5, 0.5, -1.0), 0.5, _mat(Color(0.95, 0.95, 0.95), 0.05, 1.0)) # Chrome.
+	_sphere(room, Vector3(0.0, 0.5, -1.5), 0.5, _mat(Color(1.0, 0.75, 0.35), 0.3, 1.0)) # Rough gold.
+	_sphere(room, Vector3(1.5, 0.5, -1.0), 0.5, _mat(Color(0.9, 0.9, 0.9), 0.6, 1.0)) # Brushed metal.
+	var pillar := MeshInstance3D.new()
+	var cylinder := CylinderMesh.new()
+	cylinder.top_radius = 0.25
+	cylinder.bottom_radius = 0.25
+	cylinder.height = hgt
+	pillar.mesh = cylinder
+	pillar.material_override = _mat(Color(0.9, 0.9, 0.9), 0.1, 1.0)
+	pillar.position = Vector3(3.0, hgt * 0.5, 0.5)
+	room.add_child(pillar)
+
+	# A colored ball circling the room and a moving warm light.
+	var ball := _sphere(room, Vector3.ZERO, 0.35, _emissive(Color(1.0, 0.3, 0.6), 2.0))
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.8, 0.6)
+	light.light_energy = 3.0
+	light.omni_range = 9.0
+	light.shadow_enabled = true
+	room.add_child(light)
+	var place := func(time_s: float) -> void:
+		ball.position = Vector3(sin(time_s * 0.6) * 3.5, 1.2 + 0.4 * sin(time_s * 1.3), cos(time_s * 0.6) * 2.5 - 0.5)
+		light.position = Vector3(-3.0 + 2.0 * sin(time_s * 0.35), 2.8, 1.0 + 1.5 * cos(time_s * 0.35))
+	place.call(0.0)
+	animated.append(place)
+
+	# --manual_refl=0: no PlanarReflector3D or ReflectionProbe nodes; with
+	# --volume, the DDGIVolume's automatic reflections take over.
+	var manual: bool = args.get("manual_refl", "1") == "1"
+	# Mirror on the back wall: a chrome panel, 4 x 2.4 m, 2 cm in front of it.
+	if args.get("mirror", "1") == "1":
+		_box(room, Vector3(0.0, 1.8, -5 + 0.01), Vector3(4.0, 2.4, 0.02), _mat(Color(0.95, 0.95, 0.95), 0.0, 1.0))
+		var mirror := PlanarReflector3D.new()
+		mirror.name = "MirrorReflector"
+		mirror.size = Vector2(4.0, 2.4)
+		mirror.position = Vector3(0.0, 1.8, -5 + 0.02)
+		mirror.rotation_degrees = Vector3(90, 0, 0) # Normal (+Y) toward +z, into the room.
+		if manual:
+			room.add_child(mirror)
+		else:
+			mirror.free()
+
+	# Floor reflector, covering the floor.
+	var floor_reflector := PlanarReflector3D.new()
+	floor_reflector.name = "FloorReflector"
+	floor_reflector.size = Vector2(12, 10)
+	floor_reflector.position = Vector3(0, 0.01, 0)
+	if manual:
+		room.add_child(floor_reflector)
+	else:
+		floor_reflector.free()
+
+	# Water pool in the front right: transparent water with moving ripples over a dark basin.
+	if args.get("pool", "1") == "1":
+		_box(room, Vector3(3.0, 0.02, 2.75), Vector3(4.0, 0.02, 3.0), _mat(Color(0.05, 0.12, 0.12), 0.9))
+		var water := MeshInstance3D.new()
+		var plane := PlaneMesh.new()
+		plane.size = Vector2(4.0, 3.0)
+		water.mesh = plane
+		var water_mat := StandardMaterial3D.new()
+		water_mat.albedo_color = Color(0.1, 0.25, 0.3, 0.35)
+		water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		water_mat.roughness = 0.02
+		water_mat.metallic_specular = 0.5
+		var noise := FastNoiseLite.new()
+		noise.frequency = 0.03
+		var normal_tex := NoiseTexture2D.new()
+		normal_tex.noise = noise
+		normal_tex.seamless = true
+		normal_tex.as_normal_map = true
+		normal_tex.bump_strength = 4.0
+		water_mat.normal_enabled = true
+		water_mat.normal_texture = normal_tex
+		water_mat.normal_scale = 0.4
+		water_mat.uv1_scale = Vector3(2, 2, 2)
+		water.material_override = water_mat
+		water.position = Vector3(3.0, 0.15, 2.75)
+		room.add_child(water)
+		animated.append(func(time_s: float) -> void:
+			water_mat.uv1_offset = Vector3(time_s * 0.03, time_s * 0.02, 0))
+		var pool := PlanarReflector3D.new()
+		pool.name = "PoolReflector"
+		pool.size = Vector2(4.0, 3.0)
+		pool.position = Vector3(3.0, 0.15, 2.75)
+		pool.normal_distortion = 0.4
+		if manual:
+			room.add_child(pool)
+		else:
+			pool.free()
+
+	# Box-projected reflection probe for the metal and the floor outside the
+	# reflectors' screen content.
+	var probe := ReflectionProbe.new()
+	probe.name = "RoomProbe"
+	probe.size = Vector3(12, hgt, 10)
+	probe.position = Vector3(0, hgt * 0.5, 0)
+	probe.origin_offset = Vector3(0, -0.4, 0)
+	probe.box_projection = true
+	probe.max_distance = 20.0 # The walls are at the box faces: render past them.
+	probe.blend_distance = 0.0 # Full weight up to the faces (the floor and the mirror are on them).
+	probe.interior = false
+	probe.enable_shadows = true
+	probe.update_mode = ReflectionProbe.UPDATE_ALWAYS if args.get("probe_mode", "once") == "always" else ReflectionProbe.UPDATE_ONCE
+	if manual:
+		room.add_child(probe)
+	# --extra_probes=N: N more small probes along the walls (atlas growth, update
+	# budget and priority with many probes).
+	for i in int(args.get("extra_probes", "0")):
+		var extra := ReflectionProbe.new()
+		extra.name = "ExtraProbe%d" % i
+		extra.size = Vector3(1.5, 2.0, 1.5)
+		extra.position = Vector3(-5.0 + 10.0 * float(i % 8) / 7.0, 1.0, -4.0 + 8.0 * float(i / 8) / maxf(1.0, float((int(args["extra_probes"]) - 1) / 8)))
+		extra.update_mode = probe.update_mode
+		extra.intensity = 0.5
+		room.add_child(extra)
+	if not manual:
+		probe.free()

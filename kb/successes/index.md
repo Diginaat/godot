@@ -5,6 +5,7 @@ done, why it worked, and when to use it again. Add one whenever something
 works clearly better than what came before. Mistakes are in
 [mistakes](/mistakes/).
 
+* [Reflection atlas layers on demand](/successes/reflection-atlas-on-demand.md) - 512 MB to 47 MB for one probe, growth copies layers
 * [Sample-driven probe scheduling](/successes/sample-driven-scheduling.md) - DDGI follows light changes about 8% faster at no measurable cost
 * [Least-squares baking](/successes/least-squares-bake.md) - baked GI error against a finer bake roughly halved, from a talk's idea in two builds
 * [Measuring the response to a change](/successes/step-response-instead-of-startup.md) - converge, step one input, trace: repeats within a few frames

@@ -22,6 +22,11 @@ to the open-sky light (step "occlude sky and reflection probe light in
 dark areas"). It doesn't use the direct shadow, and XeGTAO's bent normals
 aren't used for specular.
 
+Update 2026-10-31: reflection probes replaced the occluded sky inside
+their box, so they leaked; they are now normalized by the DDGI
+irradiance (REFLECTIONS.md, research/cubemap-normalization.md). Points
+1 and 2 below are still open.
+
 # Proposal
 
 FF7 Rebirth's reflections leaked into shadows and interiors; the fixes

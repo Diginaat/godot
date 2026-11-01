@@ -256,8 +256,12 @@ private:
 
 	/* REFLECTION ATLAS */
 
+	static constexpr int REFLECTION_ATLAS_INITIAL_CAPACITY = 4;
+
 	struct ReflectionAtlas {
-		int count = 0;
+		int count = 0; // Most probes it can hold (reflection_count).
+		int capacity = 0; // Probes the texture holds now: grows on demand up to count, so a few probes don't pay for all of them.
+		int mipmaps = 0;
 		int size = 0;
 		int reflection_texture_size = 0;
 		float uv_border_size = 0.0;
@@ -285,6 +289,7 @@ private:
 	mutable RID_Owner<ReflectionAtlas> reflection_atlas_owner;
 
 	void _reflection_atlas_clear(ReflectionAtlas *p_reflection_atlas);
+	void _reflection_atlas_grow(ReflectionAtlas *p_reflection_atlas, int p_capacity);
 
 	/* REFLECTION PROBE INSTANCE */
 

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PlanarReflector3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		A rectangle that reflects the scene like a mirror: floors, water, mirrors and glass.
+	</brief_description>
+	<description>
+		Place the node on a flat reflective surface and size it to cover the surface: its X and Z axes span the rectangle ([member size]), its Y axis points to the side that is reflected. Surfaces that lie on the rectangle (within [member thickness]) and are smoother than [member roughness_cutoff] show an exact mirror image of the screen.
+		The reflection is made by pixel projection: every pixel on screen is mirrored across the plane and projected back onto the screen, in two compute passes after the depth pre-pass (about 0.35 ms at 1920×1080 on an RTX 3060, 0.1 ms at half resolution). The scene isn't rendered again, so the cost doesn't grow with the scene's size; on the other hand, only what is on screen can be reflected. Where the reflected content is off screen or hidden behind other objects, the reflection falls back to [ReflectionProbe]s, screen-space reflections and the sky: place a box-projected reflection probe in rooms with mirrors that face the camera.
+		The reflected light replaces the surface's incoming specular light (like screen-space reflections), so the material's metallic, roughness and Fresnel response apply and no light is counted twice. Transparent surfaces such as water receive the reflection too; opaque objects below them don't.
+		Works without DDGI and without ray tracing: it needs only compute shaders and 32-bit image atomics, which every Forward+ device has (tested with Vulkan and Direct3D 12). Settings: [member ProjectSettings.rendering/global_illumination/reflections/planar_enabled], [member ProjectSettings.rendering/global_illumination/reflections/planar_resolution] and [member ProjectSettings.rendering/global_illumination/reflections/planar_max_reflectors].
+		[b]Note:[/b] Only supported by the Forward+ renderer, in single view (not in XR). The reflection uses the last frame's image, reprojected; fast moving objects can lag slightly in it.
+	</description>
+	<tutorials>
+	</tutorials>
+	<members>
+		<member name="intensity" type="float" setter="set_intensity" getter="get_intensity" default="1.0">
+			How much the planar reflection replaces the other reflections (probes, sky, screen-space reflections) on the reflector, from 0 to 1. The material still decides how reflective the surface is.
+		</member>
+		<member name="layers" type="int" setter="set_layer_mask" getter="get_layer_mask" default="1">
+			The render layers of the reflector: only cameras whose [member Camera3D.cull_mask] shares a layer with it use it.
+		</member>
+		<member name="normal_distortion" type="float" setter="set_normal_distortion" getter="get_normal_distortion" default="0.0">
+			How much normal maps and waves bend the reflection, by how far the surface's normal leans from the plane's. 0 for mirrors and polished floors, about 0.2 to 0.5 for water.
+		</member>
+		<member name="roughness_cutoff" type="float" setter="set_roughness_cutoff" getter="get_roughness_cutoff" default="0.4">
+			Surfaces rougher than this don't use the planar reflection (it fades out above 60% of the value) and keep the probe and sky reflections, which are blurred for rough surfaces. Below it, the reflection is blurred more the rougher the surface and the farther the reflected object.
+		</member>
+		<member name="size" type="Vector2" setter="set_size" getter="get_size" default="Vector2(10, 10)">
+			Size of the reflecting rectangle along the node's X and Z axes, in meters.
+		</member>
+		<member name="thickness" type="float" setter="set_thickness" getter="get_thickness" default="0.05">
+			How far a surface may be from the plane and still receive the reflection, in meters (raise it for waves and bumpy surfaces). Objects closer than this to the plane aren't reflected, since they count as part of the surface.
+		</member>
+	</members>
+</class>

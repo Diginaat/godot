@@ -8,7 +8,7 @@ stay in your agent's private memory.
 
 Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.md)
 (sync, build, release runbook), [PATHTRACER_TESTING.md](PATHTRACER_TESTING.md)
-(path tracer work).
+(path tracer work), [REFLECTIONS.md](REFLECTIONS.md) (reflections).
 
 ## Working rules
 
@@ -187,6 +187,26 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   on 2026-10-31). Check the light
   path (which side of the object is lit) before calling missing bounce
   light a bug; the probes can show bounce light that isn't there.
+
+## Reflections
+
+- Notes, test view (`reflect`) and findings: REFLECTIONS.md. Work on
+  `dev-ddgi-reflections`.
+- Planar reflections are pixel-projected (two compute passes, no second
+  scene render). Points within a reflector's thickness must be skipped in
+  the projection pass: they mirror onto themselves with offset 0 and win
+  every atomic, so the reflector shows its own image.
+- To see what a screen pass computes, write a debug pattern into its
+  output (the decoded source UV as `fract(uv * 4)`): a grid that lines up
+  with the screen means the offsets are zero.
+- In PowerShell, `$a = if (...) { $s.Split(' ') }` turns a one-element
+  array into a string and `@a` passes nothing: cast with `[string[]]`
+  before splatting test arguments, or single-flag runs measure the defaults.
+- Under `--gpu-profile`, several probe faces per frame overflow 256 GPU
+  timestamps; the DDGI test project raises the limit to 2048.
+- A `ReflectionProbe` in a test room: its capture's far plane is its box
+  face (set `max_distance` when the walls sit on it), and `blend_distance`
+  fades it to zero at the faces.
 
 ## In-editor DLSS installer
 

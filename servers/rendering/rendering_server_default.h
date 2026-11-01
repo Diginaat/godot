@@ -735,6 +735,18 @@ public:
 	FUNCRIDSPLIT(occluder)
 	FUNC3(occluder_set_mesh, RID, const PackedVector3Array &, const PackedInt32Array &)
 
+	/* PLANAR REFLECTION */
+	FUNCRIDSPLIT(planar_reflection)
+	FUNC2(planar_reflection_set_scenario, RID, RID)
+	FUNC2(planar_reflection_set_transform, RID, const Transform3D &)
+	FUNC2(planar_reflection_set_size, RID, const Vector2 &)
+	FUNC2(planar_reflection_set_layer_mask, RID, uint32_t)
+	FUNC2(planar_reflection_set_visible, RID, bool)
+	FUNC2(planar_reflection_set_intensity, RID, float)
+	FUNC2(planar_reflection_set_thickness, RID, float)
+	FUNC2(planar_reflection_set_normal_distortion, RID, float)
+	FUNC2(planar_reflection_set_roughness_cutoff, RID, float)
+
 #undef server_name
 #undef ServerName
 //from now on, calls forwarded to this singleton

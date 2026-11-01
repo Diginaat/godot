@@ -2846,6 +2846,19 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("occluder_create"), &RenderingServer::occluder_create);
 	ClassDB::bind_method(D_METHOD("occluder_set_mesh", "occluder", "vertices", "indices"), &RenderingServer::occluder_set_mesh);
 
+	/* PLANAR REFLECTION */
+
+	ClassDB::bind_method(D_METHOD("planar_reflection_create"), &RenderingServer::planar_reflection_create);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_scenario", "planar_reflection", "scenario"), &RenderingServer::planar_reflection_set_scenario);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_transform", "planar_reflection", "transform"), &RenderingServer::planar_reflection_set_transform);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_size", "planar_reflection", "size"), &RenderingServer::planar_reflection_set_size);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_layer_mask", "planar_reflection", "layers"), &RenderingServer::planar_reflection_set_layer_mask);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_visible", "planar_reflection", "visible"), &RenderingServer::planar_reflection_set_visible);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_intensity", "planar_reflection", "intensity"), &RenderingServer::planar_reflection_set_intensity);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_thickness", "planar_reflection", "thickness"), &RenderingServer::planar_reflection_set_thickness);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_normal_distortion", "planar_reflection", "distortion"), &RenderingServer::planar_reflection_set_normal_distortion);
+	ClassDB::bind_method(D_METHOD("planar_reflection_set_roughness_cutoff", "planar_reflection", "roughness"), &RenderingServer::planar_reflection_set_roughness_cutoff);
+
 	/* CAMERA */
 
 	ClassDB::bind_method(D_METHOD("camera_create"), &RenderingServer::camera_create);
@@ -3866,6 +3879,15 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/ddgi/gpu_time_budget_ms", PROPERTY_HINT_RANGE, "0,16,0.1,or_greater,suffix:ms"), 0.0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/ddgi/apply_resolution", PROPERTY_HINT_ENUM, "Full,1/2 (2x2 Blocks),1/4 (4x4 Blocks),1/8 (8x8 Blocks)"), 2);
 	GLOBAL_DEF("rendering/global_illumination/ddgi/emissive_lights", true);
+
+	GLOBAL_DEF("rendering/global_illumination/reflections/probes_enabled", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/reflections/probe_update_faces_per_frame", PROPERTY_HINT_RANGE, "0,24,1"), 2);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/reflections/probe_ddgi_normalization", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/reflections/probe_normalization_max", PROPERTY_HINT_RANGE, "1,16,0.1"), 4.0);
+	GLOBAL_DEF("rendering/global_illumination/reflections/ddgi_overrides_probe_ambient", true);
+	GLOBAL_DEF("rendering/global_illumination/reflections/planar_enabled", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/reflections/planar_max_reflectors", PROPERTY_HINT_RANGE, "1,8,1"), 4);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/reflections/planar_resolution", PROPERTY_HINT_ENUM, "Full,Half"), 0);
 
 	// OpenGL limits
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/opengl/max_renderable_elements", PROPERTY_HINT_RANGE, "1024,65536,1"), 65536);

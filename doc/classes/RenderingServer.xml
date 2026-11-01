@@ -3521,6 +3521,86 @@
 				If [code]true[/code], particles use local coordinates. If [code]false[/code] they use global coordinates. Equivalent to [member GPUParticles3D.local_coords].
 			</description>
 		</method>
+		<method name="planar_reflection_create">
+			<return type="RID" />
+			<description>
+				Creates a planar reflector and adds it to the RenderingServer. It can be accessed with the RID that is returned. This RID will be used in all [code]planar_reflection_*[/code] RenderingServer functions.
+				Once finished with your RID, you will want to free the RID using the RenderingServer's [method free_rid] method.
+				[b]Note:[/b] The equivalent node is [PlanarReflector3D].
+			</description>
+		</method>
+		<method name="planar_reflection_set_intensity">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="intensity" type="float" />
+			<description>
+				Sets how much the planar reflection replaces the other reflections (probes, sky, SSR) on the reflector, from 0 to 1. Equivalent to [member PlanarReflector3D.intensity].
+			</description>
+		</method>
+		<method name="planar_reflection_set_layer_mask">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="layers" type="int" />
+			<description>
+				Sets the render layers of the planar reflector: only cameras whose cull mask shares a layer with it use it. Equivalent to [member PlanarReflector3D.layers].
+			</description>
+		</method>
+		<method name="planar_reflection_set_normal_distortion">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="distortion" type="float" />
+			<description>
+				Sets how much normal maps and waves bend the planar reflection. Equivalent to [member PlanarReflector3D.normal_distortion].
+			</description>
+		</method>
+		<method name="planar_reflection_set_roughness_cutoff">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="roughness" type="float" />
+			<description>
+				Sets the roughness above which surfaces on the reflector don't use the planar reflection. Equivalent to [member PlanarReflector3D.roughness_cutoff].
+			</description>
+		</method>
+		<method name="planar_reflection_set_scenario">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="scenario" type="RID" />
+			<description>
+				Sets the scenario (the 3D world) of the planar reflector; an empty RID removes it from its scenario.
+			</description>
+		</method>
+		<method name="planar_reflection_set_size">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="size" type="Vector2" />
+			<description>
+				Sets the size of the reflecting rectangle, along the transform's X and Z axes. Equivalent to [member PlanarReflector3D.size].
+			</description>
+		</method>
+		<method name="planar_reflection_set_thickness">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="thickness" type="float" />
+			<description>
+				Sets how far a surface may be from the reflector's plane and still receive its reflection (waves, bumps), in meters. Equivalent to [member PlanarReflector3D.thickness].
+			</description>
+		</method>
+		<method name="planar_reflection_set_transform">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="transform" type="Transform3D" />
+			<description>
+				Sets the world transform of the planar reflector: the plane passes through the origin, and its Y axis points to the reflected side.
+			</description>
+		</method>
+		<method name="planar_reflection_set_visible">
+			<return type="void" />
+			<param index="0" name="planar_reflection" type="RID" />
+			<param index="1" name="visible" type="bool" />
+			<description>
+				Turns the planar reflector on or off.
+			</description>
+		</method>
 		<method name="positional_soft_shadow_filter_set_quality">
 			<return type="void" />
 			<param index="0" name="quality" type="int" enum="RenderingServer.ShadowQuality" />

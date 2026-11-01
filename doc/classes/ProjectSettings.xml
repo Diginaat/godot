@@ -3153,6 +3153,30 @@
 			If [code]true[/code], renders [VoxelGI] and SDFGI ([member Environment.sdfgi_enabled]) buffers at halved resolution (e.g. 960×540 when the viewport size is 1920×1080). This improves performance significantly when VoxelGI or SDFGI is enabled, at the cost of artifacts that may be visible on polygon edges. The loss in quality becomes less noticeable as the viewport resolution increases. [LightmapGI] rendering is not affected by this setting.
 			[b]Note:[/b] This property is only read when the project starts. To set half-resolution GI at run-time, call [method RenderingServer.gi_set_use_half_resolution] instead.
 		</member>
+		<member name="rendering/global_illumination/reflections/ddgi_overrides_probe_ambient" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], surfaces that DDGI covers keep the DDGI indirect light inside a [ReflectionProbe] whose [member ReflectionProbe.ambient_mode] is Environment, instead of the probe's blurred cubemap. DDGI follows light changes and is occluded per probe, so this keeps interiors dark where they are dark. If [code]false[/code], the probe's ambient light replaces DDGI inside the probe, as it replaces SDFGI and VoxelGI. Has no effect without DDGI. Forward+ only.
+		</member>
+		<member name="rendering/global_illumination/reflections/planar_enabled" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], [PlanarReflector3D] nodes reflect the screen across their plane (pixel-projected reflections: two compute passes over the screen, about 0.35 ms at 1920×1080 on an RTX 3060, no second scene render). Content that isn't on screen falls back to reflection probes and the sky. Independent of DDGI and of [member Environment.ssr_enabled]. Forward+ only, single view (not in XR).
+		</member>
+		<member name="rendering/global_illumination/reflections/planar_max_reflectors" type="int" setter="" getter="" default="4">
+			The most [PlanarReflector3D] nodes used per view (1 to 8): the nearest reflectors in view and facing the camera. Each one adds a little to the cost of the projection pass.
+		</member>
+		<member name="rendering/global_illumination/reflections/planar_resolution" type="int" setter="" getter="" default="0">
+			Resolution of planar reflections. [b]Full[/b] is sharp (mirrors). [b]Half[/b] costs about a third (water, wet or glossy floors) and uses a quarter of the memory.
+		</member>
+		<member name="rendering/global_illumination/reflections/probe_ddgi_normalization" type="float" setter="" getter="" default="1.0">
+			Strength of the DDGI normalization of [ReflectionProbe] reflections (0 to 1). Each reflection is scaled by the DDGI irradiance at the surface over the probe's own irradiance (its blurriest level, in the direction of the normal): a probe captured once follows light changes such as a day and night cycle, and is darkened in corners and under objects that it saw lit. Only where DDGI covers the surface; costs one texture read per probe. 0 turns it off.
+		</member>
+		<member name="rendering/global_illumination/reflections/probe_normalization_max" type="float" setter="" getter="" default="4.0">
+			The largest factor by which [member rendering/global_illumination/reflections/probe_ddgi_normalization] brightens a probe's reflection, against overly bright reflections where the probe saw little light (1 to 16).
+		</member>
+		<member name="rendering/global_illumination/reflections/probe_update_faces_per_frame" type="int" setter="" getter="" default="2">
+			The most cubemap faces rendered per frame for [ReflectionProbe] updates, for all probes together (time slicing). A probe is captured face by face and shown when all six faces are done, so its reflection never mixes old and new faces; probes that have no reflection yet or moved come first, then realtime ([constant ReflectionProbe.UPDATE_ALWAYS]) probes, nearer and older ones first. With 2, one realtime probe refreshes every third frame, at about a quarter of the GPU time of a full update per frame. [code]0[/code] restores the previous behavior: "Once" probes render all six faces in one frame, realtime probes all of them every frame.
+		</member>
+		<member name="rendering/global_illumination/reflections/probes_enabled" type="bool" setter="" getter="" default="true">
+			If [code]false[/code], [ReflectionProbe] nodes are neither updated nor used: surfaces get the sky and screen-space or planar reflections only. Saves the probes' update and shading cost on weak GPUs. All renderers.
+		</member>
 		<member name="rendering/global_illumination/sdfgi/frames_to_converge" type="int" setter="" getter="" default="5">
 			The number of frames to use for converging signed distance field global illumination. Higher values lead to a less noisy result, at the cost of taking a longer time to fully converge. This means the scene's global illumination will be too dark for a longer period of time, especially when the camera moves fast. The actual convergence speed depends on rendered framerate. For example, with the default setting of 30 frames, rendering at 60 FPS will make SDFGI fully converge after 0.5 seconds. See also [member rendering/global_illumination/sdfgi/frames_to_update_lights] and [member rendering/global_illumination/sdfgi/probe_ray_count].
 			[b]Note:[/b] This property is only read when the project starts. To control SDFGI convergence speed at runtime, call [method RenderingServer.environment_set_sdfgi_frames_to_converge] instead.

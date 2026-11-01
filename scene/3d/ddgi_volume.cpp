@@ -33,9 +33,13 @@
 #include "ddgi_bake_solver.h"
 
 #include "core/config/project_settings.h"
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "scene/3d/camera_3d.h"
+#include "scene/3d/planar_reflector_3d.h"
+#include "scene/3d/reflection_probe.h"
+#include "scene/main/scene_tree.h"
 #include "scene/main/viewport.h"
 #include "scene/resources/3d/world_3d.h"
 #include "servers/rendering/rendering_device.h"
@@ -155,13 +159,52 @@ void DDGIVolume::_apply_baked_data() {
 	applied_environment->set_ddgi_baked_data(use ? int(bake_mode) : 0, use ? probe_data->get_data() : Dictionary());
 }
 
+void DDGIVolume::_update_auto_reflections() {
+	bool active = enabled && auto_reflections && is_inside_world();
+	set_process_internal(active);
+	if (!active) {
+		auto_reflector.clear();
+	} else {
+		auto_reflector.mark_dirty();
+	}
+}
+
+void DDGIVolume::_on_tree_node_changed(Node *p_node) {
+	// Only what can change the automatic reflections; other nodes come and go often.
+	if (Object::cast_to<GeometryInstance3D>(p_node) || Object::cast_to<PlanarReflector3D>(p_node) || Object::cast_to<ReflectionProbe>(p_node)) {
+		auto_reflector.mark_dirty();
+	}
+}
+
 void DDGIVolume::_notification(int p_what) {
 	switch (p_what) {
-		case NOTIFICATION_ENTER_WORLD:
+		case NOTIFICATION_ENTER_TREE: {
+			get_tree()->connect(SNAME("node_added"), callable_mp(this, &DDGIVolume::_on_tree_node_changed));
+			get_tree()->connect(SNAME("node_removed"), callable_mp(this, &DDGIVolume::_on_tree_node_changed));
+		} break;
+		case NOTIFICATION_EXIT_TREE: {
+			get_tree()->disconnect(SNAME("node_added"), callable_mp(this, &DDGIVolume::_on_tree_node_changed));
+			get_tree()->disconnect(SNAME("node_removed"), callable_mp(this, &DDGIVolume::_on_tree_node_changed));
+		} break;
+		case NOTIFICATION_INTERNAL_PROCESS: {
+			DDGIAutoReflections::Settings settings;
+			settings.probe = auto_reflection_probe;
+			settings.planar = auto_planar_reflections && RenderingServer::get_singleton()->get_current_rendering_method() == "forward_plus";
+			settings.planar_max_roughness = auto_planar_max_roughness;
+			settings.planar_min_area = auto_planar_min_area;
+			auto_reflector.update(this, settings, size, infinite_world, get_process_delta_time());
+		} break;
+		case NOTIFICATION_ENTER_WORLD: {
+			_apply_to_environment();
+			_update_auto_reflections();
+		} break;
 		case NOTIFICATION_TRANSFORM_CHANGED: {
 			_apply_to_environment();
+			auto_reflector.mark_dirty();
 		} break;
 		case NOTIFICATION_EXIT_WORLD: {
+			set_process_internal(false);
+			auto_reflector.clear();
 			if (applied_environment.is_valid()) {
 				// The node is the editor's DDGI switch: without it, DDGI is off.
 				applied_environment->set_ddgi_enabled(false);
@@ -182,9 +225,59 @@ bool DDGIVolume::_set(const StringName &p_name, const Variant &p_value) {
 	return false;
 }
 
+void DDGIVolume::set_auto_reflections(bool p_enabled) {
+	auto_reflections = p_enabled;
+	_update_auto_reflections();
+}
+
+bool DDGIVolume::is_auto_reflections_enabled() const {
+	return auto_reflections;
+}
+
+void DDGIVolume::set_auto_reflection_probe(bool p_enabled) {
+	auto_reflection_probe = p_enabled;
+	auto_reflector.mark_dirty();
+}
+
+bool DDGIVolume::is_auto_reflection_probe_enabled() const {
+	return auto_reflection_probe;
+}
+
+void DDGIVolume::set_auto_planar_reflections(bool p_enabled) {
+	auto_planar_reflections = p_enabled;
+	auto_reflector.mark_dirty();
+}
+
+bool DDGIVolume::is_auto_planar_reflections_enabled() const {
+	return auto_planar_reflections;
+}
+
+void DDGIVolume::set_auto_planar_max_roughness(float p_roughness) {
+	auto_planar_max_roughness = CLAMP(p_roughness, 0.0f, 1.0f);
+	auto_reflector.mark_dirty();
+}
+
+float DDGIVolume::get_auto_planar_max_roughness() const {
+	return auto_planar_max_roughness;
+}
+
+void DDGIVolume::set_auto_planar_min_area(float p_area) {
+	auto_planar_min_area = MAX(p_area, 0.01f);
+	auto_reflector.mark_dirty();
+}
+
+float DDGIVolume::get_auto_planar_min_area() const {
+	return auto_planar_min_area;
+}
+
+int DDGIVolume::get_auto_planar_reflector_count() const {
+	return auto_reflector.get_planar_reflector_count();
+}
+
 void DDGIVolume::set_enabled(bool p_enabled) {
 	enabled = p_enabled;
 	_apply_to_environment();
+	_update_auto_reflections();
 }
 
 bool DDGIVolume::is_enabled() const {
@@ -195,6 +288,7 @@ void DDGIVolume::set_size(const Vector3 &p_size) {
 	size = p_size.maxf(0.1f);
 	update_gizmos();
 	_apply_to_environment();
+	auto_reflector.mark_dirty();
 }
 
 Vector3 DDGIVolume::get_size() const {
@@ -604,6 +698,17 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_probe_data", "data"), &DDGIVolume::set_probe_data);
 	ClassDB::bind_method(D_METHOD("get_probe_data"), &DDGIVolume::get_probe_data);
 	ClassDB::bind_method(D_METHOD("bake", "updates_per_probe"), &DDGIVolume::bake, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("set_auto_reflections", "enabled"), &DDGIVolume::set_auto_reflections);
+	ClassDB::bind_method(D_METHOD("is_auto_reflections_enabled"), &DDGIVolume::is_auto_reflections_enabled);
+	ClassDB::bind_method(D_METHOD("set_auto_reflection_probe", "enabled"), &DDGIVolume::set_auto_reflection_probe);
+	ClassDB::bind_method(D_METHOD("is_auto_reflection_probe_enabled"), &DDGIVolume::is_auto_reflection_probe_enabled);
+	ClassDB::bind_method(D_METHOD("set_auto_planar_reflections", "enabled"), &DDGIVolume::set_auto_planar_reflections);
+	ClassDB::bind_method(D_METHOD("is_auto_planar_reflections_enabled"), &DDGIVolume::is_auto_planar_reflections_enabled);
+	ClassDB::bind_method(D_METHOD("set_auto_planar_max_roughness", "roughness"), &DDGIVolume::set_auto_planar_max_roughness);
+	ClassDB::bind_method(D_METHOD("get_auto_planar_max_roughness"), &DDGIVolume::get_auto_planar_max_roughness);
+	ClassDB::bind_method(D_METHOD("set_auto_planar_min_area", "area"), &DDGIVolume::set_auto_planar_min_area);
+	ClassDB::bind_method(D_METHOD("get_auto_planar_min_area"), &DDGIVolume::get_auto_planar_min_area);
+	ClassDB::bind_method(D_METHOD("get_auto_planar_reflector_count"), &DDGIVolume::get_auto_planar_reflector_count);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "enabled"), "set_enabled", "is_enabled");
 	// Size, spacing and probe count are linked: editing one updates the others in the inspector.
@@ -622,6 +727,12 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "probe_classification"), "set_probe_classification", "is_probe_classification_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "infinite_world"), "set_infinite_world", "is_infinite_world");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_mode", PROPERTY_HINT_ENUM, "Disabled,Indirect Light,Probe Irradiance,Probe Distance,Probe States,Probe Update Priority,Cascades"), "set_debug_mode", "get_debug_mode");
+	ADD_GROUP("Reflections", "auto_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflections"), "set_auto_reflections", "is_auto_reflections_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflection_probe"), "set_auto_reflection_probe", "is_auto_reflection_probe_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_planar_reflections"), "set_auto_planar_reflections", "is_auto_planar_reflections_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_max_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_planar_max_roughness", "get_auto_planar_max_roughness");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_min_area", PROPERTY_HINT_RANGE, U"0.1,100,0.1,or_greater,suffix:m\u00B2"), "set_auto_planar_min_area", "get_auto_planar_min_area");
 	ADD_GROUP("Baking", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "bake_mode", PROPERTY_HINT_ENUM, "Dynamic,Baked,Baked + Dynamic"), "set_bake_mode", "get_bake_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "bake_least_squares"), "set_bake_least_squares", "is_bake_least_squares_enabled");
