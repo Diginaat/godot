@@ -312,8 +312,10 @@ Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
   per view gets the mirror pass (what is off screen, behind the camera or
   hidden); the others fall back to probes and the sky (`auto_mirror_probes`
   puts one in front of each mirror).
-- The mirror pass costs a second scene render, shadow cascades included:
-  +2.07 ms at 1080p in the demo level (RTX 3060, half resolution). It
+- The mirror pass costs a second scene render of the mirror's part of the
+  screen (shadow cascades included, no post-processing): about 0.55 ms
+  with the mirror filling the view and 0.35 ms with it a quarter of the
+  view, at 1080p in the demo level (RTX 3060, half resolution). It
   samples the view's DDGI probes but SDFGI and VoxelGI run again for it.
   Not in XR, orthogonal cameras, Mobile or Compatibility.
 - The reflected image is last frame's, reprojected: fast moving objects
@@ -428,6 +430,30 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 
 Newest first.
 
+- **2026-11-01, mirror pass cost.** GPU timestamps (demo level, 1080p,
+  `--gpu-profile`, `demo_level.gd --timestamps`): the pass took 1.0 ms
+  plus about 0.4 ms that showed up at the start of the main pass (the
+  timestamps overlap; it is the pass's tail). Its "Setup Sky" (0.29 ms) is
+  not extra: the sky's radiance is updated once per frame, by whichever
+  pass comes first. Cuts:
+  - No tonemap, auto exposure, glow, SSR or SSIL in the mirror pass (its
+    image is only sampled as light). Contact shadows must stay: lights that
+    use them read their buffer, which is bound black when missing (the
+    whole reflection went dark in a first try).
+  - The projection is cropped to the reflector's screen rectangle (plus 2%
+    of the screen for distortion and blur): `crop * projection`, an
+    off-center frustum. Its size goes in eighths of the screen, grown at
+    once and shrunk after 30 frames, so the buffers aren't reallocated
+    every frame. The crop only scales x and y, so the mirror's depth is
+    what the full projection would give, and the resolve maps screen UV
+    into the rectangle. Shadow cascades, light culling and the shadow atlas
+    sizing keep the full projection (`CameraData::cull_projection`): they
+    assume a symmetric frustum.
+  - Result: about 0.55 ms extra near (mirror fills the view), 0.35 ms far
+    (a quarter of it), from about 1.4 ms. The "Render 3D Transparent
+    Pass" (0.15 ms) costs the same in both passes regardless of
+    resolution: something in the scene, not the mirror.
+
 - **2026-11-01, mirror pass (step 8).** Research: engines render the scene
   again from the reflected camera, clip at the plane (oblique near plane),
   flip culling and blur by roughness with contact hardening
@@ -458,10 +484,9 @@ Newest first.
     the distance behind the mirror, seen from the camera (sharp contacts,
     blurred distance, as HDRP does). Its motion comes from the mirror
     depth, so the temporal pass keeps working.
-  - Demo level, 1080p: 3.62 ms without, 5.69 ms with (+2.07 ms); stable
-    while moving. Next: scissor the render to the mirror's screen
-    rectangle (off-center projection), skip the post-processing and
-    screen-space effects in the mirror pass, share the shadow maps.
+  - Demo level, 1080p: 3.62 ms without, 5.69 ms with (+2.07 ms, one
+    measurement; the frame timer varies by up to 0.8 ms between runs);
+    stable while moving. Cut later the same day (see above).
 
 - **2026-11-01, mirrors seen from close by.** A mirror seen from 1 to 2 m
   reflects mostly what is behind the camera: the planar pass has nothing

@@ -84,6 +84,7 @@ private:
 		int32_t mirror_reflector;
 		float mirror_max_lod;
 		uint32_t pad[2];
+		float mirror_rect[4];
 		ReflectorData reflectors[MAX_REFLECTORS];
 	};
 
@@ -104,7 +105,7 @@ public:
 	// last frame's color (with mipmaps), p_reprojection maps this frame's clip space to
 	// the last frame's. p_mirror_color (mipmapped) and p_mirror_depth are the mirror
 	// pass of reflector p_mirror_reflector (-1: none).
-	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size, int p_mirror_reflector = -1, RID p_mirror_color = RID(), RID p_mirror_depth = RID());
+	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size, int p_mirror_reflector = -1, RID p_mirror_color = RID(), RID p_mirror_depth = RID(), const Rect2 &p_mirror_uv_rect = Rect2(0, 0, 1, 1));
 };
 
 } // namespace RendererRD

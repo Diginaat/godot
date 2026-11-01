@@ -118,7 +118,7 @@ int PlanarReflections::select_reflectors(const LocalVector<RendererSceneRender::
 	return count;
 }
 
-void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size, int p_mirror_reflector, RID p_mirror_color, RID p_mirror_depth) {
+void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size, int p_mirror_reflector, RID p_mirror_color, RID p_mirror_depth, const Rect2 &p_mirror_uv_rect) {
 	ERR_FAIL_COND(p_render_buffers.is_null());
 	ERR_FAIL_COND(p_count <= 0 || p_count > MAX_REFLECTORS);
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
@@ -176,6 +176,10 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 	bool use_mirror = p_mirror_reflector >= 0 && p_mirror_reflector < p_count && p_mirror_color.is_valid() && p_mirror_depth.is_valid();
 	params.mirror_reflector = use_mirror ? p_mirror_reflector : -1;
 	params.mirror_max_lod = use_mirror ? MAX(float(RD::get_singleton()->texture_get_format(p_mirror_color).mipmaps) - 1.0f, 0.0f) : 0.0f;
+	params.mirror_rect[0] = p_mirror_uv_rect.position.x;
+	params.mirror_rect[1] = p_mirror_uv_rect.position.y;
+	params.mirror_rect[2] = MAX(p_mirror_uv_rect.size.x, 1e-4f);
+	params.mirror_rect[3] = MAX(p_mirror_uv_rect.size.y, 1e-4f);
 
 	Transform3D to_view = p_cam_transform.affine_inverse();
 	for (int i = 0; i < p_count; i++) {

@@ -1653,6 +1653,7 @@ void RenderForwardClustered::_process_planar_reflections(RenderDataRD *p_render_
 	int mirror_reflector = -1;
 	RID mirror_color;
 	RID mirror_depth;
+	Rect2 mirror_uv_rect(0, 0, 1, 1);
 	for (int i = 0; i < planar_reflection_count; i++) {
 		Ref<RenderSceneBuffersRD> mirror_rb = planar_reflection_selection[i]->mirror_buffers;
 		if (mirror_rb.is_null()) {
@@ -1680,6 +1681,7 @@ void RenderForwardClustered::_process_planar_reflections(RenderDataRD *p_render_
 		mirror_reflector = i;
 		mirror_color = rb->get_texture(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR);
 		mirror_depth = mirror_rb->get_depth_texture(0);
+		mirror_uv_rect = planar_reflection_selection[i]->mirror_uv_rect;
 		break;
 	}
 	if (mirror_reflector < 0 && rb->has_texture(RB_SCOPE_PLANAR_MIRROR, RB_PLANAR_MIRROR_COLOR)) {
@@ -1687,7 +1689,7 @@ void RenderForwardClustered::_process_planar_reflections(RenderDataRD *p_render_
 	}
 
 	bool half_size = GLOBAL_GET_CACHED(int, "rendering/global_illumination/reflections/planar_resolution") == 1;
-	planar_reflections_effect->process(rb, rb->get_depth_texture(0), normal_roughness, rb->get_texture(RB_SCOPE_SSLF, RB_LAST_FRAME), scene_data->cam_projection, scene_data->taa_jitter, scene_data->cam_transform, reprojection, planar_reflection_selection, planar_reflection_count, half_size, mirror_reflector, mirror_color, mirror_depth);
+	planar_reflections_effect->process(rb, rb->get_depth_texture(0), normal_roughness, rb->get_texture(RB_SCOPE_SSLF, RB_LAST_FRAME), scene_data->cam_projection, scene_data->taa_jitter, scene_data->cam_transform, reprojection, planar_reflection_selection, planar_reflection_count, half_size, mirror_reflector, mirror_color, mirror_depth, mirror_uv_rect);
 }
 
 void RenderForwardClustered::_copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr) {
@@ -2222,7 +2224,11 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	bool using_planar = false;
 	planar_reflection_count = 0;
 	bool reverse_cull = p_render_data->scene_data->cam_transform.basis.determinant() < 0;
-	bool using_ssil = !is_reflection_probe && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
+	// A mirror pass (planar reflections) is only sampled as reflected light: no
+	// SSIL, SSR or post-processing in it. (Contact shadows stay: lights that use
+	// them read their buffer, black when it is missing.)
+	const bool is_mirror_pass = p_render_data->scene_data->mirror_pass;
+	bool using_ssil = !is_reflection_probe && !is_mirror_pass && p_render_data->environment.is_valid() && environment_get_ssil_enabled(p_render_data->environment);
 	bool using_motion_pass = rb_data.is_valid() && using_upscaling;
 
 	if (is_reflection_probe) {
@@ -2262,7 +2268,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			if (environment_get_sdfgi_enabled(p_render_data->environment) && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_UNSHADED) {
 				using_sdfgi = true;
 			}
-			if (environment_get_ssr_enabled(p_render_data->environment)) {
+			if (environment_get_ssr_enabled(p_render_data->environment) && !is_mirror_pass) {
 				if (!p_render_data->transparent_bg) {
 					using_ssr = true;
 				} else {
@@ -2898,7 +2904,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		_render_3d_upscaling(p_render_data, scale_type, using_taa, time_step, DLSSRRGuideBuffers());
 	}
 
-	if (rb_data.is_valid()) {
+	if (rb_data.is_valid() && !is_mirror_pass) {
 		_debug_draw_cluster(rb);
 
 		RENDER_TIMESTAMP("Tonemap");

@@ -150,13 +150,17 @@ public:
 		RID render_target;
 		Size2i size;
 		uint64_t last_frame = 0;
+		// Rendered part of the screen, in eighths per axis (1 to 8), grown at once
+		// and shrunk after a while, so the buffers aren't reallocated every frame.
+		Vector2i eighths = Vector2i(8, 8);
+		int shrink_frames = 0;
 	};
 	HashMap<RID, MirrorView> mirror_views; // Per viewport.
 	// The mirror pass of the view being rendered: which reflector of the scenario's
 	// planar_reflection_data (-1: none), its buffers and view-projection.
 	int mirror_reflector = -1;
 	Ref<RenderSceneBuffers> mirror_buffers;
-	Projection mirror_view_projection;
+	Rect2 mirror_uv_rect;
 
 	virtual RID planar_reflection_allocate();
 	virtual void planar_reflection_initialize(RID p_planar_reflection);

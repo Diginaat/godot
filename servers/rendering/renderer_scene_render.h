@@ -334,10 +334,10 @@ public:
 		float roughness_cutoff = 0.4;
 		// Set on the copy given to the renderer when a mirror pass rendered this
 		// reflector this frame (RendererSceneCull::_render_mirror()): the mirrored
-		// camera's buffers (linear HDR color in the internal texture) and the
-		// world to clip transform of that view.
+		// camera's buffers (linear HDR color in the internal texture), and the part
+		// of the screen they cover (screen UV, y down, as the effect shaders use).
 		Ref<RenderSceneBuffers> mirror_buffers;
-		Projection mirror_view_projection;
+		Rect2 mirror_uv_rect;
 	};
 
 	struct CameraData {
@@ -361,6 +361,9 @@ public:
 		// updated, only sampled.
 		bool mirror_pass = false;
 		Plane clip_plane;
+		// The view's whole projection (main_projection is cropped to the mirror's
+		// rectangle): shadow cascades and light culling assume a symmetric frustum.
+		Projection cull_projection;
 
 		void set_camera(const Transform3D p_transform, const Projection p_projection, bool p_is_orthogonal, bool p_vaspect, const Vector2 &p_taa_jitter = Vector2(), float p_taa_frame_count = 0.0f, uint32_t p_visible_layers = 0xFFFFFFFF);
 		void set_multiview_camera(const Transform3D &p_transform, const LocalVector<Transform3D> &p_offsets, const LocalVector<Projection> &p_projection, bool p_is_orthogonal, bool p_vaspect, uint32_t p_visible_layers = 0xFFFFFFFF);

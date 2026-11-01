@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-01 (mirror pass cost)
+
+* **Updated**: REFLECTIONS.md findings and limitations: mirror pass cropped
+  to the reflector, no post-processing; timestamps before and after.
+
 ## 2026-11-01 (mirror pass, step 8)
 
 * **Updated**: REFLECTIONS.md: `planar_mirror_render`, `planar_mirror_scale`,

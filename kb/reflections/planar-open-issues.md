@@ -25,9 +25,9 @@ the runbook.[^runbook]
    resolution by default on weak GPUs (0.83 ms at 1080p now).
 2. Mirrors seen from close by at grazing angles: bilinear footprint fill, or
    the mirror pass (step 8, done 2026-11-01) now fills what the projection
-   misses on the reflector covering most of the view. Its cost (+2 ms at
-   1080p) is the next thing to cut: scissor to the mirror's rectangle,
-   no post-processing in it, shared shadow maps.
+   misses on the reflector covering most of the view, at about 0.35 to
+   0.55 ms (1080p, cropped to the mirror's rectangle, no post-processing).
+   Shared shadow maps would cut more.
 3. Hidden undersides of small objects: needs a re-render or ray tracing;
    screen space can only fall back to the probe.
 4. Per-mesh opt-in/opt-out for the automatic scan.

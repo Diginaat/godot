@@ -53,6 +53,7 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	float mirror_max_lod;
 	uint pad0;
 	uint pad1;
+	vec4 mirror_rect; // Screen UV rectangle the mirror pass covers (position, size).
 	Reflector reflectors[MAX_REFLECTORS];
 }
 params;
@@ -356,8 +357,10 @@ void main() {
 	// screen position. Premultiplied by the reflector's intensity.
 	vec4 mirror = vec4(0.0);
 	vec2 mirror_motion = vec2(2.0); // Off screen: no history.
-	if (reflector == params.mirror_reflector) {
-		float md = textureLod(mirror_depth, uv, 0.0).r;
+	vec2 mirror_uv = (uv - params.mirror_rect.xy) / params.mirror_rect.zw;
+	if (reflector == params.mirror_reflector && all(greaterThanEqual(mirror_uv, vec2(0.0))) && all(lessThanEqual(mirror_uv, vec2(1.0)))) {
+		// Same depth as the full projection would give: the crop only scales x and y.
+		float md = textureLod(mirror_depth, mirror_uv, 0.0).r;
 		// In the mirror camera's view space, what it sees is where the main camera
 		// sees its mirror image.
 		vec3 virtual_pos = (md <= 0.0 && params.orthogonal == 0) ? normalize(view_from_uv_depth(uv, 0.5)) * SKY_DISTANCE : view_from_uv_depth(uv, md);
@@ -367,10 +370,10 @@ void main() {
 		// 2 alpha behind; seen from total away, that many mirror texels.
 		float alpha = decode_roughness(textureLod(source_normal_roughness, uv, 0.0).w);
 		alpha *= alpha;
-		float texels = 2.0 * alpha * behind / max(total, 1e-3) * abs(params.projection[1][1]) * 0.5 * float(textureSize(mirror_color, 0).y);
+		float texels = 2.0 * alpha * behind / max(total, 1e-3) * abs(params.projection[1][1]) * 0.5 * float(textureSize(mirror_color, 0).y) / params.mirror_rect.w;
 		float lod = clamp(log2(max(texels, 1.0)), 0.0, params.mirror_max_lod);
 		float w = clamp(r.center.w, 0.0, 1.0);
-		mirror = vec4(textureLod(mirror_color, uv, lod).rgb * w, w);
+		mirror = vec4(textureLod(mirror_color, mirror_uv, lod).rgb * w, w);
 		vec4 prev = params.reprojection * vec4(uv * 2.0 - 1.0, md, 1.0);
 		if (prev.w > 0.0) {
 			mirror_motion = prev.xy / prev.w * 0.5 + 0.5 - uv;

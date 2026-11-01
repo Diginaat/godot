@@ -3041,18 +3041,70 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 	Basis reflection(Vector3(1, 0, 0) - 2.0 * normal.x * normal, Vector3(0, 1, 0) - 2.0 * normal.y * normal, Vector3(0, 0, 1) - 2.0 * normal.z * normal);
 	Transform3D mirror_transform = Transform3D(reflection, 2.0 * d * normal) * cam;
 
+	MirrorView &mv = mirror_views[p_viewport];
+	mv.last_frame = frame;
+
+	// The part of the screen the reflector covers (NDC), a little larger for
+	// normal distortion and blur. Corners behind or at the camera: all of it.
+	Vector2 ndc_min(-1, -1);
+	Vector2 ndc_max(1, 1);
+	{
+		Projection view_projection = p_camera_data.main_projection * Projection(cam.affine_inverse());
+		Vector3 axis_u = r.transform.basis.get_column(0).normalized() * (r.size.x * 0.5);
+		Vector3 axis_v = r.transform.basis.get_column(2).normalized() * (r.size.y * 0.5);
+		Vector2 lo(1e20, 1e20);
+		Vector2 hi(-1e20, -1e20);
+		bool all_in_front = true;
+		for (int c = 0; c < 4; c++) {
+			Vector3 corner = r.transform.origin + ((c & 1) ? axis_u : -axis_u) + ((c & 2) ? axis_v : -axis_v);
+			Vector4 clip = view_projection.xform(Vector4(corner.x, corner.y, corner.z, 1.0));
+			if (clip.w < p_camera_data.main_projection.get_z_near() * 1.01) {
+				all_in_front = false;
+				break;
+			}
+			Vector2 ndc(clip.x / clip.w, clip.y / clip.w);
+			lo = lo.min(ndc);
+			hi = hi.max(ndc);
+		}
+		if (all_in_front) {
+			ndc_min = (lo - Vector2(0.04, 0.04)).max(Vector2(-1, -1));
+			ndc_max = (hi + Vector2(0.04, 0.04)).min(Vector2(1, 1));
+		}
+	}
+	// Rendered size in eighths of the screen, rounded up; shrinks after 30 frames.
+	Vector2i wanted(CLAMP(int(Math::ceil((ndc_max.x - ndc_min.x) * 4.0)), 1, 8), CLAMP(int(Math::ceil((ndc_max.y - ndc_min.y) * 4.0)), 1, 8));
+	if (wanted.x > mv.eighths.x || wanted.y > mv.eighths.y) {
+		mv.eighths = mv.eighths.max(wanted);
+		mv.shrink_frames = 0;
+	} else if (wanted != mv.eighths && ++mv.shrink_frames > 30) {
+		mv.eighths = wanted;
+		mv.shrink_frames = 0;
+	}
+	// Grow the rectangle around its center to that size, kept on screen where possible.
+	Vector2 extent = Vector2(mv.eighths) * 0.25;
+	Vector2 center = (ndc_min + ndc_max) * 0.5;
+	center = center.clamp(Vector2(-1, -1) + extent * 0.5, Vector2(1, 1) - extent * 0.5);
+	ndc_min = center - extent * 0.5;
+	ndc_max = center + extent * 0.5;
+
+	// Crop the projection to that rectangle (clip x' = sx x + tx w, same for y).
+	Projection crop;
+	crop.columns[0][0] = 2.0 / extent.x;
+	crop.columns[3][0] = -(ndc_min.x + ndc_max.x) / extent.x;
+	crop.columns[1][1] = 2.0 / extent.y;
+	crop.columns[3][1] = -(ndc_min.y + ndc_max.y) / extent.y;
+
 	RendererSceneRender::CameraData mirror_camera;
-	// Same projection: the mirror's pixels see the reflection at the same screen
-	// position as the main camera (unjittered; the main view's TAA smooths it).
-	mirror_camera.set_camera(mirror_transform, p_camera_data.main_projection, false, p_camera_data.vaspect, Vector2(), 0.0, p_camera_data.visible_layers);
+	// The view's projection, cropped: the mirror's pixels see the reflection at
+	// their own screen position (unjittered; the main view's TAA smooths it).
+	mirror_camera.set_camera(mirror_transform, crop * p_camera_data.main_projection, false, p_camera_data.vaspect, Vector2(), 0.0, p_camera_data.visible_layers);
 	mirror_camera.mirror_pass = true;
+	mirror_camera.cull_projection = p_camera_data.main_projection;
 	// Slightly in front of the plane: the reflecting surface itself isn't drawn.
 	mirror_camera.clip_plane = Plane(normal, d + MAX(r.thickness * 0.2f, 0.005f));
 
 	float scale = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_mirror_scale"), 0.25f, 1.0f);
-	Size2i size = Size2i(MAX(int(p_viewport_size.x * scale), 16), MAX(int(p_viewport_size.y * scale), 16));
-	MirrorView &mv = mirror_views[p_viewport];
-	mv.last_frame = frame;
+	Size2i size = Size2i(MAX(int(p_viewport_size.x * scale * mv.eighths.x / 8.0), 16), MAX(int(p_viewport_size.y * scale * mv.eighths.y / 8.0), 16));
 	if (mv.render_buffers.is_null()) {
 		mv.render_buffers = RSG::scene->render_buffers_create();
 		mv.render_target = RSG::texture_storage->render_target_create();
@@ -3081,7 +3133,8 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 
 	mirror_reflector = best;
 	mirror_buffers = mv.render_buffers;
-	mirror_view_projection = p_camera_data.main_projection * Projection(mirror_transform.affine_inverse());
+	// Screen UV of the effect shaders: x right, y down.
+	mirror_uv_rect = Rect2(ndc_min.x * 0.5 + 0.5, 0.5 - ndc_max.y * 0.5, extent.x * 0.5, extent.y * 0.5);
 }
 
 void RendererSceneCull::free_mirror_views() {
@@ -3674,7 +3727,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	}
 
 	// Prepare the light - camera volume culling system.
-	light_culler->prepare_camera(frustum_transform, p_camera_data->main_projection);
+	// Shadows and light culling use the whole view's projection (a mirror pass's is cropped).
+	const Projection &shadow_projection = p_camera_data->mirror_pass ? p_camera_data->cull_projection : p_camera_data->main_projection;
+	light_culler->prepare_camera(frustum_transform, shadow_projection);
 
 	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
 	Vector3 camera_position = p_camera_data->main_transform.origin;
@@ -3775,7 +3830,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		RSG::light_storage->set_directional_shadow_count(lights_with_shadow.size());
 
 		for (int i = 0; i < lights_with_shadow.size(); i++) {
-			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], frustum_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect);
+			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], frustum_transform, shadow_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect);
 		}
 	}
 
@@ -3904,11 +3959,11 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 			{ //compute coverage
 
 				Transform3D cam_xf = p_camera_data->main_transform;
-				float zn = p_camera_data->main_projection.get_z_near();
+				float zn = shadow_projection.get_z_near();
 				Plane p(-cam_xf.basis.get_column(2), cam_xf.origin + cam_xf.basis.get_column(2) * -zn); //camera near plane
 
 				// near plane half width and height
-				Vector2 vp_half_extents = p_camera_data->main_projection.get_viewport_half_extents();
+				Vector2 vp_half_extents = shadow_projection.get_viewport_half_extents();
 
 				switch (RSG::light_storage->light_get_type(ins->base)) {
 					case RSE::LIGHT_OMNI: {
@@ -4025,7 +4080,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 			if (redraw && max_shadows_used < MAX_UPDATE_SHADOWS) {
 				//must redraw!
 				RENDER_TIMESTAMP("> Render Light3D " + itos(i));
-				if (_light_instance_update_shadow(ins, p_camera_data->main_transform, p_camera_data->main_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect, p_shadow_atlas, scenario, p_screen_mesh_lod_threshold, p_visible_layers)) {
+				if (_light_instance_update_shadow(ins, p_camera_data->main_transform, shadow_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect, p_shadow_atlas, scenario, p_screen_mesh_lod_threshold, p_visible_layers)) {
 					light->make_shadow_dirty();
 				}
 				RENDER_TIMESTAMP("< Render Light3D " + itos(i));
@@ -4108,7 +4163,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 				if (int(i) == mirror_reflector) {
 					RendererSceneRender::RenderPlanarReflection &added = planar_reflection_render_list[planar_reflection_render_list.size() - 1];
 					added.mirror_buffers = mirror_buffers;
-					added.mirror_view_projection = mirror_view_projection;
+					added.mirror_uv_rect = mirror_uv_rect;
 				}
 			}
 		}
