@@ -98,6 +98,7 @@ private:
 	// Automatic reflections (see DDGIAutoReflections).
 	bool auto_reflections = true;
 	bool auto_reflection_probe = true;
+	bool auto_reflection_probe_realtime = false;
 	bool auto_planar_reflections = true;
 	float auto_planar_max_roughness = 0.3f;
 	float auto_planar_min_area = 2.0f;
@@ -185,6 +186,9 @@ public:
 	void set_auto_reflection_probe(bool p_enabled);
 	bool is_auto_reflection_probe_enabled() const;
 
+	void set_auto_reflection_probe_realtime(bool p_enabled);
+	bool is_auto_reflection_probe_realtime_enabled() const;
+
 	void set_auto_planar_reflections(bool p_enabled);
 	bool is_auto_planar_reflections_enabled() const;
 
@@ -195,6 +199,7 @@ public:
 	float get_auto_planar_min_area() const;
 
 	int get_auto_planar_reflector_count() const;
+	Array get_auto_planar_reflectors() const;
 
 	virtual AABB get_aabb() const override;
 	PackedStringArray get_configuration_warnings() const override;

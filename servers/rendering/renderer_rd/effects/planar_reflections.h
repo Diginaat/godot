@@ -38,6 +38,9 @@
 #define RB_PLANAR_INTERMEDIATE SNAME("intermediate")
 #define RB_PLANAR_COLOR SNAME("color")
 #define RB_PLANAR_PARAMS SNAME("params")
+#define RB_PLANAR_CURRENT SNAME("current")
+#define RB_PLANAR_MOTION SNAME("motion")
+#define RB_PLANAR_HISTORY SNAME("history")
 
 namespace RendererRD {
 
@@ -52,6 +55,7 @@ private:
 	enum Mode {
 		MODE_PROJECT,
 		MODE_RESOLVE,
+		MODE_TEMPORAL,
 		MODE_MAX
 	};
 
@@ -72,7 +76,7 @@ private:
 		uint32_t reflector_count;
 		float max_color_lod;
 		uint32_t orthogonal;
-		uint32_t pad;
+		uint32_t history_valid;
 		ReflectorData reflectors[MAX_REFLECTORS];
 	};
 
@@ -91,7 +95,7 @@ public:
 	// Allocates the buffers (full or half size) and runs both passes. p_last_frame is the
 	// last frame's color (with mipmaps), p_reprojection maps this frame's clip space to
 	// the last frame's.
-	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size);
+	void process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size);
 };
 
 } // namespace RendererRD

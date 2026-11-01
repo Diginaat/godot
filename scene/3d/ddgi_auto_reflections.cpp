@@ -67,6 +67,11 @@ static float _material_roughness(const Ref<Material> &p_material) {
 	return -1.0; // Unknown: not used.
 }
 
+static bool _material_is_transparent(const Ref<Material> &p_material) {
+	Ref<BaseMaterial3D> base = p_material;
+	return base.is_valid() && base->get_transparency() != BaseMaterial3D::TRANSPARENCY_DISABLED;
+}
+
 static bool _material_has_normal_map(const Ref<Material> &p_material) {
 	Ref<BaseMaterial3D> base = p_material;
 	return base.is_valid() && base->get_feature(BaseMaterial3D::FEATURE_NORMAL_MAPPING);
@@ -204,8 +209,9 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 	while (!stack.is_empty()) {
 		Node *node = stack[stack.size() - 1];
 		stack.resize(stack.size() - 1);
-		for (int i = node->get_child_count() - 1; i >= 0; i--) {
-			stack.push_back(node->get_child(i));
+		// Internal children too: level kits keep their meshes there.
+		for (int i = node->get_child_count(true) - 1; i >= 0; i--) {
+			stack.push_back(node->get_child(i, true));
 		}
 
 		Node3D *n3d = Object::cast_to<Node3D>(node);
@@ -215,7 +221,7 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 
 		if (ReflectionProbe *rp = Object::cast_to<ReflectionProbe>(node)) {
 			AABB box = rp->get_global_transform().xform(rp->get_aabb());
-			if (!p_bounded || box.intersects(p_bounds)) {
+			if (!p_bounded || box.intersects(p_bounds.grow(0.5))) {
 				r_manual_probe = true;
 			}
 			continue;
@@ -238,7 +244,9 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 			continue;
 		}
 		Transform3D xform = mi->get_global_transform();
-		if (p_bounded && !xform.xform(mesh->get_aabb()).intersects(p_bounds)) {
+		// Grown: floors usually lie exactly on the volume's bottom face, and touching
+		// doesn't count as intersecting.
+		if (p_bounded && !xform.xform(mesh->get_aabb()).intersects(p_bounds.grow(0.5))) {
 			continue;
 		}
 		Basis normal_basis = xform.basis.inverse().transposed();
@@ -261,12 +269,19 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 				Vector3 e_u = corners[1] - corners[0];
 				Vector3 e_v = corners[2] - corners[0];
 				float area = e_u.length() * e_v.length();
-				if (area < p_settings.planar_min_area) {
-					continue;
+				if (area < p_settings.planar_min_area || MIN(e_u.length(), e_v.length()) < 0.5) {
+					continue; // Small, or a thin strip (wall tops, slab edges).
+				}
+				Vector3 face_center = corners[0] + (e_u + e_v) * 0.5;
+				if (p_bounded && !p_bounds.grow(0.25).has_point(face_center)) {
+					continue; // Outside the volume, or a slab's buried side below its floor.
 				}
 				Vector3 normal = normal_basis.xform(c.normal).normalized();
 				if (normal.y < -0.7) {
 					continue; // Undersides (of floors and slabs): almost never seen, never worth a reflector.
+				}
+				if (normal.y < 0.7 && _material_is_transparent(material)) {
+					continue; // Upright glass: its faint reflection comes from the probes; a planar one reads as an overlay.
 				}
 				Vector3 x = e_u.normalized();
 				Vector3 z = x.cross(normal).normalized();
@@ -398,7 +413,7 @@ void DDGIAutoReflections::_apply_reflectors(const LocalVector<Reflector> &p_refl
 	reflectors = p_reflectors;
 }
 
-void DDGIAutoReflections::_set_probe(bool p_enabled, const Transform3D &p_transform, const Vector3 &p_size, bool p_box_projection) {
+void DDGIAutoReflections::_set_probe(bool p_enabled, const Transform3D &p_transform, const Vector3 &p_size, bool p_box_projection, bool p_realtime) {
 	RenderingServer *rs = RenderingServer::get_singleton();
 	if (!p_enabled) {
 		if (probe_instance.is_valid()) {
@@ -411,7 +426,8 @@ void DDGIAutoReflections::_set_probe(bool p_enabled, const Transform3D &p_transf
 	}
 	if (probe.is_null()) {
 		probe = rs->reflection_probe_create();
-		rs->reflection_probe_set_update_mode(probe, RSE::REFLECTION_PROBE_UPDATE_ONCE);
+		probe_realtime = p_realtime;
+		rs->reflection_probe_set_update_mode(probe, p_realtime ? RSE::REFLECTION_PROBE_UPDATE_ALWAYS : RSE::REFLECTION_PROBE_UPDATE_ONCE);
 		rs->reflection_probe_set_ambient_mode(probe, RSE::REFLECTION_PROBE_AMBIENT_DISABLED); // DDGI gives the diffuse light.
 		rs->reflection_probe_set_enable_shadows(probe, true);
 		rs->reflection_probe_set_blend_distance(probe, 0.5);
@@ -420,6 +436,10 @@ void DDGIAutoReflections::_set_probe(bool p_enabled, const Transform3D &p_transf
 		rs->instance_set_scenario(probe_instance, scenario);
 		probe_transform = Transform3D(Basis(), Vector3(1e20, 1e20, 1e20));
 		probe_size = Vector3();
+	}
+	if (p_realtime != probe_realtime) {
+		probe_realtime = p_realtime;
+		rs->reflection_probe_set_update_mode(probe, p_realtime ? RSE::REFLECTION_PROBE_UPDATE_ALWAYS : RSE::REFLECTION_PROBE_UPDATE_ONCE);
 	}
 	if (p_size != probe_size || p_box_projection != probe_box_projection) {
 		probe_size = p_size;
@@ -488,9 +508,9 @@ void DDGIAutoReflections::update(Node3D *p_volume, const Settings &p_settings, c
 		}
 		float step = MAX(MAX(p_volume_size.x, p_volume_size.z) * 0.25f, 1.0f);
 		center = (center / step).round() * step;
-		_set_probe(p_settings.probe && !has_manual_probe, Transform3D(Basis(), center), p_volume_size, false);
+		_set_probe(p_settings.probe && !has_manual_probe, Transform3D(Basis(), center), p_volume_size, false, p_settings.probe_realtime);
 	} else {
-		_set_probe(p_settings.probe && !has_manual_probe, Transform3D(Basis(), p_volume->get_global_position()), p_volume_size + Vector3(1, 1, 1), true);
+		_set_probe(p_settings.probe && !has_manual_probe, Transform3D(Basis(), p_volume->get_global_position()), p_volume_size + Vector3(1, 1, 1), true, p_settings.probe_realtime);
 	}
 }
 
@@ -510,6 +530,18 @@ void DDGIAutoReflections::clear() {
 	has_manual_probe = false;
 	dirty = true;
 	since_scan = 1e9;
+}
+
+Array DDGIAutoReflections::get_planar_reflectors() const {
+	Array result;
+	for (const Reflector &r : reflectors) {
+		Dictionary d;
+		d["transform"] = r.transform;
+		d["size"] = r.size;
+		d["distortion"] = r.distortion;
+		result.push_back(d);
+	}
+	return result;
 }
 
 DDGIAutoReflections::~DDGIAutoReflections() {

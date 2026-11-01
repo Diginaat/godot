@@ -30,6 +30,12 @@
 				Returns how many planar reflectors [member auto_planar_reflections] created.
 			</description>
 		</method>
+		<method name="get_auto_planar_reflectors" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns the planar reflectors [member auto_planar_reflections] created, each as a [Dictionary] with [code]transform[/code] (a [Transform3D]: the plane passes through its origin, its Y axis points to the reflected side), [code skip-lint]size[/code] (a [Vector2] along its X and Z axes) and [code]distortion[/code]. For checking what the automatic scan chose.
+			</description>
+		</method>
 	</methods>
 	<members>
 		<member name="auto_planar_max_roughness" type="float" setter="set_auto_planar_max_roughness" getter="get_auto_planar_max_roughness" default="0.3">
@@ -43,6 +49,9 @@
 		</member>
 		<member name="auto_reflection_probe" type="bool" setter="set_auto_reflection_probe" getter="is_auto_reflection_probe_enabled" default="true">
 			If [code]true[/code], one box-projected reflection probe covers the volume (or follows the camera with [member infinite_world]), captured once and normalized by DDGI. Skipped when the volume contains a [ReflectionProbe].
+		</member>
+		<member name="auto_reflection_probe_realtime" type="bool" setter="set_auto_reflection_probe_realtime" getter="is_auto_reflection_probe_realtime_enabled" default="false">
+			If [code]true[/code], the automatic reflection probe is recaptured continuously ([constant ReflectionProbe.UPDATE_ALWAYS]) within [member ProjectSettings.rendering/global_illumination/reflections/probe_update_faces_per_frame]: moving objects, doors and lights show up in it. With the default budget (2 faces per frame) it refreshes about every third frame, for about 0.8 ms of GPU time per frame at 1080p on an RTX 3060. If [code]false[/code], it is captured once (when it appears or the volume moves), and DDGI normalization makes it follow light changes.
 		</member>
 		<member name="auto_reflections" type="bool" setter="set_auto_reflections" getter="is_auto_reflections_enabled" default="true">
 			If [code]true[/code], the volume creates reflections automatically: a reflection probe and planar reflectors (see the other [code]auto_*[/code] properties). Nothing is added to the scene.

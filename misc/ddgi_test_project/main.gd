@@ -338,6 +338,7 @@ func _setup_volume() -> void:
 	# --bake_ls=0|1: least-squares refinement of the bake (default on).
 	volume.bake_least_squares = args.get("bake_ls", "1") == "1"
 	volume.auto_reflections = args.get("auto_refl", "1") == "1"
+	volume.auto_reflection_probe_realtime = args.get("auto_refl_rt", "0") == "1"
 	add_child(volume)
 	if args.has("baked"):
 		volume.probe_data = load(args["baked"])

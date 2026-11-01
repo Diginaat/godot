@@ -60,6 +60,7 @@ with the scene.
 | --- | --- | --- |
 | `auto_reflections` | on | Master switch |
 | `auto_reflection_probe` | on | One box-projected reflection probe for the volume (ambient off: DDGI gives the diffuse light), captured once; with `infinite_world` it follows the camera in steps of a quarter of the volume. Skipped when the volume has a `ReflectionProbe` of its own |
+| `auto_reflection_probe_realtime` | off | The probe is recaptured continuously within the face budget (moving objects, doors, lights show up); about 0.8 ms per frame at 1080p with the default budget. Off: captured once, DDGI normalization follows light changes |
 | `auto_planar_reflections` | on | Planar reflectors on large flat surfaces of `MeshInstance3D`s whose material roughness (`BaseMaterial3D.roughness`, or a `ShaderMaterial` `roughness` parameter) is at most `auto_planar_max_roughness`; coplanar pieces merged, undersides skipped, the 16 largest kept, surfaces with a `PlanarReflector3D` left alone |
 | `auto_planar_max_roughness` | 0.3 | Smoothest-surfaces-only by default. Raise it (up to 1) for floors that turn glossy at runtime, such as wet floors from a shader: the reflection then appears where the per-pixel roughness drops below the reflector's cutoff, at the planar pass cost while they are in view |
 | `auto_planar_min_area` | 2 m² | Smaller flat surfaces are ignored |
@@ -123,7 +124,7 @@ metallic apply and nothing is added twice.
 | --- | --- | --- | --- | --- | --- |
 | Mirrored camera re-render | Exact | A scene render per reflector (CPU and triangle cost) | A render target per reflector | Yes | High (culling, shadows, GI, post) |
 | SSR (ray marched) | Approximate, noisy | Already in Godot; depends on steps | Small | No | Exists |
-| PPR (chosen) | Exact on screen | 0.34 ms full, 0.10 ms half (RTX 3060) | 28 MB full, 7 MB half | No (falls back) | Medium |
+| PPR (chosen) | Exact on screen | 0.83 ms full, 0.23 ms half (RTX 3060), with temporal filtering | about 80 MB full, 20 MB half | No (falls back) | Medium |
 | Hardware ray tracing | Exact | High | BVH | Yes | Not vendor independent enough (needs RT hardware) |
 
 **Reflection probes: build on Godot's `ReflectionProbe`, don't duplicate
@@ -323,6 +324,39 @@ Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
   `max_distance` when walls sit on the box), and `blend_distance` fades a
   probe to zero at its box faces.
 
+## Open issues (paused 2026-11-01)
+
+Work on the planar reflections stopped here, to be continued. State: the
+showcase level (a first-person test project outside this repository,
+`demo/reflection_showcase.tscn`) and the DDGI test
+project's `reflect` view render without errors; planar reflections are
+temporally stable while moving. What is still wrong, how to see it, and the
+likely fix:
+
+| # | Issue | How to see it | Likely fix |
+| --- | --- | --- | --- |
+| A | Blocky, jagged edges in a mirror seen from very close at a grazing angle (one source pixel covers up to 24 x 24 screen pixels) | Showcase: `--at=-5,-8.6 --yaw=-80 --pitch=-4` (stand at the mirror's side, look along it) | Fill the footprint with the source's bilinear neighborhood instead of one offset per parallelogram; or a mirrored-camera mode for mirrors (step 8) |
+| B | Small objects above a reflector (hanging lamps, the orb) reflect as a thin ring or a partial shape: their underside, which the reflection shows, is never on screen | Showcase gallery, look at the floor under the lamps; `reflect` view's floor under the pink ball | Only a re-render (step 8) or ray tracing gives the hidden side; screen space can only shade it from the probe. A one-sided dilation was tried and gave cone and ghost artifacts (findings log) |
+| C | Bright emissive objects look dimmer and more orange in floor reflections than the object itself | Showcase: the orb and its floor reflection | Mostly physical (a dielectric floor reflects a few percent; the object itself clips to white). Check the luma/chroma anti-bleeding in the resolve and the HDR range of the last frame copy before changing anything |
+| D | Thin bright lines on the floor at grazing views near the windows | Showcase gallery, morning, low pitch toward the east wall | Believed real (sunlit window sills reflected); confirm against the path tracer (`F3`) before treating it as a bug |
+| E | Cost went up with each quality fix: 0.34 ms (first version) to 0.83 ms at 1080p; about 80 MB at full resolution | `misc/ddgi_test_project`: `--view=reflect --res=1920x1080 --bench=300 --gpu-profile` | Ping-pong the history instead of copying it; skip the temporal pass for pixels without a reflector (indirect dispatch over reflector tiles, as the PPR talk suggests); default to half resolution on weak GPUs |
+| F | The automatic scan uses heuristics: undersides, upright glass, thin strips and faces outside the volume are skipped | `DDGIVolume.get_auto_planar_reflectors()` lists what it chose | Expose per-material or per-mesh opt-in/opt-out (a mesh metadata flag) for the cases the heuristics get wrong |
+| G | Planar reflections and the automatic planar scan are not tested in the editor viewport, with XR (not supported), with AMD or Intel GPUs | | Step 10 |
+
+How to test (always with movement: still frames hid the stripes and the
+grid): the showcase records walks with `--move=dx,dz,dyaw` (meters and
+degrees per second) and `--write-movie`, e.g.
+
+```
+bin\godot.windows.editor.x86_64.console.exe --resolution 1920x1032 --write-movie C:\tmp\mv\f.png --fixed-fps 60 --quit-after 330 --path <showcase project> res://demo/reflection_showcase.tscn -- --at=-7,-7.6 --yaw=-80 --pitch=-6 --move=1.2,0,9
+bin\godot.windows.editor.x86_64.console.exe --resolution 1920x1032 --write-movie C:\tmp\st\f.png --fixed-fps 60 --quit-after 250 --path <showcase project> res://demo/reflection_showcase.tscn -- --at=-4,-3 --yaw=-100 --pitch=-10 --move=0.6,0,3
+```
+
+Compare consecutive frames (200 to 203): they should look the same apart
+from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
+`--time=0..3`, `--reflections=0`, `--planar=0`, `--realtime=1`, `--ddgi=0`,
+`--still`, `--turn`; the screenshot run prints the automatic reflectors.
+
 ## Steps
 
 | # | Step | Status |
@@ -338,6 +372,8 @@ Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
 | 8 | Optional mirrored-camera mode for mirrors that face the camera (budgeted, low resolution) | Open |
 | 9 | DDGI irradiance inside probe captures (sample the probes in the capture pass) | Open |
 | 10 | Test on AMD and Intel GPUs, Mobile and Compatibility renderers | Open |
+| 11 | Planar quality: temporal filter, footprint fill, coverage, automatic scan fixes, showcase level | Done (2026-11-01) |
+| 12 | Open issues A to G above | Open |
 
 ## Sources
 
@@ -377,6 +413,59 @@ Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
 
 Newest first.
 
+- **2026-11-01, temporal stability.** Moving through the showcase, planar
+  reflections shimmered (the projection lands on slightly different pixels
+  every frame). A third pass now accumulates them: the resolve writes where
+  each reflection was last frame (the mirror image of the reflected point,
+  projected with last frame's camera: it stays put when only the camera
+  moves), the temporal pass blends 15% of this frame into the history there,
+  clamped to this frame's 3x3 neighborhood so moving objects leave no trail.
+  The projection also uses the depth buffer's TAA/FSR2/DLSS jitter now.
+  Checked with walks past the windows and the mirror (`--move=`): four
+  consecutive frames identical in look, no stripes; the moving ball in the
+  reflect view leaves no trail. Cost at 1080p (RTX 3060): planar 0.83 ms
+  (half resolution 0.23 ms); about 50 MB more at full resolution (current,
+  output, history, motion).
+- **2026-11-01, missing floors and overlapping planes.** The automatic scan
+  dropped floors and water that lie exactly on the DDGIVolume's bottom face
+  (touching AABBs don't intersect), so the showroom floor had no reflector,
+  while hidden slab sides and thin wall tops did (two of them overlapping at
+  a floor seam). Now: bounds grown by 0.5 m for meshes, the face center must
+  be inside the volume (grown 0.25 m), both sides at least 0.5 m.
+  `DDGIVolume.get_auto_planar_reflectors()` lists them.
+- **2026-11-01, footprint splatting.** Where the reflection magnifies
+  (grazing views, mirrors seen from close by), the projection pass now fills
+  the parallelogram spanned by where the right and lower neighbors land (at
+  most 24 px per side, only without a depth edge between them), each pixel
+  with its own offset. Segments toward the two neighbors only (first try)
+  left a dotted grid in a mirror seen at a grazing angle. Checked with
+  walks along the mirror wall (`--move=` in the showcase). Removes the curved
+  gaps and streaks the after-the-fact hole filling missed. Planar pass at
+  1080p (RTX 3060, reflect view): 0.34 to 0.59 ms; half resolution 0.10 to
+  about 0.16 ms.
+- **2026-11-01, edge quality.** In the showcase level, planar
+  reflections sparkled at the edges of reflected objects (data and probe
+  fallback alternating per pixel), showed a seam where the reflected
+  content left the screen, and an upright glass pane's automatic reflector
+  read as an overlay. The resolve now weights the reflection by how many of
+  its row and column neighbors have data (the better of the two, so
+  stretched rows at grazing angles stay; a 3x3 count faded them into
+  stripes; bridged gaps count as covered), fades over 8% of the screen at its edges, and the automatic
+  scan skips upright transparent surfaces (water stays). Same approach as
+  commercial SSPR tools: hole filling plus a fallback blend.
+- **2026-11-01, contact bands and grazing gaps.** Objects standing on a
+  reflective floor got the floor's reflection on their lowest few
+  centimeters (within the depth tolerance). The resolve now also requires
+  an opaque pixel's normal to face like the plane (dot > 0.7). At grazing
+  angles the stretched reflection left gaps of several pixels between
+  written rows; empty pixels are now bridged along the reflected ray's
+  screen direction (up to 32 px), but only with data on both sides and
+  similar offsets. A one-sided version stretched objects into cones and
+  ghosts in the mirror and was dropped. Thin bright horizontal lines on the
+  showroom floor at grazing views are real (sunlit window sills).
+- **2026-11-01, level kits.** The automatic planar scan skipped internal
+  child nodes, where a level kit's blocks keep their meshes: no
+  floor of such a level got a reflector. It walks internal children now.
 - **2026-10-31, profiler limit.** Six probe faces per frame overflow the
   default 256 GPU timestamps under `--gpu-profile` (ERROR lines, lost
   timings). The test project now sets

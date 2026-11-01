@@ -37,6 +37,7 @@
 #include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/rid.h"
+#include "core/variant/array.h"
 
 class Mesh;
 class Node;
@@ -56,6 +57,7 @@ class DDGIAutoReflections {
 public:
 	struct Settings {
 		bool probe = true;
+		bool probe_realtime = false; // Recaptured continuously, within the face budget.
 		bool planar = true;
 		float planar_max_roughness = 0.3;
 		float planar_min_area = 2.0;
@@ -99,6 +101,7 @@ private:
 	Transform3D probe_transform;
 	Vector3 probe_size;
 	bool probe_box_projection = true;
+	bool probe_realtime = false;
 	bool has_manual_probe = false;
 
 	bool dirty = true;
@@ -108,7 +111,7 @@ private:
 	const LocalVector<Cluster> &_get_clusters(const Ref<Mesh> &p_mesh, int p_surface);
 	void _scan(Node3D *p_volume, Node *p_root, const Settings &p_settings, const AABB &p_bounds, bool p_bounded, bool &r_manual_probe);
 	void _apply_reflectors(const LocalVector<Reflector> &p_reflectors);
-	void _set_probe(bool p_enabled, const Transform3D &p_transform, const Vector3 &p_size, bool p_box_projection);
+	void _set_probe(bool p_enabled, const Transform3D &p_transform, const Vector3 &p_size, bool p_box_projection, bool p_realtime = false);
 
 public:
 	// Something in the scene changed (meshes, reflectors, probes, settings).
@@ -118,6 +121,8 @@ public:
 	// Frees all server objects.
 	void clear();
 	int get_planar_reflector_count() const { return reflectors.size(); }
+	// Each reflector as {transform, size, distortion} (debugging, tests).
+	Array get_planar_reflectors() const;
 	bool has_probe() const { return probe_instance.is_valid(); }
 
 	~DDGIAutoReflections();

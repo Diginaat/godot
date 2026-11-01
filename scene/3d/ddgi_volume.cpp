@@ -189,6 +189,7 @@ void DDGIVolume::_notification(int p_what) {
 		case NOTIFICATION_INTERNAL_PROCESS: {
 			DDGIAutoReflections::Settings settings;
 			settings.probe = auto_reflection_probe;
+			settings.probe_realtime = auto_reflection_probe_realtime;
 			settings.planar = auto_planar_reflections && RenderingServer::get_singleton()->get_current_rendering_method() == "forward_plus";
 			settings.planar_max_roughness = auto_planar_max_roughness;
 			settings.planar_min_area = auto_planar_min_area;
@@ -243,6 +244,14 @@ bool DDGIVolume::is_auto_reflection_probe_enabled() const {
 	return auto_reflection_probe;
 }
 
+void DDGIVolume::set_auto_reflection_probe_realtime(bool p_enabled) {
+	auto_reflection_probe_realtime = p_enabled;
+}
+
+bool DDGIVolume::is_auto_reflection_probe_realtime_enabled() const {
+	return auto_reflection_probe_realtime;
+}
+
 void DDGIVolume::set_auto_planar_reflections(bool p_enabled) {
 	auto_planar_reflections = p_enabled;
 	auto_reflector.mark_dirty();
@@ -268,6 +277,10 @@ void DDGIVolume::set_auto_planar_min_area(float p_area) {
 
 float DDGIVolume::get_auto_planar_min_area() const {
 	return auto_planar_min_area;
+}
+
+Array DDGIVolume::get_auto_planar_reflectors() const {
+	return auto_reflector.get_planar_reflectors();
 }
 
 int DDGIVolume::get_auto_planar_reflector_count() const {
@@ -702,6 +715,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_auto_reflections_enabled"), &DDGIVolume::is_auto_reflections_enabled);
 	ClassDB::bind_method(D_METHOD("set_auto_reflection_probe", "enabled"), &DDGIVolume::set_auto_reflection_probe);
 	ClassDB::bind_method(D_METHOD("is_auto_reflection_probe_enabled"), &DDGIVolume::is_auto_reflection_probe_enabled);
+	ClassDB::bind_method(D_METHOD("set_auto_reflection_probe_realtime", "enabled"), &DDGIVolume::set_auto_reflection_probe_realtime);
+	ClassDB::bind_method(D_METHOD("is_auto_reflection_probe_realtime_enabled"), &DDGIVolume::is_auto_reflection_probe_realtime_enabled);
 	ClassDB::bind_method(D_METHOD("set_auto_planar_reflections", "enabled"), &DDGIVolume::set_auto_planar_reflections);
 	ClassDB::bind_method(D_METHOD("is_auto_planar_reflections_enabled"), &DDGIVolume::is_auto_planar_reflections_enabled);
 	ClassDB::bind_method(D_METHOD("set_auto_planar_max_roughness", "roughness"), &DDGIVolume::set_auto_planar_max_roughness);
@@ -709,6 +724,7 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_auto_planar_min_area", "area"), &DDGIVolume::set_auto_planar_min_area);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_min_area"), &DDGIVolume::get_auto_planar_min_area);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_reflector_count"), &DDGIVolume::get_auto_planar_reflector_count);
+	ClassDB::bind_method(D_METHOD("get_auto_planar_reflectors"), &DDGIVolume::get_auto_planar_reflectors);
 
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "enabled"), "set_enabled", "is_enabled");
 	// Size, spacing and probe count are linked: editing one updates the others in the inspector.
@@ -730,6 +746,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_GROUP("Reflections", "auto_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflections"), "set_auto_reflections", "is_auto_reflections_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflection_probe"), "set_auto_reflection_probe", "is_auto_reflection_probe_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflection_probe_realtime"), "set_auto_reflection_probe_realtime", "is_auto_reflection_probe_realtime_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_planar_reflections"), "set_auto_planar_reflections", "is_auto_planar_reflections_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_max_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_planar_max_roughness", "get_auto_planar_max_roughness");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_min_area", PROPERTY_HINT_RANGE, U"0.1,100,0.1,or_greater,suffix:m\u00B2"), "set_auto_planar_min_area", "get_auto_planar_min_area");

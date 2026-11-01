@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-01 (planar quality, paused)
+
+* **Added**: reflections/planar-open-issues.md; REFLECTIONS.md "Open issues"
+  (A to G) with repro positions and movement test commands.
+* **Updated**: REFLECTIONS.md findings: temporal filter, footprint fill,
+  coverage, normal check, automatic scan bounds and filters.
+
 ## 2026-11-01 (automatic reflections)
 
 * **Updated**: REFLECTIONS.md: DDGIVolume `auto_reflections` (volume probe and

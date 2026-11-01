@@ -204,6 +204,10 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   before splatting test arguments, or single-flag runs measure the defaults.
 - Under `--gpu-profile`, several probe faces per frame overflow 256 GPU
   timestamps; the DDGI test project raises the limit to 2048.
+- Test planar reflections while moving (the showcase level's
+  `--move=` with `--write-movie`) and compare consecutive frames: still
+  frames hid stripes, grids and shimmer. Check every fix against the
+  `reflect` view too. Open issues: REFLECTIONS.md "Open issues".
 - A `ReflectionProbe` in a test room: its capture's far plane is its box
   face (set `max_distance` when the walls sit on it), and `blend_distance`
   fades it to zero at the faces.

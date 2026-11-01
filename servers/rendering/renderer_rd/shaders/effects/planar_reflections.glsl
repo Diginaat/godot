@@ -42,17 +42,27 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	uint reflector_count;
 	float max_color_lod;
 	uint orthogonal;
-	uint pad;
+	uint history_valid;
 	Reflector reflectors[MAX_REFLECTORS];
 }
 params;
 
+#if defined(MODE_PROJECT) || defined(MODE_RESOLVE)
 layout(set = 0, binding = 1) uniform sampler2D source_depth;
 layout(r32ui, set = 0, binding = 2) uniform restrict uimage2D intermediate;
 layout(set = 0, binding = 3) uniform sampler2D source_normal_roughness;
 layout(set = 0, binding = 4) uniform sampler2D source_last_frame;
-layout(rgba16f, set = 0, binding = 5) uniform restrict writeonly image2D output_color;
+layout(rgba16f, set = 0, binding = 5) uniform restrict writeonly image2D output_color; // This frame's reflection.
 layout(rgba16f, set = 0, binding = 6) uniform restrict writeonly image2D output_params;
+layout(rg16f, set = 0, binding = 7) uniform restrict writeonly image2D output_motion; // To last frame's position of the reflection, in UV.
+#endif
+
+#ifdef MODE_TEMPORAL
+layout(set = 0, binding = 1) uniform sampler2D current_color;
+layout(set = 0, binding = 2) uniform sampler2D motion;
+layout(set = 0, binding = 3) uniform sampler2D history;
+layout(rgba16f, set = 0, binding = 4) uniform restrict writeonly image2D output_color;
+#endif
 
 // Sky pixels (reverse Z: depth 0) are treated as points this far away.
 #define SKY_DISTANCE 10000.0
@@ -62,6 +72,7 @@ vec3 view_from_uv_depth(vec2 uv, float depth) {
 	return pos.xyz / pos.w;
 }
 
+#if defined(MODE_PROJECT) || defined(MODE_RESOLVE)
 vec3 view_position(vec2 uv) {
 	float depth = textureLod(source_depth, uv, 0.0).r;
 	if (depth <= 0.0 && params.orthogonal == 0) {
@@ -71,6 +82,7 @@ vec3 view_position(vec2 uv) {
 	}
 	return view_from_uv_depth(uv, depth);
 }
+#endif
 
 // Returns the screen position (in target pixels) of a view space point, z < 0 in front.
 bool project_to_target(vec3 p, out vec2 r_pixel) {
@@ -167,44 +179,79 @@ vec2 decode_offset(uint stored) {
 
 #ifdef MODE_PROJECT
 
+// Where a view space point is seen in reflector i, in target pixels, if it is.
+bool reflect_to_target(uint i, vec3 p, out vec2 r_dest) {
+	Reflector r = params.reflectors[i];
+	float height = dot(r.plane.xyz, p) - r.plane.w;
+	if (height <= surface_tolerance(r, -p.z)) {
+		return false; // Behind the mirror or part of its surface: not reflected by it.
+	}
+	vec3 mirrored = p - 2.0 * height * r.plane.xyz;
+	vec3 eye = camera_eye(mirrored);
+	if (dot(r.plane.xyz, eye) - r.plane.w <= 0.0) {
+		return false; // Mirror seen from behind.
+	}
+	vec3 hit;
+	float t;
+	if (!ray_hits_reflector(i, eye, mirrored, hit, t) || covered_by_other_reflector(i, eye, hit)) {
+		return false;
+	}
+	if (!project_to_target(hit, r_dest)) {
+		return false;
+	}
+	// The reflector must be visible there (not behind the depth buffer).
+	float scene_depth = -view_position(r_dest / vec2(params.target_size)).z;
+	float plane_depth = -hit.z;
+	return scene_depth >= plane_depth - surface_tolerance(r, plane_depth);
+}
+
 void main() {
 	ivec2 target_pos = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(target_pos, params.target_size))) {
 		return;
 	}
 
-	vec2 uv = (vec2(target_pos) + 0.5) / vec2(params.target_size);
-	vec3 p = view_position(uv);
+	vec2 source_px = vec2(target_pos) + 0.5;
+	vec3 p = view_position(source_px / vec2(params.target_size));
+
+	// The right and lower neighbors give the footprint of this pixel in the
+	// reflection: where the reflection magnifies (grazing views, mirrors seen from
+	// close by), one pixel covers many, and writing only one leaves a grid of gaps.
+	vec3 right = view_position((source_px + vec2(1.0, 0.0)) / vec2(params.target_size));
+	vec3 down = view_position((source_px + vec2(0.0, 1.0)) / vec2(params.target_size));
+	// Same surface: no depth edge in between (else the footprint would stretch the
+	// foreground over the background).
+	float edge_tolerance = 0.03 * (-p.z) + 0.02;
+	bool right_ok = length(right - p) < edge_tolerance;
+	bool down_ok = length(down - p) < edge_tolerance;
 
 	for (uint i = 0; i < params.reflector_count; i++) {
-		Reflector r = params.reflectors[i];
-		float height = dot(r.plane.xyz, p) - r.plane.w;
-		if (height <= surface_tolerance(r, -p.z)) {
-			continue; // Behind the mirror or part of its surface: not reflected by it.
-		}
-		vec3 mirrored = p - 2.0 * height * r.plane.xyz;
-		vec3 eye = camera_eye(mirrored);
-		if (dot(r.plane.xyz, eye) - r.plane.w <= 0.0) {
-			continue; // Mirror seen from behind.
-		}
-		vec3 hit;
-		float t;
-		if (!ray_hits_reflector(i, eye, mirrored, hit, t) || covered_by_other_reflector(i, eye, hit)) {
-			continue;
-		}
 		vec2 dest;
-		if (!project_to_target(hit, dest)) {
+		if (!reflect_to_target(i, p, dest)) {
 			continue;
 		}
-		// The reflector must be visible there (not behind the depth buffer).
-		vec2 dest_uv = dest / vec2(params.target_size);
-		float scene_depth = -view_position(dest_uv).z;
-		float plane_depth = -hit.z;
-		if (scene_depth < plane_depth - surface_tolerance(r, plane_depth)) {
-			continue;
+		vec2 dest_right = dest;
+		vec2 dest_down = dest;
+		bool has_right = right_ok && reflect_to_target(i, right, dest_right);
+		bool has_down = down_ok && reflect_to_target(i, down, dest_down);
+		vec2 du = has_right ? dest_right - dest : vec2(0.0);
+		vec2 dv = has_down ? dest_down - dest : vec2(0.0);
+
+		// Fill the parallelogram spanned by the two neighbors' spots (at most 24
+		// pixels per side). Each pixel gets its own offset, to the matching point
+		// between the source pixels, so the nearest-wins rule still holds.
+		int steps_u = int(clamp(ceil(length(du)), 1.0, 24.0));
+		int steps_v = int(clamp(ceil(length(dv)), 1.0, 24.0));
+		for (int b = 0; b < steps_v; b++) {
+			for (int a = 0; a < steps_u; a++) {
+				vec2 f = vec2(float(a) / float(steps_u), float(b) / float(steps_v));
+				vec2 d = dest + du * f.x + dv * f.y;
+				ivec2 di = ivec2(d);
+				if (all(greaterThanEqual(di, ivec2(0))) && all(lessThan(di, params.target_size))) {
+					imageAtomicMax(intermediate, di, encode_offset(d - (source_px + f)));
+				}
+			}
 		}
-		vec2 offset = dest - (vec2(target_pos) + 0.5);
-		imageAtomicMax(intermediate, ivec2(dest), encode_offset(offset));
 	}
 }
 
@@ -242,6 +289,7 @@ void main() {
 
 	vec2 target_px = vec2(target_pos) + 0.5;
 	vec2 uv = target_px / vec2(params.target_size);
+	imageStore(output_motion, target_pos, vec4(0.0));
 
 	// Which reflector this pixel shows: the nearest rectangle the camera ray meets in
 	// front of the depth buffer.
@@ -250,6 +298,7 @@ void main() {
 	float scene_depth = -view_position(uv).z;
 	int reflector = -1;
 	float plane_depth = 1e20;
+	vec3 plane_hit = vec3(0.0);
 	for (uint i = 0; i < params.reflector_count; i++) {
 		vec3 hit;
 		float t;
@@ -266,6 +315,7 @@ void main() {
 		}
 		reflector = int(i);
 		plane_depth = d;
+		plane_hit = hit;
 	}
 
 	if (reflector < 0) {
@@ -275,6 +325,19 @@ void main() {
 	}
 
 	Reflector r = params.reflectors[reflector];
+
+	// An opaque surface at the plane's depth must also face like the plane: the
+	// bottom of an object standing on a reflective floor is within the depth
+	// tolerance, but it isn't the floor.
+	if (abs(scene_depth - plane_depth) <= surface_tolerance(r, plane_depth)) {
+		vec3 n = normalize(textureLod(source_normal_roughness, uv, 0.0).xyz * 2.0 - 1.0);
+		if (dot(n, r.plane.xyz) < 0.7) {
+			imageStore(output_color, target_pos, vec4(0.0));
+			imageStore(output_params, target_pos, vec4(0.0));
+			return;
+		}
+	}
+
 	imageStore(output_params, target_pos, vec4(plane_depth, r.params.x, r.params.y, r.params.z));
 
 	// Offset of the reflected pixel; fill holes from the 4 neighbors: take a neighbor's
@@ -299,6 +362,51 @@ void main() {
 		}
 	}
 
+	vec2 offset = stored != 0u ? decode_offset(stored) : vec2(0.0);
+	bool bridged = false;
+
+	if (stored == 0u) {
+		// At grazing angles the reflection is stretched along the reflected ray's
+		// direction on screen, leaving gaps of several pixels between the rows that
+		// were written. Bridge a gap only where reflected data lies on both sides of
+		// it with similar offsets, so nothing is extended past an object's edge.
+		vec3 refl_dir = reflect(normalize(plane_hit - eye), r.plane.xyz);
+		vec4 clip = params.projection * vec4(plane_hit + refl_dir * max(0.25 * plane_depth, 0.5), 1.0);
+		if (clip.w > 0.0) {
+			vec2 dir = (clip.xy / clip.w * 0.5 + 0.5) * vec2(params.target_size) - target_px;
+			if (length(dir) > 1e-3) {
+				dir = normalize(dir);
+				uint before = 0u;
+				uint after = 0u;
+				float before_k = 0.0;
+				float after_k = 0.0;
+				// 1 to 8 pixels one by one, then wider steps up to 32 (very grazing views).
+				for (int i = 1; i <= 14; i++) {
+					float k = i <= 8 ? float(i) : 8.0 + float(i - 8) * 4.0;
+					if (before == 0u) {
+						ivec2 q = clamp(ivec2(target_px - dir * k), ivec2(0), params.target_size - 1);
+						before = imageLoad(intermediate, q).r;
+						before_k = k;
+					}
+					if (after == 0u) {
+						ivec2 q = clamp(ivec2(target_px + dir * k), ivec2(0), params.target_size - 1);
+						after = imageLoad(intermediate, q).r;
+						after_k = k;
+					}
+				}
+				if (before != 0u && after != 0u) {
+					vec2 ob = decode_offset(before);
+					vec2 oa = decode_offset(after);
+					if (abs(length(ob) - length(oa)) < 0.2 * max(length(ob), length(oa)) + 4.0) {
+						offset = before_k <= after_k ? ob : oa;
+						stored = before_k <= after_k ? before : after;
+						bridged = true;
+					}
+				}
+			}
+		}
+	}
+
 	if (stored == 0u) {
 		// Nothing on screen is reflected here (it is off screen or behind the camera):
 		// the scene shader falls back to probes and the sky.
@@ -306,7 +414,6 @@ void main() {
 		return;
 	}
 
-	vec2 offset = decode_offset(stored);
 	vec2 source_px = target_px - offset; // Sub-pixel position of the reflected point.
 	vec2 source_uv = source_px / vec2(params.target_size);
 	vec2 source_uv_point = (floor(source_px) + 0.5) / vec2(params.target_size);
@@ -338,12 +445,74 @@ void main() {
 	vec3 color = ycocg_to_rgb(vec3(y, mix(chroma_f, chroma_p, chroma_mix) * y));
 	color = max(color, vec3(0.0));
 
-	// Fade toward the screen edges, where the reflected content ends.
+	// Fade toward the screen edges, where the reflected content ends, over 8% of
+	// the screen so the change to the probes' reflection doesn't show as a seam.
 	vec2 edge = min(source_uv, 1.0 - source_uv);
-	float edge_fade = clamp(min(edge.x, edge.y) * 20.0, 0.0, 1.0);
-	float weight = clamp(r.center.w, 0.0, 1.0) * edge_fade;
+	float edge_fade = smoothstep(0.0, 0.08, min(edge.x, edge.y));
+
+	// Coverage: where only some neighbors have reflected data (the edge of a
+	// reflected object, partly filled holes), blend with the probes' reflection by
+	// how many do, instead of switching per pixel (which sparkles).
+	// Counted along the row and the column separately: a stretched reflection
+	// arrives as full rows (or columns) with gaps between them, which must not fade.
+	float covered_x = 0.0;
+	float covered_y = 0.0;
+	for (int k = -1; k <= 1; k++) {
+		covered_x += imageLoad(intermediate, clamp(target_pos + ivec2(k, 0), ivec2(0), params.target_size - 1)).r != 0u ? 1.0 : 0.0;
+		covered_y += imageLoad(intermediate, clamp(target_pos + ivec2(0, k), ivec2(0), params.target_size - 1)).r != 0u ? 1.0 : 0.0;
+	}
+	float coverage = bridged ? 1.0 : smoothstep(1.0, 3.0, max(covered_x, covered_y)); // Bridged gaps have data on both sides by construction.
+
+	float weight = clamp(r.center.w, 0.0, 1.0) * edge_fade * coverage;
 
 	imageStore(output_color, target_pos, vec4(color * weight, weight)); // Premultiplied.
+
+	// Where this reflection was last frame: a reflection is seen where the camera
+	// sees the mirror image of the reflected point, which stays put when only the
+	// camera moves; so project the mirror image with last frame's camera.
+	vec3 reflected = view_position(source_uv_point);
+	vec3 mirrored = reflected - 2.0 * (dot(r.plane.xyz, reflected) - r.plane.w) * r.plane.xyz;
+	vec4 clip = params.projection * vec4(mirrored, 1.0);
+	if (clip.w > 0.0) {
+		vec3 ndc = clip.xyz / clip.w;
+		vec4 prev = params.reprojection * vec4(ndc, 1.0);
+		if (prev.w > 0.0) {
+			imageStore(output_motion, target_pos, vec4(prev.xy / prev.w * 0.5 + 0.5 - (ndc.xy * 0.5 + 0.5), 0.0, 0.0));
+		}
+	}
 }
 
 #endif // MODE_RESOLVE
+
+#ifdef MODE_TEMPORAL
+
+// Accumulates the reflection over frames: the projection picks slightly different
+// pixels every frame (sub-pixel positions, stretched areas), which shimmers while
+// the camera moves. Last frame's result is fetched where the reflection was and
+// clamped to this frame's 3x3 neighborhood, so moving objects don't leave trails.
+void main() {
+	ivec2 target_pos = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(target_pos, params.target_size))) {
+		return;
+	}
+	vec4 current = texelFetch(current_color, target_pos, 0);
+	vec4 low = current;
+	vec4 high = current;
+	for (int y = -1; y <= 1; y++) {
+		for (int x = -1; x <= 1; x++) {
+			vec4 c = texelFetch(current_color, clamp(target_pos + ivec2(x, y), ivec2(0), params.target_size - 1), 0);
+			low = min(low, c);
+			high = max(high, c);
+		}
+	}
+	vec2 uv = (vec2(target_pos) + 0.5) / vec2(params.target_size);
+	vec2 prev_uv = uv + texelFetch(motion, target_pos, 0).xy;
+	vec4 result = current;
+	if (params.history_valid != 0u && all(greaterThanEqual(prev_uv, vec2(0.0))) && all(lessThanEqual(prev_uv, vec2(1.0)))) {
+		vec4 previous = clamp(textureLod(history, prev_uv, 0.0), low, high);
+		result = mix(previous, current, 0.15);
+	}
+	imageStore(output_color, target_pos, result);
+}
+
+#endif // MODE_TEMPORAL

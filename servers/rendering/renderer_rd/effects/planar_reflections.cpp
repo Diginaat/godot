@@ -39,6 +39,7 @@ PlanarReflections::PlanarReflections() {
 	Vector<String> modes;
 	modes.push_back("\n#define MODE_PROJECT\n");
 	modes.push_back("\n#define MODE_RESOLVE\n");
+	modes.push_back("\n#define MODE_TEMPORAL\n");
 	shader.initialize(modes);
 	shader_version = shader.version_create();
 	for (int i = 0; i < MODE_MAX; i++) {
@@ -116,7 +117,7 @@ int PlanarReflections::select_reflectors(const LocalVector<RendererSceneRender::
 	return count;
 }
 
-void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size) {
+void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_depth, RID p_normal_roughness, RID p_last_frame, const Projection &p_projection, const Vector2 &p_jitter, const Transform3D &p_cam_transform, const Projection &p_reprojection, const RendererSceneRender::RenderPlanarReflection *const *p_reflectors, int p_count, bool p_half_size) {
 	ERR_FAIL_COND(p_render_buffers.is_null());
 	ERR_FAIL_COND(p_count <= 0 || p_count > MAX_REFLECTORS);
 	UniformSetCacheRD *uniform_set_cache = UniformSetCacheRD::get_singleton();
@@ -134,19 +135,31 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 			p_render_buffers->clear_context(RB_SCOPE_PLANAR_REFLECTIONS);
 		}
 	}
+	bool history_valid = true;
 	if (!p_render_buffers->has_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR)) {
+		const uint32_t color_usage = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT;
 		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_INTERMEDIATE, RD::DATA_FORMAT_R32_UINT, RD::TEXTURE_USAGE_STORAGE_BIT | RD::TEXTURE_USAGE_STORAGE_ATOMIC_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
-		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
-		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_PARAMS, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_STORAGE_BIT, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
+		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_CURRENT, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, color_usage, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
+		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, color_usage | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
+		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_HISTORY, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_CAN_COPY_TO_BIT, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
+		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_PARAMS, RD::DATA_FORMAT_R16G16B16A16_SFLOAT, color_usage, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
+		p_render_buffers->create_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_MOTION, RD::DATA_FORMAT_R16G16_SFLOAT, color_usage, RD::TEXTURE_SAMPLES_1, target_size, 1, 1);
+		history_valid = false;
 	}
 	RID intermediate = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_INTERMEDIATE);
+	RID current = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_CURRENT);
 	RID color = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_COLOR);
+	RID history = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_HISTORY);
 	RID params_texture = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_PARAMS);
+	RID motion = p_render_buffers->get_texture(RB_SCOPE_PLANAR_REFLECTIONS, RB_PLANAR_MOTION);
 
 	// Parameters, reflectors in view space.
 	Params params = {};
+	// With the same sub-pixel jitter as the depth buffer (TAA, FSR2, DLSS), or the
+	// reflection would move by a fraction of a pixel every frame.
 	Projection correction;
 	correction.set_depth_correction(true);
+	correction.add_jitter_offset(p_jitter);
 	Projection projection = correction * p_projection;
 	MaterialStorage::store_camera(projection, params.projection);
 	MaterialStorage::store_camera(projection.inverse(), params.inv_projection);
@@ -158,6 +171,7 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 	params.reflector_count = p_count;
 	params.max_color_lod = MAX(float(RD::get_singleton()->texture_get_format(p_last_frame).mipmaps) - 1.0f, 0.0f);
 	params.orthogonal = p_projection.is_orthogonal() ? 1 : 0;
+	params.history_valid = history_valid ? 1 : 0;
 
 	Transform3D to_view = p_cam_transform.affine_inverse();
 	for (int i = 0; i < p_count; i++) {
@@ -208,20 +222,33 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 	RD::Uniform u_intermediate(RD::UNIFORM_TYPE_IMAGE, 2, intermediate);
 	RD::Uniform u_normal_roughness(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, Vector<RID>({ nearest, p_normal_roughness }));
 	RD::Uniform u_last_frame(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 4, Vector<RID>({ linear_mips, p_last_frame }));
-	RD::Uniform u_color(RD::UNIFORM_TYPE_IMAGE, 5, color);
+	RD::Uniform u_current_out(RD::UNIFORM_TYPE_IMAGE, 5, current);
 	RD::Uniform u_params_out(RD::UNIFORM_TYPE_IMAGE, 6, params_texture);
+	RD::Uniform u_motion_out(RD::UNIFORM_TYPE_IMAGE, 7, motion);
 
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
-	for (int mode = 0; mode < MODE_MAX; mode++) {
+	for (int mode = MODE_PROJECT; mode <= MODE_RESOLVE; mode++) {
 		RID shader_rid = shader.version_get_shader(shader_version, mode);
 		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[mode]);
-		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader_rid, 0, u_params, u_depth, u_intermediate, u_normal_roughness, u_last_frame, u_color, u_params_out), 0);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader_rid, 0, u_params, u_depth, u_intermediate, u_normal_roughness, u_last_frame, u_current_out, u_params_out, u_motion_out), 0);
 		RD::get_singleton()->compute_list_dispatch_threads(compute_list, target_size.x, target_size.y, 1);
-		if (mode == MODE_PROJECT) {
-			RD::get_singleton()->compute_list_add_barrier(compute_list);
-		}
+		RD::get_singleton()->compute_list_add_barrier(compute_list);
+	}
+
+	// Temporal accumulation into the output, which is then kept as next frame's history.
+	{
+		RID linear = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
+		RID shader_rid = shader.version_get_shader(shader_version, MODE_TEMPORAL);
+		RD::Uniform u_current(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 1, Vector<RID>({ nearest, current }));
+		RD::Uniform u_motion(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 2, Vector<RID>({ nearest, motion }));
+		RD::Uniform u_history(RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, 3, Vector<RID>({ linear, history }));
+		RD::Uniform u_color_out(RD::UNIFORM_TYPE_IMAGE, 4, color);
+		RD::get_singleton()->compute_list_bind_compute_pipeline(compute_list, pipelines[MODE_TEMPORAL]);
+		RD::get_singleton()->compute_list_bind_uniform_set(compute_list, uniform_set_cache->get_cache(shader_rid, 0, u_params, u_current, u_motion, u_history, u_color_out), 0);
+		RD::get_singleton()->compute_list_dispatch_threads(compute_list, target_size.x, target_size.y, 1);
 	}
 	RD::get_singleton()->compute_list_end();
+	RD::get_singleton()->texture_copy(color, history, Vector3(), Vector3(), Vector3(target_size.x, target_size.y, 1), 0, 0, 0, 0);
 
 	RD::get_singleton()->draw_command_end_label();
 }

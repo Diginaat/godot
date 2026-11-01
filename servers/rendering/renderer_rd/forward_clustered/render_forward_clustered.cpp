@@ -1636,8 +1636,12 @@ void RenderForwardClustered::_process_planar_reflections(RenderDataRD *p_render_
 	const RenderSceneDataRD *scene_data = p_render_data->scene_data;
 	Projection correction;
 	correction.set_depth_correction(true);
-	Projection current = correction * scene_data->cam_projection;
-	Projection previous = correction * scene_data->prev_cam_projection;
+	Projection current_correction = correction;
+	current_correction.add_jitter_offset(scene_data->taa_jitter);
+	Projection previous_correction = correction;
+	previous_correction.add_jitter_offset(scene_data->prev_taa_jitter);
+	Projection current = current_correction * scene_data->cam_projection;
+	Projection previous = previous_correction * scene_data->prev_cam_projection;
 	Projection reprojection = previous * Projection(scene_data->prev_cam_transform.affine_inverse()) * Projection(scene_data->cam_transform) * current.inverse();
 
 	RID normal_roughness = p_normal_slices[0];
@@ -1645,7 +1649,7 @@ void RenderForwardClustered::_process_planar_reflections(RenderDataRD *p_render_
 		normal_roughness = RendererRD::TextureStorage::get_singleton()->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
 	}
 	bool half_size = GLOBAL_GET_CACHED(int, "rendering/global_illumination/reflections/planar_resolution") == 1;
-	planar_reflections_effect->process(rb, rb->get_depth_texture(0), normal_roughness, rb->get_texture(RB_SCOPE_SSLF, RB_LAST_FRAME), scene_data->cam_projection, scene_data->cam_transform, reprojection, planar_reflection_selection, planar_reflection_count, half_size);
+	planar_reflections_effect->process(rb, rb->get_depth_texture(0), normal_roughness, rb->get_texture(RB_SCOPE_SSLF, RB_LAST_FRAME), scene_data->cam_projection, scene_data->taa_jitter, scene_data->cam_transform, reprojection, planar_reflection_selection, planar_reflection_count, half_size);
 }
 
 void RenderForwardClustered::_copy_framebuffer_to_ss_effects(Ref<RenderSceneBuffersRD> p_render_buffers, bool p_use_ssil, bool p_use_ssr) {
