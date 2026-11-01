@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-01 (reflection resolution, mirrored-camera research)
+
+* **Added**: research/mirrored-camera-reflections.md (step 8 sources).
+* **Updated**: REFLECTIONS.md: DDGIVolume `auto_reflection_resolution`.
+
 ## 2026-11-01 (mirror probes)
 
 * **Updated**: REFLECTIONS.md: DDGIVolume `auto_mirror_probes` (a probe in

@@ -963,6 +963,7 @@ public:
 	FUNC2(scenario_set_camera_attributes, RID, RID)
 	FUNC2(scenario_set_fallback_environment, RID, RID)
 	FUNC2(scenario_set_compositor, RID, RID)
+	FUNC3(scenario_set_reflection_atlas_size, RID, int, int)
 
 	/* INSTANCING API */
 	FUNCRIDSPLIT(instance)

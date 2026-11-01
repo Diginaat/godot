@@ -169,6 +169,22 @@ void DDGIVolume::_update_auto_reflections() {
 	}
 }
 
+void DDGIVolume::_apply_reflection_resolution() {
+	// Godot's probes all share their world's atlas: the resolution is per world.
+	RenderingServer *rs = RenderingServer::get_singleton();
+	RID scenario = is_inside_world() ? get_world_3d()->get_scenario() : RID();
+	int count = GLOBAL_GET("rendering/reflections/reflection_atlas/reflection_count");
+	if (resolution_scenario.is_valid() && (resolution_scenario != scenario || auto_reflection_resolution == 0)) {
+		// Give the world back the project's resolution.
+		rs->scenario_set_reflection_atlas_size(resolution_scenario, GLOBAL_GET("rendering/reflections/reflection_atlas/reflection_size"), count);
+		resolution_scenario = RID();
+	}
+	if (scenario.is_valid() && auto_reflection_resolution > 0) {
+		rs->scenario_set_reflection_atlas_size(scenario, auto_reflection_resolution, count); // No-op when unchanged; else every probe is recaptured.
+		resolution_scenario = scenario;
+	}
+}
+
 void DDGIVolume::_on_tree_node_changed(Node *p_node) {
 	// Only what can change the automatic reflections; other nodes come and go often.
 	if (Object::cast_to<GeometryInstance3D>(p_node) || Object::cast_to<PlanarReflector3D>(p_node) || Object::cast_to<ReflectionProbe>(p_node)) {
@@ -199,6 +215,7 @@ void DDGIVolume::_notification(int p_what) {
 		case NOTIFICATION_ENTER_WORLD: {
 			_apply_to_environment();
 			_update_auto_reflections();
+			_apply_reflection_resolution();
 		} break;
 		case NOTIFICATION_TRANSFORM_CHANGED: {
 			_apply_to_environment();
@@ -207,6 +224,10 @@ void DDGIVolume::_notification(int p_what) {
 		case NOTIFICATION_EXIT_WORLD: {
 			set_process_internal(false);
 			auto_reflector.clear();
+			if (resolution_scenario.is_valid()) {
+				RenderingServer::get_singleton()->scenario_set_reflection_atlas_size(resolution_scenario, GLOBAL_GET("rendering/reflections/reflection_atlas/reflection_size"), GLOBAL_GET("rendering/reflections/reflection_atlas/reflection_count"));
+				resolution_scenario = RID();
+			}
 			if (applied_environment.is_valid()) {
 				// The node is the editor's DDGI switch: without it, DDGI is off.
 				applied_environment->set_ddgi_enabled(false);
@@ -287,6 +308,15 @@ void DDGIVolume::set_auto_mirror_probes(bool p_enabled) {
 
 bool DDGIVolume::is_auto_mirror_probes_enabled() const {
 	return auto_mirror_probes;
+}
+
+void DDGIVolume::set_auto_reflection_resolution(int p_resolution) {
+	auto_reflection_resolution = p_resolution > 0 ? CLAMP(p_resolution, 32, 4096) : 0;
+	_apply_reflection_resolution();
+}
+
+int DDGIVolume::get_auto_reflection_resolution() const {
+	return auto_reflection_resolution;
 }
 
 Array DDGIVolume::get_auto_planar_reflectors() const {
@@ -735,6 +765,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_planar_min_area"), &DDGIVolume::get_auto_planar_min_area);
 	ClassDB::bind_method(D_METHOD("set_auto_mirror_probes", "enabled"), &DDGIVolume::set_auto_mirror_probes);
 	ClassDB::bind_method(D_METHOD("is_auto_mirror_probes_enabled"), &DDGIVolume::is_auto_mirror_probes_enabled);
+	ClassDB::bind_method(D_METHOD("set_auto_reflection_resolution", "resolution"), &DDGIVolume::set_auto_reflection_resolution);
+	ClassDB::bind_method(D_METHOD("get_auto_reflection_resolution"), &DDGIVolume::get_auto_reflection_resolution);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_reflector_count"), &DDGIVolume::get_auto_planar_reflector_count);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_reflectors"), &DDGIVolume::get_auto_planar_reflectors);
 
@@ -758,6 +790,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_GROUP("Reflections", "auto_");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflections"), "set_auto_reflections", "is_auto_reflections_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflection_probe"), "set_auto_reflection_probe", "is_auto_reflection_probe_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "auto_reflection_resolution", PROPERTY_HINT_ENUM, "Project Setting:0,128:128,256:256,512:512,1024:1024,2048:2048"), "set_auto_reflection_resolution", "get_auto_reflection_resolution");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflection_probe_realtime"), "set_auto_reflection_probe_realtime", "is_auto_reflection_probe_realtime_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_planar_reflections"), "set_auto_planar_reflections", "is_auto_planar_reflections_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_max_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_planar_max_roughness", "get_auto_planar_max_roughness");

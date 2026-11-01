@@ -56,6 +56,9 @@
 		<member name="auto_reflection_probe_realtime" type="bool" setter="set_auto_reflection_probe_realtime" getter="is_auto_reflection_probe_realtime_enabled" default="false">
 			If [code]true[/code], the automatic reflection probe is recaptured continuously ([constant ReflectionProbe.UPDATE_ALWAYS]) within [member ProjectSettings.rendering/global_illumination/reflections/probe_update_faces_per_frame]: moving objects, doors and lights show up in it. With the default budget (2 faces per frame) it refreshes about every third frame, for about 0.8 ms of GPU time per frame at 1080p on an RTX 3060. If [code]false[/code], it is captured once (when it appears or the volume moves), and DDGI normalization makes it follow light changes.
 		</member>
+		<member name="auto_reflection_resolution" type="int" setter="set_auto_reflection_resolution" getter="get_auto_reflection_resolution" default="0">
+			Resolution of the reflection probes (in pixels per side) in this volume's world: the automatic probes, the mirror probes and every [ReflectionProbe] of the scene, since they all share one atlas. Higher values give sharper mirrors and glossy reflections, at more video memory per probe in use (about 3 MB at 256, 11 MB at 512, 45 MB at 1024, 180 MB at 2048) and slower captures. [code]0[/code] keeps [member ProjectSettings.rendering/reflections/reflection_atlas/reflection_size]. Changing it recaptures every probe. Removing the volume gives the world the project setting back.
+		</member>
 		<member name="auto_reflections" type="bool" setter="set_auto_reflections" getter="is_auto_reflections_enabled" default="true">
 			If [code]true[/code], the volume creates reflections automatically: a reflection probe and planar reflectors (see the other [code]auto_*[/code] properties). Nothing is added to the scene.
 		</member>

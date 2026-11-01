@@ -31,6 +31,7 @@ ideas; check the license before taking any code.
 
 * [Pixel-projected reflections](/research/pixel-projected-reflections.md) - planar reflections by scattering with an atomic min on packed offsets; used for PlanarReflector3D
 * [Cubemap normalization](/research/cubemap-normalization.md) - static probes scaled by irradiance at the pixel over the probe's (Black Ops II, Frostbite, AC4, Unity APV); used with DDGI
+* [Mirrored-camera reflections](/research/mirrored-camera-reflections.md) - real mirrors by a second render from the reflected camera: plane clipping, flipped culling, screen percentage, roughness prefiltering with contact hardening (read 2026-11-01, step 8)
 
 # What they mean for DDGI
 

@@ -103,7 +103,10 @@ private:
 	float auto_planar_max_roughness = 0.3f;
 	float auto_planar_min_area = 2.0f;
 	bool auto_mirror_probes = true;
+	int auto_reflection_resolution = 0; // 0: the project setting.
+	RID resolution_scenario; // The world whose probe resolution this volume set.
 	DDGIAutoReflections auto_reflector;
+	void _apply_reflection_resolution();
 	void _update_auto_reflections();
 	void _on_tree_node_changed(Node *p_node);
 
@@ -201,6 +204,9 @@ public:
 
 	void set_auto_mirror_probes(bool p_enabled);
 	bool is_auto_mirror_probes_enabled() const;
+
+	void set_auto_reflection_resolution(int p_resolution);
+	int get_auto_reflection_resolution() const;
 
 	int get_auto_planar_reflector_count() const;
 	Array get_auto_planar_reflectors() const;
