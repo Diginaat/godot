@@ -399,6 +399,11 @@ reliable): all reflections 1.6 ms of 4.66 ms. Mirror pass 0.69 ms
 another reflector is in front about 0.12 ms, the neighbors' spots 0.16 ms,
 atomics 0.05 ms, the footprint fill about 0.
 
+Mirror pass parts (same method, base 4.62 ms): its DDGI apply 0.10 ms,
+its shadows 0.06 ms, `planar_mirror_scale` 0.5 to 0.35 saves 0.11 ms;
+the rest (about 0.5 ms) is the fixed cost of a second scene render
+(culling, depth pre-pass, opaque pass).
+
 Done and rejected:
 - The project pass tests only the reflectors whose screen areas overlap
   (convex clip of their screen quads on the CPU, a bit mask per
