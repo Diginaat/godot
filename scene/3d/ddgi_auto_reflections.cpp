@@ -262,7 +262,10 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 		for (int s = 0; s < mesh->get_surface_count(); s++) {
 			Ref<Material> material = mi->get_active_material(s);
 			float roughness = _material_roughness(material);
-			if (forced == 0 && (roughness < 0.0 || roughness > p_settings.planar_max_roughness)) {
+			// Floors and upright surfaces have their own limits (checked per face
+			// below, once the face's direction is known); skip the surface early
+			// when it is above both.
+			if (forced == 0 && (roughness < 0.0 || roughness > MAX(p_settings.planar_max_roughness, p_settings.planar_mirror_max_roughness))) {
 				continue;
 			}
 			const LocalVector<Cluster> &clusters = _get_clusters(mesh, s);
@@ -288,6 +291,9 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 				Vector3 normal = normal_basis.xform(c.normal).normalized();
 				if (forced == 0 && normal.y < -0.7) {
 					continue; // Undersides (of floors and slabs): almost never seen, never worth a reflector.
+				}
+				if (forced == 0 && roughness > (normal.y >= 0.7 ? p_settings.planar_max_roughness : p_settings.planar_mirror_max_roughness)) {
+					continue; // Floors may be rough (wet when it rains); mirrors and walls only count when nearly perfect.
 				}
 				if (forced == 0 && normal.y < 0.7 && _material_is_transparent(material)) {
 					continue; // Upright glass: its faint reflection comes from the probes; a planar one reads as an overlay.

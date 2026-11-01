@@ -42,7 +42,10 @@
 			If [code]true[/code], each large upright planar reflector (a mirror, automatic or a [PlanarReflector3D]) gets a small box-projected reflection probe in front of it, captured from the mirror (at most 8, the largest; a thin two-sided mirror counts twice). A mirror seen from close by reflects what is behind the camera, which is off screen, so its planar reflection falls back to the probes there; this probe makes that fallback sharp and in the right place for static surroundings. Skipped for mirrors inside a [ReflectionProbe] of the scene. Follows [member auto_reflection_probe_realtime]. Its sharpness is limited by [member ProjectSettings.rendering/reflections/reflection_atlas/reflection_size].
 		</member>
 		<member name="auto_planar_max_roughness" type="float" setter="set_auto_planar_max_roughness" getter="get_auto_planar_max_roughness" default="0.3">
-			Surfaces whose material roughness is above this get no automatic planar reflector. Raise it (up to 1) for floors that become glossy at runtime, such as wet floors from a shader.
+			Floors, water and other surfaces facing up (within 45 degrees) whose material roughness is above this get no automatic planar reflector. Raise it (up to 1) for floors that become glossy at runtime, such as wet floors from a shader. Upright surfaces use [member auto_planar_mirror_max_roughness].
+		</member>
+		<member name="auto_planar_mirror_max_roughness" type="float" setter="set_auto_planar_mirror_max_roughness" getter="get_auto_planar_mirror_max_roughness" default="0.02">
+			Upright surfaces (mirrors, walls) whose material roughness is above this get no automatic planar reflector. Low by default, so only real mirrors get one (and with it possibly the mirror pass): a glossy wall reflects through probes instead. Floors use [member auto_planar_max_roughness].
 		</member>
 		<member name="auto_planar_min_area" type="float" setter="set_auto_planar_min_area" getter="get_auto_planar_min_area" default="2.0">
 			Flat surfaces smaller than this (in square meters) get no automatic planar reflector.

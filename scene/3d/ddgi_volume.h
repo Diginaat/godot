@@ -101,6 +101,7 @@ private:
 	bool auto_reflection_probe_realtime = false;
 	bool auto_planar_reflections = true;
 	float auto_planar_max_roughness = 0.3f;
+	float auto_planar_mirror_max_roughness = 0.02f;
 	float auto_planar_min_area = 2.0f;
 	bool auto_mirror_probes = true;
 	int auto_reflection_resolution = 0; // 0: the project setting.
@@ -198,6 +199,9 @@ public:
 
 	void set_auto_planar_max_roughness(float p_roughness);
 	float get_auto_planar_max_roughness() const;
+
+	void set_auto_planar_mirror_max_roughness(float p_roughness);
+	float get_auto_planar_mirror_max_roughness() const;
 
 	void set_auto_planar_min_area(float p_area);
 	float get_auto_planar_min_area() const;

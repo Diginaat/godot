@@ -208,6 +208,7 @@ void DDGIVolume::_notification(int p_what) {
 			settings.probe_realtime = auto_reflection_probe_realtime;
 			settings.planar = auto_planar_reflections && RenderingServer::get_singleton()->get_current_rendering_method() == "forward_plus";
 			settings.planar_max_roughness = auto_planar_max_roughness;
+			settings.planar_mirror_max_roughness = auto_planar_mirror_max_roughness;
 			settings.planar_min_area = auto_planar_min_area;
 			settings.mirror_probes = auto_mirror_probes;
 			auto_reflector.update(this, settings, size, infinite_world, get_process_delta_time());
@@ -290,6 +291,15 @@ void DDGIVolume::set_auto_planar_max_roughness(float p_roughness) {
 
 float DDGIVolume::get_auto_planar_max_roughness() const {
 	return auto_planar_max_roughness;
+}
+
+void DDGIVolume::set_auto_planar_mirror_max_roughness(float p_roughness) {
+	auto_planar_mirror_max_roughness = CLAMP(p_roughness, 0.0f, 1.0f);
+	auto_reflector.mark_dirty();
+}
+
+float DDGIVolume::get_auto_planar_mirror_max_roughness() const {
+	return auto_planar_mirror_max_roughness;
 }
 
 void DDGIVolume::set_auto_planar_min_area(float p_area) {
@@ -761,6 +771,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_auto_planar_reflections_enabled"), &DDGIVolume::is_auto_planar_reflections_enabled);
 	ClassDB::bind_method(D_METHOD("set_auto_planar_max_roughness", "roughness"), &DDGIVolume::set_auto_planar_max_roughness);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_max_roughness"), &DDGIVolume::get_auto_planar_max_roughness);
+	ClassDB::bind_method(D_METHOD("set_auto_planar_mirror_max_roughness", "roughness"), &DDGIVolume::set_auto_planar_mirror_max_roughness);
+	ClassDB::bind_method(D_METHOD("get_auto_planar_mirror_max_roughness"), &DDGIVolume::get_auto_planar_mirror_max_roughness);
 	ClassDB::bind_method(D_METHOD("set_auto_planar_min_area", "area"), &DDGIVolume::set_auto_planar_min_area);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_min_area"), &DDGIVolume::get_auto_planar_min_area);
 	ClassDB::bind_method(D_METHOD("set_auto_mirror_probes", "enabled"), &DDGIVolume::set_auto_mirror_probes);
@@ -794,6 +806,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_reflection_probe_realtime"), "set_auto_reflection_probe_realtime", "is_auto_reflection_probe_realtime_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_planar_reflections"), "set_auto_planar_reflections", "is_auto_planar_reflections_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_max_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_planar_max_roughness", "get_auto_planar_max_roughness");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_mirror_max_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_planar_mirror_max_roughness", "get_auto_planar_mirror_max_roughness");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_min_area", PROPERTY_HINT_RANGE, U"0.1,100,0.1,or_greater,suffix:m\u00B2"), "set_auto_planar_min_area", "get_auto_planar_min_area");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_mirror_probes"), "set_auto_mirror_probes", "is_auto_mirror_probes_enabled");
 	ADD_GROUP("Baking", "");
