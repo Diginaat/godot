@@ -1,5 +1,9 @@
 # Update log
 
+## 2026-11-01 (glass research)
+
+* **Added**: research/cheap-glass-shading.md.
+
 ## 2026-11-01 (mirror pass cost)
 
 * **Updated**: REFLECTIONS.md findings and limitations: mirror pass cropped

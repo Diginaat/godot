@@ -33,6 +33,10 @@ ideas; check the license before taking any code.
 * [Cubemap normalization](/research/cubemap-normalization.md) - static probes scaled by irradiance at the pixel over the probe's (Black Ops II, Frostbite, AC4, Unity APV); used with DDGI
 * [Mirrored-camera reflections](/research/mirrored-camera-reflections.md) - real mirrors by a second render from the reflected camera: plane clipping, flipped culling, screen percentage, roughness prefiltering with contact hardening (read 2026-11-01, step 8)
 
+# Glass (read 2026-11-01)
+
+* [Cheap good-looking glass](/research/cheap-glass-shading.md) - blur-pyramid frosted glass (Doom), thin-walled panes, parallel-slab refraction (Cyberpunk), Beer-Lambert tint, depth test against foreground leaks
+
 # What they mean for DDGI
 
 * [DDGI improvement proposals, ranked](/ddgi/improvements/index.md)
