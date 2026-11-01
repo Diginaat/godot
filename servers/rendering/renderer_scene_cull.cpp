@@ -3878,6 +3878,11 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	/* STEP 2 - CULL */
 
 	Vector<Plane> planes = p_camera_data->main_projection.get_projection_planes(p_camera_data->main_transform);
+	if (p_camera_data->mirror_pass) {
+		// What lies behind the mirror is clipped in the shaders anyway: don't
+		// draw it at all (the frustum's planes point outward).
+		planes.push_back(-p_camera_data->clip_plane);
+	}
 	cull.frustum = Frustum(planes);
 
 	// RT: build wider AABB cull volume for TLAS and light gathering.

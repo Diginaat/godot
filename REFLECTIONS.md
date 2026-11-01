@@ -408,6 +408,16 @@ Done and rejected:
 - The project pass tests only the reflectors whose screen areas overlap
   (convex clip of their screen quads on the CPU, a bit mask per
   reflector): 4.66 to 4.62 ms; images within run-to-run noise.
+- The resolve and temporal passes skip 8 x 8 work groups outside every
+  reflector's screen rectangle (CPU bounds with a 2% margin; tile
+  classification as in the PPR talk, without indirect dispatch): planar
+  0.83 to 0.77 ms; images within noise.
+- The mirror pass culls what lies behind the mirror plane on the CPU (it was
+  only clipped in the shaders): lossless; no gain measurable in the test
+  views, which have little behind their mirrors.
+- Rejected: the mirror pass reusing the view's positional shadows (as HDRP
+  does): Godot already renders a moving light's shadow once per frame for
+  both passes (shared atlas, version check); it only moved the render.
 - Rejected: sharing the neighbors' spots through group shared memory (one
   computation per pixel instead of three): slower, 4.66 to 4.82 ms (a
   barrier per reflector).
