@@ -308,6 +308,23 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 		int counts[MAX_REFLECTORS];
 		for (int i = 0; i < p_count; i++) {
 			counts[i] = _planar_screen_polygon(view_projection, *p_reflectors[i], polygons[i]);
+			// Bounds in the shaders' screen UV (y flipped by the depth correction),
+			// grown by 2% of the screen (jitter, the temporal pass's 3 x 3 neighborhood).
+			Vector2 lo(1e20, 1e20);
+			Vector2 hi(-1e20, -1e20);
+			for (int k = 0; k < counts[i]; k++) {
+				Vector2 uv(polygons[i][k].x * 0.5 + 0.5, -polygons[i][k].y * 0.5 + 0.5);
+				lo = lo.min(uv);
+				hi = hi.max(uv);
+			}
+			if (counts[i] == 0) {
+				lo = Vector2(2, 2); // Off screen: an empty rectangle.
+				hi = Vector2(-2, -2);
+			}
+			params.reflector_rects[i][0] = lo.x - 0.02;
+			params.reflector_rects[i][1] = lo.y - 0.02;
+			params.reflector_rects[i][2] = hi.x + 0.02;
+			params.reflector_rects[i][3] = hi.y + 0.02;
 		}
 		for (int i = 0; i < p_count; i++) {
 			for (int j = i + 1; j < p_count; j++) {

@@ -55,8 +55,23 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	uint pad1;
 	vec4 mirror_rect; // Screen UV rectangle the mirror pass covers (position, size).
 	Reflector reflectors[MAX_REFLECTORS];
+	vec4 reflector_rects[MAX_REFLECTORS]; // Screen UV bounds of each reflector, with a margin (min xy, max xy).
 }
 params;
+
+// Whether this work group's 8 x 8 pixels can show a reflector: outside every
+// reflector's screen bounds the resolve and temporal passes only write zeros.
+bool group_has_reflector() {
+	vec2 group_min = vec2(gl_WorkGroupID.xy * 8u) / vec2(params.target_size);
+	vec2 group_max = vec2(gl_WorkGroupID.xy * 8u + 8u) / vec2(params.target_size);
+	for (uint i = 0; i < params.reflector_count; i++) {
+		vec4 rect = params.reflector_rects[i];
+		if (all(lessThan(group_min, rect.zw)) && all(greaterThan(group_max, rect.xy))) {
+			return true;
+		}
+	}
+	return false;
+}
 
 #if defined(MODE_PROJECT) || defined(MODE_RESOLVE)
 layout(set = 0, binding = 1) uniform sampler2D source_depth;
@@ -304,6 +319,11 @@ void main() {
 	vec2 target_px = vec2(target_pos) + 0.5;
 	vec2 uv = target_px / vec2(params.target_size);
 	imageStore(output_motion, target_pos, vec4(0.0));
+	if (!group_has_reflector()) {
+		imageStore(output_color, target_pos, vec4(0.0));
+		imageStore(output_params, target_pos, vec4(0.0));
+		return;
+	}
 
 	// Which reflector this pixel shows: the nearest rectangle the camera ray meets in
 	// front of the depth buffer.
@@ -616,6 +636,12 @@ void main() {
 void main() {
 	ivec2 target_pos = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(target_pos, params.target_size))) {
+		return;
+	}
+	if (!group_has_reflector()) {
+		// The 3 x 3 neighborhood is empty too (the bounds have a margin): the
+		// result would be 0.
+		imageStore(output_color, target_pos, vec4(0.0));
 		return;
 	}
 	vec4 current = texelFetch(current_color, target_pos, 0);

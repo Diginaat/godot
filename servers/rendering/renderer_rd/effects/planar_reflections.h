@@ -99,6 +99,9 @@ private:
 		uint32_t pad[2];
 		float mirror_rect[4];
 		ReflectorData reflectors[MAX_REFLECTORS];
+		// Screen UV rectangle (min x, min y, max x, max y) of each reflector,
+		// with a margin: work groups outside all of them have nothing to do.
+		float reflector_rects[MAX_REFLECTORS][4];
 	};
 
 	PlanarReflectionsShaderRD shader;
