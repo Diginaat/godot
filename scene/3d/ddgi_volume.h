@@ -102,6 +102,7 @@ private:
 	bool auto_planar_reflections = true;
 	float auto_planar_max_roughness = 0.3f;
 	float auto_planar_min_area = 2.0f;
+	bool auto_mirror_probes = true;
 	DDGIAutoReflections auto_reflector;
 	void _update_auto_reflections();
 	void _on_tree_node_changed(Node *p_node);
@@ -197,6 +198,9 @@ public:
 
 	void set_auto_planar_min_area(float p_area);
 	float get_auto_planar_min_area() const;
+
+	void set_auto_mirror_probes(bool p_enabled);
+	bool is_auto_mirror_probes_enabled() const;
 
 	int get_auto_planar_reflector_count() const;
 	Array get_auto_planar_reflectors() const;

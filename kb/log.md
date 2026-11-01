@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-01 (mirror probes)
+
+* **Updated**: REFLECTIONS.md: DDGIVolume `auto_mirror_probes` (a probe in
+  front of each mirror, for what close mirrors reflect off screen),
+  findings log; reflections/planar-open-issues.md.
+
 ## 2026-11-01 (planar quality, paused)
 
 * **Added**: reflections/planar-open-issues.md; REFLECTIONS.md "Open issues"

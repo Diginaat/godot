@@ -200,6 +200,7 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 	LocalVector<Reflector> candidates;
 	LocalVector<ObjectID> candidate_sources;
 	LocalVector<Reflector> manual;
+	LocalVector<AABB> manual_probes;
 	HashMap<ObjectID, Transform3D> new_sources;
 	r_manual_probe = false;
 
@@ -224,6 +225,7 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 			if (!p_bounded || box.intersects(p_bounds.grow(0.5))) {
 				r_manual_probe = true;
 			}
+			manual_probes.push_back(box);
 			continue;
 		}
 		if (PlanarReflector3D *pr = Object::cast_to<PlanarReflector3D>(node)) {
@@ -376,6 +378,12 @@ void DDGIAutoReflections::_scan(Node3D *p_volume, Node *p_root, const Settings &
 	}
 	_apply_reflectors(result);
 
+	LocalVector<Reflector> all(result);
+	for (const Reflector &m : manual) {
+		all.push_back(m);
+	}
+	_apply_mirror_probes(all, manual_probes, p_settings, p_bounds, p_bounded);
+
 	sources.clear();
 	for (const KeyValue<ObjectID, Transform3D> &kv : new_sources) {
 		Node3D *src = ObjectDB::get_instance<Node3D>(kv.key);
@@ -411,6 +419,142 @@ void DDGIAutoReflections::_apply_reflectors(const LocalVector<Reflector> &p_refl
 		rs->planar_reflection_set_normal_distortion(reflector_rids[i], p_reflectors[i].distortion);
 	}
 	reflectors = p_reflectors;
+}
+
+// Distance from p (inside the box) along a unit direction to the box's face.
+static float _exit_distance(const AABB &p_box, const Vector3 &p_point, const Vector3 &p_dir) {
+	float t = 1e20;
+	for (int a = 0; a < 3; a++) {
+		if (p_dir[a] > 1e-4) {
+			t = MIN(t, (p_box.position[a] + p_box.size[a] - p_point[a]) / p_dir[a]);
+		} else if (p_dir[a] < -1e-4) {
+			t = MIN(t, (p_box.position[a] - p_point[a]) / p_dir[a]);
+		}
+	}
+	return MAX(t, 0.0f);
+}
+
+void DDGIAutoReflections::_apply_mirror_probes(const LocalVector<Reflector> &p_reflectors, const LocalVector<AABB> &p_manual_probes, const Settings &p_settings, const AABB &p_bounds, bool p_bounded) {
+	// Behind the mirror (the box must hold the mirror's own pixels), and how far
+	// the box reaches without walls to put its faces on (infinite worlds).
+	static constexpr float BEHIND = 0.25;
+	static constexpr float OPEN_DEPTH = 16.0;
+	static constexpr float MIN_DEPTH = 2.0;
+
+	LocalVector<MirrorProbe> wanted;
+	if (p_settings.mirror_probes) {
+		LocalVector<const Reflector *> mirrors;
+		for (const Reflector &r : p_reflectors) {
+			if (Math::abs(r.transform.basis.get_column(1).y) >= 0.7 || r.size.x * r.size.y < p_settings.planar_min_area) {
+				continue; // Floors and water see mostly what is on screen.
+			}
+			bool has_own = false;
+			for (const AABB &box : p_manual_probes) {
+				if (box.has_point(r.transform.origin + r.transform.basis.get_column(1) * 0.5)) {
+					has_own = true;
+					break;
+				}
+			}
+			if (!has_own) {
+				mirrors.push_back(&r);
+			}
+		}
+		struct ByArea {
+			bool operator()(const Reflector *a, const Reflector *b) const { return a->size.x * a->size.y > b->size.x * b->size.y; }
+		};
+		mirrors.sort_custom<ByArea>();
+
+		for (uint32_t i = 0; i < mirrors.size() && (int)i < MAX_MIRROR_PROBES; i++) {
+			const Reflector &r = *mirrors[i];
+			const Basis &b = r.transform.basis; // X, Z in the mirror, Y its normal.
+			Vector3 center = r.transform.origin;
+			// The box's faces where the room's walls are: box projection is exact
+			// for what lies on them.
+			float depth = OPEN_DEPTH;
+			float side[4] = { OPEN_DEPTH * 0.5f, OPEN_DEPTH * 0.5f, OPEN_DEPTH * 0.5f, OPEN_DEPTH * 0.5f };
+			if (p_bounded) {
+				AABB room = p_bounds.grow(0.5);
+				Vector3 front = center + b.get_column(1) * 0.05;
+				depth = _exit_distance(room, front, b.get_column(1));
+				side[0] = _exit_distance(room, front, b.get_column(0)) - r.size.x * 0.5;
+				side[1] = _exit_distance(room, front, -b.get_column(0)) - r.size.x * 0.5;
+				side[2] = _exit_distance(room, front, b.get_column(2)) - r.size.y * 0.5;
+				side[3] = _exit_distance(room, front, -b.get_column(2)) - r.size.y * 0.5;
+			}
+			depth = CLAMP(depth, MIN_DEPTH, OPEN_DEPTH * 4.0f);
+			for (float &s : side) {
+				s = CLAMP(s, 0.25f, OPEN_DEPTH * 2.0f);
+			}
+			// Box in the mirror's frame: x from -(half + side[1]) to half + side[0], etc.
+			float x0 = -(r.size.x * 0.5f + side[1]);
+			float x1 = r.size.x * 0.5f + side[0];
+			float z0 = -(r.size.y * 0.5f + side[3]);
+			float z1 = r.size.y * 0.5f + side[2];
+			// A thin two-sided mirror (a box mesh) has a reflector on each side: each
+			// probe's box must stop before the other side's glass. Godot's probes fade
+			// out over blend_distance at every face, so it is limited the same way.
+			float behind = BEHIND;
+			for (const Reflector &o : p_reflectors) {
+				float gap = b.get_column(1).dot(r.transform.origin - o.transform.origin);
+				if (&o != &r && o.transform.basis.get_column(1).dot(b.get_column(1)) < -0.999 && gap > 0.0 && gap < 2.0 * BEHIND && r.transform.origin.distance_to(o.transform.origin) < r.size.length()) {
+					behind = MIN(behind, gap * 0.45f);
+				}
+			}
+			Vector3 local_center((x0 + x1) * 0.5f, (depth - behind) * 0.5f, (z0 + z1) * 0.5f);
+			MirrorProbe mp;
+			mp.transform = Transform3D(b, center + b.xform(local_center));
+			mp.size = Vector3(x1 - x0, depth + behind, z1 - z0);
+			// Captured from just in front of the mirror's center: exact there, box
+			// projected elsewhere.
+			mp.origin_offset = Vector3(0.0, 0.1, 0.0) - local_center;
+			mp.blend_distance = behind;
+			mp.realtime = p_settings.probe_realtime;
+			wanted.push_back(mp);
+		}
+	}
+
+	RenderingServer *rs = RenderingServer::get_singleton();
+	while (mirror_probes.size() > wanted.size()) {
+		MirrorProbe &mp = mirror_probes[mirror_probes.size() - 1];
+		rs->free_rid(mp.instance);
+		rs->free_rid(mp.probe);
+		mirror_probes.resize(mirror_probes.size() - 1);
+	}
+	for (uint32_t i = 0; i < wanted.size(); i++) {
+		const MirrorProbe &w = wanted[i];
+		if (i == mirror_probes.size()) {
+			MirrorProbe mp;
+			mp.probe = rs->reflection_probe_create();
+			rs->reflection_probe_set_ambient_mode(mp.probe, RSE::REFLECTION_PROBE_AMBIENT_DISABLED); // DDGI gives the diffuse light.
+			rs->reflection_probe_set_enable_shadows(mp.probe, true);
+			rs->reflection_probe_set_enable_box_projection(mp.probe, true);
+			rs->reflection_probe_set_update_mode(mp.probe, w.realtime ? RSE::REFLECTION_PROBE_UPDATE_ALWAYS : RSE::REFLECTION_PROBE_UPDATE_ONCE);
+			mp.realtime = w.realtime;
+			mp.instance = rs->instance_create();
+			rs->instance_set_base(mp.instance, mp.probe);
+			rs->instance_set_scenario(mp.instance, scenario);
+			mp.transform = Transform3D(Basis(), Vector3(1e20, 1e20, 1e20));
+			mirror_probes.push_back(mp);
+		}
+		MirrorProbe &mp = mirror_probes[i];
+		if (w.realtime != mp.realtime) {
+			mp.realtime = w.realtime;
+			rs->reflection_probe_set_update_mode(mp.probe, w.realtime ? RSE::REFLECTION_PROBE_UPDATE_ALWAYS : RSE::REFLECTION_PROBE_UPDATE_ONCE);
+		}
+		if (!w.size.is_equal_approx(mp.size) || !w.origin_offset.is_equal_approx(mp.origin_offset) || !Math::is_equal_approx(w.blend_distance, mp.blend_distance)) {
+			mp.size = w.size;
+			mp.origin_offset = w.origin_offset;
+			mp.blend_distance = w.blend_distance;
+			rs->reflection_probe_set_blend_distance(mp.probe, w.blend_distance);
+			rs->reflection_probe_set_size(mp.probe, w.size);
+			rs->reflection_probe_set_origin_offset(mp.probe, w.origin_offset);
+			rs->reflection_probe_set_max_distance(mp.probe, w.size.length());
+		}
+		if (!w.transform.is_equal_approx(mp.transform)) {
+			mp.transform = w.transform;
+			rs->instance_set_transform(mp.instance, w.transform); // Recaptured, in budgeted steps.
+		}
+	}
 }
 
 void DDGIAutoReflections::_set_probe(bool p_enabled, const Transform3D &p_transform, const Vector3 &p_size, bool p_box_projection, bool p_realtime) {
@@ -524,6 +668,11 @@ void DDGIAutoReflections::clear() {
 	}
 	reflector_rids.clear();
 	reflectors.clear();
+	for (const MirrorProbe &mp : mirror_probes) {
+		rs->free_rid(mp.instance);
+		rs->free_rid(mp.probe);
+	}
+	mirror_probes.clear();
 	sources.clear();
 	_set_probe(false, Transform3D(), Vector3(), true);
 	scenario = RID();

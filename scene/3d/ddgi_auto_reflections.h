@@ -49,7 +49,11 @@ class Node3D;
 //    world it follows the camera in steps of a quarter of the volume;
 //  - planar reflectors on large, flat, smooth surfaces found in the scene's
 //    meshes: triangles grouped by plane, coplanar neighbors merged, only
-//    surfaces whose material is smooth enough.
+//    surfaces whose material is smooth enough;
+//  - a small box-projected probe in front of each large upright reflector
+//    (mirror), captured from the mirror: what a mirror seen from close by
+//    reflects is behind the camera, off screen, so the planar reflection
+//    falls back to the probes there.
 // Everything lives in the RenderingServer: nothing is added to the scene or
 // saved with it. Volumes or surfaces that already have a ReflectionProbe or
 // PlanarReflector3D of their own are left alone.
@@ -61,9 +65,11 @@ public:
 		bool planar = true;
 		float planar_max_roughness = 0.3;
 		float planar_min_area = 2.0;
+		bool mirror_probes = true;
 	};
 
 	static constexpr int MAX_PLANAR_REFLECTORS = 16;
+	static constexpr int MAX_MIRROR_PROBES = 8;
 
 private:
 	// A group of coplanar triangles of one mesh surface, in mesh space.
@@ -92,6 +98,17 @@ private:
 	LocalVector<Reflector> reflectors;
 	LocalVector<RID> reflector_rids;
 
+	struct MirrorProbe {
+		RID probe;
+		RID instance;
+		Transform3D transform;
+		Vector3 size;
+		Vector3 origin_offset;
+		float blend_distance = 0.0;
+		bool realtime = false;
+	};
+	LocalVector<MirrorProbe> mirror_probes;
+
 	// Mesh instances that produced reflectors, and where they were: moving one rescans.
 	HashMap<ObjectID, Transform3D> sources;
 
@@ -111,6 +128,7 @@ private:
 	const LocalVector<Cluster> &_get_clusters(const Ref<Mesh> &p_mesh, int p_surface);
 	void _scan(Node3D *p_volume, Node *p_root, const Settings &p_settings, const AABB &p_bounds, bool p_bounded, bool &r_manual_probe);
 	void _apply_reflectors(const LocalVector<Reflector> &p_reflectors);
+	void _apply_mirror_probes(const LocalVector<Reflector> &p_reflectors, const LocalVector<AABB> &p_manual_probes, const Settings &p_settings, const AABB &p_bounds, bool p_bounded);
 	void _set_probe(bool p_enabled, const Transform3D &p_transform, const Vector3 &p_size, bool p_box_projection, bool p_realtime = false);
 
 public:
@@ -124,6 +142,7 @@ public:
 	// Each reflector as {transform, size, distortion} (debugging, tests).
 	Array get_planar_reflectors() const;
 	bool has_probe() const { return probe_instance.is_valid(); }
+	int get_mirror_probe_count() const { return mirror_probes.size(); }
 
 	~DDGIAutoReflections();
 };

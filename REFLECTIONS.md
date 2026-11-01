@@ -46,7 +46,9 @@ decides how reflective it is (metallic, roughness, specular).
 | `layers` | 1 | Render layers; cameras whose cull mask shares one use it |
 
 Mirrors that face the camera reflect what is behind it, which is off screen:
-put a box-projected `ReflectionProbe` in the room for that part. Water: a
+with a `DDGIVolume`, `auto_mirror_probes` puts a box-projected probe in
+front of each mirror for that part; without one, put a box-projected
+`ReflectionProbe` in the room. Water: a
 transparent material works (the reflector is matched by depth, not by the
 depth buffer).
 
@@ -64,6 +66,7 @@ with the scene.
 | `auto_planar_reflections` | on | Planar reflectors on large flat surfaces of `MeshInstance3D`s whose material roughness (`BaseMaterial3D.roughness`, or a `ShaderMaterial` `roughness` parameter) is at most `auto_planar_max_roughness`; coplanar pieces merged, undersides skipped, the 16 largest kept, surfaces with a `PlanarReflector3D` left alone |
 | `auto_planar_max_roughness` | 0.3 | Smoothest-surfaces-only by default. Raise it (up to 1) for floors that turn glossy at runtime, such as wet floors from a shader: the reflection then appears where the per-pixel roughness drops below the reflector's cutoff, at the planar pass cost while they are in view |
 | `auto_planar_min_area` | 2 m² | Smaller flat surfaces are ignored |
+| `auto_mirror_probes` | on | A box-projected probe in front of each upright planar reflector (automatic or `PlanarReflector3D`; the 8 largest), captured from 10 cm in front of the mirror's center. Box faces on the volume's faces (bounded volume) or 16 m deep and 8 m to each side (`infinite_world`); for a thin two-sided mirror each box stops before the other side's glass. Skipped for mirrors inside a scene `ReflectionProbe`. Follows `auto_reflection_probe_realtime` |
 
 Scanning: on start and after meshes, probes or reflectors are added or
 removed (at most every 0.5 s), every 3 s for material and mesh changes, and
@@ -300,7 +303,8 @@ Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
 
 - Planar reflections show only what is on screen. Mirrors facing the
   camera, and parts of objects hidden behind others, fall back to probes
-  and the sky. There is no mirrored-camera mode yet (see the steps).
+  and the sky (`auto_mirror_probes` puts one in front of each mirror).
+  There is no mirrored-camera mode yet (see the steps).
 - The reflected image is last frame's, reprojected: fast moving objects
   lag by a frame in it; disocclusions show the probe.
 - Normal-mapped reflections are approximated by shifting the lookup, not
@@ -369,7 +373,7 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 | 6 | Atlas on demand, LRU fix | Done |
 | 7 | Test view, benchmarks, chaos, docs | Done |
 | 7b | Automatic reflections from the DDGIVolume (`auto_reflections`) | Done |
-| 8 | Optional mirrored-camera mode for mirrors that face the camera (budgeted, low resolution) | Open |
+| 8 | Optional mirrored-camera mode for mirrors that face the camera (budgeted, low resolution) | Open; meanwhile `auto_mirror_probes` (2026-11-01) |
 | 9 | DDGI irradiance inside probe captures (sample the probes in the capture pass) | Open |
 | 10 | Test on AMD and Intel GPUs, Mobile and Compatibility renderers | Open |
 | 11 | Planar quality: temporal filter, footprint fill, coverage, automatic scan fixes, showcase level | Done (2026-11-01) |
@@ -412,6 +416,20 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 ## Findings log
 
 Newest first.
+
+- **2026-11-01, mirrors seen from close by.** A mirror seen from 1 to 2 m
+  reflects mostly what is behind the camera: the planar pass has nothing
+  there and the volume's probe filled it, captured from the volume's
+  center (a 58 m arena: the mirror showed the floor's shadow and none of
+  the cubes behind the player). `auto_mirror_probes` captures a probe from
+  the mirror itself; the demo level's mirror now shows the cubes, the
+  glossy pad and the orb. In a room whose volume probe is already
+  box-projected to its walls (showcase gallery) the difference is small.
+  Thin box mirrors give two back-to-back reflectors; a 0.25 m margin behind
+  the glass put each side's pixels inside the other side's (smaller, so
+  winning) probe box, so the margin and blend distance shrink to 45% of the
+  gap. The real fix for close mirrors is still the mirrored camera (step 8);
+  the probe is static and as sharp as `reflection_atlas/reflection_size`.
 
 - **2026-11-01, temporal stability.** Moving through the showcase, planar
   reflections shimmered (the projection lands on slightly different pixels

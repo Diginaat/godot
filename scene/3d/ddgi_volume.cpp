@@ -193,6 +193,7 @@ void DDGIVolume::_notification(int p_what) {
 			settings.planar = auto_planar_reflections && RenderingServer::get_singleton()->get_current_rendering_method() == "forward_plus";
 			settings.planar_max_roughness = auto_planar_max_roughness;
 			settings.planar_min_area = auto_planar_min_area;
+			settings.mirror_probes = auto_mirror_probes;
 			auto_reflector.update(this, settings, size, infinite_world, get_process_delta_time());
 		} break;
 		case NOTIFICATION_ENTER_WORLD: {
@@ -277,6 +278,15 @@ void DDGIVolume::set_auto_planar_min_area(float p_area) {
 
 float DDGIVolume::get_auto_planar_min_area() const {
 	return auto_planar_min_area;
+}
+
+void DDGIVolume::set_auto_mirror_probes(bool p_enabled) {
+	auto_mirror_probes = p_enabled;
+	auto_reflector.mark_dirty();
+}
+
+bool DDGIVolume::is_auto_mirror_probes_enabled() const {
+	return auto_mirror_probes;
 }
 
 Array DDGIVolume::get_auto_planar_reflectors() const {
@@ -723,6 +733,8 @@ void DDGIVolume::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_auto_planar_max_roughness"), &DDGIVolume::get_auto_planar_max_roughness);
 	ClassDB::bind_method(D_METHOD("set_auto_planar_min_area", "area"), &DDGIVolume::set_auto_planar_min_area);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_min_area"), &DDGIVolume::get_auto_planar_min_area);
+	ClassDB::bind_method(D_METHOD("set_auto_mirror_probes", "enabled"), &DDGIVolume::set_auto_mirror_probes);
+	ClassDB::bind_method(D_METHOD("is_auto_mirror_probes_enabled"), &DDGIVolume::is_auto_mirror_probes_enabled);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_reflector_count"), &DDGIVolume::get_auto_planar_reflector_count);
 	ClassDB::bind_method(D_METHOD("get_auto_planar_reflectors"), &DDGIVolume::get_auto_planar_reflectors);
 
@@ -750,6 +762,7 @@ void DDGIVolume::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_planar_reflections"), "set_auto_planar_reflections", "is_auto_planar_reflections_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_max_roughness", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_auto_planar_max_roughness", "get_auto_planar_max_roughness");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "auto_planar_min_area", PROPERTY_HINT_RANGE, U"0.1,100,0.1,or_greater,suffix:m\u00B2"), "set_auto_planar_min_area", "get_auto_planar_min_area");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_mirror_probes"), "set_auto_mirror_probes", "is_auto_mirror_probes_enabled");
 	ADD_GROUP("Baking", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "bake_mode", PROPERTY_HINT_ENUM, "Dynamic,Baked,Baked + Dynamic"), "set_bake_mode", "get_bake_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "bake_least_squares"), "set_bake_least_squares", "is_bake_least_squares_enabled");
