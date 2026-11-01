@@ -15,7 +15,8 @@ sources:
 
 Pixel-projected planar reflections with footprint fill, coverage blending,
 gap bridging, a normal check against contact bands and a temporal filter.
-Stable while moving in the showcase level and the reflect test view.
+Stable in the reflect test view; the showcase walks before 2026-11-01
+evening didn't move (see the mistakes entry), so recheck in motion.
 The table of open issues, their repro positions and test commands is in
 the runbook.[^runbook]
 
@@ -32,6 +33,11 @@ the runbook.[^runbook]
    (floors included by default); other reflectors still fall back.
 4. Per-mesh opt-in/opt-out for the automatic scan: done (metadata
    `auto_planar_reflection`).
+5. A mirror without the mirror pass shows its probe, captured without
+   DDGI (cold, dark): DDGI in probe captures (step 9), or a second pass.
+6. The showcase's indirect light is 3 to 7 times the path tracer's, which
+   washes out the bright marble floor and its reflections (a DDGI
+   question).
 
 # Lessons
 

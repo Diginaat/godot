@@ -2958,6 +2958,54 @@ void RendererSceneCull::_update_planar_reflection_data(Scenario *p_scenario) {
 	p_scenario->planar_reflections_dirty = false;
 }
 
+// The fraction of the screen a reflector's rectangle covers (clipped to the view
+// frustum), and the middle of that part in NDC.
+static float _planar_screen_coverage(const Projection &p_view_projection, const Vector3 *p_corners, Vector2 &r_centroid) {
+	// Sutherland-Hodgman in clip space against w +- x >= 0, w +- y >= 0 and the near
+	// plane (w + z >= 0): 4 corners gain at most one vertex per plane.
+	Vector4 polygon[10];
+	Vector4 clipped[10];
+	int count = 4;
+	for (int c = 0; c < 4; c++) {
+		polygon[c] = p_view_projection.xform(Vector4(p_corners[c].x, p_corners[c].y, p_corners[c].z, 1.0));
+	}
+	static const Vector4 planes[5] = { Vector4(-1, 0, 0, 1), Vector4(1, 0, 0, 1), Vector4(0, -1, 0, 1), Vector4(0, 1, 0, 1), Vector4(0, 0, 1, 1) };
+	for (const Vector4 &plane : planes) {
+		int out = 0;
+		for (int i = 0; i < count; i++) {
+			const Vector4 &a = polygon[i];
+			const Vector4 &b = polygon[(i + 1) % count];
+			float da = plane.dot(a);
+			float db = plane.dot(b);
+			if (da >= 0.0) {
+				clipped[out++] = a;
+			}
+			if ((da >= 0.0) != (db >= 0.0)) {
+				clipped[out++] = a + (b - a) * (da / (da - db));
+			}
+		}
+		count = out;
+		if (count < 3) {
+			return 0.0;
+		}
+		for (int i = 0; i < count; i++) {
+			polygon[i] = clipped[i];
+		}
+	}
+	float area = 0.0;
+	Vector2 sum;
+	for (int i = 0; i < count; i++) {
+		const Vector4 &a = polygon[i];
+		const Vector4 &b = polygon[(i + 1) % count];
+		Vector2 pa(a.x / a.w, a.y / a.w);
+		Vector2 pb(b.x / b.w, b.y / b.w);
+		area += pa.cross(pb);
+		sum += pa;
+	}
+	r_centroid = sum / float(count);
+	return Math::abs(area) * 0.5 / 4.0; // The screen spans 2 x 2 in NDC.
+}
+
 void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_camera_attributes, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, Size2 p_viewport_size, RID p_shadow_atlas, float p_screen_mesh_lod_threshold, float p_window_output_max_value) {
 	Scenario *scenario = scenario_owner.get_or_null(p_scenario);
 	ERR_FAIL_NULL(scenario);
@@ -2979,12 +3027,16 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 	}
 	_update_planar_reflection_data(scenario);
 
-	// The reflector covering most of the view: area seen face on, over distance squared.
+	// The reflector that needs the pass most: the part of the screen it covers, times
+	// how much of what it reflects is off screen (see below).
 	const Transform3D &cam = p_camera_data.main_transform;
 	const Transform3D inv_cam = cam.affine_inverse();
+	const Projection view_projection = p_camera_data.main_projection * Projection(inv_cam);
+	const Projection inv_view_projection = view_projection.inverse();
 	Vector<Plane> frustum = p_camera_data.main_projection.get_projection_planes(cam);
 	// Updated for this camera just before (render_camera()).
 	const RendererSceneOcclusionCull::HZBuffer *occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
+	MirrorView &mv = mirror_views[p_viewport];
 	int best = -1;
 	float best_score = 0.0;
 	for (uint32_t i = 0; i < scenario->planar_reflection_data.size(); i++) {
@@ -3038,15 +3090,26 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 				continue;
 			}
 		}
-		// Distance to the rectangle (not its center), so a large wall seen from close by wins.
-		Vector3 nearest = r.transform.origin + axis_u * CLAMP(to_camera.dot(axis_u), -r.size.x * 0.5f, r.size.x * 0.5f) + axis_v * CLAMP(to_camera.dot(axis_v), -r.size.y * 0.5f, r.size.y * 0.5f);
-		float distance = MAX(cam.origin.distance_to(nearest), 0.25f);
-		float score = r.size.x * r.size.y * (side / to_camera.length()) / (distance * distance);
-		// Mode 2: upright reflectors (mirrors) count four times. A mirror facing the
-		// camera has no other source for what is behind it; a floor lacks only
-		// hidden sides (the undersides of things above it).
-		if (mode == 2 && Math::abs(normal.y) < 0.7) {
-			score *= 4.0;
+		// The part of the screen it covers (area and distance alone made a large floor
+		// win over a mirror filling the view: the floor's nearest point is close).
+		Vector2 centroid;
+		float coverage = _planar_screen_coverage(view_projection, corners, centroid);
+		if (coverage <= 0.0) {
+			continue;
+		}
+		// How much of what it reflects is off screen: the reflected ray of a view ray
+		// v turns by 2 acos(|v.n|) from it, so a mirror seen face on reflects what is
+		// behind the camera (all of it off screen), a floor seen at a grazing angle
+		// mostly what is on screen (the projection has it; the pass adds hidden
+		// sides). v goes through the middle of the covered part of the screen.
+		Vector3 through = inv_view_projection.xform(Vector3(centroid.x, centroid.y, 0.0));
+		Vector3 view_ray = (through - cam.origin).normalized();
+		float facing = view_ray.dot(normal);
+		float score = coverage * (0.2 + 0.8 * facing * facing);
+		// Last frame's choice keeps the pass unless another needs it clearly more:
+		// switching changes both reflectors' look.
+		if (normal.is_equal_approx(mv.last_normal) && r.transform.origin.is_equal_approx(mv.last_origin)) {
+			score *= 1.5;
 		}
 		if (score > best_score) {
 			best_score = score;
@@ -3064,15 +3127,15 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 	Basis reflection(Vector3(1, 0, 0) - 2.0 * normal.x * normal, Vector3(0, 1, 0) - 2.0 * normal.y * normal, Vector3(0, 0, 1) - 2.0 * normal.z * normal);
 	Transform3D mirror_transform = Transform3D(reflection, 2.0 * d * normal) * cam;
 
-	MirrorView &mv = mirror_views[p_viewport];
 	mv.last_frame = frame;
+	mv.last_normal = normal;
+	mv.last_origin = r.transform.origin;
 
 	// The part of the screen the reflector covers (NDC), a little larger for
 	// normal distortion and blur. Corners behind or at the camera: all of it.
 	Vector2 ndc_min(-1, -1);
 	Vector2 ndc_max(1, 1);
 	{
-		Projection view_projection = p_camera_data.main_projection * Projection(cam.affine_inverse());
 		Vector3 axis_u = r.transform.basis.get_column(0).normalized() * (r.size.x * 0.5);
 		Vector3 axis_v = r.transform.basis.get_column(2).normalized() * (r.size.y * 0.5);
 		Vector2 lo(1e20, 1e20);
@@ -3117,17 +3180,25 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 	crop.columns[1][1] = 2.0 / extent.y;
 	crop.columns[3][1] = -(ndc_min.y + ndc_max.y) / extent.y;
 
+	float scale = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_mirror_scale"), 0.25f, 1.0f);
+	Size2i size = Size2i(MAX(int(p_viewport_size.x * scale * mv.eighths.x / 8.0), 16), MAX(int(p_viewport_size.y * scale * mv.eighths.y / 8.0), 16));
+
+	// The pass has no anti-aliasing of its own and is rendered at lower resolution, so
+	// its edges were stair-stepped. It is shifted by a sub-pixel amount every frame
+	// (Halton 2, 3 over 16 frames, as TAA does): the planar temporal pass accumulates
+	// it into smooth edges.
+	uint32_t phase = uint32_t(frame % 16);
+	Vector2 jitter = Vector2(get_halton_value(phase, 2), get_halton_value(phase, 3)) / Vector2(size);
+
 	RendererSceneRender::CameraData mirror_camera;
 	// The view's projection, cropped: the mirror's pixels see the reflection at
-	// their own screen position (unjittered; the main view's TAA smooths it).
-	mirror_camera.set_camera(mirror_transform, crop * p_camera_data.main_projection, false, p_camera_data.vaspect, Vector2(), 0.0, p_camera_data.visible_layers);
+	// their own screen position.
+	mirror_camera.set_camera(mirror_transform, crop * p_camera_data.main_projection, false, p_camera_data.vaspect, jitter, float(phase), p_camera_data.visible_layers);
 	mirror_camera.mirror_pass = true;
 	mirror_camera.cull_projection = p_camera_data.main_projection;
 	// Slightly in front of the plane: the reflecting surface itself isn't drawn.
 	mirror_camera.clip_plane = Plane(normal, d + MAX(r.thickness * 0.2f, 0.005f));
 
-	float scale = CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_mirror_scale"), 0.25f, 1.0f);
-	Size2i size = Size2i(MAX(int(p_viewport_size.x * scale * mv.eighths.x / 8.0), 16), MAX(int(p_viewport_size.y * scale * mv.eighths.y / 8.0), 16));
 	if (mv.render_buffers.is_null()) {
 		mv.render_buffers = RSG::scene->render_buffers_create();
 		mv.render_target = RSG::texture_storage->render_target_create();

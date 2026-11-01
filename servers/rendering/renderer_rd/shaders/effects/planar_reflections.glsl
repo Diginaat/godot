@@ -468,15 +468,44 @@ void main() {
 		return;
 	}
 
+	// Anti-aliased edges (TAA, MSAA, FXAA): a background pixel next to a nearer object
+	// has some of the object's color but the background's depth, so it is reflected
+	// where the background is: a bright lamp against the ceiling left a thin ring in
+	// the floor. Take the color 2 pixels away from the object instead, where the
+	// depth is still the background's.
+	vec2 color_shift = vec2(0.0);
+	{
+		vec2 texel = 1.0 / vec2(params.target_size);
+		float own = -view_position(source_uv_point).z;
+		float nearer = own * 0.9 - 0.05;
+		vec2 away = vec2(0.0);
+		const vec2 directions[4] = vec2[](vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));
+		for (int k = 0; k < 4; k++) {
+			for (int s = 1; s <= 2; s++) {
+				if (-view_position(source_uv_point + directions[k] * float(s) * texel).z < nearer) {
+					away -= directions[k];
+					break;
+				}
+			}
+		}
+		if (away != vec2(0.0)) {
+			vec2 step_uv = sign(away) * 2.0 * texel;
+			float there = -view_position(source_uv_point + step_uv).z;
+			if (abs(there - own) < 0.1 * own + 0.05) {
+				color_shift = step_uv;
+			}
+		}
+	}
+
 	// Rough surfaces blur the reflection, more the farther the reflected point is.
 	vec2 nr_uv = (vec2(target_pos) + 0.5) / vec2(params.target_size);
 	float roughness = decode_roughness(textureLod(source_normal_roughness, nr_uv, 0.0).w);
 	float distance_px = length(offset) * float(params.screen_size.x) / float(params.target_size.x);
 	float lod = clamp(log2(1.0 + roughness * roughness * distance_px * 0.25), 0.0, params.max_color_lod);
 
-	float source_depth = textureLod(source_depth, source_uv_point, 0.0).r;
-	vec3 filtered = last_frame_color(source_uv, source_depth, lod);
-	vec3 point = last_frame_color(source_uv_point, source_depth, lod);
+	float source_depth = textureLod(source_depth, source_uv_point + color_shift, 0.0).r;
+	vec3 filtered = last_frame_color(source_uv + color_shift, source_depth, lod);
+	vec3 point = last_frame_color(source_uv_point + color_shift, source_depth, lod);
 
 	// Bilinear filtering of the stretched image bleeds colors across edges in the
 	// reflection: keep luminance and chroma near the point sample where they differ a lot.

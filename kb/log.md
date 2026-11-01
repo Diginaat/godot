@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-01 (reflections: bugs seen in play)
+
+* **Added**: mistakes/motion-test-that-did-not-move.md.
+* **Updated**: REFLECTIONS.md findings (mirror pass selection by screen
+  coverage, edge halo, mirror pass jitter) and open issues H and I;
+  reflections/planar-open-issues.md.
+
 ## 2026-11-01 (reflections: open issues)
 
 * **Added**: mistakes/stale-generated-shader-header.md.

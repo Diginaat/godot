@@ -154,6 +154,10 @@ public:
 		// and shrunk after a while, so the buffers aren't reallocated every frame.
 		Vector2i eighths = Vector2i(8, 8);
 		int shrink_frames = 0;
+		// The reflector rendered last frame (its plane normal and center), kept unless
+		// another needs the pass clearly more.
+		Vector3 last_normal;
+		Vector3 last_origin;
 	};
 	HashMap<RID, MirrorView> mirror_views; // Per viewport.
 	// The mirror pass of the view being rendered: which reflector of the scenario's

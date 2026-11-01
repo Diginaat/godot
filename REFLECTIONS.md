@@ -92,7 +92,7 @@ Project settings (`rendering/global_illumination/reflections/`):
 | `planar_enabled` | on | Planar reflections on/off |
 | `planar_max_reflectors` | 4 | Most reflectors per view (nearest first, 1 to 8) |
 | `planar_resolution` | Full | Full or Half |
-| `planar_mirror_render` | All Reflectors | Mirror pass: one reflector per view (the one covering most of it, upright ones counted four times) is rendered again from the camera reflected across it. Disabled, Upright Reflectors (mirrors, walls) or All Reflectors (floors and water too) |
+| `planar_mirror_render` | All Reflectors | Mirror pass: one reflector per view (the one that needs it most: screen coverage times how much of what it reflects is off screen) is rendered again from the camera reflected across it. Disabled, Upright Reflectors (mirrors, walls) or All Reflectors (floors and water too) |
 | `planar_mirror_scale` | 0.5 | Resolution of the mirror pass relative to the view's 3D resolution (0.25 to 1) |
 
 Probe resolution and count stay in the existing
@@ -359,6 +359,8 @@ likely fix:
 | E | Cost went up with each quality fix: 0.34 ms (first version) to 0.83 ms at 1080p; about 80 MB at full resolution. 2026-11-01: 0.88 ms with the mirror pass's mip chain, 0.835 ms after the history ping-pong | `misc/ddgi_test_project`: `--view=reflect --res=1920x1080 --bench=300 --gpu-profile` | History ping-pong done. Left: skip the temporal pass for pixels without a reflector (indirect dispatch over reflector tiles, as the PPR talk suggests); half resolution on weak GPUs (`planar_resolution`) |
 | F | **Done.** The automatic scan uses heuristics: undersides, upright glass, thin strips and faces outside the volume are skipped | `DDGIVolume.get_auto_planar_reflectors()` lists what it chose | Per mesh: metadata `auto_planar_reflection` true (always, any material) or false (never) on the `MeshInstance3D` |
 | G | Planar reflections and the automatic planar scan are not tested with XR (not supported), with AMD or Intel GPUs. Editor (demo level open 600 frames), Mobile and Compatibility run without errors (2026-11-01; Forward+ is the target) | | Step 10 |
+| H | A mirror that loses the mirror pass shows its probe, which is lit wrong: cold and dark, because probe captures get the sky ambient instead of DDGI. Happens from about 5 m away in the showcase, when the floor needs the pass more | Showcase: `--at=0.5,-7 --yaw=0 --pitch=-8 --move=0,1.5,0` (walk back from the mirror) | DDGI in probe captures (step 9; the volumetric fog already samples the probes directly), or a second mirror pass |
+| I | Indirect light in the showcase gallery is 3 to 7 times brighter (linear) than the path tracer's: floor in shade, ceiling, walls. Direct sunlight matches. Floors look washed out and their reflections weak against them | Showcase north view, raster against `--pt --still` averaged over 240 frames; the path tracer gives the same with 3 and 8 bounces (`--pt-bounces=`) | A DDGI question, not a reflection one: compare DDGI with the path tracer in a closed bright room. The path tracer renders the polished marble floor matte, so it is no reference for the floor's reflection |
 
 How to test (always with movement: still frames hid the stripes and the
 grid): the showcase records walks with `--move=dx,dz,dyaw` (meters and
@@ -429,6 +431,41 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 ## Findings log
 
 Newest first.
+
+- **2026-11-01, reported from playing the showcase.** Four problems seen
+  in play, three fixed:
+  - *The room in the wall mirror was lit wrong* (cold, dark ceiling). With
+    All Reflectors the floor took the mirror pass even with the mirror
+    filling a third of the view: the score was area x cos / distance² with
+    the distance to the nearest point, and the showcase's floor reflector is
+    44 x 20 m with its nearest point 1.6 m below the eye (floor 45, mirror
+    7 after its x4). The mirror then showed its probe, whose capture has no
+    DDGI. Now the score is the part of the screen the rectangle covers
+    (clipped to the frustum) times 0.2 + 0.8 (v.n)², v the view ray to the
+    covered part: a reflected ray turns by twice the angle to the normal,
+    so a mirror seen face on reflects only what is off screen, a floor seen
+    at a grazing angle mostly what is on screen. Last frame's reflector
+    scores 1.5 times (no flip-flop). From farther away the floor still wins
+    and the probe shows (issue H).
+  - *A thin bright ring on the floor* above each hanging lamp's
+    reflection, also without the mirror pass, gone with `--planar=0`. The
+    ring was the lamp's outline at the reflected place of the ceiling behind
+    it: anti-aliased edge pixels have the background's depth but some of
+    the bright lamp's color. The resolve now takes the color 2 pixels away
+    from a nearer neighbor (within 2 pixels) when the depth there is still
+    the background's. Planar pass 0.835 to 0.87 ms at 1080p.
+  - *Jagged edges in the mirror*: the pass is half resolution without
+    anti-aliasing. It is now shifted by a Halton (2, 3) sub-pixel offset
+    over 16 frames; the planar temporal pass accumulates it (smooth edges in
+    a still view, no doubled edges).
+  - *Missing floor reflections of the plinths* near the camera: present,
+    but weak at the steeper angle near the feet (Fresnel of a dielectric),
+    and the floor around them is bright (issue I).
+  - The showcase's `--move` didn't move the camera: the PhysX character
+    controller keeps its own position and pulled the player back, a jump
+    every 27 frames. Move mode now turns the player's physics off. Earlier
+    "stable while moving" checks with `--move` probably turned in place
+    without walking; redo them.
 
 - **2026-11-01, mirror pass on floors (issue B).** `planar_mirror_render`
   now defaults to All Reflectors: upright reflectors score four times,
