@@ -612,6 +612,10 @@ bool RenderForwardClusteredPT::_ddgi_get_fog_resources(RenderSceneBuffersRD *p_r
 	return ddgi && ddgi->get_sampling_resources(p_render_buffers, r_data_buffer, r_probe_buffer, r_irradiance_atlas, r_distance_atlas);
 }
 
+bool RenderForwardClusteredPT::_ddgi_get_capture_resources(RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) {
+	return ddgi && ddgi->get_capture_resources(r_data_buffer, r_probe_buffer, r_irradiance_atlas, r_distance_atlas);
+}
+
 Dictionary RenderForwardClusteredPT::ddgi_get_probe_data(const Ref<RenderSceneBuffers> &p_render_buffers) {
 	Ref<RenderSceneBuffersRD> rb = p_render_buffers;
 	if (!ddgi || rb.is_null()) {

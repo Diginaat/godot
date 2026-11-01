@@ -3885,6 +3885,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/reflections/probe_ddgi_normalization", PROPERTY_HINT_RANGE, "0,1,0.01"), 1.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/reflections/probe_normalization_max", PROPERTY_HINT_RANGE, "1,16,0.1"), 4.0);
 	GLOBAL_DEF("rendering/global_illumination/reflections/ddgi_overrides_probe_ambient", true);
+	GLOBAL_DEF("rendering/global_illumination/reflections/probe_capture_ddgi", true);
 	GLOBAL_DEF("rendering/global_illumination/reflections/planar_enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/reflections/planar_max_reflectors", PROPERTY_HINT_RANGE, "1,8,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/reflections/planar_resolution", PROPERTY_HINT_ENUM, "Full,Half"), 0);

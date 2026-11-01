@@ -130,6 +130,9 @@ public:
 				uint32_t cluster_has_area_light : 1;
 				uint32_t use_lightmap_specular : 1;
 				uint32_t material_feedback : 1;
+				// Reflection probe capture sampling the DDGI probes (bindings 42-45);
+				// compiled out of every other pipeline.
+				uint32_t ddgi_probe_capture : 1;
 			};
 		};
 

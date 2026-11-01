@@ -89,6 +89,7 @@ Project settings (`rendering/global_illumination/reflections/`):
 | `probe_ddgi_normalization` | 1.0 | Strength of the DDGI normalization (0 = off) |
 | `probe_normalization_max` | 4.0 | Largest brightening factor of the normalization |
 | `ddgi_overrides_probe_ambient` | on | DDGI's diffuse light wins over the probe ambient where DDGI covers the pixel |
+| `probe_capture_ddgi` | on | Probe captures are lit by DDGI (they sample the DDGI probes of the last view that used DDGI) and are captured again when DDGI has converged and after light changes; normalization then only acts on rough reflections |
 | `planar_enabled` | on | Planar reflections on/off |
 | `planar_max_reflectors` | 4 | Most reflectors per view (nearest first, 1 to 8) |
 | `planar_resolution` | Full | Full or Half |
@@ -325,9 +326,12 @@ Arguments: `--probes=0|1`, `--probe_faces=N`, `--probe_mode=once|always`,
 - Planar reflections: Forward+ only, one view (not in XR), at most 8
   reflectors per view; overlapping transparent reflectors pick the
   nearest.
-- Probe captures don't contain DDGI's indirect light (they use the
-  environment ambient); normalization fixes their overall level at the
-  shading point, not the light distribution inside the capture.
+- Probe captures contain DDGI's indirect light (`probe_capture_ddgi`) but
+  not DDGI's emissive lights, which the view's apply pass adds and the
+  probes leave out: rooms lit by emissive surfaces look darker in probe
+  reflections (with `ddgi/emissive_lights` off the probes include them).
+  Without the setting, captures use the environment's ambient light and
+  normalization fixes their overall level at the shading point only.
 - Normalization assumes the probe's light is like the surface's: a probe
   that sees a bright window can be dimmed or brightened unevenly at
   surfaces with very different surroundings. Lower
@@ -359,7 +363,7 @@ likely fix:
 | E | Cost went up with each quality fix: 0.34 ms (first version) to 0.83 ms at 1080p; about 80 MB at full resolution. 2026-11-01: 0.88 ms with the mirror pass's mip chain, 0.835 ms after the history ping-pong | `misc/ddgi_test_project`: `--view=reflect --res=1920x1080 --bench=300 --gpu-profile` | History ping-pong done. Left: skip the temporal pass for pixels without a reflector (indirect dispatch over reflector tiles, as the PPR talk suggests); half resolution on weak GPUs (`planar_resolution`) |
 | F | **Done.** The automatic scan uses heuristics: undersides, upright glass, thin strips and faces outside the volume are skipped | `DDGIVolume.get_auto_planar_reflectors()` lists what it chose | Per mesh: metadata `auto_planar_reflection` true (always, any material) or false (never) on the `MeshInstance3D` |
 | G | Planar reflections and the automatic planar scan are not tested with XR (not supported), with AMD or Intel GPUs. Editor (demo level open 600 frames), Mobile and Compatibility run without errors (2026-11-01; Forward+ is the target) | | Step 10 |
-| H | A mirror that loses the mirror pass shows its probe, which is lit wrong: cold and dark, because probe captures get the sky ambient instead of DDGI. Happens from about 5 m away in the showcase, when the floor needs the pass more | Showcase: `--at=0.5,-7 --yaw=0 --pitch=-8 --move=0,1.5,0` (walk back from the mirror) | DDGI in probe captures (step 9; the volumetric fog already samples the probes directly), or a second mirror pass |
+| H | **Done** (step 9). A mirror that loses the mirror pass showed its probe lit wrong: cold and dark, because probe captures got the sky ambient instead of DDGI. Now the probe is DDGI-lit (ceiling 0.27 against 0.29 linear for the mirror pass; was 0.06). Left: box-projection parallax (the probe is captured from the room's middle) | Showcase: `--at=0.5,-3 --yaw=0 --pitch=-5 --still`, against `--mirror-render=1`; `--ps=rendering/global_illumination/reflections/probe_capture_ddgi=false` for the old look | A second mirror pass would make it exact (cost, see the performance plan) |
 | I | Indirect light in the showcase gallery is 3 to 7 times brighter (linear) than the path tracer's: floor in shade, ceiling, walls. Direct sunlight matches. Floors look washed out and their reflections weak against them | Showcase north view, raster against `--pt --still` averaged over 240 frames; the path tracer gives the same with 3 and 8 bounces (`--pt-bounces=`) | A DDGI question, not a reflection one: compare DDGI with the path tracer in a closed bright room. The path tracer renders the polished marble floor matte, so it is no reference for the floor's reflection |
 
 How to test (always with movement: still frames hid the stripes and the
@@ -376,6 +380,25 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 `--time=0..3`, `--reflections=0`, `--planar=0`, `--realtime=1`, `--ddgi=0`,
 `--still`, `--turn`; the screenshot run prints the automatic reflectors.
 
+## Performance plan
+
+Goal (2026-11-01): cheaper per frame without a visible change. Each item
+is measured before and after (`reflect` view `--bench=300 --gpu-profile`,
+the showcase's GPU timestamps) and checked for image changes (frame diff
+against the previous build, in motion). Current costs at 1080p, RTX 3060:
+planar passes 0.87 ms, mirror pass 0.35 to 0.55 ms, probe faces about
+0.4 ms per face pair while capturing.
+
+| # | Item | Expected gain | Quality risk |
+| --- | --- | --- | --- |
+| P1 | Code only some passes run behind specialization constants, so other pipelines compile it out. Done for the probe capture's DDGI sampling (+0.09 ms in every view as a plain branch, 0 now). Next: the planar compositing in the scene shader (runs only with reflectors in view) | 0.05 to 0.1 ms in views without reflectors | None (same code where it runs) |
+| P2 | Planar passes only on tiles with a reflector: classify 8x8 tiles in the project pass, indirect dispatch of resolve and temporal (as the PPR talk does) | Most of 0.87 ms where reflectors cover little of the screen | None |
+| P3 | Mirror pass shares the main view's shadow maps instead of rendering the cascades again | Part of the 0.35 to 0.55 ms | None if the cascades cover the mirror's view; check reflected shadows against the path tracer |
+| P4 | Mirror pass: higher mesh LOD threshold (it is rendered at half resolution) and the main view's occlusion culling for the reflected frustum | Triangle and draw cost | LOD pops in reflections; compare in motion |
+| P5 | Mirror pass skipped when the projection covers the whole reflector (nothing off screen, no hidden sides measured last frame) | The whole pass in such views | Must not toggle visibly: hysteresis |
+| P6 | Probe recaptures (DDGI convergence, light changes) stay within the face budget; check that a continuously moving sun keeps them at one capture per 2 s | Bounded cost | None |
+| P7 | Planar `half` resolution and mirror pass scale per quality preset, set from measurements per GPU class | Large on weak GPUs | Softer reflections there only |
+
 ## Steps
 
 | # | Step | Status |
@@ -389,7 +412,7 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 | 7 | Test view, benchmarks, chaos, docs | Done |
 | 7b | Automatic reflections from the DDGIVolume (`auto_reflections`) | Done |
 | 8 | Mirror pass: the reflector covering most of the view rendered from the reflected camera (`planar_mirror_render`), combined with the projection | Done (2026-11-01); cost reductions open (see findings) |
-| 9 | DDGI irradiance inside probe captures (sample the probes in the capture pass) | Open |
+| 9 | DDGI irradiance inside probe captures (sample the probes in the capture pass) | Done (2026-11-01) |
 | 10 | Test on AMD and Intel GPUs, Mobile and Compatibility renderers | Open |
 | 11 | Planar quality: temporal filter, footprint fill, coverage, automatic scan fixes, showcase level | Done (2026-11-01) |
 | 12 | Open issues A to G above | Open |
@@ -431,6 +454,29 @@ from the motion. Other showcase options: `--screenshot=`, `--warmup=`,
 ## Findings log
 
 Newest first.
+
+- **2026-11-01, DDGI in probe captures (step 9, issue H).** Captures had
+  no GI buffer, so they were lit by the sky's ambient light: the room in
+  a probe-lit mirror looked cold (ceiling 0.06 linear, mirror pass 0.29).
+  The scene shader now samples the DDGI probes directly in reflection
+  probe captures (`ddgi_sample_irradiance()`, bindings 42 to 45 of the
+  render pass set, as the volumetric fog does), with the probes of the
+  last view that applied DDGI. A first result was blotchy with dark bands:
+  "Once" probes are captured in the first frames, while most DDGI probes
+  are still untraced (bands = the slabs not reached yet; 64 probes per
+  frame left almost nothing covered, a realtime probe was smooth). The
+  probe passes now capture again after DDGI has updated every probe 1, 4
+  and 16 times, and after light changes (directional lights, background
+  energy: once DDGI followed, at most every 2 s while it keeps changing;
+  a switch to night at frame 200 matches night from the start). DDGI
+  normalization then darkened the mirror 1.6x: it scales by the
+  irradiance at the surface over the probe's at its center, which says
+  nothing about the distant light a sharp reflection shows; with DDGI-lit
+  captures it now fades out below roughness 0.5 (from 0.2). Result: 0.27
+  against 0.29. The sampling code sits behind a specialization constant:
+  as a plain branch it cost 0.09 ms in every view (register pressure),
+  now 0 (reflect view 4.65 ms before and after). Debugged with the
+  captures' positions, normals and coverage written as emission.
 
 - **2026-11-01, reported from playing the showcase.** Four problems seen
   in play, three fixed:

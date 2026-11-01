@@ -33,8 +33,10 @@ the runbook.[^runbook]
    (floors included by default); other reflectors still fall back.
 4. Per-mesh opt-in/opt-out for the automatic scan: done (metadata
    `auto_planar_reflection`).
-5. A mirror without the mirror pass shows its probe, captured without
-   DDGI (cold, dark): DDGI in probe captures (step 9), or a second pass.
+5. A mirror without the mirror pass showed its probe captured without
+   DDGI (cold, dark): done, captures sample DDGI and are taken again after
+   DDGI converged and after light changes.
+7. Cost: the performance plan in the runbook (same image, cheaper).
 6. The showcase's indirect light is 3 to 7 times the path tracer's, which
    washes out the bright marble floor and its reflections (a DDGI
    question).

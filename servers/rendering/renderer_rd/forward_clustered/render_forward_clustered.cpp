@@ -809,6 +809,16 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 	scene_state.ubo.reflection_normalization = GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/probe_ddgi_normalization");
 	scene_state.ubo.reflection_normalization_max = GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/probe_normalization_max");
 	scene_state.ubo.reflection_flags = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/ddgi_overrides_probe_ambient") ? REFLECTION_FLAGS_DDGI_OVERRIDES_PROBE_AMBIENT : 0;
+	{
+		RID ddgi_resources[4];
+		if (_probe_capture_ddgi(p_render_data, ddgi_resources)) {
+			scene_state.ubo.reflection_flags |= REFLECTION_FLAGS_DDGI_IN_PROBE_CAPTURE;
+		}
+		RID env = p_render_data->environment;
+		if (p_render_data->reflection_probe.is_null() && env.is_valid() && environment_get_ddgi_enabled(env) && !environment_get_pathtracing_enabled(env) && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probe_capture_ddgi")) {
+			scene_state.ubo.reflection_flags |= REFLECTION_FLAGS_PROBES_CAPTURED_WITH_DDGI;
+		}
+	}
 	scene_state.ubo.reflection_pad = 0;
 
 	if (uniform_buffer_index >= scene_state.implementation_uniform_buffers.size()) {
@@ -2532,6 +2542,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	SceneShaderForwardClustered::ShaderSpecialization base_specialization = scene_shader.default_specialization;
 	base_specialization.use_depth_fog = p_render_data->environment.is_valid() && environment_get_fog_mode(p_render_data->environment) == RSE::EnvironmentFogMode::ENV_FOG_MODE_DEPTH;
+	{
+		RID ddgi_resources[4];
+		base_specialization.ddgi_probe_capture = _probe_capture_ddgi(p_render_data, ddgi_resources);
+	}
 
 	if (depth_pre_pass) { //depth pre pass
 		bool needs_pre_resolve = _needs_post_prepass_render(p_render_data, using_sdfgi || using_voxelgi);
@@ -3739,6 +3753,17 @@ void RenderForwardClustered::_update_render_base_uniform_set() {
 	}
 }
 
+bool RenderForwardClustered::_probe_capture_ddgi(const RenderDataRD *p_render_data, RID r_resources[4]) {
+	if (!p_render_data || p_render_data->reflection_probe.is_null() || !GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probe_capture_ddgi")) {
+		return false;
+	}
+	RID env = p_render_data->environment;
+	if (env.is_null() || !environment_get_ddgi_enabled(env) || environment_get_pathtracing_enabled(env)) {
+		return false;
+	}
+	return _ddgi_get_capture_resources(r_resources[0], r_resources[1], r_resources[2], r_resources[3]);
+}
+
 RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
@@ -4158,6 +4183,26 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u_params.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 		u_params.append_id(planar_params.is_valid() ? planar_params : black);
 		uniforms.push_back(u_params);
+	}
+	{
+		// DDGI probes for reflection probe captures (42: data, 43: probes,
+		// 44: irradiance, 45: distance); zeros (no volumes) otherwise.
+		RID ddgi[4];
+		if (!_probe_capture_ddgi(p_render_data, ddgi)) {
+			RID black = texture_storage->texture_rd_get_default(RendererRD::TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
+			ddgi[0] = ddgi_dummy_uniform_buffer;
+			ddgi[1] = ddgi_dummy_storage_buffer;
+			ddgi[2] = black;
+			ddgi[3] = black;
+		}
+		const RD::UniformType types[4] = { RD::UNIFORM_TYPE_UNIFORM_BUFFER, RD::UNIFORM_TYPE_STORAGE_BUFFER, RD::UNIFORM_TYPE_TEXTURE, RD::UNIFORM_TYPE_TEXTURE };
+		for (int i = 0; i < 4; i++) {
+			RD::Uniform u;
+			u.binding = 42 + i;
+			u.uniform_type = types[i];
+			u.append_id(ddgi[i]);
+			uniforms.push_back(u);
+		}
 	}
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 	{
@@ -5749,6 +5794,13 @@ RenderForwardClustered::RenderForwardClustered() {
 	dlss_effect = memnew(RendererRD::DLSSEffect);
 	ss_effects = memnew(RendererRD::SSEffects);
 	planar_reflections_effect = memnew(RendererRD::PlanarReflections);
+	{
+		// Larger than the shaders' DDGIDataBlock and one DDGIProbe; all zeros.
+		Vector<uint8_t> zeros;
+		zeros.resize_initialized(4096);
+		ddgi_dummy_uniform_buffer = RD::get_singleton()->uniform_buffer_create(zeros.size(), Span<uint8_t>(zeros.ptr(), zeros.size()));
+		ddgi_dummy_storage_buffer = RD::get_singleton()->storage_buffer_create(256, Span<uint8_t>(zeros.ptr(), 256));
+	}
 	motion_vectors_store = memnew(RendererRD::MotionVectorsStore);
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	mfx_temporal_effect = memnew(RendererRD::MFXTemporalEffect);
@@ -5766,6 +5818,10 @@ RenderForwardClustered::~RenderForwardClustered() {
 	if (planar_reflections_effect != nullptr) {
 		memdelete(planar_reflections_effect);
 		planar_reflections_effect = nullptr;
+	}
+	if (ddgi_dummy_uniform_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(ddgi_dummy_uniform_buffer);
+		RD::get_singleton()->free_rid(ddgi_dummy_storage_buffer);
 	}
 
 	if (taa != nullptr) {

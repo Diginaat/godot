@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-01 (DDGI in probe captures, performance plan)
+
+* **Updated**: REFLECTIONS.md: `probe_capture_ddgi`, step 9 done, issue H
+  done, performance plan, findings; reflections/planar-open-issues.md.
+
 ## 2026-11-01 (reflections: bugs seen in play)
 
 * **Added**: mistakes/motion-test-that-did-not-move.md.

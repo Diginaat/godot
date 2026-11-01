@@ -1244,6 +1244,9 @@ public:
 	InstanceReflectionProbeData *reflection_probe_capturing = nullptr;
 	Vector3 reflection_probe_camera_position;
 	uint64_t reflection_probe_frame = 0;
+	// The renderer's DDGI capture generation at the last check: when it changes,
+	// all reflection probes are captured again (probe_capture_ddgi).
+	uint64_t reflection_probe_ddgi_generation = 0;
 	bool _render_reflection_probe_face(Instance *p_instance, int p_face);
 	void _render_reflection_probes_budgeted(int p_faces_per_frame);
 

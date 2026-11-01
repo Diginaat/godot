@@ -4527,6 +4527,25 @@ void RendererSceneCull::_render_reflection_probes_budgeted(int p_faces_per_frame
 void RendererSceneCull::render_probes() {
 	/* REFLECTION PROBES */
 
+	// Captures sample the DDGI probes (probe_capture_ddgi); "Once" probes were
+	// captured while those were still converging: capture all probes again
+	// (each is queued the next time a view sees it, as after a move).
+	uint64_t ddgi_generation = scene_render->ddgi_get_capture_generation();
+	if (ddgi_generation != reflection_probe_ddgi_generation) {
+		reflection_probe_ddgi_generation = ddgi_generation;
+		if (GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probe_capture_ddgi")) {
+			for (const RID &rid : scenario_owner.get_owned_list()) {
+				Scenario *scenario = scenario_owner.get_or_null(rid);
+				for (uint32_t i = 0; i < scenario->instance_data.size(); i++) {
+					InstanceData &idata = scenario->instance_data[i];
+					if ((idata.flags & InstanceData::FLAG_BASE_TYPE_MASK) == RSE::INSTANCE_REFLECTION_PROBE) {
+						idata.flags |= InstanceData::FLAG_REFLECTION_PROBE_DIRTY;
+					}
+				}
+			}
+		}
+	}
+
 	SelfList<InstanceReflectionProbeData> *ref_probe = reflection_probe_render_list.first();
 	Vector<SelfList<InstanceReflectionProbeData> *> done_list;
 

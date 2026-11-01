@@ -240,6 +240,17 @@ public:
 
 		uint32_t frame = 0;
 		uint32_t update_capacity_used = 0; // Probes the trace dispatch covers (budget control).
+		// Probe updates since the probes were last reset, and how many of the
+		// reflection probe recapture points (1, 4, 16 updates of every probe)
+		// they passed (see get_capture_generation()).
+		uint64_t updates_since_reset = 0;
+		int capture_milestone = 0;
+		// Light changes since (directional lights, the sky's energy): reflection
+		// probes are captured again once DDGI has caught up.
+		uint32_t light_hash = 0;
+		uint32_t light_changed_frame = 0;
+		uint32_t light_recapture_frame = 0;
+		bool light_recapture_pending = false;
 		RandomPCG rng;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}
@@ -305,6 +316,10 @@ private:
 	RID apply_pipelines[APPLY_MODE_MAX];
 
 	bool initialized = false;
+	// The probes of the last view that applied DDGI (weak: views come and go).
+	// Reflection probe captures have no view of their own and sample these.
+	ObjectID capture_source;
+	uint64_t capture_generation = 0;
 	// The apply variants with emissive lights need ray queries.
 	bool emitters_supported = false;
 	/// rendering/global_illumination/ddgi/emissive_lights, if the GPU can do it.
@@ -346,6 +361,18 @@ public:
 	/// The probes of a viewport (atlases, offsets, states and the volume they
 	/// belong to) for DDGIProbeData, or an empty dictionary.
 	Dictionary get_probe_data(RenderSceneBuffersRD *p_render_buffers);
+
+	/// The sampling resources (as get_sampling_resources()) of the last view
+	/// that applied DDGI, for reflection probe captures, which have no view of
+	/// their own. False when no view has probes.
+	bool get_capture_resources(RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas);
+	/// Changes when reflection probes should be captured again because the
+	/// probes they sample have converged further: after 1, 4 and 16 updates of
+	/// every probe since a reset, and when baked probes are uploaded. "Once"
+	/// probes are otherwise captured in the first frames, while most DDGI probes
+	/// are still untraced (dark bands, blotches). Also after the light changes
+	/// (directional lights, the sky's energy), once the probes followed it.
+	uint64_t get_capture_generation() const { return capture_generation; }
 
 	/// What sampling the probes needs (as ddgi_sample_inc.glsl does), for
 	/// other passes such as volumetric fog. False when the viewport has no

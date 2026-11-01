@@ -2083,6 +2083,28 @@ void fragment_shader(in SceneData scene_data) {
 			indirect_specular_light = mix(indirect_specular_light, buffer_reflection.rgb, buffer_reflection.a);
 		}
 	}
+
+	if (sc_ddgi_probe_capture() && bool(implementation_data.reflection_flags & REFLECTION_FLAGS_DDGI_IN_PROBE_CAPTURE)) {
+		// Reflection probe capture: it has no GI buffer, so it was lit by the sky's
+		// ambient light (a cold, bright room in the probe's reflections). Sample the
+		// DDGI probes here instead, as DDGI's apply pass does for the view, with the
+		// same occlusion of the sky's specular light.
+		vec3 ddgi_pos = (inv_view_matrix * vec4(vertex, 1.0)).xyz;
+		vec3 ddgi_normal = normalize(mat3(inv_view_matrix) * indirect_normal);
+		vec3 ddgi_to_eye = normalize(inv_view_matrix[3].xyz - ddgi_pos);
+		vec4 capture_ddgi = ddgi_sample_irradiance(ddgi_pos, ddgi_normal, ddgi_to_eye);
+		capture_ddgi.rgb *= ddgi.volumes[0].params.x; // Energy.
+		if (capture_ddgi.a > 0.0 && !any(isnan(capture_ddgi)) && !any(isinf(capture_ddgi))) {
+			float open_ambient = dot(ambient_light, vec3(0.2126, 0.7152, 0.0722));
+			float ddgi_ambient = dot(capture_ddgi.rgb, vec3(0.2126, 0.7152, 0.0722));
+			float specular_visibility = open_ambient > 1e-5 ? clamp(ddgi_ambient / open_ambient, 0.0, 1.0) : 1.0;
+			indirect_specular_light *= mix(1.0, specular_visibility, capture_ddgi.a);
+			ambient_light = mix(ambient_light, capture_ddgi.rgb, capture_ddgi.a);
+			// As for the GI buffer: other probes keep DDGI's diffuse light and are normalized by it.
+			ddgi_coverage = capture_ddgi.a;
+			ddgi_irradiance = capture_ddgi.rgb;
+		}
+	}
 #endif // !USE_LIGHTMAP
 
 	if (bool(implementation_data.ss_effects_flags & SCREEN_SPACE_EFFECTS_FLAGS_USE_SSAO)) {
@@ -2129,7 +2151,15 @@ void fragment_shader(in SceneData scene_data) {
 		ref_vec = mix(ref_vec, bent_normal, roughness * roughness * roughness * roughness);
 
 		// Under DDGI, probe reflections are normalized by the DDGI irradiance (see reflection_process()).
-		vec4 probe_normalization = vec4(ddgi_irradiance, ddgi_coverage * implementation_data.reflection_normalization);
+		float normalization_strength = ddgi_coverage * implementation_data.reflection_normalization;
+		if (bool(implementation_data.reflection_flags & REFLECTION_FLAGS_PROBES_CAPTURED_WITH_DDGI)) {
+			// The probes were captured with DDGI's light, and again after light changes:
+			// normalization is left for rough reflections (darker in corners and under
+			// objects). A sharp reflection shows distant light, which the irradiance here
+			// over the probe's at its center says nothing about (a mirror was 1.6x too dark).
+			normalization_strength *= smoothstep(0.2, 0.5, float(roughness));
+		}
+		vec4 probe_normalization = vec4(ddgi_irradiance, normalization_strength);
 
 		for (uint i = item_from; i < item_to; i++) {
 			uint mask = cluster_buffer.data[cluster_reflection_offset + i];

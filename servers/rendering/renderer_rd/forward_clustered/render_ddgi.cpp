@@ -35,6 +35,7 @@
 #include "servers/rendering/renderer_rd/environment/gi.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_raytracing.h"
+#include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_data_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
@@ -409,12 +410,16 @@ uint32_t RenderDDGI::_setup_volumes(ViewportData *p_data, const RenderDataRD *p_
 			vs.spacing = spacing;
 			vs.valid = true;
 			reset[3] = 1;
+			p_data->updates_since_reset = 0;
+			p_data->capture_milestone = 0;
 		} else if (!s.node_volume && s.follow_camera && origin != vs.origin) {
 			Vector3i delta = origin - vs.origin;
 			if (Math::abs(delta.x) >= grid.x || Math::abs(delta.y) >= grid.y || Math::abs(delta.z) >= grid.z) {
 				// Teleported: nothing of the old grid is reusable.
 				vs.scroll = Vector3i();
 				reset[3] = 1;
+				p_data->updates_since_reset = 0;
+				p_data->capture_milestone = 0;
 			} else {
 				vs.scroll = Vector3i(((vs.scroll.x + delta.x) % grid.x + grid.x) % grid.x,
 						((vs.scroll.y + delta.y) % grid.y + grid.y) % grid.y,
@@ -497,6 +502,8 @@ Ref<RenderDDGI::ViewportData> RenderDDGI::_prepare_viewport(RenderDataRD *p_rend
 	} else if (vd->baked_version != s.baked_version) {
 		if (!_upload_baked(vd.ptr(), s)) {
 			vd->baked_version = s.baked_version; // Don't retry (and warn) every frame.
+		} else {
+			capture_generation++; // Converged probes: capture reflection probes again.
 		}
 	}
 	return vd;
@@ -656,6 +663,52 @@ bool RenderDDGI::get_sampling_resources(RenderSceneBuffersRD *p_render_buffers, 
 	return true;
 }
 
+// Directional lights (direction, color, energy) and the background's energy,
+// quantized: a change means reflection probes captured before show the old light.
+static uint32_t _ddgi_light_state_hash(const RenderDataRD *p_render_data) {
+	uint32_t h = HASH_MURMUR3_SEED;
+	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
+	if (p_render_data->lights) {
+		for (uint32_t i = 0; i < p_render_data->lights->size(); i++) {
+			RID instance = (*p_render_data->lights)[i];
+			RID light = light_storage->light_instance_get_base_light(instance);
+			if (light_storage->light_get_type(light) != RSE::LIGHT_DIRECTIONAL) {
+				continue;
+			}
+			Vector3 dir = light_storage->light_instance_get_base_transform(instance).basis.get_column(2).normalized();
+			Color color = light_storage->light_get_color(light);
+			float energy = light_storage->light_get_param(light, RSE::LIGHT_PARAM_ENERGY);
+			// About 1 degree, 3% of color, 0.05 of energy.
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(dir.x * 64.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(dir.y * 64.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(dir.z * 64.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(color.r * 32.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(color.g * 32.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(color.b * 32.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(energy * 20.0f))), h);
+		}
+	}
+	RID env = p_render_data->environment;
+	RendererEnvironmentStorage *env_storage = RendererEnvironmentStorage::get_singleton();
+	if (env.is_valid() && env_storage->is_environment(env)) {
+		h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(env_storage->environment_get_bg_energy_multiplier(env) * 20.0f))), h);
+		h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(env_storage->environment_get_bg_intensity(env) * 0.05f))), h);
+	}
+	return hash_fmix32(h) | 1u; // Never 0 (0: not set yet).
+}
+
+bool RenderDDGI::get_capture_resources(RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) {
+	ViewportData *vd = ObjectDB::get_instance<ViewportData>(capture_source);
+	if (!vd || !vd->data_buffer.is_valid() || !vd->probe_buffer.is_valid() || !vd->irradiance_display.is_valid() || !vd->distance_atlas.is_valid()) {
+		return false;
+	}
+	r_data_buffer = vd->data_buffer;
+	r_probe_buffer = vd->probe_buffer;
+	r_irradiance_atlas = vd->irradiance_display;
+	r_distance_atlas = vd->distance_atlas;
+	return true;
+}
+
 Dictionary RenderDDGI::get_probe_data(RenderSceneBuffersRD *p_render_buffers) {
 	ERR_FAIL_NULL_V(p_render_buffers, Dictionary());
 	if (!p_render_buffers->has_custom_data(RB_SCOPE_DDGI)) {
@@ -738,6 +791,40 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	const uint32_t capacity = vd->update_capacity_used;
 	DDGIDataGPU gpu = {};
 	_write_frame_data(vd.ptr(), p_render_data, q, capacity, gpu);
+
+	// Reflection probe captures sample these probes. After every probe was
+	// updated once (the scheduler takes new probes first), four and sixteen
+	// times, ask for them to be captured again.
+	vd->updates_since_reset += capacity;
+	if (vd->total_probes > 0) {
+		uint64_t sweeps = vd->updates_since_reset / vd->total_probes;
+		int milestone = sweeps >= 16 ? 3 : (sweeps >= 4 ? 2 : (sweeps >= 1 ? 1 : 0));
+		if (milestone > vd->capture_milestone) {
+			vd->capture_milestone = milestone;
+			capture_generation++;
+		}
+	}
+	// After a light change (time of day, a light switched), ask again once DDGI
+	// has followed it: two updates of every probe plus the display easing; at
+	// most every 2 s while the light keeps changing.
+	{
+		uint32_t light_hash = _ddgi_light_state_hash(p_render_data);
+		if (light_hash != vd->light_hash) {
+			vd->light_recapture_pending = vd->light_hash != 0;
+			vd->light_hash = light_hash;
+			vd->light_changed_frame = vd->frame;
+		}
+		if (vd->light_recapture_pending) {
+			uint32_t sweep_frames = capacity > 0 ? (vd->total_probes + capacity - 1) / capacity : 1;
+			bool settled = vd->frame - vd->light_changed_frame >= 2 * sweep_frames + 30;
+			bool overdue = vd->frame - vd->light_recapture_frame >= 2 * sweep_frames + 120;
+			if (settled || overdue) {
+				vd->light_recapture_pending = false;
+				vd->light_recapture_frame = vd->frame;
+				capture_generation++;
+			}
+		}
+	}
 
 	rd->buffer_update(vd->data_buffer, 0, sizeof(DDGIDataGPU), &gpu);
 	{
@@ -918,6 +1005,7 @@ void RenderDDGI::apply(RenderDataRD *p_render_data, const RID *p_normal_roughnes
 	if (vd.is_null() || !vd->data_buffer.is_valid()) {
 		return;
 	}
+	capture_source = vd->get_instance_id();
 
 	RD *rd = RD::get_singleton();
 	RendererEnvironmentStorage::DDGISettings s = RendererEnvironmentStorage::get_singleton()->environment_get_ddgi(p_render_data->environment);

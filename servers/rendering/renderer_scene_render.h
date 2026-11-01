@@ -272,6 +272,9 @@ public:
 	bool environment_get_ddgi_baked_only(RID p_env) const;
 	/// The DDGI probes of a viewport's render buffers (see DDGIProbeData), or an empty dictionary.
 	virtual Dictionary ddgi_get_probe_data(const Ref<RenderSceneBuffers> &p_render_buffers) { return Dictionary(); }
+	// Changes when reflection probes should be captured again because the DDGI
+	// probes their captures sample have converged further (0 without DDGI).
+	virtual uint64_t ddgi_get_capture_generation() const { return 0; }
 
 	// Adjustment
 	void environment_set_adjustment(RID p_env, bool p_enable, float p_brightness, float p_contrast, float p_saturation, bool p_use_1d_color_correction, RID p_color_correction);

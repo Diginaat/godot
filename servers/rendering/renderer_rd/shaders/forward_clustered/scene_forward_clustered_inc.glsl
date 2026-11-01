@@ -150,6 +150,10 @@ bool sc_use_lightmap_specular() {
 	return ((sc_packed_1() >> 6) & 1U) != 0;
 }
 
+bool sc_ddgi_probe_capture() {
+	return ((sc_packed_1() >> 8) & 1U) != 0;
+}
+
 bool sc_material_feedback() {
 	return ((sc_packed_1() >> 7) & 1U) != 0;
 }
@@ -205,6 +209,8 @@ layout(set = 0, binding = 2) uniform sampler shadow_sampler;
 #define SCREEN_SPACE_EFFECTS_FLAGS_USE_PLANAR_REFLECTIONS (1 << 5)
 
 #define REFLECTION_FLAGS_DDGI_OVERRIDES_PROBE_AMBIENT (1 << 0)
+#define REFLECTION_FLAGS_DDGI_IN_PROBE_CAPTURE (1 << 1)
+#define REFLECTION_FLAGS_PROBES_CAPTURED_WITH_DDGI (1 << 2)
 
 layout(set = 0, binding = 3, std430) restrict readonly buffer OmniLights {
 	LightData data[];
@@ -506,6 +512,25 @@ layout(set = 1, binding = 37) uniform texture2DArray sscs_buffer;
 // plane (0 = no reflector), its thickness, normal distortion, roughness cutoff.
 layout(set = 1, binding = 40) uniform texture2D planar_reflection_color;
 layout(set = 1, binding = 41) uniform texture2D planar_reflection_params;
+
+// DDGI probes, for reflection probe captures (REFLECTION_FLAGS_DDGI_IN_PROBE_CAPTURE):
+// a capture has no view and so no GI buffer. Zeros (no volumes) in other passes.
+#include "../raytracing/ddgi_inc.glsl"
+
+layout(set = 1, binding = 42, std140) uniform DDGIUniforms {
+	DDGIDataBlock ddgi;
+};
+
+layout(set = 1, binding = 43, std430) restrict readonly buffer DDGIProbes {
+	DDGIProbe ddgi_probes[];
+};
+
+layout(set = 1, binding = 44) uniform texture2D ddgi_irradiance_atlas;
+layout(set = 1, binding = 45) uniform texture2D ddgi_distance_atlas;
+
+#define DDGI_SAMPLER SAMPLER_LINEAR_CLAMP
+#define DDGI_SAMPLING
+#include "../raytracing/ddgi_sample_inc.glsl"
 
 #endif
 

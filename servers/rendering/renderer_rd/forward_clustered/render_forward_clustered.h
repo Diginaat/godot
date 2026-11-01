@@ -317,6 +317,8 @@ protected:
 
 	enum {
 		REFLECTION_FLAGS_DDGI_OVERRIDES_PROBE_AMBIENT = (1 << 0),
+		REFLECTION_FLAGS_DDGI_IN_PROBE_CAPTURE = (1 << 1), // Probe capture: sample the DDGI probes directly (bindings 42-45).
+		REFLECTION_FLAGS_PROBES_CAPTURED_WITH_DDGI = (1 << 2), // The view's probes were captured with DDGI's light.
 	};
 
 	struct SceneState {
@@ -807,6 +809,11 @@ protected:
 	RendererRD::SSEffects *ss_effects = nullptr;
 	RendererRD::PlanarReflections *planar_reflections_effect = nullptr;
 
+	// Stand-ins for the DDGI bindings (42-45) when a pass doesn't sample DDGI:
+	// zeros, so no volumes.
+	RID ddgi_dummy_uniform_buffer;
+	RID ddgi_dummy_storage_buffer;
+
 #ifdef METAL_MFXTEMPORAL_ENABLED
 	RendererRD::MFXTemporalEffect *mfx_temporal_effect = nullptr;
 #endif
@@ -899,6 +906,13 @@ protected:
 	virtual void _ddgi_debug_draw(RenderDataRD *p_render_data) {}
 	// The probe resources of this view, for volumetric fog. False when there are none.
 	virtual bool _ddgi_get_fog_resources(RenderSceneBuffersRD *p_render_buffers, RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) { return false; }
+	// The probe resources of the last view that applied DDGI, for reflection
+	// probe captures. False when there are none.
+	virtual bool _ddgi_get_capture_resources(RID &r_data_buffer, RID &r_probe_buffer, RID &r_irradiance_atlas, RID &r_distance_atlas) { return false; }
+	// Whether this pass is a reflection probe capture that samples the DDGI
+	// probes (rendering/global_illumination/reflections/probe_capture_ddgi), and
+	// their resources (data, probes, irradiance, distance) if so.
+	bool _probe_capture_ddgi(const RenderDataRD *p_render_data, RID r_resources[4]);
 	bool ddgi_active_this_frame = false;
 
 	// Planar reflections selected for the view being rendered (set in _render_scene()).
