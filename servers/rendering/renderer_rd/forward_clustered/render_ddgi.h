@@ -93,7 +93,7 @@ struct DDGIDataGPU {
 	float atlas_inv_size[4];
 	float schedule[4]; // Base update rate, total probes, max radiance per ray, bounce energy.
 	float miss_color[4];
-	float smoothing[4]; // x: blend of the display irradiance toward the probes' per frame, yzw: unused.
+	float smoothing[4]; // x: blend of the display irradiance toward the probes' per frame, y: 1 keeps the update budget full (adaptive budget), zw: unused.
 };
 static_assert(sizeof(DDGIDataGPU) == 1632, "DDGIDataGPU must match the std140 layout of DDGIDataBlock");
 
@@ -240,6 +240,13 @@ public:
 
 		uint32_t frame = 0;
 		uint32_t update_capacity_used = 0; // Probes the trace dispatch covers (budget control).
+		// Adaptive budget (rendering/global_illumination/ddgi/adaptive_budget):
+		// probe updates since the probes were reset, the light state
+		// (directional lights, background energy) last seen and the frame it
+		// changed. The budget stays full after either.
+		uint64_t updates_since_reset = 0;
+		uint32_t light_hash = 0;
+		uint32_t light_changed_frame = 0;
 		RandomPCG rng;
 
 		virtual void configure(RenderSceneBuffersRD *p_render_buffers) override {}

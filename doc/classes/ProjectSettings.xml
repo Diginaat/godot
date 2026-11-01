@@ -3128,6 +3128,9 @@
 		<member name="rendering/global_illumination/ddgi/custom_rays_per_probe" type="int" setter="" getter="" default="128">
 			Rays traced per probe update when [member rendering/global_illumination/ddgi/quality] is Custom. More rays give less noisy indirect light; the ray tracing cost grows linearly.
 		</member>
+		<member name="rendering/global_illumination/ddgi/adaptive_budget" type="bool" setter="" getter="" default="true">
+			If [code]true[/code], DDGI stops spending its whole per-frame probe update budget once the probes' light has settled (the updated probes' light barely changes beyond their noise): each probe is then updated at its own rate, and a static scene costs less. The budget is used fully again when probes change, for four updates of every probe after a reset, and for 32 after a change of the directional lights or the background's energy. Probes still converging after other changes (moving lights, emissive objects) can lag a little: in a test interior, the indirect light ended 3% off after the sun halved, while DDGI cost 0.85 instead of 1.38 ms per frame once settled (1080p, RTX 3060, Medium). Has no effect with realtime updates.
+		</member>
 		<member name="rendering/global_illumination/ddgi/emissive_lights" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], emissive [StandardMaterial3D] surfaces light their surroundings directly: each pixel gets their light as from a sphere light, with a ray traced shadow, and the probes only carry the light they reflect. This gives smooth, correctly falling off light from small bright emitters instead of noisy, blocky spots at the probe spacing, and no light through walls. If [code]false[/code], the probes see emitters directly, as before. Needs ray queries; not used for baked-only probes (bakes keep the emitters' light in the probes). Emission textures and custom shaders are not taken into account for the direct light.
 		</member>

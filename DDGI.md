@@ -119,6 +119,7 @@ Project settings (`rendering/global_illumination/ddgi/`):
 | `light_transition_time` | 0.2 s (at 60 fps): how long surfaces take to fade to a probe's new light |
 | `realtime_rays_per_probe` | 64: rays per probe and frame with realtime updates |
 | `emissive_lights` | On: emissive surfaces light pixels directly (sphere lights with a ray traced shadow); the probes carry only their bounce light |
+| `adaptive_budget` | On: once the probes have settled, the scheduler stops filling the per-frame update budget (each probe keeps its own rate); full again when probes change, after a reset (4 updates of every probe) and after a light change (32) |
 | `near_field_rays` | **Removed 2026-10-31** (dark spots that moved with the camera; see kb/ddgi/findings/near-field-camera-spots.md). Was: on: one short ray per block of the low resolution apply and frame, accumulated and filtered, in place of the probes' light near surfaces (see below) |
 | `near_field_distance` | **Removed 2026-10-31.** Was 0.5: how far the near-field rays reach, in probe spacings of the finest volume (moving objects reach 2 regardless) |
 | `skip_moving_objects` | **Removed 2026-10-31** (moving objects stay in the probes). Was on: probes and near-field cosine rays skip objects that keep moving; each block takes the light of the one that covers most of its view, from its shape (a sphere, or its oriented box scaled by how much of it the mesh fills), so its shadow and bounce light follow it without noise or smear |
@@ -627,6 +628,24 @@ How to read them:
 ## Findings log
 
 Newest first. Note the date, the commit, what you saw or changed.
+
+- **2026-11-01, adaptive update budget.** DDGI cost the same in a static
+  scene as in a changing one (interior, 1080p, Medium: 1.38 ms): the
+  scheduler raised `rate_scale` whenever less than 90% of the budget was
+  traced. Halving the budget saved 0.26 ms, a quarter 0.40 ms. Now the
+  blend pass sums the updated probes' variability (change above the noise),
+  and while its mean is below 0.02 the relocate pass lets `rate_scale`
+  drift back toward 1 instead of filling the budget. A first version kept
+  the budget full for 4 updates of every probe after a light change: probes
+  still converging (5% of their remaining gap per update) passed for
+  settled and the interior ended 5% too bright after the sun halved. With
+  32 after a light change (CPU hash of the directional lights and the
+  background energy): DDGI 0.85 ms once settled, brightness unchanged
+  (0.0460), flicker 0.64% to 0.12% of pixels, sun step within about 1 to 3%
+  of the full budget's after 600 frames. Thresholds 0.005 and 0.002 saved
+  little (1.28, 1.38 ms). Setting `rendering/global_illumination/ddgi/adaptive_budget`;
+  test project `--adaptive=0|1`, `--ppf=N`. Found through a performance
+  pass (research: RTXGI's probe variability, Flax's per-probe ray budget).
 
 - 2026-10-12: Performance and stability pass. Baseline (RTX 3060, 1080p,
   DDGI ms Low / Medium / High / Ultra): room 1.40 / 1.72 / 2.21 / 3.48,

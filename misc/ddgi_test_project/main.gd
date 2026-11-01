@@ -165,6 +165,12 @@ func _apply_args() -> void:
 	if args.has("linear"):
 		env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 		env.tonemap_exposure = float(args.get("exposure", "1.0"))
+	if args.has("adaptive"):
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/adaptive_budget", args["adaptive"] == "1")
+	if args.has("ppf"):
+		# Custom quality with this many probes traced per frame (other values as Medium).
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/quality", 4)
+		ProjectSettings.set_setting("rendering/global_illumination/ddgi/custom_probes_per_frame", int(args["ppf"]))
 	_set_gi_mode(args.get("gi", "ddgi"))
 	_set_view(args.get("view", "room"))
 

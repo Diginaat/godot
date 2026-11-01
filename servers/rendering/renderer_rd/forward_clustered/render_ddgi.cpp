@@ -35,6 +35,7 @@
 #include "servers/rendering/renderer_rd/environment/gi.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_raytracing.h"
+#include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_data_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/render_scene_buffers_rd.h"
@@ -399,12 +400,14 @@ uint32_t RenderDDGI::_setup_volumes(ViewportData *p_data, const RenderDataRD *p_
 			vs.spacing = spacing;
 			vs.valid = true;
 			reset[3] = 1;
+			p_data->updates_since_reset = 0;
 		} else if (!s.node_volume && s.follow_camera && origin != vs.origin) {
 			Vector3i delta = origin - vs.origin;
 			if (Math::abs(delta.x) >= grid.x || Math::abs(delta.y) >= grid.y || Math::abs(delta.z) >= grid.z) {
 				// Teleported: nothing of the old grid is reusable.
 				vs.scroll = Vector3i();
 				reset[3] = 1;
+			p_data->updates_since_reset = 0;
 			} else {
 				vs.scroll = Vector3i(((vs.scroll.x + delta.x) % grid.x + grid.x) % grid.x,
 						((vs.scroll.y + delta.y) % grid.y + grid.y) % grid.y,
@@ -687,6 +690,40 @@ Dictionary RenderDDGI::get_probe_data(RenderSceneBuffersRD *p_render_buffers) {
 	return d;
 }
 
+// Directional lights (direction, color, energy) and the background's energy,
+// quantized: a change means the probes have to follow new light.
+static uint32_t _ddgi_light_state_hash(const RenderDataRD *p_render_data) {
+	uint32_t h = HASH_MURMUR3_SEED;
+	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
+	if (p_render_data->lights) {
+		for (uint32_t i = 0; i < p_render_data->lights->size(); i++) {
+			RID instance = (*p_render_data->lights)[i];
+			RID light = light_storage->light_instance_get_base_light(instance);
+			if (light_storage->light_get_type(light) != RSE::LIGHT_DIRECTIONAL) {
+				continue;
+			}
+			Vector3 dir = light_storage->light_instance_get_base_transform(instance).basis.get_column(2).normalized();
+			Color color = light_storage->light_get_color(light);
+			float energy = light_storage->light_get_param(light, RSE::LIGHT_PARAM_ENERGY);
+			// About 1 degree, 3% of color, 0.05 of energy.
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(dir.x * 64.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(dir.y * 64.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(dir.z * 64.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(color.r * 32.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(color.g * 32.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(color.b * 32.0f))), h);
+			h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(energy * 20.0f))), h);
+		}
+	}
+	RID env = p_render_data->environment;
+	RendererEnvironmentStorage *env_storage = RendererEnvironmentStorage::get_singleton();
+	if (env.is_valid() && env_storage->is_environment(env)) {
+		h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(env_storage->environment_get_bg_energy_multiplier(env) * 20.0f))), h);
+		h = hash_murmur3_one_32(uint32_t(int32_t(Math::round(env_storage->environment_get_bg_intensity(env) * 0.05f))), h);
+	}
+	return hash_fmix32(h) | 1u; // Never 0 (0: not set yet).
+}
+
 void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_raytracing, RTViewportState *p_rt_state, uint32_t p_rt_flags) {
 	ERR_FAIL_COND(!initialized);
 	ERR_FAIL_NULL(p_raytracing);
@@ -728,6 +765,27 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	const uint32_t capacity = vd->update_capacity_used;
 	DDGIDataGPU gpu = {};
 	_write_frame_data(vd.ptr(), p_render_data, q, capacity, gpu);
+
+	// Adaptive budget (rendering/global_illumination/ddgi/adaptive_budget): once
+	// the probes have settled, the scheduler may leave part of the budget
+	// unused (MODE_RELOCATE_CLASSIFY in ddgi_update.glsl), so a static scene
+	// stops paying for updates that change nothing. The budget stays full for
+	// four updates of every probe after a reset, and for 32 after a light change:
+	// probes that still converge change little per update and would pass for
+	// settled (with 4, the interior view ended 5% off after the sun halved; with
+	// 32, 3%; 0.85 instead of 1.38 ms of DDGI once settled).
+	{
+		vd->updates_since_reset += capacity;
+		uint32_t light_hash = _ddgi_light_state_hash(p_render_data);
+		if (light_hash != vd->light_hash) {
+			vd->light_hash = light_hash;
+			vd->light_changed_frame = vd->frame;
+		}
+		uint32_t sweep_frames = capacity > 0 ? (vd->total_probes + capacity - 1) / capacity : 1;
+		bool keep_full = !GLOBAL_GET_CACHED(bool, "rendering/global_illumination/ddgi/adaptive_budget") || realtime ||
+				vd->updates_since_reset < uint64_t(vd->total_probes) * 4 || vd->frame - vd->light_changed_frame < 32 * sweep_frames;
+		gpu.smoothing[1] = keep_full ? 1.0f : 0.0f;
+	}
 
 	rd->buffer_update(vd->data_buffer, 0, sizeof(DDGIDataGPU), &gpu);
 	{
