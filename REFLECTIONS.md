@@ -426,13 +426,23 @@ Done and rejected:
   specialization constant: no measurable gain (`interior` 3.39 to 3.41 ms
   before and after), and pipelines would compile when reflectors come
   into view.
+- The mirror pass picks mesh LODs from the view's whole projection and its
+  own resolution: the cropped projection is zoomed in (by up to 8 times
+  for a small mirror), so it chose finer LODs than the view itself, and
+  the pass renders at `planar_mirror_scale` (Godot already coarsens LODs
+  for `scaling_3d_scale` the same way). Test with 420 spheres of 37k
+  triangles with generated LODs seen only in a wall mirror, 1080p, 300
+  frames: mirror pass 0.193 to 0.131 ms, identical on repeat runs; image
+  differences only at the silhouettes of distant spheres, not visible at
+  2x zoom. No change in scenes without LOD meshes (Godot's primitive
+  meshes and the test projects have none).
 
 | # | Item | Expected gain | Quality risk |
 | --- | --- | --- | --- |
 | P1 | Code only some passes run behind specialization constants, so other pipelines compile it out. Done for the probe capture's DDGI sampling (+0.09 ms in every view as a plain branch, 0 now). Next: the planar compositing in the scene shader (runs only with reflectors in view) | 0.05 to 0.1 ms in views without reflectors | None (same code where it runs) |
 | P2 | Planar passes only on tiles with a reflector: classify 8x8 tiles in the project pass, indirect dispatch of resolve and temporal (as the PPR talk does) | Most of 0.87 ms where reflectors cover little of the screen | None |
 | P3 | Mirror pass shares the main view's shadow maps instead of rendering the cascades again | Part of the 0.35 to 0.55 ms | None if the cascades cover the mirror's view; check reflected shadows against the path tracer |
-| P4 | Mirror pass: higher mesh LOD threshold (it is rendered at half resolution) and the main view's occlusion culling for the reflected frustum | Triangle and draw cost | LOD pops in reflections; compare in motion |
+| P4 | Mirror pass: mesh LODs from the uncropped projection and its resolution (done, see above). Open: occlusion culling for the reflected frustum (the main view's buffer is of no use; needs its own) | Triangle and draw cost | None for the LODs (matched to the pass's pixel size) |
 | P5 | Mirror pass skipped when the projection covers the whole reflector (nothing off screen, no hidden sides measured last frame) | The whole pass in such views | Must not toggle visibly: hysteresis |
 | P6 | Probe recaptures (DDGI convergence, light changes) stay within the face budget; check that a continuously moving sun keeps them at one capture per 2 s | Bounded cost | None |
 | P7 | Planar `half` resolution and mirror pass scale per quality preset, set from measurements per GPU class | Large on weak GPUs | Softer reflections there only |

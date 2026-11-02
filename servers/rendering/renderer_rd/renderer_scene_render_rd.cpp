@@ -1447,11 +1447,17 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 		scene_data.z_far = p_camera_data->main_projection.get_z_far();
 
 		// this should be the same for all cameras..
-		const float lod_distance_multiplier = p_camera_data->main_projection.get_lod_multiplier();
+		// A mirror pass's projection is cropped to the mirror (zoomed in): it would pick
+		// finer LODs than the view itself. Use the view's whole projection.
+		const float lod_distance_multiplier = (p_camera_data->mirror_pass ? p_camera_data->cull_projection : p_camera_data->main_projection).get_lod_multiplier();
 
 		// Also, take into account resolution scaling for the multiplier, since we have more leeway with quality
 		// degradation visibility. Conversely, allow upwards scaling, too, for increased mesh detail at high res.
-		const float scaling_3d_scale = GLOBAL_GET_CACHED(float, "rendering/scaling_3d/scale");
+		float scaling_3d_scale = GLOBAL_GET_CACHED(float, "rendering/scaling_3d/scale");
+		if (p_camera_data->mirror_pass) {
+			// Same for the mirror pass's own resolution (RendererSceneCull::_render_mirror()).
+			scaling_3d_scale *= CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_mirror_scale"), 0.25f, 1.0f);
+		}
 		scene_data.lod_distance_multiplier = lod_distance_multiplier * (1.0 / scaling_3d_scale);
 
 		if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_DISABLE_LOD) {

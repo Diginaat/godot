@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-02 (mirror pass LODs)
+
+* **Updated**: REFLECTIONS.md performance plan: the mirror pass picks mesh
+  LODs from the view's whole projection and its own resolution (P4).
+* **Added**: mistakes/test-scene-without-hard-quit.md.
+
 ## 2026-11-01 (brightness against the path tracer)
 
 * **Added**: mistakes/tonemapped-noise-averages-darker.md.
