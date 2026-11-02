@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-02 (mirrors first for the mirror pass)
+
+* **Updated**: REFLECTIONS.md settings and findings: upright reflectors get
+  the mirror pass before floors.
+
 ## 2026-11-02 (mirror pass shadow LODs)
 
 * **Updated**: REFLECTIONS.md performance plan P4: shadow passes in the

@@ -3037,8 +3037,16 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 	// Updated for this camera just before (render_camera()).
 	const RendererSceneOcclusionCull::HZBuffer *occlusion_buffer = RendererSceneOcclusionCull::get_singleton()->buffer_get_ptr(p_viewport);
 	MirrorView &mv = mirror_views[p_viewport];
+	// Upright reflectors (mirrors) come first: they reflect what is behind the camera,
+	// which only the pass can show, while a floor's projection has most of what it
+	// reflects. A floor near the camera covered more of the screen and took the pass,
+	// and the mirror in view turned soft and smeared. Floors get it when no mirror
+	// covers at least MIN_MIRROR_COVERAGE of the screen.
+	const float MIN_MIRROR_COVERAGE = 0.005;
 	int best = -1;
 	float best_score = 0.0;
+	int best_upright = -1;
+	float best_upright_score = 0.0;
 	for (uint32_t i = 0; i < scenario->planar_reflection_data.size(); i++) {
 		const RendererSceneRender::RenderPlanarReflection &r = scenario->planar_reflection_data[i];
 		if (!(r.layers & p_visible_layers) || r.intensity <= 0.0) {
@@ -3115,6 +3123,13 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 			best_score = score;
 			best = i;
 		}
+		if (Math::abs(normal.y) < 0.7 && coverage >= MIN_MIRROR_COVERAGE && score > best_upright_score) {
+			best_upright_score = score;
+			best_upright = i;
+		}
+	}
+	if (best_upright >= 0) {
+		best = best_upright;
 	}
 	if (best < 0) {
 		return;

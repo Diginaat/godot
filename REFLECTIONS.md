@@ -94,7 +94,7 @@ Project settings (`rendering/global_illumination/reflections/`):
 | `planar_enabled` | on | Planar reflections on/off |
 | `planar_max_reflectors` | 4 | Most reflectors per view (nearest first, 1 to 8) |
 | `planar_resolution` | Full | Full or Half |
-| `planar_mirror_render` | All Reflectors | Mirror pass: one reflector per view (the one that needs it most: screen coverage times how much of what it reflects is off screen) is rendered again from the camera reflected across it. Disabled, Upright Reflectors (mirrors, walls) or All Reflectors (floors and water too) |
+| `planar_mirror_render` | All Reflectors | Mirror pass: one reflector per view is rendered again from the camera reflected across it. Upright reflectors covering at least 0.5% of the screen come first (they reflect what is behind the camera); among those, or among floors when no mirror is in view, screen coverage times how much of what it reflects is off screen. Disabled, Upright Reflectors (mirrors, walls) or All Reflectors (floors and water too, when no mirror is in view) |
 | `planar_mirror_scale` | 0.5 | Resolution of the mirror pass relative to the view's 3D resolution (0.25 to 1) |
 
 Probe resolution and count stay in the existing
@@ -509,6 +509,17 @@ Done and rejected:
 ## Findings log
 
 Newest first.
+
+- **2026-11-02, a glossy floor took the mirror pass from a mirror.** In the
+  demo level, standing at the glossy pad and looking down a little at a
+  box mirror (`--at=3,-1.2 --yaw=92 --pitch=-16`), the pad covered more of
+  the screen and won the pass (and kept it through the hysteresis); the
+  mirror fell back to the projection and its reflection turned soft and
+  smeared (the demo level has mirror probes off). Upright reflectors now
+  come first when they cover at least 0.5% of the screen: the mirror in
+  that view matches `planar_mirror_render` = Upright Reflectors, and the
+  pad keeps its planar reflection (projection only). Floors still get the
+  pass when no mirror is in view.
 
 - **2026-11-02, sky flashing in the mirror while walking (issue J).** As
   the camera walks up to a mirror, the mirror pass's rectangle grows in
