@@ -59,6 +59,15 @@ green walls onto the floor and ceiling.
 The scenes come from [`misc/ddgi_test_project`](misc/ddgi_test_project);
 each row shares one exposure. Details and benchmarks: [DDGI.md](DDGI.md).
 
+The same comparison in a game scene, an overgrown train station under an open
+roof. Without GI the sky ambient lights the covered platforms as brightly as
+the tracks in the sun; with DDGI they fall into shade, and the light that
+reaches them bounces off the sunlit tracks, grass and vines.
+
+| No GI | DDGI |
+| --- | --- |
+| ![Overgrown train station, no GI](docs/images/ddgi/station_off.jpg) | ![Overgrown train station, DDGI](docs/images/ddgi/station_ddgi.jpg) |
+
 ## Downloads
 
 Prebuilt Windows editors and export templates (standard and .NET) are on the
