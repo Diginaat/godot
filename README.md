@@ -133,6 +133,21 @@ CPU, rendering without DLSS).
   energy `1.0`, normal bias `0.1`, view bias `0.3`, hysteresis `0.95`, probe
   relocation/classification off.
 
+### Reflections (Forward+)
+
+- **`PlanarReflector3D` node**: exact mirror and floor reflections by pixel
+  projection, plus a mirror pass that renders the reflected camera's view for
+  the mirror that covers most of the screen, so a mirror shows the room
+  behind the player, live.
+- **Automatic reflections with `DDGIVolume`**: planar reflectors on glossy
+  floors, water and mirrors, and a box-projected reflection probe for the
+  volume, with no scene setup.
+- Reflection probes are captured within a per-frame face budget, scaled by
+  DDGI's lighting, and the reflection atlas grows on demand.
+- Distance limits for reflectors and the mirror pass
+  (`rendering/global_illumination/reflections/planar_max_distance`,
+  `planar_mirror_max_distance`). Details: [REFLECTIONS.md](REFLECTIONS.md).
+
 ### PhysX 5 (from the godot_physx module)
 
 Select it in Project Settings > Physics > 3D > Physics Engine = `PhysX`. Every

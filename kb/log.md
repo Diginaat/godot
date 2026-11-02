@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-02 (release 0.8.1)
+
+* **Updated**: release 0.8.1 (reflections, DDGI adaptive update budget)
+  in CUSTOM_BUILD.md; README.md lists the reflection features.
+
 ## 2026-11-02 (mirror probes off by default)
 
 * **Updated**: REFLECTIONS.md: `auto_mirror_probes` defaults to off.
