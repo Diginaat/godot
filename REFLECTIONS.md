@@ -437,13 +437,19 @@ Done and rejected:
   differences only at the silhouettes of distant spheres, not visible at
   2x zoom. No change in scenes without LOD meshes (Godot's primitive
   meshes and the test projects have none).
+- The shadow passes run during the mirror pass take their LODs from the
+  view's whole projection too. The mirror pass renders first, and the view
+  reuses a moving light's shadow maps rendered that frame, so they were
+  drawn with the mirror's finer LODs for both. Same LOD test with a moving
+  shadowed omni light among the spheres: 0.963 to 0.944 ms per frame,
+  identical on repeat runs; images within 7/255.
 
 | # | Item | Expected gain | Quality risk |
 | --- | --- | --- | --- |
 | P1 | Code only some passes run behind specialization constants, so other pipelines compile it out. Done for the probe capture's DDGI sampling (+0.09 ms in every view as a plain branch, 0 now). Next: the planar compositing in the scene shader (runs only with reflectors in view) | 0.05 to 0.1 ms in views without reflectors | None (same code where it runs) |
 | P2 | Planar passes only on tiles with a reflector: classify 8x8 tiles in the project pass, indirect dispatch of resolve and temporal (as the PPR talk does) | Most of 0.87 ms where reflectors cover little of the screen | None |
 | P3 | Mirror pass shares the main view's shadow maps instead of rendering the cascades again | Part of the 0.35 to 0.55 ms | None if the cascades cover the mirror's view; check reflected shadows against the path tracer |
-| P4 | Mirror pass: mesh LODs from the uncropped projection and its resolution (done, see above). Open: occlusion culling for the reflected frustum (the main view's buffer is of no use; needs its own) | Triangle and draw cost | None for the LODs (matched to the pass's pixel size) |
+| P4 | Mirror pass: mesh LODs (and its shadow passes' LODs) from the uncropped projection and its resolution (done, see above). Deferred (2026-11-02): occlusion culling for the reflected frustum (needs its own buffer with rays starting at the mirror plane; no test scene has occluders, so nothing to gain there yet) | Triangle and draw cost | None for the LODs (matched to the pass's pixel size) |
 | P5 | Mirror pass skipped when the projection covers the whole reflector (nothing off screen, no hidden sides measured last frame) | The whole pass in such views | Must not toggle visibly: hysteresis |
 | P6 | **Checked (2026-11-02), no change needed.** Probe recaptures (DDGI convergence, light changes) stay within the face budget. DDGI test project `reflect` view, sun turning about 6 degrees per second (`--tod=1`): a request every 142 frames (2.4 s at 60 fps), 24 faces per 600 frames (one probe, 4% of frames capturing, about 0.01 ms per frame on average); static sun: only the captures at 1, 4 and 16 sweeps. With many probes (8 mirror probes and more) the share grows, but never past the 2 faces per frame of the budget | Bounded cost | None |
 | P7 | Planar `half` resolution and mirror pass scale per quality preset, set from measurements per GPU class | Large on weak GPUs | Softer reflections there only |

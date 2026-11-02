@@ -1767,7 +1767,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 	p_render_data->directional_shadows.clear();
 	p_render_data->contact_shadows.clear();
 
-	float lod_distance_multiplier = p_render_data->scene_data->cam_projection.get_lod_multiplier();
+	float lod_distance_multiplier = p_render_data->scene_data->shadow_lod_distance_multiplier;
 	{
 		for (int i = 0; i < p_render_data->render_shadow_count; i++) {
 			RID li = p_render_data->render_shadows[i].light;

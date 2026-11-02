@@ -1459,6 +1459,7 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 			scaling_3d_scale *= CLAMP(GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_mirror_scale"), 0.25f, 1.0f);
 		}
 		scene_data.lod_distance_multiplier = lod_distance_multiplier * (1.0 / scaling_3d_scale);
+		scene_data.shadow_lod_distance_multiplier = lod_distance_multiplier;
 
 		if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_DISABLE_LOD) {
 			scene_data.screen_mesh_lod_threshold = 0.0;

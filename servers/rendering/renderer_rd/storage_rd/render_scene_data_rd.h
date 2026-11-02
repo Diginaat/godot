@@ -70,6 +70,10 @@ public:
 	float z_far = 0.0;
 
 	float lod_distance_multiplier = 0.0;
+	// For the shadow passes: the view's own projection, without resolution scaling (a
+	// mirror pass's cropped projection would pick finer LODs, and its shadow maps are
+	// reused by the view).
+	float shadow_lod_distance_multiplier = 0.0;
 	float screen_mesh_lod_threshold = 0.0;
 
 	uint32_t directional_light_count = 0;

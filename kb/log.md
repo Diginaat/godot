@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-02 (mirror pass shadow LODs)
+
+* **Updated**: REFLECTIONS.md performance plan P4: shadow passes in the
+  mirror pass use the view's whole projection for LODs; mirror occlusion
+  culling deferred.
+
 ## 2026-11-02 (probe recaptures with a moving sun)
 
 * **Updated**: REFLECTIONS.md performance plan P6: measured, bounded, no
