@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-02 (probe recaptures with a moving sun)
+
+* **Updated**: REFLECTIONS.md performance plan P6: measured, bounded, no
+  change needed.
+
 ## 2026-11-02 (sky flashing in the mirror)
 
 * **Updated**: REFLECTIONS.md issue J and findings (fog volume created

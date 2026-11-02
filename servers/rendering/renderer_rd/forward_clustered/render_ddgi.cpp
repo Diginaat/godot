@@ -807,8 +807,10 @@ void RenderDDGI::update_probes(RenderDataRD *p_render_data, RenderRaytracing *p_
 	}
 	uint32_t sweep_frames = capacity > 0 ? (vd->total_probes + capacity - 1) / capacity : 1;
 	// After a light change (time of day, a light switched), ask again once DDGI
-	// has followed it: two updates of every probe plus the display easing; at
-	// most every 2 s while the light keeps changing.
+	// has followed it: two updates of every probe plus the display easing; while
+	// the light keeps changing, every 2 sweeps + 120 frames (2.4 s at 60 fps in
+	// the test project's reflect view). Counted in frames like the DDGI updates,
+	// so the share of frames spent capturing doesn't depend on the frame rate.
 	{
 		uint32_t light_hash = _ddgi_light_state_hash(p_render_data);
 		if (light_hash != vd->light_hash) {
