@@ -96,7 +96,8 @@ private:
 		uint32_t history_valid;
 		int32_t mirror_reflector;
 		float mirror_max_lod;
-		uint32_t pad[2];
+		uint32_t mirror_background_to_probes; // planar_mirror_max_distance is set: what it didn't draw falls back to the probes.
+		uint32_t pad;
 		float mirror_rect[4];
 		ReflectorData reflectors[MAX_REFLECTORS];
 		// Screen UV rectangle (min x, min y, max x, max y) of each reflector,

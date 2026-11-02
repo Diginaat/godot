@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-02 (planar distance limits, presets)
+
+* **Updated**: REFLECTIONS.md settings (`planar_max_distance`,
+  `planar_mirror_max_distance`), findings, performance plan P7.
+
 ## 2026-11-02 (mirrors first for the mirror pass)
 
 * **Updated**: REFLECTIONS.md settings and findings: upright reflectors get

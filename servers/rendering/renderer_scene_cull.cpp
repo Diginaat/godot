@@ -2960,6 +2960,24 @@ void RendererSceneCull::_update_planar_reflection_data(Scenario *p_scenario) {
 
 // The fraction of the screen a reflector's rectangle covers (clipped to the view
 // frustum), and the middle of that part in NDC.
+// How much of a planar reflector to show at this camera distance
+// (rendering/global_illumination/reflections/planar_max_distance): 1 up to 80% of
+// the distance, fading to 0 at it (the probes take over). The distance is to the
+// reflector's nearest point, so a large floor counts as near while one stands on it.
+static float _planar_distance_fade(const RendererSceneRender::RenderPlanarReflection &p_reflector, const Vector3 &p_camera) {
+	float max_distance = GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_max_distance");
+	if (max_distance <= 0.0) {
+		return 1.0;
+	}
+	const Basis &b = p_reflector.transform.basis;
+	Vector3 u = b.get_column(0).normalized();
+	Vector3 v = b.get_column(2).normalized();
+	Vector3 to_camera = p_camera - p_reflector.transform.origin;
+	Vector3 nearest = p_reflector.transform.origin + u * CLAMP(to_camera.dot(u), -p_reflector.size.x * 0.5f, p_reflector.size.x * 0.5f) + v * CLAMP(to_camera.dot(v), -p_reflector.size.y * 0.5f, p_reflector.size.y * 0.5f);
+	float distance = p_camera.distance_to(nearest);
+	return CLAMP((max_distance - distance) / (0.2f * max_distance), 0.0f, 1.0f);
+}
+
 static float _planar_screen_coverage(const Projection &p_view_projection, const Vector3 *p_corners, Vector2 &r_centroid) {
 	// Sutherland-Hodgman in clip space against w +- x >= 0, w +- y >= 0 and the near
 	// plane (w + z >= 0): 4 corners gain at most one vertex per plane.
@@ -3049,7 +3067,7 @@ void RendererSceneCull::_render_mirror(const RendererSceneRender::CameraData &p_
 	float best_upright_score = 0.0;
 	for (uint32_t i = 0; i < scenario->planar_reflection_data.size(); i++) {
 		const RendererSceneRender::RenderPlanarReflection &r = scenario->planar_reflection_data[i];
-		if (!(r.layers & p_visible_layers) || r.intensity <= 0.0) {
+		if (!(r.layers & p_visible_layers) || r.intensity <= 0.0 || _planar_distance_fade(r, cam.origin) <= 0.0) {
 			continue;
 		}
 		const Basis &b = r.transform.basis;
@@ -3897,6 +3915,13 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		// What lies behind the mirror is clipped in the shaders anyway: don't
 		// draw it at all (the frustum's planes point outward).
 		planes.push_back(-p_camera_data->clip_plane);
+		// What lies wholly farther behind the mirror than planar_mirror_max_distance
+		// isn't drawn (the background shows there): objects that reach closer stay,
+		// so large walls and terrain don't leave holes.
+		float max_distance = GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_mirror_max_distance");
+		if (max_distance > 0.0) {
+			planes.push_back(Plane(p_camera_data->clip_plane.normal, p_camera_data->clip_plane.d + max_distance));
+		}
 	}
 	cull.frustum = Frustum(planes);
 
@@ -4272,8 +4297,10 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		planar_reflection_render_list.clear();
 		for (uint32_t i = 0; i < scenario->planar_reflection_data.size(); i++) {
 			const RendererSceneRender::RenderPlanarReflection &r = scenario->planar_reflection_data[i];
-			if (r.layers & p_visible_layers) {
+			float fade = _planar_distance_fade(r, p_camera_data->main_transform.origin);
+			if ((r.layers & p_visible_layers) && fade > 0.0) {
 				planar_reflection_render_list.push_back(r);
+				planar_reflection_render_list[planar_reflection_render_list.size() - 1].intensity *= fade;
 				if (int(i) == mirror_reflector) {
 					RendererSceneRender::RenderPlanarReflection &added = planar_reflection_render_list[planar_reflection_render_list.size() - 1];
 					added.mirror_buffers = mirror_buffers;

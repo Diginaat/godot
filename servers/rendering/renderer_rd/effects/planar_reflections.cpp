@@ -30,6 +30,8 @@
 
 #include "planar_reflections.h"
 
+#include "core/config/project_settings.h"
+
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/texture_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
@@ -290,6 +292,8 @@ void PlanarReflections::process(Ref<RenderSceneBuffersRD> p_render_buffers, RID 
 	bool use_mirror = p_mirror_reflector >= 0 && p_mirror_reflector < p_count && p_mirror_color.is_valid() && p_mirror_depth.is_valid();
 	params.mirror_reflector = use_mirror ? p_mirror_reflector : -1;
 	params.mirror_max_lod = use_mirror ? MAX(float(RD::get_singleton()->texture_get_format(p_mirror_color).mipmaps) - 1.0f, 0.0f) : 0.0f;
+	params.mirror_background_to_probes = GLOBAL_GET_CACHED(float, "rendering/global_illumination/reflections/planar_mirror_max_distance") > 0.0 ? 1 : 0;
+	params.pad = 0;
 	params.mirror_rect[0] = p_mirror_uv_rect.position.x;
 	params.mirror_rect[1] = p_mirror_uv_rect.position.y;
 	params.mirror_rect[2] = MAX(p_mirror_uv_rect.size.x, 1e-4f);

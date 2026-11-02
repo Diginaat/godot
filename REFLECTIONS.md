@@ -95,6 +95,8 @@ Project settings (`rendering/global_illumination/reflections/`):
 | `planar_max_reflectors` | 4 | Most reflectors per view (nearest first, 1 to 8) |
 | `planar_resolution` | Full | Full or Half |
 | `planar_mirror_render` | All Reflectors | Mirror pass: one reflector per view is rendered again from the camera reflected across it. Upright reflectors covering at least 0.5% of the screen come first (they reflect what is behind the camera); among those, or among floors when no mirror is in view, screen coverage times how much of what it reflects is off screen. Disabled, Upright Reflectors (mirrors, walls) or All Reflectors (floors and water too, when no mirror is in view) |
+| `planar_max_distance` | 0 (no limit) | Reflectors farther from the camera (to their nearest point) are not used; they reflect through probes and the sky. Fades out over the last 20%. LOD test: with the camera beyond it, 0.711 to 0.169 ms (all planar passes and the mirror pass skipped) |
+| `planar_mirror_max_distance` | 0 (no limit) | Objects wholly farther behind the mirror are not drawn in the mirror pass; where the pass drew nothing, the reflection falls back to the probes (the room's far walls stay). LOD test with 10 m: mirror pass 0.130 to 0.096 ms |
 | `planar_mirror_scale` | 0.5 | Resolution of the mirror pass relative to the view's 3D resolution (0.25 to 1) |
 
 Probe resolution and count stay in the existing
@@ -452,7 +454,7 @@ Done and rejected:
 | P4 | Mirror pass: mesh LODs (and its shadow passes' LODs) from the uncropped projection and its resolution (done, see above). Deferred (2026-11-02): occlusion culling for the reflected frustum (needs its own buffer with rays starting at the mirror plane; no test scene has occluders, so nothing to gain there yet) | Triangle and draw cost | None for the LODs (matched to the pass's pixel size) |
 | P5 | Mirror pass skipped when the projection covers the whole reflector (nothing off screen, no hidden sides measured last frame) | The whole pass in such views | Must not toggle visibly: hysteresis |
 | P6 | **Checked (2026-11-02), no change needed.** Probe recaptures (DDGI convergence, light changes) stay within the face budget. DDGI test project `reflect` view, sun turning about 6 degrees per second (`--tod=1`): a request every 142 frames (2.4 s at 60 fps), 24 faces per 600 frames (one probe, 4% of frames capturing, about 0.01 ms per frame on average); static sun: only the captures at 1, 4 and 16 sweeps. With many probes (8 mirror probes and more) the share grows, but never past the 2 faces per frame of the budget | Bounded cost | None |
-| P7 | Planar `half` resolution and mirror pass scale per quality preset, set from measurements per GPU class | Large on weak GPUs | Softer reflections there only |
+| P7 | **Done in the fps-starter presets (2026-11-02)**, measured on an RTX 3060 only. DDGI test project `reflect` view, 1080p, whole frame against planar off (3.02 ms), two runs: Low (half resolution, mirror scale 0.35, 30 m distances) 0.79 ms, Medium (half, 0.5, 60 m) 0.82 ms, High (full, 0.5, no limit) 1.34 ms, Ultra (full, 0.75) 1.43 ms. Half resolution saves 0.52 ms; the mirror scale only 0.03 to 0.08 ms. Other GPU classes not measured | Large on weak GPUs | Softer reflections there only |
 
 ## Steps
 
@@ -509,6 +511,17 @@ Done and rejected:
 ## Findings log
 
 Newest first.
+
+- **2026-11-02, distance limits.** `planar_max_distance` drops reflectors
+  beyond a distance from the camera (nearest point of the reflector, fade
+  over the last 20%); `planar_mirror_max_distance` culls objects wholly
+  beyond a distance behind the mirror in the mirror pass (one more cull
+  plane, parallel to the mirror). Culling alone showed the sky through the
+  mirror where a room's far walls were culled (showcase, 6 m); now the
+  resolve treats the pass's background (depth 0) as missing when the
+  distance is set, so those pixels take the probes (the sky seen in the
+  mirror then comes from the probes too). A faint seam can show where the
+  pass and the probe meet (12 m in the showcase).
 
 - **2026-11-02, a glossy floor took the mirror pass from a mirror.** In the
   demo level, standing at the glossy pad and looking down a little at a

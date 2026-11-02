@@ -51,8 +51,8 @@ layout(set = 0, binding = 0, std140) uniform Params {
 	uint history_valid;
 	int mirror_reflector; // Reflector with a mirror pass, -1 for none.
 	float mirror_max_lod;
+	uint mirror_background_to_probes; // planar_mirror_max_distance is set: the pass's background (what it didn't draw) falls back to the probes.
 	uint pad0;
-	uint pad1;
 	vec4 mirror_rect; // Screen UV rectangle the mirror pass covers (position, size).
 	Reflector reflectors[MAX_REFLECTORS];
 	vec4 reflector_rects[MAX_REFLECTORS]; // Screen UV bounds of each reflector, with a margin (min xy, max xy).
@@ -384,24 +384,29 @@ void main() {
 	if (reflector == params.mirror_reflector && all(greaterThanEqual(mirror_uv, vec2(0.0))) && all(lessThanEqual(mirror_uv, vec2(1.0)))) {
 		// Same depth as the full projection would give: the crop only scales x and y.
 		float md = textureLod(mirror_depth, mirror_uv, 0.0).r;
-		// In the mirror camera's view space, what it sees is where the main camera
-		// sees its mirror image.
-		vec3 virtual_pos = (md <= 0.0 && params.orthogonal == 0) ? normalize(view_from_uv_depth(uv, 0.5)) * SKY_DISTANCE : view_from_uv_depth(uv, md);
-		float total = length(virtual_pos - eye);
-		mirror_virtual_distance = total;
-		mirror_virtual_dir = (virtual_pos - eye) / max(total, 1e-6);
-		float behind = max(total - length(plane_hit - eye), 0.0); // From the mirror to what it reflects.
-		// The reflection cone (GGX alpha as its half-width slope) spreads over
-		// 2 alpha behind; seen from total away, that many mirror texels.
-		float alpha = decode_roughness(textureLod(source_normal_roughness, uv, 0.0).w);
-		alpha *= alpha;
-		float texels = 2.0 * alpha * behind / max(total, 1e-3) * abs(params.projection[1][1]) * 0.5 * float(textureSize(mirror_color, 0).y) / params.mirror_rect.w;
-		float lod = clamp(log2(max(texels, 1.0)), 0.0, params.mirror_max_lod);
-		float w = clamp(r.center.w, 0.0, 1.0);
-		mirror = vec4(textureLod(mirror_color, mirror_uv, lod).rgb * w, w);
-		vec4 prev = params.reprojection * vec4(uv * 2.0 - 1.0, md, 1.0);
-		if (prev.w > 0.0) {
-			mirror_motion = prev.xy / prev.w * 0.5 + 0.5 - uv;
+		if (md <= 0.0 && params.mirror_background_to_probes != 0u) {
+			// Nothing drawn here (beyond planar_mirror_max_distance, or the sky): the
+			// probes have the room's far walls (and the sky).
+		} else {
+			// In the mirror camera's view space, what it sees is where the main camera
+			// sees its mirror image.
+			vec3 virtual_pos = (md <= 0.0 && params.orthogonal == 0) ? normalize(view_from_uv_depth(uv, 0.5)) * SKY_DISTANCE : view_from_uv_depth(uv, md);
+			float total = length(virtual_pos - eye);
+			mirror_virtual_distance = total;
+			mirror_virtual_dir = (virtual_pos - eye) / max(total, 1e-6);
+			float behind = max(total - length(plane_hit - eye), 0.0); // From the mirror to what it reflects.
+			// The reflection cone (GGX alpha as its half-width slope) spreads over
+			// 2 alpha behind; seen from total away, that many mirror texels.
+			float alpha = decode_roughness(textureLod(source_normal_roughness, uv, 0.0).w);
+			alpha *= alpha;
+			float texels = 2.0 * alpha * behind / max(total, 1e-3) * abs(params.projection[1][1]) * 0.5 * float(textureSize(mirror_color, 0).y) / params.mirror_rect.w;
+			float lod = clamp(log2(max(texels, 1.0)), 0.0, params.mirror_max_lod);
+			float w = clamp(r.center.w, 0.0, 1.0);
+			mirror = vec4(textureLod(mirror_color, mirror_uv, lod).rgb * w, w);
+			vec4 prev = params.reprojection * vec4(uv * 2.0 - 1.0, md, 1.0);
+			if (prev.w > 0.0) {
+				mirror_motion = prev.xy / prev.w * 0.5 + 0.5 - uv;
+			}
 		}
 	}
 

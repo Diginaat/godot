@@ -3892,6 +3892,8 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/reflections/planar_resolution", PROPERTY_HINT_ENUM, "Full,Half"), 0);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/global_illumination/reflections/planar_mirror_render", PROPERTY_HINT_ENUM, "Disabled,Upright Reflectors,All Reflectors"), 2);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/reflections/planar_mirror_scale", PROPERTY_HINT_RANGE, "0.25,1.0,0.05"), 0.5);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/reflections/planar_max_distance", PROPERTY_HINT_RANGE, "0,500,0.1,or_greater,suffix:m"), 0.0);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/global_illumination/reflections/planar_mirror_max_distance", PROPERTY_HINT_RANGE, "0,500,0.1,or_greater,suffix:m"), 0.0);
 
 	// OpenGL limits
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/limits/opengl/max_renderable_elements", PROPERTY_HINT_RANGE, "1024,65536,1"), 65536);
