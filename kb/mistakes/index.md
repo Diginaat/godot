@@ -20,5 +20,6 @@ What worked is in [successes](/successes/).
 * [A restored shader source didn't rebuild its generated header](/mistakes/stale-generated-shader-header.md) - touch restored files; check the .gen.h when a shader change doesn't show
 * [Recorded a long run of a scene that couldn't show the problem](/mistakes/long-run-of-an-unfit-scene.md) - check one frame shows the effect before a long run
 * [A walking test that didn't walk](/mistakes/motion-test-that-did-not-move.md) - check the first and last frames of a motion test differ as intended
+* [A flicker metric that could not see the flicker](/mistakes/metric-blind-to-the-artifact.md) - check crops around each event; measure the artifact, not a proxy; reproduce the user's exact motion
 * [A test scene that could not quit](/mistakes/test-scene-without-hard-quit.md) - give every automated run `--quit-after`, check for `SCRIPT ERROR` before looping
 * [Averaged noisy frames after the tonemapper](/mistakes/tonemapped-noise-averages-darker.md) - compare brightness in linear HDR at a fixed exposure; a reference must not depend on spp

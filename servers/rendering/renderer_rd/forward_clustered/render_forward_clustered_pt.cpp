@@ -271,6 +271,9 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 			RD::get_singleton()->draw_command_begin_label("Setup Sky");
 
 			// Setup our sky render information for this frame/viewport
+			if (rb_data.is_valid()) {
+				_ensure_volumetric_fog(rb, p_render_data->environment);
+			}
 			sky.setup_sky(p_render_data, screen_size);
 
 			sky_brightness_multiplier *= bg_energy_multiplier;

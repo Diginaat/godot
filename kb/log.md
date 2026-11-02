@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-02 (sky flashing in the mirror)
+
+* **Updated**: REFLECTIONS.md issue J and findings (fog volume created
+  before the sky is set up; no reprojection on a new volume's first frame).
+* **Added**: mistakes/metric-blind-to-the-artifact.md.
+
 ## 2026-11-02 (mirror pass LODs)
 
 * **Updated**: REFLECTIONS.md performance plan: the mirror pass picks mesh

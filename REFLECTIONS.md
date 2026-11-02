@@ -367,6 +367,7 @@ likely fix:
 | G | Planar reflections and the automatic planar scan are not tested with XR (not supported), with AMD or Intel GPUs. Editor (demo level open 600 frames), Mobile and Compatibility run without errors (2026-11-01; Forward+ is the target) | | Step 10 |
 | H | **Done** (step 9). A mirror that loses the mirror pass showed its probe lit wrong: cold and dark, because probe captures got the sky ambient instead of DDGI. Now the probe is DDGI-lit (ceiling 0.27 against 0.29 linear for the mirror pass; was 0.06). Left: box-projection parallax (the probe is captured from the room's middle) | Showcase: `--at=0.5,-3 --yaw=0 --pitch=-5 --still`, against `--mirror-render=1`; `--ps=rendering/global_illumination/reflections/probe_capture_ddgi=false` for the old look | A second mirror pass would make it exact (cost, see the performance plan) |
 | I | Mostly a measurement error, see the findings. With linear HDR averages at a fixed exposure, walls and the ceiling are within 10 to 20% of the path tracer, the sun patch within 4%. Left: the floor's diffuse indirect light is 1.8 times the path tracer's (0.030 against 0.016, specular off on both sides), a wall area seen in the mirror 1.6 times | Showcase `--at=0.5,-6.5 --yaw=0 --pitch=-3 --still --warmup=300 --hdr-points=240 --screenshot=<png>`, again with `--pt` (`--floor-spec=0` for diffuse only) | A DDGI question for `dev-ddgi`. Not the cause: the volume's bottom face (`--ddgi-pad=2`), probe spacing, fog, glow, the sun disk in the sky (`--sun-disk=0`), path tracer bounces (3 and 8 agree). Note: DDGI probe rays see metallic mirrors as black (no diffuse bounce, no reflected light), which can only make it darker |
+| J | **Done.** The sky in the mirror flashed white for single frames while walking toward a mirror, with volumetric fog on (High and Ultra presets of the fps-starter) | Showcase `--quality=2 --at=0.5,-1 --yaw=0 --pitch=8 --move=0,-1.5,0` or demo level `--quality=2 --at=1,2 --yaw=90 --pitch=10 --move=-1.2,0,0`, movie at 60 fps | See the findings (2026-11-02) |
 
 How to test (always with movement: still frames hid the stripes and the
 grid): the showcase records walks with `--move=dx,dz,dyaw` (meters and
@@ -502,6 +503,25 @@ Done and rejected:
 ## Findings log
 
 Newest first.
+
+- **2026-11-02, sky flashing in the mirror while walking (issue J).** As
+  the camera walks up to a mirror, the mirror pass's rectangle grows in
+  eighths of the screen and its buffers are reconfigured, which frees
+  their volumetric fog volume. Forward+ sets up the sky before
+  `_pre_opaque_render()` recreates the volume, so on each resize frame the
+  sky was drawn without fog (white instead of the fogged blue): every
+  flash fell on a resize frame (207, 209, 234, ... in the showcase walk).
+  Fixed in the renderer: the fog volume is validated and created before
+  the sky is set up (`_ensure_volumetric_fog()`, both Forward+ render
+  paths). Also: a new volume skips temporal reprojection for its first
+  frame, since its history is cleared to zero and blending it in faded
+  the fog in over many frames. Demo level walk: 24 one-frame flicker
+  spikes before, none after; showcase walk: 8 before, none after. Not the
+  cause, though first suspected: the mirror pass passing its own camera
+  as the previous one, and fog froxels assuming a centered frustum (the
+  cropped projection is off axis); both are real but didn't make this
+  flicker, and are left as they were. Left: a single pop when the mirror
+  pass moves from the floor to the mirror (selection with hysteresis).
 
 - **2026-11-01, brightness against the path tracer (issue I).** The
   showcase looked 3 to 7 times brighter than the path tracer. Three test

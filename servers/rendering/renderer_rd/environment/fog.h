@@ -307,6 +307,10 @@ public:
 		uint32_t width = 0;
 		uint32_t height = 0;
 		uint32_t depth = 0;
+		// False until the first update: a new volume's history is empty (cleared to
+		// zero), and blending it in fades the fog in over many frames. A mirror pass
+		// recreates its volume whenever its buffers are resized.
+		bool has_history = false;
 
 		float length;
 		float spread;

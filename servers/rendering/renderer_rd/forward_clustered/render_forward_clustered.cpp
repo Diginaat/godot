@@ -1402,6 +1402,41 @@ void RenderForwardClustered::_debug_draw_cluster(Ref<RenderSceneBuffersRD> p_ren
 ////////////////////////////////////////////////////////////////////////////////
 // FOG SHADER
 
+// Frees the buffers' volumetric fog volume when it no longer fits, creates it when
+// needed. Called before the sky is set up too: the sky reads the volume's uniform
+// set, and on the frame the buffers are resized (a mirror pass growing as the
+// camera walks up to the mirror) the volume didn't exist yet, so the sky was drawn
+// without fog for that frame.
+bool RenderForwardClustered::_ensure_volumetric_fog(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment) {
+	Size2i size = p_render_buffers->get_internal_size();
+	float ratio = float(size.x) / float((size.x + size.y) / 2);
+	uint32_t target_width = uint32_t(float(get_volumetric_fog_size()) * ratio);
+	uint32_t target_height = uint32_t(float(get_volumetric_fog_size()) / ratio);
+
+	if (p_render_buffers->has_custom_data(RB_SCOPE_FOG)) {
+		Ref<RendererRD::Fog::VolumetricFog> fog = p_render_buffers->get_custom_data(RB_SCOPE_FOG);
+		//validate
+		if (p_environment.is_null() || !environment_get_volumetric_fog_enabled(p_environment) || fog->width != target_width || fog->height != target_height || fog->depth != get_volumetric_fog_depth()) {
+			p_render_buffers->set_custom_data(RB_SCOPE_FOG, Ref<RenderBufferCustomDataRD>());
+		}
+	}
+
+	if (p_environment.is_null() || !environment_get_volumetric_fog_enabled(p_environment)) {
+		return false;
+	}
+
+	if (!p_render_buffers->has_custom_data(RB_SCOPE_FOG)) {
+		//required volumetric fog but not existing, create
+		Ref<RendererRD::Fog::VolumetricFog> fog;
+
+		fog.instantiate();
+		fog->init(Vector3i(target_width, target_height, get_volumetric_fog_depth()), sky.sky_shader.default_shader_rd);
+
+		p_render_buffers->set_custom_data(RB_SCOPE_FOG, fog);
+	}
+	return true;
+}
+
 void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_render_buffers, RID p_environment, const Projection &p_cam_projection, const Transform3D &p_cam_transform, const Transform3D &p_prev_cam_inv_transform, RID p_shadow_atlas, int p_directional_light_count, bool p_use_directional_shadows, int p_positional_light_count, int p_voxel_gi_count, const PagedArray<RID> &p_fog_volumes) {
 	ERR_FAIL_COND(p_render_buffers.is_null());
 
@@ -1417,31 +1452,9 @@ void RenderForwardClustered::_update_volumetric_fog(Ref<RenderSceneBuffersRD> p_
 	}
 
 	Size2i size = p_render_buffers->get_internal_size();
-	float ratio = float(size.x) / float((size.x + size.y) / 2);
-	uint32_t target_width = uint32_t(float(get_volumetric_fog_size()) * ratio);
-	uint32_t target_height = uint32_t(float(get_volumetric_fog_size()) / ratio);
-
-	if (p_render_buffers->has_custom_data(RB_SCOPE_FOG)) {
-		Ref<RendererRD::Fog::VolumetricFog> fog = p_render_buffers->get_custom_data(RB_SCOPE_FOG);
-		//validate
-		if (p_environment.is_null() || !environment_get_volumetric_fog_enabled(p_environment) || fog->width != target_width || fog->height != target_height || fog->depth != get_volumetric_fog_depth()) {
-			p_render_buffers->set_custom_data(RB_SCOPE_FOG, Ref<RenderBufferCustomDataRD>());
-		}
-	}
-
-	if (p_environment.is_null() || !environment_get_volumetric_fog_enabled(p_environment)) {
+	if (!_ensure_volumetric_fog(p_render_buffers, p_environment)) {
 		//no reason to enable or update, bye
 		return;
-	}
-
-	if (p_environment.is_valid() && environment_get_volumetric_fog_enabled(p_environment) && !p_render_buffers->has_custom_data(RB_SCOPE_FOG)) {
-		//required volumetric fog but not existing, create
-		Ref<RendererRD::Fog::VolumetricFog> fog;
-
-		fog.instantiate();
-		fog->init(Vector3i(target_width, target_height, get_volumetric_fog_depth()), sky.sky_shader.default_shader_rd);
-
-		p_render_buffers->set_custom_data(RB_SCOPE_FOG, fog);
 	}
 
 	if (p_render_buffers->has_custom_data(RB_SCOPE_FOG)) {
@@ -2494,6 +2507,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			RD::get_singleton()->draw_command_begin_label("Setup Sky");
 
 			// Setup our sky render information for this frame/viewport
+			if (rb_data.is_valid()) {
+				_ensure_volumetric_fog(rb, p_render_data->environment);
+			}
 			sky.setup_sky(p_render_data, screen_size);
 
 			sky_brightness_multiplier *= bg_energy_multiplier;

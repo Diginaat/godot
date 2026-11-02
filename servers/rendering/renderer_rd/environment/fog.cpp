@@ -612,7 +612,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 		params.fog_volume_size[1] = fog->height;
 		params.fog_volume_size[2] = fog->depth;
 
-		params.use_temporal_reprojection = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env);
+		params.use_temporal_reprojection = fog->has_history && RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env);
 		params.temporal_frame = RSG::rasterizer->get_frame_number() % VolumetricFog::MAX_TEMPORAL_FRAMES;
 		params.detail_spread = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_detail_spread(p_settings.env);
 		params.temporal_blend = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection_amount(p_settings.env);
@@ -1140,7 +1140,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 	Transform3D to_prev_cam_view = p_prev_cam_inv_transform * p_cam_transform;
 	RendererRD::MaterialStorage::store_transform(to_prev_cam_view, params.to_prev_view);
 
-	params.use_temporal_reprojection = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env);
+	params.use_temporal_reprojection = fog->has_history && RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection(p_settings.env);
 	params.temporal_blend = RendererSceneRenderRD::get_singleton()->environment_get_volumetric_fog_temporal_reprojection_amount(p_settings.env);
 
 	RID sky_rid = RendererSceneRenderRD::get_singleton()->environment_get_sky(p_settings.env);
@@ -1243,6 +1243,7 @@ void Fog::volumetric_fog_update(const VolumetricFogSettings &p_settings, const P
 
 	RD::get_singleton()->compute_list_end();
 
+	fog->has_history = true;
 	RENDER_TIMESTAMP("< Volumetric Fog");
 	RD::get_singleton()->draw_command_end_label();
 	RD::get_singleton()->draw_command_end_label();
