@@ -1,5 +1,9 @@
 # Update log
 
+## 2026-11-02 (mirror probes off by default)
+
+* **Updated**: REFLECTIONS.md: `auto_mirror_probes` defaults to off.
+
 ## 2026-11-02 (planar distance limits, presets)
 
 * **Updated**: REFLECTIONS.md settings (`planar_max_distance`,

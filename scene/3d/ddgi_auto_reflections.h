@@ -66,7 +66,7 @@ public:
 		float planar_max_roughness = 0.3; // Floors, water, ramps (normal within 45 degrees of up).
 		float planar_mirror_max_roughness = 0.02; // Upright surfaces: mirrors, walls.
 		float planar_min_area = 2.0;
-		bool mirror_probes = true;
+		bool mirror_probes = false;
 	};
 
 	static constexpr int MAX_PLANAR_REFLECTORS = 16;
