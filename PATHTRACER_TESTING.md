@@ -123,6 +123,12 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-11-05: Native raster MultiMesh frustum-culling integration changes shared
+  Forward+ draw constants and bindings, not the ray tracer. Standard smoke tests
+  pass on the `b23737c64e` working tree with integration changes: Vulkan PT room
+  screenshot, DDGI interior, PhysX GPU game/editor. Culling defaults off; this is
+  compatibility coverage, not a claim of GPU visibility filtering in ray tracing.
+
 - 2026-10-08: After syncing upstream `65e8d16951`, the fog path tracer smoke
   initially exited with `Attempted to free invalid ID` after saving the
   screenshot. Cause: several BLAS cleanup paths still freed stale acceleration

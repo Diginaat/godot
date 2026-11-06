@@ -14,6 +14,15 @@ generated: { by: claude_code/claude-opus-5-5, at: 2026-10-12T00:00:00Z }
   failure; the user reported it as one.
 - A "did the probes change" test hashed newly created `Image` objects,
   not their bytes, so it always said "changed".
+- A native-culling test's conditional expression produced an untyped `Array`
+  for an `Array[int]` destination. The fixture aborted after allocating test
+  RIDs, and the frame-limit exit returned 0. The runner correctly rejected
+  `SCRIPT ERROR`, leaked RIDs and missing success marker. Use an explicitly
+  typed array and `assign()`; corrected kernel/raster tests then passed.
+- Resident CLOD shadow-stat coverage initially swapped Viewport.get_render_info
+  enum arguments. GDScript rejected the signature; the runner caught parse
+  errors despite the engine's frame-limit exit 0. Corrected argument order;
+  shadow receiver and native raster tests then passed on Vulkan and D3D12.
 
 # Rule
 

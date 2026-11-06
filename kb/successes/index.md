@@ -5,6 +5,8 @@ done, why it worked, and when to use it again. Add one whenever something
 works clearly better than what came before. Mistakes are in
 [mistakes](/mistakes/).
 
+* [Inspect indirect commands before drawing](/successes/inspect-indirect-before-draw.md) - reproduce invalid GPU counts safely, then prove material pixels on real backends
+
 * [Reflection atlas layers on demand](/successes/reflection-atlas-on-demand.md) - 512 MB to 47 MB for one probe, growth copies layers
 * [Sample-driven probe scheduling](/successes/sample-driven-scheduling.md) - DDGI follows light changes about 8% faster at no measurable cost
 * [Least-squares baking](/successes/least-squares-bake.md) - baked GI error against a finer bake roughly halved, from a talk's idea in two builds
