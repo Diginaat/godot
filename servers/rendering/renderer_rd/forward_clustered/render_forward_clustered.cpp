@@ -122,8 +122,27 @@ bool RenderForwardClustered::RenderBufferDataForwardClustered::ensure_mfx_tempor
 #endif
 
 void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
+	for (MultiMeshCullBuffers *cull : { &multimesh_cull, &multimesh_shadow_cull }) {
+		for (RID resource : { cull->visible_ids, cull->commands, cull->inputs, cull->ranks, cull->blocks }) {
+			if (resource.is_valid()) {
+				RD::get_singleton()->free_rid(resource);
+			}
+		}
+		*cull = {};
+	}
+	for (RID resource : { mesh_clod.commands, mesh_clod.inputs, mesh_clod.occlusion_inputs }) {
+		if (resource.is_valid()) {
+			RD::get_singleton()->free_rid(resource);
+		}
+	}
+	mesh_clod = {};
+	if (geometry_statistics.buffer.is_valid()) {
+		RD::get_singleton()->free_rid(geometry_statistics.buffer);
+	}
+	geometry_statistics = {};
 	// JIC, should already have been cleared
 	if (render_buffers) {
+		render_buffers->clear_context(SNAME("mesh_clod_hzb"));
 		render_buffers->clear_context(RB_SCOPE_FORWARD_CLUSTERED);
 		render_buffers->clear_context(RB_SCOPE_SSDS);
 		render_buffers->clear_context(RB_SCOPE_SSIL);
@@ -365,6 +384,7 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 	for (uint32_t i = p_from_element; i < p_to_element; i++) {
 		const GeometryInstanceSurfaceDataCache *surf = p_params->elements[i];
 		const RenderElementInfo &element_info = p_params->element_info[i];
+		const bool use_clod = p_params->mesh_clod_commands.is_valid() && element_info.mesh_clod_offset != UINT32_MAX;
 
 		if (p_pass_mode == PASS_MODE_COLOR && surf->color_pass_inclusion_mask && (p_color_pass_flags & surf->color_pass_inclusion_mask) == 0) {
 			// Some surfaces can be repeated in multiple render lists. We exclude them from being rendered on the color pass based on the
@@ -385,6 +405,11 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			material_uniform_set = surf->material_uniform_set_shadow;
 			shader = surf->shader_shadow;
 			mesh_surface = surf->surface_shadow;
+			if (!shadow_pass && use_clod) {
+				// Main-view CLOD depth must index source vertices, not a separately
+				// welded shadow mesh. Actual shadow passes retain that shadow mesh.
+				mesh_surface = surf->surface;
+			}
 
 		} else {
 #ifdef DEBUG_ENABLED
@@ -447,6 +472,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		pipeline_specialization.multimesh_format_2d = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_FORMAT_2D);
 		pipeline_specialization.multimesh_has_color = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_HAS_COLOR);
 		pipeline_specialization.multimesh_has_custom_data = bool(surf->owner->base_flags & INSTANCE_DATA_FLAG_MULTIMESH_HAS_CUSTOM_DATA);
+		const bool gpu_culled = p_params->multimesh_cull_commands.is_valid() && element_info.multimesh_cull_draw != UINT32_MAX;
+		pipeline_specialization.multimesh_gpu_culling = gpu_culled;
+		push_constant.multimesh_visible_ids_offset = gpu_culled ? element_info.multimesh_visible_ids_offset : 0;
 		pipeline_specialization.material_feedback = p_params->use_material_feedback && surf->material->material_feedback_rid.is_valid();
 
 		if constexpr (p_pass_mode == PASS_MODE_COLOR) {
@@ -564,7 +592,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		}
 
 		if (pipeline_valid) {
-			if (!emulate_point_size) {
+			if (use_clod) {
+				index_array_rd = mesh_storage->mesh_surface_get_cluster_data(mesh_surface).index_array;
+			} else if (!emulate_point_size) {
 				index_array_rd = mesh_storage->mesh_surface_get_index_array(mesh_surface, element_info.lod_index);
 			} else {
 				index_array_rd = RID();
@@ -633,6 +663,32 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 					WARN_PRINT("Indirect draws are not supported when emulating point size.");
 				}
 				RD::get_singleton()->draw_list_draw(draw_list, false, mesh_storage->mesh_surface_get_vertex_count(mesh_surface), instance_count * 6);
+			} else if (use_clod) {
+				const uint32_t group_count = mesh_storage->mesh_surface_get_cluster_data(mesh_surface).group_count;
+				// One command record per group (unselected groups have zero
+				// instances). Multi-draw consumes the whole surface range in one
+				// call; backends without it keep one call per record.
+				if (mesh_clod.multi_draw) {
+					RD::get_singleton()->draw_list_draw_indirect(draw_list, true, p_params->mesh_clod_commands, element_info.mesh_clod_offset * sizeof(uint32_t), group_count, 5 * sizeof(uint32_t));
+				} else {
+					for (uint32_t group = 0; group < group_count; group++) {
+						RD::get_singleton()->draw_list_draw_indirect(draw_list, true, p_params->mesh_clod_commands, (element_info.mesh_clod_offset + group * 5) * sizeof(uint32_t), 1, 0);
+					}
+				}
+			} else if (gpu_culled) {
+				// One draw per GPU LOD bucket: each binds its index LOD and its own
+				// visible-ID range. Level 0 uses the arrays bound above.
+				const uint32_t levels = MAX(element_info.multimesh_cull_lod >> 24, 1u);
+				for (uint32_t level = 0; level < levels; level++) {
+					if (level > 0) {
+						index_array_rd = mesh_storage->mesh_surface_get_index_array(mesh_surface, _multimesh_lod_for_bucket(level, element_info.lod_index, element_info.multimesh_cull_last_lod));
+						RD::get_singleton()->draw_list_bind_index_array(draw_list, index_array_rd);
+						prev_index_array_rd = index_array_rd;
+						push_constant.multimesh_visible_ids_offset = element_info.multimesh_visible_ids_offset + level * (element_info.multimesh_cull_lod & 0xffffff);
+						RD::get_singleton()->draw_list_set_push_constant(draw_list, &push_constant, push_constant_size);
+					}
+					RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), p_params->multimesh_cull_commands, (element_info.multimesh_cull_draw + level) * 5 * sizeof(uint32_t), 1, 0);
+				}
 			} else if (indirect) {
 				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), mesh_storage->_multimesh_get_command_buffer_rd_rid(surf->owner->data->base), surf->surface_index * sizeof(uint32_t) * mesh_storage->INDIRECT_MULTIMESH_COMMAND_STRIDE, 1, 0);
 			} else {
@@ -947,6 +1003,11 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 		}
 
 		RenderElementInfo &element_info = rl->element_info[p_offset + i];
+		element_info.multimesh_cull_draw = UINT32_MAX;
+		element_info.multimesh_visible_ids_offset = 0;
+		element_info.multimesh_cull_lod = 0;
+		element_info.multimesh_cull_last_lod = 0;
+		element_info.mesh_clod_offset = UINT32_MAX;
 
 		// Manually bit shift and OR the "uses_lightmap_specular" value to avoid redundant memory stores generated by the compiler.
 		element_info.value = uint32_t(surface->sort.sort_key1 & 0xFFF) | (uint32_t(surface->uses_lightmap_specular) << 12);
@@ -1833,7 +1894,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 			_render_shadow_pass(p_render_data->render_shadows[p_render_data->shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->shadows[i]].pass, p_render_data->render_shadows[p_render_data->shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, i == 0, i == p_render_data->shadows.size() - 1, true, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform);
 		}
 
-		_render_shadow_process();
+		_render_shadow_process(rb_data.ptr());
 	}
 
 	if (render_gi) {
@@ -2357,6 +2418,18 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_fill_instance_data(RENDER_LIST_OPAQUE, render_info);
 	_fill_instance_data(RENDER_LIST_MOTION, render_info);
 	_fill_instance_data(RENDER_LIST_ALPHA, render_info);
+	if (rb_data.is_valid()) {
+		_begin_geometry_statistics(rb_data.ptr());
+	}
+	_prepare_multimesh_culling(p_render_data, rb_data.ptr());
+	_prepare_mesh_clod(p_render_data, rb_data.ptr());
+	const RID mesh_clod_commands = rb_data.is_valid() && rb_data->mesh_clod.active ? rb_data->mesh_clod.commands : RID();
+	RID multimesh_visible_ids;
+	RID multimesh_cull_commands;
+	if (rb_data.is_valid() && rb_data->multimesh_cull.active) {
+		multimesh_visible_ids = rb_data->multimesh_cull.visible_ids;
+		multimesh_cull_commands = rb_data->multimesh_cull.commands;
+	}
 
 	RD::get_singleton()->draw_command_end_label();
 
@@ -2580,10 +2653,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RD::get_singleton()->draw_command_begin_label("Render Depth Pre-Pass");
 
-		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index);
+		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_visible_ids);
 
 		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || using_planar || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
+		render_list_params.multimesh_cull_commands = multimesh_cull_commands;
+		render_list_params.mesh_clod_commands = mesh_clod_commands;
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 
 		RD::get_singleton()->draw_command_end_label();
@@ -2637,6 +2712,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	ddgi_active_this_frame = using_ddgi;
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, voxel_gi_views);
 	ddgi_active_this_frame = false;
+	if (depth_pre_pass && rb_data.is_valid()) {
+		_occlude_mesh_clod(p_render_data, rb_data.ptr());
+	}
+	if (rb_data.is_valid()) {
+		_end_geometry_statistics(rb_data.ptr());
+	}
 
 	if (current_cluster_builder) {
 		base_specialization.cluster_has_area_light = current_cluster_builder->get_cluster_count_by_type(ClusterBuilderRD::ELEMENT_TYPE_AREA_LIGHT) != 0;
@@ -2677,6 +2758,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			uint32_t opaque_color_pass_flags = using_motion_pass ? (color_pass_flags & ~uint32_t(COLOR_PASS_FLAG_MOTION_VECTORS)) : color_pass_flags;
 			RID opaque_framebuffer = using_motion_pass ? rb_data->get_color_pass_fb(opaque_color_pass_flags) : color_framebuffer;
 			RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, PASS_MODE_COLOR, opaque_color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
+			render_list_params.multimesh_cull_commands = multimesh_cull_commands;
+			render_list_params.mesh_clod_commands = mesh_clod_commands;
 			_render_list_with_draw_list(&render_list_params, opaque_framebuffer, RD::DrawFlags(load_color ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_COLOR_ALL) | (depth_pre_pass ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_DEPTH), c, 0.0f, 0u, p_render_data->render_region);
 		}
 
@@ -2703,6 +2786,8 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_MOTION, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true);
 
 			RenderListParameters render_list_params(render_list[RENDER_LIST_MOTION].elements.ptr(), render_list[RENDER_LIST_MOTION].element_info.ptr(), render_list[RENDER_LIST_MOTION].elements.size(), reverse_cull, PASS_MODE_COLOR, color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
+			render_list_params.multimesh_cull_commands = multimesh_cull_commands;
+			render_list_params.mesh_clod_commands = mesh_clod_commands;
 			_render_list_with_draw_list(&render_list_params, color_framebuffer);
 
 			RD::get_singleton()->draw_command_end_label();
@@ -3266,23 +3351,30 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 		shadow_pass.rect = p_rect;
 
 		shadow_pass.uniform_buffer_index = uniform_buffer_index;
+		shadow_pass.cam_projection = p_projection;
+		shadow_pass.cam_transform = p_transform;
+		shadow_pass.main_cam_transform = p_main_cam_transform;
 
 		scene_state.shadow_passes.push_back(shadow_pass);
 	}
 }
 
-void RenderForwardClustered::_render_shadow_process() {
+void RenderForwardClustered::_render_shadow_process(RenderBufferDataForwardClustered *p_cull_buffers) {
 	RenderingDevice *rd = RenderingDevice::get_singleton();
 	if (scene_state.instance_buffer[RENDER_LIST_SECONDARY].get_size(0u) > 0u) {
 		rd->buffer_flush(scene_state.instance_buffer[RENDER_LIST_SECONDARY]._get(0u));
 	}
+
+	// Without buffers (e.g. cubemap shadows rendered on their own) every pass keeps direct draws.
+	_prepare_multimesh_shadow_culling(p_cull_buffers);
+	const RID shadow_visible_ids = scene_state.shadow_multimesh_cull_commands.is_valid() ? p_cull_buffers->multimesh_shadow_cull.visible_ids : RID();
 
 	//render shadows one after the other, so this can be done un-barriered and the driver can optimize (as well as allow us to run compute at the same time)
 
 	for (uint32_t i = 0; i < scene_state.shadow_passes.size(); i++) {
 		//render passes need to be configured after instance buffer is done, since they need the latest version
 		SceneState::ShadowPass &shadow_pass = scene_state.shadow_passes[i];
-		shadow_pass.rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_SECONDARY, nullptr, false, RID(), RendererRD::MaterialStorage::get_singleton()->samplers_rd_get_default(), shadow_pass.uniform_buffer_index, false);
+		shadow_pass.rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_SECONDARY, nullptr, false, RID(), RendererRD::MaterialStorage::get_singleton()->samplers_rd_get_default(), shadow_pass.uniform_buffer_index, false, shadow_visible_ids);
 	}
 
 	RD::get_singleton()->draw_command_end_label();
@@ -3292,6 +3384,7 @@ void RenderForwardClustered::_render_shadow_end() {
 
 	for (SceneState::ShadowPass &shadow_pass : scene_state.shadow_passes) {
 		RenderListParameters render_list_parameters(render_list[RENDER_LIST_SECONDARY].elements.ptr() + shadow_pass.element_from, render_list[RENDER_LIST_SECONDARY].element_info.ptr() + shadow_pass.element_from, shadow_pass.element_count, shadow_pass.flip_cull, shadow_pass.pass_mode, 0, true, false, shadow_pass.rp_uniform_set, false, Vector2(), shadow_pass.lod_distance_multiplier, shadow_pass.screen_mesh_lod_threshold, 1, shadow_pass.element_from);
+		render_list_parameters.multimesh_cull_commands = scene_state.shadow_multimesh_cull_commands;
 		_render_list_with_draw_list(&render_list_parameters, shadow_pass.framebuffer, shadow_pass.clear_depth ? RD::DRAW_CLEAR_DEPTH : RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0, shadow_pass.rect);
 	}
 
@@ -3780,7 +3873,7 @@ bool RenderForwardClustered::_probe_capture_ddgi(const RenderDataRD *p_render_da
 	return _ddgi_get_capture_resources(r_resources[0], r_resources[1], r_resources[2], r_resources[3]);
 }
 
-RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas) {
+RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas, RID p_visible_ids) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 
@@ -4234,6 +4327,17 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 	}
 #endif // MODULE_TEXTURE_STREAMING_ENABLED
 
+	{
+		RD::Uniform u;
+		u.binding = 46;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		RID ids = p_visible_ids;
+		if (ids.is_null() && rb_data.is_valid() && rb_data->multimesh_cull.active) {
+			ids = rb_data->multimesh_cull.visible_ids;
+		}
+		u.append_id(ids.is_valid() ? ids : scene_shader.default_vec4_xform_buffer);
+		uniforms.push_back(u);
+	}
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
 }
 
@@ -4456,6 +4560,13 @@ RID RenderForwardClustered::_setup_sdfgi_render_pass_uniform_set(RID p_albedo_te
 		ERR_FAIL_COND_V(scene_shader.default_shader_sdfgi_rd.is_null(), RID());
 	}
 
+	{
+		RD::Uniform u;
+		u.binding = 46;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		u.append_id(scene_shader.default_vec4_xform_buffer);
+		uniforms.push_back(u);
+	}
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.default_shader_sdfgi_rd, RENDER_PASS_UNIFORM_SET, uniforms);
 }
 
@@ -5653,7 +5764,13 @@ void RenderForwardClustered::_update_shader_quality_settings() {
 }
 
 RenderForwardClustered::RenderForwardClustered() {
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/enabled", false);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/shadows", false);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/enabled", false);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/error_pixels", PROPERTY_HINT_RANGE, "0,64,0.1,or_greater"), 1.0);
 	singleton = this;
+	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);
 
 	/* SCENE SHADER */
 
@@ -5874,6 +5991,36 @@ RenderForwardClustered::~RenderForwardClustered() {
 	RD::get_singleton()->free_rid(best_fit_normal.pipeline);
 	RD::get_singleton()->free_rid(best_fit_normal.texture);
 	best_fit_normal.shader.version_free(best_fit_normal.shader_version);
+	if (multimesh_cull.version.is_valid()) {
+		for (RID pipeline : multimesh_cull.pipelines) {
+			if (pipeline.is_valid()) {
+				RD::get_singleton()->free_rid(pipeline);
+			}
+		}
+		multimesh_cull.shader.version_free(multimesh_cull.version);
+	}
+	if (mesh_clod.version.is_valid()) {
+		for (RID pipeline : mesh_clod.pipelines) {
+			if (pipeline.is_valid()) {
+				RD::get_singleton()->free_rid(pipeline);
+			}
+		}
+		mesh_clod.shader.version_free(mesh_clod.version);
+	}
+	if (mesh_hiz.reduce_version.is_valid()) {
+		for (RID pipeline : mesh_hiz.reduce_pipelines) {
+			if (pipeline.is_valid()) {
+				RD::get_singleton()->free_rid(pipeline);
+			}
+		}
+		mesh_hiz.reduce_shader.version_free(mesh_hiz.reduce_version);
+	}
+	if (mesh_hiz.occlude_version.is_valid()) {
+		if (mesh_hiz.occlude_pipeline.is_valid()) {
+			RD::get_singleton()->free_rid(mesh_hiz.occlude_pipeline);
+		}
+		mesh_hiz.occlude_shader.version_free(mesh_hiz.occlude_version);
+	}
 
 	RD::get_singleton()->free_rid(dfg_lut.pipeline);
 	RD::get_singleton()->free_rid(dfg_lut.texture);

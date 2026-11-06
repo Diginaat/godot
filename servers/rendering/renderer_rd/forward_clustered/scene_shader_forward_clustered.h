@@ -133,6 +133,7 @@ public:
 				// Reflection probe capture sampling the DDGI probes (bindings 42-45);
 				// compiled out of every other pipeline.
 				uint32_t ddgi_probe_capture : 1;
+				uint32_t multimesh_gpu_culling : 1;
 			};
 		};
 
@@ -237,6 +238,7 @@ public:
 
 		DepthDraw depth_draw = DEPTH_DRAW_OPAQUE;
 		DepthTest depth_test = DEPTH_TEST_ENABLED;
+		bool writes_fragment_depth = false;
 
 		int blend_mode = BLEND_MODE_MIX;
 		int depth_test_disabledi = 0;
@@ -271,6 +273,7 @@ public:
 		bool uses_vertex_time = false;
 		bool uses_fragment_time = false;
 		bool writes_modelview_or_projection = false;
+		bool uses_custom_vertex_transform = false;
 		bool uses_world_coordinates = false;
 		bool uses_screen_texture_mipmaps = false;
 		bool uses_z_clip_scale = false;

@@ -307,10 +307,22 @@
 		<constant name="NAVIGATION_3D_OBSTACLE_COUNT" value="58" enum="Monitor">
 			Number of active navigation obstacles in the [NavigationServer3D].
 		</constant>
-		<constant name="RENDER_STREAMING_TEXTURE_MEM_USED" value="59" enum="Monitor">
+		<constant name="RENDER_GPU_CULLED_INSTANCES_VISIBLE" value="59" enum="Monitor">
+			Experimental. MultiMesh instances drawn by GPU culling in the root viewport, including MultiMeshes that lie fully inside the view. Zero unless [member ProjectSettings.rendering/geometry/multimesh_gpu_culling/enabled] is on (Forward+). Values lag a few frames.
+		</constant>
+		<constant name="RENDER_CLOD_TRIANGLES_VISIBLE" value="60" enum="Monitor">
+			Experimental. Triangles of the cluster LOD cut inside the root viewport's frustum. Zero unless [member ProjectSettings.rendering/geometry/cluster_lod/enabled] is on (Forward+). Values lag a few frames.
+		</constant>
+		<constant name="RENDER_HZB_TRIANGLES_OCCLUDED" value="61" enum="Monitor">
+			Experimental. Cluster LOD triangles rejected by HZB occlusion in the root viewport ([member ProjectSettings.rendering/geometry/cluster_lod/occlusion_enabled]). Values lag a few frames.
+		</constant>
+		<constant name="RENDER_CLOD_STREAMING_MEM_USED" value="62" enum="Monitor">
+			Experimental. Bytes of streamed cluster LOD indices resident in the shared GPU pool ([member ProjectSettings.rendering/geometry/cluster_lod/streaming/enabled]).
+		</constant>
+		<constant name="RENDER_STREAMING_TEXTURE_MEM_USED" value="63" enum="Monitor">
 			The amount of memory used by texture streaming (in bytes). This represents the current VRAM usage of streamed textures at their currently loaded mipmap levels.
 		</constant>
-		<constant name="MONITOR_MAX" value="60" enum="Monitor">
+		<constant name="MONITOR_MAX" value="64" enum="Monitor">
 			Represents the size of the [enum Monitor] enum.
 		</constant>
 		<constant name="MONITOR_TYPE_QUANTITY" value="0" enum="MonitorType">

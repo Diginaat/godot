@@ -101,6 +101,14 @@
 				Returns the name of the blend shape at this index.
 			</description>
 		</method>
+		<method name="generate_cluster_lods">
+			<return type="int" enum="Error" />
+			<param index="0" name="cluster_triangles" type="int" default="64" />
+			<param index="1" name="group_size" type="int" default="8" />
+			<description>
+				Generates and attaches [member cluster_data] from the current source surfaces. See [method MeshClusterData.generate] for supported geometry and parameter limits. Failure preserves the previous attachment. Does not replace source geometry, materials or the mesh RID. Experimental resident raster additionally requires [member ProjectSettings.rendering/geometry/cluster_lod/enabled]; geometry streaming is not implemented.
+			</description>
+		</method>
 		<method name="lightmap_unwrap">
 			<return type="int" enum="Error" />
 			<param index="0" name="transform" type="Transform3D" />
@@ -215,6 +223,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="cluster_data" type="MeshClusterData" setter="set_cluster_data" getter="get_cluster_data">
+			Optional serialized hierarchy derived from this mesh. Attachment checks source-array SHA-256 signatures, surface counts and primitive types; unrelated or unsigned caches must be regenerated. Geometry/attribute region updates, adding/removing/replacing surfaces and clearing/reloading this mesh detach the hierarchy. Material and surface-name edits retain it. A shared hierarchy changed to a different source detaches from its old owners. Source arrays remain authoritative. Eligible static surfaces can use experimental resident raster when [member ProjectSettings.rendering/geometry/cluster_lod/enabled] is enabled; other views and unsupported geometry retain conventional submission. Virtual paging and streaming are not implemented.
+		</member>
 		<member name="blend_shape_mode" type="int" setter="set_blend_shape_mode" getter="get_blend_shape_mode" enum="Mesh.BlendShapeMode" default="1">
 			The blend shape mode.
 		</member>

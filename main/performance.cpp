@@ -37,6 +37,7 @@
 #include "core/variant/typed_array.h"
 #include "scene/main/node.h"
 #include "scene/main/scene_tree.h"
+#include "scene/main/window.h"
 #include "servers/audio/audio_server.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -141,6 +142,10 @@ void Performance::_bind_methods() {
 	BIND_ENUM_CONSTANT(NAVIGATION_3D_EDGE_FREE_COUNT);
 	BIND_ENUM_CONSTANT(NAVIGATION_3D_OBSTACLE_COUNT);
 #endif // NAVIGATION_3D_DISABLED
+	BIND_ENUM_CONSTANT(RENDER_GPU_CULLED_INSTANCES_VISIBLE);
+	BIND_ENUM_CONSTANT(RENDER_CLOD_TRIANGLES_VISIBLE);
+	BIND_ENUM_CONSTANT(RENDER_HZB_TRIANGLES_OCCLUDED);
+	BIND_ENUM_CONSTANT(RENDER_CLOD_STREAMING_MEM_USED);
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 	BIND_ENUM_CONSTANT(RENDER_STREAMING_TEXTURE_MEM_USED);
 #endif
@@ -239,6 +244,10 @@ String Performance::get_monitor_name(Monitor p_monitor) const {
 		PNAME("navigation_3d/edges_free"),
 		PNAME("navigation_3d/obstacles"),
 #endif // NAVIGATION_3D_DISABLED
+		PNAME("raster/gpu_culled_instances_visible"),
+		PNAME("raster/clod_triangles_visible"),
+		PNAME("raster/hzb_triangles_occluded"),
+		PNAME("video/clod_streaming_mem_used"),
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 		PNAME("video/streaming_texture_mem_used"),
 #endif
@@ -466,6 +475,14 @@ double Performance::get_monitor(Monitor p_monitor) const {
 		case NAVIGATION_3D_OBSTACLE_COUNT:
 			return NavigationServer3D::get_singleton()->get_process_info(NavigationServer3D::INFO_OBSTACLE_COUNT);
 #endif // NAVIGATION_3D_DISABLED
+		case RENDER_GPU_CULLED_INSTANCES_VISIBLE:
+			return double(_gpu_geometry_statistic("multimesh_instances_visible")) + double(_gpu_geometry_statistic("multimesh_instances_fully_visible"));
+		case RENDER_CLOD_TRIANGLES_VISIBLE:
+			return _gpu_geometry_statistic("clod_triangles_visible");
+		case RENDER_HZB_TRIANGLES_OCCLUDED:
+			return _gpu_geometry_statistic("hzb_triangles_occluded");
+		case RENDER_CLOD_STREAMING_MEM_USED:
+			return _gpu_geometry_statistic("clod_stream_resident_bytes");
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 		case RENDER_STREAMING_TEXTURE_MEM_USED: {
 			TextureStreaming *texture_streaming = TextureStreaming::get_singleton();
@@ -477,6 +494,18 @@ double Performance::get_monitor(Monitor p_monitor) const {
 	}
 
 	return 0;
+}
+
+double Performance::_gpu_geometry_statistic(const StringName &p_key) const {
+	// Root viewport counters; polling also keeps them recording (see
+	// RenderingServer.viewport_get_gpu_geometry_statistics). Zero until the
+	// first asynchronous result arrives or when the paths are disabled.
+	SceneTree *tree = SceneTree::get_singleton();
+	if (!tree || !tree->get_root()) {
+		return 0;
+	}
+	const Dictionary statistics = RenderingServer::get_singleton()->viewport_get_gpu_geometry_statistics(tree->get_root()->get_viewport_rid());
+	return double(statistics.get(p_key, 0));
 }
 
 Performance::MonitorType Performance::get_monitor_type(Monitor p_monitor) const {
@@ -544,6 +573,10 @@ Performance::MonitorType Performance::get_monitor_type(Monitor p_monitor) const 
 		MONITOR_TYPE_QUANTITY,
 		MONITOR_TYPE_QUANTITY,
 #endif // _3D_DISABLED
+		MONITOR_TYPE_QUANTITY,
+		MONITOR_TYPE_QUANTITY,
+		MONITOR_TYPE_QUANTITY,
+		MONITOR_TYPE_MEMORY,
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 		MONITOR_TYPE_MEMORY,
 #endif // MODULE_TEXTURE_STREAMING_ENABLED

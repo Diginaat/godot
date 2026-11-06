@@ -28,6 +28,7 @@ layout(push_constant, std430) uniform DrawCall {
 	uint uv_offset;
 	uint multimesh_motion_vectors_current_offset;
 	uint multimesh_motion_vectors_previous_offset;
+	uint multimesh_visible_ids_offset;
 #ifdef UBERSHADER
 	uint sc_packed_0;
 	uint sc_packed_1;
@@ -154,6 +155,10 @@ bool sc_ddgi_probe_capture() {
 	return ((sc_packed_1() >> 8) & 1U) != 0;
 }
 
+bool sc_multimesh_gpu_culling() {
+	return ((sc_packed_1() >> 9) & 1U) != 0;
+}
+
 bool sc_material_feedback() {
 	return ((sc_packed_1() >> 7) & 1U) != 0;
 }
@@ -168,14 +173,18 @@ layout(constant_id = 2) const bool sc_emulate_point_size = false;
 #ifdef POINT_SIZE_USED
 
 #define VERTEX_INDEX (sc_emulate_point_size ? gl_InstanceIndex : gl_VertexIndex)
-#define INSTANCE_INDEX (sc_emulate_point_size ? (gl_VertexIndex / 6) : gl_InstanceIndex)
+#define RAW_INSTANCE_INDEX (sc_emulate_point_size ? (gl_VertexIndex / 6) : gl_InstanceIndex)
 
 #else
 
 #define VERTEX_INDEX gl_VertexIndex
-#define INSTANCE_INDEX gl_InstanceIndex
+#define RAW_INSTANCE_INDEX gl_InstanceIndex
 
 #endif
+
+// Both built-in INSTANCE_ID and transform/custom-data/motion lookups retain
+// source identity, regardless of the order of atomic visibility appends.
+#define INSTANCE_INDEX int(sc_multimesh_gpu_culling() ? multimesh_visible_ids.data[draw_call.multimesh_visible_ids_offset + uint(RAW_INSTANCE_INDEX)] : uint(RAW_INSTANCE_INDEX))
 
 #define REFLECTION_MULTIPLIER 1.0
 
@@ -395,6 +404,11 @@ layout(set = 1, binding = 2, std430) buffer restrict readonly InstanceDataBuffer
 	InstanceData data[];
 }
 instances;
+
+layout(set = 1, binding = 46, std430) readonly buffer MultiMeshVisibleIDs {
+	uint data[];
+}
+multimesh_visible_ids;
 
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 

@@ -1657,6 +1657,15 @@ Dictionary RendererViewport::viewport_get_ddgi_probe_data(RID p_viewport) {
 	return RSG::scene->ddgi_get_probe_data(viewport->render_buffers);
 }
 
+Dictionary RendererViewport::viewport_get_gpu_geometry_statistics(RID p_viewport) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL_V(viewport, Dictionary());
+	if (viewport->render_buffers.is_null()) {
+		return Dictionary();
+	}
+	return RSG::scene->gpu_geometry_get_statistics(viewport->render_buffers);
+}
+
 float RendererViewport::viewport_get_measured_render_time_gpu(RID p_viewport) const {
 	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
 	ERR_FAIL_NULL_V(viewport, 0);

@@ -34,6 +34,7 @@
 #include "servers/rendering/renderer_viewport.h"
 #include "servers/rendering/rendering_server.h"
 #include "servers/rendering/rendering_server_types.h"
+#include "servers/rendering/storage/mesh_cluster_data_format.h"
 
 using namespace RendererRD;
 
@@ -45,6 +46,9 @@ MeshStorage *MeshStorage::get_singleton() {
 
 MeshStorage::MeshStorage() {
 	singleton = this;
+
+	GLOBAL_DEF("rendering/geometry/cluster_lod/streaming/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/streaming/budget_mb", PROPERTY_HINT_RANGE, "0.25,4096,0.25,or_greater"), 64.0);
 
 	default_rd_storage_buffer = RD::get_singleton()->storage_buffer_create(sizeof(uint32_t) * 4);
 
@@ -189,6 +193,13 @@ MeshStorage::MeshStorage() {
 }
 
 MeshStorage::~MeshStorage() {
+	_cluster_page_batches_finish(true);
+	for (RID resource : { cluster_pool.index_buffer, cluster_pool.requests }) {
+		if (resource.is_valid()) {
+			RD::get_singleton()->free_rid(resource);
+		}
+	}
+
 	//def buffers
 	for (int i = 0; i < DEFAULT_RD_BUFFER_MAX; i++) {
 		RD::get_singleton()->free_rid(mesh_default_rd_buffers[i]);
@@ -530,6 +541,7 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 }
 
 void MeshStorage::_mesh_surface_clear(Mesh *p_mesh, int p_surface) {
+	_mesh_cluster_clear(p_mesh->surfaces[p_surface]);
 	Mesh::Surface &s = *p_mesh->surfaces[p_surface];
 
 	if (s.vertex_buffer.is_valid()) {
@@ -594,6 +606,7 @@ void MeshStorage::mesh_surface_update_vertex_region(RID p_mesh, int p_surface, i
 	const uint8_t *r = p_data.ptr();
 
 	RD::get_singleton()->buffer_update(mesh->surfaces[p_surface]->vertex_buffer, p_offset, data_size, r);
+	_mesh_cluster_clear(mesh->surfaces[p_surface]);
 
 	// Invalidate RT cache for this surface.
 	mesh->surfaces[p_surface]->rt_invalidation_counter++;
@@ -610,6 +623,7 @@ void MeshStorage::mesh_surface_update_attribute_region(RID p_mesh, int p_surface
 	const uint8_t *r = p_data.ptr();
 
 	RD::get_singleton()->buffer_update(mesh->surfaces[p_surface]->attribute_buffer, p_offset, data_size, r);
+	_mesh_cluster_clear(mesh->surfaces[p_surface]);
 
 	// Invalidate RT cache for this surface (attributes include UVs).
 	mesh->surfaces[p_surface]->rt_invalidation_counter++;
@@ -626,6 +640,7 @@ void MeshStorage::mesh_surface_update_skin_region(RID p_mesh, int p_surface, int
 	const uint8_t *r = p_data.ptr();
 
 	RD::get_singleton()->buffer_update(mesh->surfaces[p_surface]->skin_buffer, p_offset, data_size, r);
+	_mesh_cluster_clear(mesh->surfaces[p_surface]);
 
 	// Invalidate RT cache for this surface (skinned meshes need BLAS rebuild).
 	mesh->surfaces[p_surface]->rt_invalidation_counter++;
@@ -642,6 +657,7 @@ void RendererRD::MeshStorage::mesh_surface_update_index_region(RID p_mesh, int p
 	const uint8_t *r = p_data.ptr();
 
 	RD::get_singleton()->buffer_update(mesh->surfaces[p_surface]->index_buffer, p_offset, data_size, r);
+	_mesh_cluster_clear(mesh->surfaces[p_surface]);
 
 	// Invalidate RT cache for this surface.
 	mesh->surfaces[p_surface]->rt_invalidation_counter++;
@@ -914,6 +930,102 @@ void MeshStorage::mesh_set_shadow_mesh(RID p_mesh, RID p_shadow_mesh) {
 	}
 
 	mesh->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_MESH);
+}
+
+void MeshStorage::_mesh_cluster_clear(Mesh::Surface *p_surface) {
+	_cluster_streaming_release(p_surface);
+	for (RID resource : { p_surface->cluster_data.groups, p_surface->cluster_data.index_buffer }) {
+		if (resource.is_valid()) {
+			RD::get_singleton()->free_rid(resource);
+		}
+	}
+	// Freeing the index buffer also invalidates its dependent index array.
+	p_surface->cluster_data = {};
+}
+
+void MeshStorage::mesh_set_cluster_data(RID p_mesh, const Array &p_data) {
+	Mesh *mesh = mesh_owner.get_or_null(p_mesh);
+	ERR_FAIL_NULL(mesh);
+	for (uint32_t surface = 0; surface < mesh->surface_count; surface++) {
+		_mesh_cluster_clear(mesh->surfaces[surface]);
+	}
+	if (p_data.is_empty()) {
+		return;
+	}
+	ERR_FAIL_COND(p_data.size() != mesh->surface_count);
+	uint64_t total_bytes = 0;
+	for (uint32_t surface = 0; surface < mesh->surface_count; surface++) {
+		ERR_FAIL_COND(p_data[surface].get_type() != Variant::DICTIONARY);
+		const Dictionary record = p_data[surface];
+		ERR_FAIL_COND(!MeshClusterDataFormat::validate_surface(record));
+		const Mesh::Surface *source = mesh->surfaces[surface];
+		ERR_FAIL_COND(int(record["vertex_count"]) != source->vertex_count || int(record["source_index_count"]) != (source->index_count ? source->index_count : source->vertex_count));
+		const PackedInt32Array groups = record["groups"];
+		const PackedInt32Array indices = record["indices"];
+		total_bytes += uint64_t(indices.size()) * sizeof(uint32_t) + uint64_t(groups.size() / 5) * 48;
+		// Initial resident raster is intentionally budgeted. Unsupported content
+		// keeps native source submission, never a partial or missing hierarchy.
+		if (mesh->blend_shape_count || source->skin_buffer.is_valid() || source->primitive != RSE::PRIMITIVE_TRIANGLES || groups.size() / 5 > 4096 || total_bytes > 64 * 1024 * 1024) {
+			return;
+		}
+	}
+	struct Group {
+		float position_error[4];
+		float size[4];
+		uint32_t draw[4];
+	};
+	static_assert(sizeof(Group) == 48);
+	RD *rd = RD::get_singleton();
+	// Streaming keeps the cooked indices in system memory and pages group
+	// ranges into a shared GPU pool; otherwise every index is resident.
+	const bool streaming = GLOBAL_GET("rendering/geometry/cluster_lod/streaming/enabled");
+	for (uint32_t surface = 0; surface < mesh->surface_count; surface++) {
+		const Dictionary record = p_data[surface];
+		const PackedInt32Array groups = record["groups"];
+		const PackedInt32Array clusters = record["clusters"];
+		const PackedInt32Array indices = record["indices"];
+		const PackedVector3Array bounds = record["bounds"];
+		const PackedFloat32Array errors = record["errors"];
+		Vector<Group> gpu_groups;
+		gpu_groups.resize(groups.size() / 5);
+		for (int group = 0; group < gpu_groups.size(); group++) {
+			Group &gpu = gpu_groups.write[group];
+			for (int axis = 0; axis < 3; axis++) {
+				gpu.position_error[axis] = bounds[group * 2][axis];
+				gpu.size[axis] = bounds[group * 2 + 1][axis];
+			}
+			gpu.position_error[3] = errors[group];
+			gpu.size[3] = 0;
+			const int first = groups[group * 5];
+			const int last = first + groups[group * 5 + 1] - 1;
+			gpu.draw[0] = clusters[first * 3];
+			gpu.draw[1] = clusters[last * 3] + clusters[last * 3 + 1] - gpu.draw[0];
+			gpu.draw[2] = uint32_t(groups[group * 5 + 4]);
+			gpu.draw[3] = groups[group * 5 + 3];
+		}
+		Vector<uint8_t> group_bytes;
+		group_bytes.resize(gpu_groups.size() * sizeof(Group));
+		memcpy(group_bytes.ptrw(), gpu_groups.ptr(), group_bytes.size());
+		Vector<uint8_t> index_bytes;
+		index_bytes.resize(indices.size() * sizeof(uint32_t));
+		memcpy(index_bytes.ptrw(), indices.ptr(), index_bytes.size());
+		ClusterData &resident = mesh->surfaces[surface]->cluster_data;
+		resident.groups = rd->storage_buffer_create(group_bytes.size(), group_bytes);
+		// A surface that cannot stream (pool too small for its roots) stays resident.
+		if (!(streaming && resident.groups.is_valid() && _cluster_streaming_setup(mesh->surfaces[surface], record))) {
+			resident.index_buffer = rd->index_buffer_create(indices.size(), RD::INDEX_BUFFER_FORMAT_UINT32, index_bytes);
+			if (resident.index_buffer.is_valid()) {
+				resident.index_array = rd->index_array_create(resident.index_buffer, 0, indices.size());
+			}
+		}
+		if (resident.groups.is_null() || resident.index_array.is_null()) {
+			for (uint32_t rollback = 0; rollback <= surface; rollback++) {
+				_mesh_cluster_clear(mesh->surfaces[rollback]);
+			}
+			return;
+		}
+		resident.group_count = gpu_groups.size();
+	}
 }
 
 void MeshStorage::mesh_clear(RID p_mesh) {
@@ -2314,8 +2426,10 @@ void MeshStorage::_multimesh_set_visible_instances(RID p_multimesh, int p_visibl
 	if (multimesh->indirect) { //we have to update the command buffer for the instance counts, in each stride this will be the second integer.
 		Mesh *mesh = mesh_owner.get_or_null(multimesh->mesh);
 		if (mesh != nullptr) {
+			// The CPU's "all instances" sentinel is not a valid unsigned GPU draw count.
+			const uint32_t visible_instances = p_visible < 0 ? multimesh->instances : p_visible;
 			for (uint32_t i = 0; i < mesh->surface_count; i++) {
-				RD::get_singleton()->buffer_update(multimesh->command_buffer, (i * sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE) + sizeof(uint32_t), sizeof(uint32_t), &p_visible);
+				RD::get_singleton()->buffer_update(multimesh->command_buffer, (i * sizeof(uint32_t) * INDIRECT_MULTIMESH_COMMAND_STRIDE) + sizeof(uint32_t), sizeof(uint32_t), &visible_instances);
 			}
 		}
 	}

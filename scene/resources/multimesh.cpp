@@ -250,6 +250,31 @@ int MultiMesh::get_visible_instance_count() const {
 	return visible_instance_count;
 }
 
+void MultiMesh::set_distance_thinning_begin(float p_distance) {
+	ERR_FAIL_COND(!Math::is_finite(p_distance) || p_distance < 0.0f);
+	distance_thinning_begin = p_distance;
+	// The server requires end > begin while thinning is on.
+	if (distance_thinning_end == 0.0f || distance_thinning_end > distance_thinning_begin) {
+		RenderingServer::get_singleton()->multimesh_set_distance_thinning(multimesh, distance_thinning_begin, distance_thinning_end);
+	}
+}
+
+float MultiMesh::get_distance_thinning_begin() const {
+	return distance_thinning_begin;
+}
+
+void MultiMesh::set_distance_thinning_end(float p_distance) {
+	ERR_FAIL_COND(!Math::is_finite(p_distance) || p_distance < 0.0f);
+	distance_thinning_end = p_distance;
+	if (distance_thinning_end == 0.0f || distance_thinning_end > distance_thinning_begin) {
+		RenderingServer::get_singleton()->multimesh_set_distance_thinning(multimesh, distance_thinning_begin, distance_thinning_end);
+	}
+}
+
+float MultiMesh::get_distance_thinning_end() const {
+	return distance_thinning_end;
+}
+
 void MultiMesh::set_physics_interpolation_quality(PhysicsInterpolationQuality p_quality) {
 	_physics_interpolation_quality = p_quality;
 	RenderingServer::get_singleton()->multimesh_set_physics_interpolation_quality(multimesh, (RSE::MultimeshPhysicsInterpolationQuality)p_quality);
@@ -376,6 +401,10 @@ void MultiMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_instance_count"), &MultiMesh::get_instance_count);
 	ClassDB::bind_method(D_METHOD("set_visible_instance_count", "count"), &MultiMesh::set_visible_instance_count);
 	ClassDB::bind_method(D_METHOD("get_visible_instance_count"), &MultiMesh::get_visible_instance_count);
+	ClassDB::bind_method(D_METHOD("set_distance_thinning_begin", "distance"), &MultiMesh::set_distance_thinning_begin);
+	ClassDB::bind_method(D_METHOD("get_distance_thinning_begin"), &MultiMesh::get_distance_thinning_begin);
+	ClassDB::bind_method(D_METHOD("set_distance_thinning_end", "distance"), &MultiMesh::set_distance_thinning_end);
+	ClassDB::bind_method(D_METHOD("get_distance_thinning_end"), &MultiMesh::get_distance_thinning_end);
 	ClassDB::bind_method(D_METHOD("set_physics_interpolation_quality", "quality"), &MultiMesh::set_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("get_physics_interpolation_quality"), &MultiMesh::get_physics_interpolation_quality);
 	ClassDB::bind_method(D_METHOD("set_instance_transform", "instance", "transform"), &MultiMesh::set_instance_transform);
@@ -403,6 +432,10 @@ void MultiMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::AABB, "custom_aabb", PROPERTY_HINT_NONE, "suffix:m"), "set_custom_aabb", "get_custom_aabb");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "instance_count", PROPERTY_HINT_RANGE, "0,16384,1,or_greater"), "set_instance_count", "get_instance_count");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "visible_instance_count", PROPERTY_HINT_RANGE, "-1,16384,1,or_greater"), "set_visible_instance_count", "get_visible_instance_count");
+	ADD_GROUP("Distance Thinning", "distance_thinning_");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "distance_thinning_begin", PROPERTY_HINT_RANGE, "0,4096,0.1,or_greater,suffix:m"), "set_distance_thinning_begin", "get_distance_thinning_begin");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "distance_thinning_end", PROPERTY_HINT_RANGE, "0,4096,0.1,or_greater,suffix:m"), "set_distance_thinning_end", "get_distance_thinning_end");
+	ADD_GROUP("", "");
 	// Specify all types for explicit ordering in the inspector,
 	// but list generic Mesh last to allow extended types to show up at the end.
 	// Keep the order in sync with MeshInstance3D's `mesh` property.

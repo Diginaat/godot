@@ -30,6 +30,8 @@
 
 #include "register_types.h"
 
+#include "cluster_builder.h"
+
 #include "scene/resources/surface_tool.h"
 
 #include <thirdparty/meshoptimizer/meshoptimizer.h>
@@ -48,6 +50,7 @@ void initialize_meshoptimizer_module(ModuleInitializationLevel p_level) {
 	SurfaceTool::remap_vertex_func = meshopt_remapVertexBuffer;
 	SurfaceTool::remap_index_func = meshopt_remapIndexBuffer;
 	SurfaceTool::generate_tangents_func = meshopt_generateTangents;
+	MeshClusterData::generate_func = generate_mesh_clusters;
 }
 
 void uninitialize_meshoptimizer_module(ModuleInitializationLevel p_level) {
@@ -64,4 +67,5 @@ void uninitialize_meshoptimizer_module(ModuleInitializationLevel p_level) {
 	SurfaceTool::remap_vertex_func = nullptr;
 	SurfaceTool::remap_index_func = nullptr;
 	SurfaceTool::generate_tangents_func = nullptr;
+	MeshClusterData::generate_func = nullptr;
 }

@@ -148,6 +148,13 @@
 		<member name="transform_format" type="int" setter="set_transform_format" getter="get_transform_format" enum="MultiMesh.TransformFormat" default="0">
 			Format of transform used to transform mesh, either 2D or 3D.
 		</member>
+		<member name="distance_thinning_begin" type="float" setter="set_distance_thinning_begin" getter="get_distance_thinning_begin" default="0.0">
+			Experimental. Distance from the camera, in meters, where distance thinning starts dropping instances (see [member distance_thinning_end]).
+		</member>
+		<member name="distance_thinning_end" type="float" setter="set_distance_thinning_end" getter="get_distance_thinning_end" default="0.0">
+			Experimental. Distance from the camera, in meters, where every instance is dropped. Between [member distance_thinning_begin] and this distance the kept fraction of instances falls linearly from all to none; which instances stay is a fixed hash of the instance index, so an instance does not flicker while the camera moves. [code]0.0[/code] disables thinning. Must be greater than [member distance_thinning_begin].
+			Only applied by GPU MultiMesh culling in Forward+ ([member ProjectSettings.rendering/geometry/multimesh_gpu_culling/enabled]); other paths draw every instance. Suited to dense ground cover such as grass, where far instances are small.
+		</member>
 		<member name="use_colors" type="bool" setter="set_use_colors" getter="is_using_colors" default="false">
 			If [code]true[/code], the [MultiMesh] will use color data (see [method set_instance_color]). Can only be set when [member instance_count] is [code]0[/code] or less. This means that you need to call this method before setting the instance count, or temporarily reset it to [code]0[/code].
 		</member>

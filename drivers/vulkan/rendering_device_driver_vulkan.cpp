@@ -7729,6 +7729,9 @@ bool RenderingDeviceDriverVulkan::has_feature(Features p_feature) {
 #endif // defined(WINDOWS_ENABLED)
 		case SUPPORTS_GPU_MAPPABLE_BUFFER:
 			return device_local_host_visible_host_coherent_memory_support;
+		case SUPPORTS_MULTI_DRAW_INDIRECT:
+			// Enabled whenever available; the spec then guarantees maxDrawIndirectCount >= 65535.
+			return physical_device_features.multiDrawIndirect;
 		default:
 			return false;
 	}
