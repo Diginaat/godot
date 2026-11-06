@@ -31,8 +31,10 @@
 #include "mesh.h"
 
 #include "core/math/convex_hull.h"
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/templates/pair.h"
+#include "scene/resources/mesh_cluster_data.h"
 #include "scene/resources/surface_tool.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -1707,6 +1709,7 @@ void ArrayMesh::_set_surfaces(const Array &p_surfaces) {
 		surface_2d.push_back(_2d);
 	}
 
+	_clear_cluster_data();
 	if (mesh.is_valid()) {
 		//if mesh exists, it needs to be updated
 		RS::get_singleton()->mesh_clear(mesh);
@@ -1811,6 +1814,7 @@ void ArrayMesh::_recompute_aabb() {
 // TODO: Need to add binding to add_surface using future MeshSurfaceData object.
 void ArrayMesh::add_surface(BitField<ArrayFormat> p_format, PrimitiveType p_primitive, const Vector<uint8_t> &p_array, const Vector<uint8_t> &p_attribute_array, const Vector<uint8_t> &p_skin_array, int p_vertex_count, const Vector<uint8_t> &p_index_array, int p_index_count, const AABB &p_aabb, const Vector<uint8_t> &p_blend_shape_data, const Vector<AABB> &p_bone_aabbs, const Vector<RenderingServerTypes::SurfaceData::LOD> &p_lods, const Vector4 p_uv_scale) {
 	ERR_FAIL_COND(surfaces.size() == RSE::MAX_MESH_SURFACES);
+	_clear_cluster_data();
 	_create_if_empty();
 
 	Surface s;
@@ -2007,18 +2011,21 @@ String ArrayMesh::surface_get_name(int p_idx) const {
 
 void ArrayMesh::surface_update_vertex_region(int p_surface, int p_offset, const Vector<uint8_t> &p_data) {
 	ERR_FAIL_INDEX(p_surface, surfaces.size());
+	_clear_cluster_data();
 	RS::get_singleton()->mesh_surface_update_vertex_region(mesh, p_surface, p_offset, p_data);
 	emit_changed();
 }
 
 void ArrayMesh::surface_update_attribute_region(int p_surface, int p_offset, const Vector<uint8_t> &p_data) {
 	ERR_FAIL_INDEX(p_surface, surfaces.size());
+	_clear_cluster_data();
 	RS::get_singleton()->mesh_surface_update_attribute_region(mesh, p_surface, p_offset, p_data);
 	emit_changed();
 }
 
 void ArrayMesh::surface_update_skin_region(int p_surface, int p_offset, const Vector<uint8_t> &p_data) {
 	ERR_FAIL_INDEX(p_surface, surfaces.size());
+	_clear_cluster_data();
 	RS::get_singleton()->mesh_surface_update_skin_region(mesh, p_surface, p_offset, p_data);
 	emit_changed();
 }
@@ -2045,6 +2052,7 @@ AABB ArrayMesh::get_aabb() const {
 }
 
 void ArrayMesh::clear_surfaces() {
+	_clear_cluster_data();
 	if (!mesh.is_valid()) {
 		return;
 	}
@@ -2055,6 +2063,7 @@ void ArrayMesh::clear_surfaces() {
 
 void ArrayMesh::surface_remove(int p_surface) {
 	ERR_FAIL_INDEX(p_surface, surfaces.size());
+	_clear_cluster_data();
 	RS::get_singleton()->mesh_surface_remove(mesh, p_surface);
 	surfaces.remove_at(p_surface);
 
@@ -2317,6 +2326,53 @@ Ref<ArrayMesh> ArrayMesh::get_shadow_mesh() const {
 	return shadow_mesh;
 }
 
+void ArrayMesh::_clear_cluster_data() {
+	if (cluster_data.is_valid()) {
+		if (mesh.is_valid()) {
+			RS::get_singleton()->mesh_set_cluster_data(mesh, Array());
+		}
+		cluster_data->disconnect_changed(callable_mp(this, &ArrayMesh::_cluster_data_changed));
+		cluster_data.unref();
+	}
+}
+
+void ArrayMesh::_cluster_data_changed() {
+	if (cluster_data.is_valid() && !cluster_data->matches_mesh(Ref<Mesh>(this))) {
+		_clear_cluster_data();
+	} else if (cluster_data.is_valid()) {
+		RS::get_singleton()->mesh_set_cluster_data(get_rid(), cluster_data->get_data());
+	}
+	emit_changed();
+}
+
+void ArrayMesh::set_cluster_data(const Ref<MeshClusterData> &p_data) {
+	ERR_FAIL_COND_MSG(p_data.is_valid() && !p_data->matches_mesh(Ref<Mesh>(this)), "Cluster hierarchy does not match this mesh. Regenerate cluster LODs from the current source mesh.");
+	if (cluster_data == p_data) {
+		return;
+	}
+	_clear_cluster_data();
+	cluster_data = p_data;
+	if (cluster_data.is_valid()) {
+		cluster_data->connect_changed(callable_mp(this, &ArrayMesh::_cluster_data_changed));
+		RS::get_singleton()->mesh_set_cluster_data(get_rid(), cluster_data->get_data());
+	}
+	emit_changed();
+}
+
+Ref<MeshClusterData> ArrayMesh::get_cluster_data() const {
+	return cluster_data;
+}
+
+Error ArrayMesh::generate_cluster_lods(int p_cluster_triangles, int p_group_size) {
+	Ref<MeshClusterData> generated;
+	generated.instantiate();
+	const Error error = generated->generate(Ref<Mesh>(this), p_cluster_triangles, p_group_size);
+	if (error == OK) {
+		set_cluster_data(generated);
+	}
+	return error;
+}
+
 void ArrayMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_blend_shape", "name"), &ArrayMesh::add_blend_shape);
 	ClassDB::bind_method(D_METHOD("get_blend_shape_count"), &ArrayMesh::get_blend_shape_count);
@@ -2349,6 +2405,9 @@ void ArrayMesh::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_shadow_mesh", "mesh"), &ArrayMesh::set_shadow_mesh);
 	ClassDB::bind_method(D_METHOD("get_shadow_mesh"), &ArrayMesh::get_shadow_mesh);
+	ClassDB::bind_method(D_METHOD("set_cluster_data", "data"), &ArrayMesh::set_cluster_data);
+	ClassDB::bind_method(D_METHOD("get_cluster_data"), &ArrayMesh::get_cluster_data);
+	ClassDB::bind_method(D_METHOD("generate_cluster_lods", "cluster_triangles", "group_size"), &ArrayMesh::generate_cluster_lods, DEFVAL(64), DEFVAL(8));
 
 	ClassDB::bind_method(D_METHOD("_set_blend_shape_names", "blend_shape_names"), &ArrayMesh::_set_blend_shape_names);
 	ClassDB::bind_method(D_METHOD("_get_blend_shape_names"), &ArrayMesh::_get_blend_shape_names);
@@ -2361,9 +2420,11 @@ void ArrayMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "blend_shape_mode", PROPERTY_HINT_ENUM, "Normalized,Relative"), "set_blend_shape_mode", "get_blend_shape_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::AABB, "custom_aabb", PROPERTY_HINT_NO_NODEPATH, "suffix:m"), "set_custom_aabb", "get_custom_aabb");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "shadow_mesh", PROPERTY_HINT_RESOURCE_TYPE, ArrayMesh::get_class_static()), "set_shadow_mesh", "get_shadow_mesh");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "cluster_data", PROPERTY_HINT_RESOURCE_TYPE, "MeshClusterData"), "set_cluster_data", "get_cluster_data");
 }
 
 void ArrayMesh::reload_from_file() {
+	_clear_cluster_data();
 	RenderingServer::get_singleton()->mesh_clear(mesh);
 	surfaces.clear();
 	clear_blend_shapes();
@@ -2380,6 +2441,7 @@ ArrayMesh::ArrayMesh() {
 }
 
 ArrayMesh::~ArrayMesh() {
+	_clear_cluster_data();
 	if (mesh.is_valid()) {
 		ERR_FAIL_NULL(RenderingServer::get_singleton());
 		RenderingServer::get_singleton()->free_rid(mesh);

@@ -2396,6 +2396,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("mesh_surface_get_index_buffer_rd_rid", "mesh", "surface"), &RenderingServer::mesh_surface_get_index_buffer_rd_rid);
 
 	ClassDB::bind_method(D_METHOD("mesh_set_shadow_mesh", "mesh", "shadow_mesh"), &RenderingServer::mesh_set_shadow_mesh);
+	ClassDB::bind_method(D_METHOD("mesh_set_cluster_data", "mesh", "data"), &RenderingServer::mesh_set_cluster_data);
 
 	BIND_ENUM_CONSTANT(RSE::ARRAY_VERTEX);
 	BIND_ENUM_CONSTANT(RSE::ARRAY_NORMAL);
@@ -2495,6 +2496,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("multimesh_instance_get_color", "multimesh", "index"), &RenderingServer::multimesh_instance_get_color);
 	ClassDB::bind_method(D_METHOD("multimesh_instance_get_custom_data", "multimesh", "index"), &RenderingServer::multimesh_instance_get_custom_data);
 	ClassDB::bind_method(D_METHOD("multimesh_set_visible_instances", "multimesh", "visible"), &RenderingServer::multimesh_set_visible_instances);
+	ClassDB::bind_method(D_METHOD("multimesh_set_distance_thinning", "multimesh", "begin", "end"), &RenderingServer::multimesh_set_distance_thinning);
 	ClassDB::bind_method(D_METHOD("multimesh_get_visible_instances", "multimesh"), &RenderingServer::multimesh_get_visible_instances);
 	ClassDB::bind_method(D_METHOD("multimesh_set_buffer", "multimesh", "buffer"), &RenderingServer::multimesh_set_buffer);
 	ClassDB::bind_method(D_METHOD("multimesh_get_command_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_command_buffer_rd_rid);
@@ -2938,6 +2940,7 @@ void RenderingServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("viewport_get_measured_render_time_gpu", "viewport"), &RenderingServer::viewport_get_measured_render_time_gpu);
 	ClassDB::bind_method(D_METHOD("viewport_get_ddgi_probe_data", "viewport"), &RenderingServer::viewport_get_ddgi_probe_data);
+	ClassDB::bind_method(D_METHOD("viewport_get_gpu_geometry_statistics", "viewport"), &RenderingServer::viewport_get_gpu_geometry_statistics);
 
 	ClassDB::bind_method(D_METHOD("viewport_set_vrs_mode", "viewport", "mode"), &RenderingServer::viewport_set_vrs_mode);
 	ClassDB::bind_method(D_METHOD("viewport_set_vrs_update_mode", "viewport", "mode"), &RenderingServer::viewport_set_vrs_update_mode);

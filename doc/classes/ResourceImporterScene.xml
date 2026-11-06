@@ -67,6 +67,9 @@
 		<member name="meshes/force_disable_compression" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], mesh compression will not be used. Consider enabling if you notice blocky artifacts in your mesh normals or UVs, or if you have meshes that are larger than a few thousand meters in each direction.
 		</member>
+		<member name="meshes/generate_cluster_lods" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], generates optional [member ArrayMesh.cluster_data] after lightmap unwrapping, source LOD generation and index optimization, before saving embedded or external meshes. Shared imported meshes are cooked once. Unsupported blend shapes, skinning, custom vertex channels or unavailable meshoptimizer keep conventional geometry and emit a warning; the scene import still succeeds. Does not remove ordinary LODs or optimized shadow meshes. Runtime resident raster requires [member ProjectSettings.rendering/geometry/cluster_lod/enabled]. This does not enable streaming or far voxels.
+		</member>
 		<member name="meshes/generate_lods" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], generates lower detail variants of the mesh which will be displayed in the distance to improve rendering performance. Not all meshes benefit from LOD, especially if they are never rendered from far away. Disabling this can reduce output file size and speed up importing. See [url=$DOCS_URL/tutorials/3d/mesh_lod.html#doc-mesh-lod]Mesh level of detail (LOD)[/url] for more information.
 		</member>

@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VoxelFieldData" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Sparse voxel levels of a far field, split into bricks, for [VoxelField3D].
+	</brief_description>
+	<description>
+		Holds the voxel levels that [method VoxelProxyBuilder.build_field] builds. The voxel grid is a cube on the longest side of [member bounds], at its position. Level 0 has [member resolution] voxels along each edge of the cube; every coarser level halves that down to [member brick_resolution], where each brick holds one voxel. Each brick lists its voxels per level, so a renderer can pick one level per brick without gaps or overlaps between bricks.
+		A voxel takes 16 bytes: its cell in the brick and its surface centroid in 1/16 of a voxel, its sRGB albedo, an octahedral normal and its splat half size.
+		[b]Note:[/b] Experimental.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="count_splats" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="camera" type="Vector3" />
+			<param index="1" name="pixel_scale" type="float" />
+			<param index="2" name="orthogonal" type="bool" />
+			<param index="3" name="voxel_pixels" type="float" />
+			<description>
+				Returns how many voxels [VoxelField3D] selects without frustum culling, summing [method select_level] over all bricks. Arguments as in [method select_level].
+			</description>
+		</method>
+		<method name="get_aabb" qualifiers="const">
+			<return type="AABB" />
+			<description>
+				Returns [member bounds] grown by the farthest a splat can reach beyond its centroid.
+			</description>
+		</method>
+		<method name="get_brick_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of occupied bricks.
+			</description>
+		</method>
+		<method name="get_level_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of levels, from [member resolution] down to [member brick_resolution] voxels per edge.
+			</description>
+		</method>
+		<method name="get_level_voxel_count" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the number of voxels on [param level] over all bricks.
+			</description>
+		</method>
+		<method name="get_level_voxel_size" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="level" type="int" />
+			<description>
+				Returns the edge length of a voxel on [param level].
+			</description>
+		</method>
+		<method name="get_max_splat_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the most splats one selection can produce: for each brick, the voxel count of its largest level.
+			</description>
+		</method>
+		<method name="get_voxel" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="index" type="int" />
+			<description>
+				Returns voxel [param index] decoded as the GPU decodes it: [code]position[/code] (the splat centre), [code]half_size[/code], linear [code]color[/code], [code]normal[/code], and the [code]level[/code] and [code]brick[/code] it belongs to. Slow; meant for tests and tools.
+			</description>
+		</method>
+		<method name="get_voxel_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of voxels on all levels.
+			</description>
+		</method>
+		<method name="is_valid" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if the properties are consistent: power-of-two resolutions, at most 64 finest voxels per brick edge, and brick ranges inside the voxel data. [VoxelField3D] draws nothing for invalid data.
+			</description>
+		</method>
+		<method name="select_level" qualifiers="const">
+			<return type="int" />
+			<param index="0" name="brick" type="int" />
+			<param index="1" name="camera" type="Vector3" />
+			<param index="2" name="pixel_scale" type="float" />
+			<param index="3" name="orthogonal" type="bool" />
+			<param index="4" name="voxel_pixels" type="float" />
+			<description>
+				Returns the level [VoxelField3D] picks for [param brick]: the coarsest level whose voxels are at most [param voxel_pixels] wide at the brick's nearest point, or level 0 when even that is wider. [param camera] is in the field's space. [param pixel_scale] is pixels per unit at distance 1 for a perspective camera (half the viewport height times the projection's Y scale), or pixels per unit when [param orthogonal] is [code]true[/code].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="bounds" type="AABB" setter="set_bounds" getter="get_bounds" default="AABB(0, 0, 0, 1, 1, 1)">
+			The region the voxels were built from. Splat centres lie inside it.
+		</member>
+		<member name="brick_resolution" type="int" setter="set_brick_resolution" getter="get_brick_resolution" default="1">
+			Bricks along each edge of the cube, and voxels along each edge on the coarsest level.
+		</member>
+		<member name="bricks" type="PackedInt32Array" setter="set_bricks" getter="get_bricks" default="PackedInt32Array()">
+			Per brick: its packed coordinates (10 bits per axis), then the first voxel and the voxel count of each level.
+		</member>
+		<member name="resolution" type="int" setter="set_resolution" getter="get_resolution" default="1">
+			Voxels along each edge of the cube on the finest level.
+		</member>
+		<member name="voxels" type="PackedByteArray" setter="set_voxels" getter="get_voxels" default="PackedByteArray()">
+			The voxels of all bricks and levels, 16 bytes each.
+		</member>
+	</members>
+</class>

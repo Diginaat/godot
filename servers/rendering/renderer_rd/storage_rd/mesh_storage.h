@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include "core/object/worker_thread_pool.h"
+#include "core/templates/hash_map.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/rid_owner.h"
 #include "core/templates/self_list.h"
@@ -61,6 +63,44 @@ public:
 
 	enum IndirectMultiMesh : uint32_t {
 		INDIRECT_MULTIMESH_COMMAND_STRIDE = 5
+	};
+
+	// Streamed cluster LOD: the cooked indices stay in system memory and each
+	// group's index range is uploaded into a shared GPU pool on demand. Roots
+	// stay resident, so every frame has a complete cut (see the residency mode
+	// of mesh_clod_select.glsl); missing groups only make the cut coarser.
+	// With a page file, only the roots' indices stay in memory and the other
+	// groups are read from disk on worker threads.
+	struct ClusterStreaming {
+		uint64_t id = 0; // Unique per setup; reads of a released surface are dropped.
+		Vector<uint32_t> indices; // Indices held in memory: all groups, or only the roots with a page file.
+		LocalVector<uint32_t> memory_offset; // Per group, into `indices`; UINT32_MAX when only on disk.
+		LocalVector<uint32_t> first_index; // Per group, into the cooked index array.
+		LocalVector<uint32_t> index_count;
+		uint32_t total_indices = 0;
+		uint32_t vertex_count = 0;
+		String page_file; // Empty when streamed from memory.
+		uint64_t page_offset = 0; // Byte offset of this surface's indices in the page file.
+		LocalVector<uint8_t> reading; // 1: a disk read is in flight; 2: the read failed.
+		LocalVector<uint32_t> first_child; // Per group, into `children`.
+		LocalVector<uint32_t> child_count;
+		Vector<uint32_t> children;
+		LocalVector<int64_t> slot; // Pool offset in indices; -1 when not resident.
+		LocalVector<uint64_t> last_used; // Frame of the last feedback that drew the group.
+		LocalVector<uint8_t> pinned; // Roots never leave the pool.
+		RID residency; // uvec4 per group after a header: flags, first child, pool offset.
+		RID children_buffer;
+		uint32_t request_offset = 0; // First word of this surface in the shared request buffer.
+		bool complete = false; // Every root is resident.
+		bool dirty = true; // Residency table needs an upload.
+	};
+
+	struct ClusterData {
+		RID groups;
+		RID index_buffer; // Null when streamed; the pool owns the indices.
+		RID index_array;
+		uint32_t group_count = 0;
+		ClusterStreaming *streaming = nullptr;
 	};
 
 private:
@@ -114,6 +154,7 @@ private:
 			uint32_t index_buffer_size = 0;
 			RID index_array;
 			uint32_t index_count = 0;
+			ClusterData cluster_data;
 
 			struct LOD {
 				float edge_length = 0.0;
@@ -215,6 +256,78 @@ private:
 	RD::VertexFormatID _mesh_surface_generate_vertex_format(uint64_t p_surface_format, uint64_t p_input_mask, bool p_instanced_surface, bool p_input_motion_vectors, bool p_point_size_emulated, uint32_t &r_position_stride);
 	void _mesh_surface_generate_version_for_input_mask(Mesh::Surface::Version &v, Mesh::Surface *s, uint64_t p_input_mask, bool p_input_motion_vectors, bool p_point_size_emulated, MeshInstance::Surface *mis = nullptr, uint32_t p_current_buffer = 0, uint32_t p_previous_buffer = 0);
 	void _mesh_surface_clear(Mesh *p_mesh, int p_surface);
+	void _mesh_cluster_clear(Mesh::Surface *p_surface);
+
+	// Shared GPU pool for streamed cluster indices, and the GPU request buffer
+	// that the selection kernel fills (request and used bits per group).
+	struct ClusterStreamingPool {
+		struct Range {
+			uint32_t offset = 0;
+			uint32_t size = 0;
+		};
+		RID index_buffer;
+		RID index_array;
+		uint32_t capacity = 0; // In indices.
+		uint64_t budget_bytes = 0;
+		LocalVector<Range> free_ranges; // Sorted by offset, coalesced.
+		LocalVector<Mesh::Surface *> surfaces;
+		RID requests;
+		uint32_t request_capacity = 0;
+		uint32_t request_words = 0;
+		bool layout_dirty = true;
+		uint64_t layout_version = 0;
+		uint64_t frame = UINT64_MAX;
+		bool readback_pending = false;
+		Vector<uint32_t> feedback;
+		uint64_t feedback_version = 0;
+		uint64_t feedback_frame = 0;
+		bool feedback_ready = false;
+		uint64_t resident_indices = 0;
+		uint64_t loads = 0;
+		uint64_t evictions = 0;
+		uint64_t deferred = 0; // Requests left for later frames (upload limit or full pool).
+		// Disk reads: one batch per page file and frame, filled by a worker task
+		// and consumed on the render thread once the task has completed.
+		struct PageRead {
+			uint64_t surface_id = 0;
+			uint32_t group = 0;
+			uint64_t file_offset = 0;
+			uint32_t count = 0;
+			uint32_t vertex_count = 0;
+			uint32_t data_offset = 0; // Into the batch's `data`.
+			bool ok = false;
+		};
+		struct PageBatch {
+			String path;
+			LocalVector<PageRead> reads;
+			Vector<uint32_t> data;
+			WorkerThreadPool::TaskID task = WorkerThreadPool::INVALID_TASK_ID;
+		};
+		LocalVector<PageBatch *> page_batches;
+		HashMap<uint64_t, Mesh::Surface *> surface_ids;
+		uint64_t next_surface_id = 1;
+		uint32_t reading_indices = 0; // In flight across all batches.
+		uint64_t disk_reads = 0;
+		uint64_t disk_bytes = 0;
+		uint64_t disk_errors = 0;
+	} cluster_pool;
+
+	bool _cluster_pool_create(uint64_t p_budget_bytes);
+	bool _cluster_pool_allocate(uint32_t p_size, uint32_t &r_offset);
+	void _cluster_pool_free(uint32_t p_offset, uint32_t p_size);
+	bool _cluster_pool_evict(uint32_t p_size, uint64_t p_before_frame);
+	bool _cluster_streaming_store(Mesh::Surface *p_surface, uint32_t p_group, const uint32_t *p_indices);
+	bool _cluster_streaming_load(Mesh::Surface *p_surface, uint32_t p_group);
+	uint64_t _cluster_streaming_keep_after() const;
+	static bool _cluster_page_file_check(const String &p_path, int p_surface, const PackedByteArray &p_hash, uint32_t p_index_count, uint64_t &r_offset);
+	static void _cluster_page_batch_read(void *p_batch);
+	void _cluster_page_batches_finish(bool p_wait);
+	void _cluster_streaming_unload(Mesh::Surface *p_surface, uint32_t p_group);
+	void _cluster_streaming_upload_table(Mesh::Surface *p_surface);
+	bool _cluster_streaming_setup(Mesh::Surface *p_surface, const Dictionary &p_record);
+	void _cluster_streaming_release(Mesh::Surface *p_surface);
+	void _cluster_streaming_apply_feedback();
+	static void _cluster_streaming_feedback(const Vector<uint8_t> &p_data, uint64_t p_version, uint64_t p_frame);
 
 	void _mesh_instance_clear(MeshInstance *mi);
 	void _mesh_instance_add_surface(MeshInstance *mi, Mesh *mesh, uint32_t p_surface);
@@ -231,6 +344,8 @@ private:
 	struct MultiMesh {
 		RID mesh;
 		int instances = 0;
+		float thinning_begin = 0.0f; // Distance thinning (world units); end 0 = off.
+		float thinning_end = 0.0f;
 		RSE::MultimeshTransformFormat xform_format = RSE::MULTIMESH_TRANSFORM_3D;
 		bool uses_colors = false;
 		bool uses_custom_data = false;
@@ -360,6 +475,14 @@ private:
 public:
 	static MeshStorage *get_singleton();
 
+	/* Cluster LOD streaming */
+
+	// Applies last frames' GPU feedback (loads, evictions, residency tables),
+	// then copies and clears the request buffer. Once per frame, before selection.
+	void cluster_streaming_begin_frame();
+	RID cluster_streaming_get_requests() const { return cluster_pool.requests; }
+	Dictionary cluster_streaming_get_statistics() const;
+
 	MeshStorage();
 	virtual ~MeshStorage();
 
@@ -407,6 +530,10 @@ public:
 
 	virtual AABB mesh_get_aabb(RID p_mesh, RID p_skeleton = RID()) override;
 	virtual void mesh_set_shadow_mesh(RID p_mesh, RID p_shadow_mesh) override;
+	virtual void mesh_set_cluster_data(RID p_mesh, const Array &p_data) override;
+	_FORCE_INLINE_ const ClusterData &mesh_surface_get_cluster_data(void *p_surface) const {
+		return static_cast<Mesh::Surface *>(p_surface)->cluster_data;
+	}
 
 	virtual void mesh_set_path(RID p_mesh, const String &p_path) override;
 	virtual String mesh_get_path(RID p_mesh) const override;
@@ -463,6 +590,18 @@ public:
 	_FORCE_INLINE_ bool mesh_surface_has_lod(void *p_surface) const {
 		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
 		return s->lod_count > 0;
+	}
+
+	_FORCE_INLINE_ uint32_t mesh_surface_get_lod_count(void *p_surface) const {
+		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
+		return s->lod_count;
+	}
+
+	/// Screen-space edge length of index LOD p_lod (0 = first reduced LOD), as used by mesh_surface_get_lod().
+	_FORCE_INLINE_ float mesh_surface_get_lod_edge_length(void *p_surface, uint32_t p_lod) const {
+		Mesh::Surface *s = reinterpret_cast<Mesh::Surface *>(p_surface);
+		ERR_FAIL_UNSIGNED_INDEX_V(p_lod, s->lod_count, 0.0f);
+		return s->lods[p_lod].edge_length;
 	}
 
 	_FORCE_INLINE_ uint32_t mesh_surface_get_vertices_drawn_count(void *p_surface) const {
@@ -773,6 +912,18 @@ public:
 	virtual Vector<float> _multimesh_get_buffer(RID p_multimesh) const override;
 
 	virtual void _multimesh_set_visible_instances(RID p_multimesh, int p_visible) override;
+	virtual void multimesh_set_distance_thinning(RID p_multimesh, float p_begin, float p_end) override {
+		MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+		ERR_FAIL_NULL(multimesh);
+		ERR_FAIL_COND(!Math::is_finite(p_begin) || !Math::is_finite(p_end) || p_begin < 0.0f || (p_end > 0.0f && p_end <= p_begin));
+		multimesh->thinning_begin = p_begin;
+		multimesh->thinning_end = p_end;
+	}
+	_FORCE_INLINE_ void multimesh_get_distance_thinning(RID p_multimesh, float &r_begin, float &r_end) const {
+		const MultiMesh *multimesh = multimesh_owner.get_or_null(p_multimesh);
+		r_begin = multimesh ? multimesh->thinning_begin : 0.0f;
+		r_end = multimesh ? multimesh->thinning_end : 0.0f;
+	}
 	virtual int _multimesh_get_visible_instances(RID p_multimesh) const override;
 
 	virtual void _multimesh_set_custom_aabb(RID p_multimesh, const AABB &p_aabb) override;

@@ -44,6 +44,10 @@
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/best_fit_normal.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/integrate_dfg.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_clod_select.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_occlude.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_reduce.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/forward_clustered/multimesh_cull.glsl.gen.h"
 
 #ifdef METAL_ENABLED
 #include "servers/rendering/renderer_rd/effects/metal_fx.h"
@@ -93,6 +97,11 @@ protected:
 	SceneShaderForwardClustered scene_shader;
 
 public:
+	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 24;
+	// MultiMesh culling words of shadow passes start here (same layout as the main view's).
+	static constexpr uint32_t GEOMETRY_STATISTICS_SHADOW_OFFSET = 12;
+	virtual Dictionary gpu_geometry_get_statistics(const Ref<RenderSceneBuffers> &p_render_buffers) override;
+
 	/* Framebuffer */
 
 	class RenderBufferDataForwardClustered : public RenderBufferCustomDataRD {
@@ -108,6 +117,46 @@ public:
 
 	public:
 		ClusterBuilderRD *cluster_builder = nullptr;
+
+		// Per-viewport GPU outputs. RD orders writes after prior submitted readers and
+		// defers destruction; source MultiMesh transforms and commands are never replaced.
+		struct MultiMeshCullBuffers {
+			RID visible_ids;
+			RID commands;
+			RID inputs;
+			RID ranks;
+			RID blocks;
+			uint32_t id_capacity = 0;
+			uint32_t draw_capacity = 0;
+			bool active = false;
+		};
+		// Main view and shadow passes keep separate buffers: shadow draws run
+		// between the main view's culling dispatch and its opaque draws.
+		MultiMeshCullBuffers multimesh_cull;
+		MultiMeshCullBuffers multimesh_shadow_cull;
+		struct MeshCLODBuffers {
+			RID commands;
+			RID inputs;
+			uint32_t group_capacity = 0;
+			uint32_t draw_capacity = 0;
+			RID occlusion_inputs;
+			uint32_t occlusion_capacity = 0;
+			bool active = false;
+		} mesh_clod;
+		// GPU geometry counters, see RenderingServer::viewport_get_gpu_geometry_statistics.
+		// Kernels always accumulate into `buffer`; it is cleared and read back
+		// asynchronously only while a caller polled recently. CPU counts are per frame.
+		struct GeometryStatistics {
+			RID buffer;
+			uint64_t requested_until_frame = 0;
+			bool recording = false;
+			uint32_t culled_surfaces = 0;
+			uint32_t skipped_surfaces = 0;
+			uint64_t skipped_instances = 0;
+			uint32_t clod_surfaces = 0;
+			uint32_t shadow_culled_surfaces = 0;
+			Dictionary latest;
+		} geometry_statistics;
 
 		struct SSEffectsData {
 			Projection ssil_last_frame_projections[RendererSceneRender::MAX_RENDER_VIEWS];
@@ -186,7 +235,106 @@ protected:
 
 	void _update_render_base_uniform_set();
 	RID _setup_sdfgi_render_pass_uniform_set(RID p_albedo_texture, RID p_emission_texture, RID p_emission_aniso_texture, RID p_geom_facing_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index);
-	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false);
+	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, RID p_visible_ids = RID());
+	void _prepare_multimesh_culling(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	void _prepare_multimesh_shadow_culling(RenderBufferDataForwardClustered *p_buffers);
+	// TAA and upscalers shift NDC x/y by the jitter (Projection::add_jitter_offset).
+	// Dividing the x/y rows by 1 + |jitter| widens the frustum to |ndc| <= 1 + |jitter|,
+	// which contains the jittered one, so frustum tests stay exact for the raster.
+	static Projection _jitter_safe_projection(const Projection &p_projection, const Vector2 &p_jitter) {
+		Projection projection = p_projection;
+		const Vector2 jitter = p_jitter.abs();
+		if (jitter != Vector2()) {
+			for (int column = 0; column < 4; column++) {
+				projection.columns[column][0] /= 1.0 + jitter.x;
+				projection.columns[column][1] /= 1.0 + jitter.y;
+			}
+		}
+		return projection;
+	}
+	struct RenderElementInfo;
+	// One record per culled surface; matches CullData in multimesh_cull.glsl.
+	struct MultiMeshCullInput {
+		float planes[6][4];
+		float center[4];
+		float half_extents[4];
+		uint32_t count;
+		uint32_t stride;
+		uint32_t current_offset;
+		uint32_t ids_offset;
+		float lod_camera[4];
+		float lod_edges[4];
+		uint32_t lod_levels;
+		uint32_t lod_stride;
+		uint32_t first_command;
+		uint32_t statistics_offset;
+	};
+	// A camera or shadow view to cull against.
+	struct MultiMeshCullView {
+		Vector<Plane> planes;
+		Vector3 lod_camera;
+		float lod_threshold = 0.0f;
+		float lod_distance_multiplier = 1.0f;
+		bool lod_allowed = false;
+		uint32_t statistics_offset = 0;
+	};
+	// Per-frame work list; kept as a member so its storage is reused.
+	struct MultiMeshCullBatch {
+		LocalVector<MultiMeshCullInput> inputs;
+		LocalVector<RID> transforms;
+		LocalVector<RenderElementInfo *> elements;
+		LocalVector<uint32_t> last_lods;
+		LocalVector<uint32_t> commands;
+		uint32_t total_ids = 0;
+		uint32_t skipped_surfaces = 0;
+		uint64_t skipped_instances = 0;
+		void clear() {
+			inputs.clear();
+			transforms.clear();
+			elements.clear();
+			last_lods.clear();
+			commands.clear();
+			total_ids = 0;
+			skipped_surfaces = 0;
+			skipped_instances = 0;
+		}
+	} multimesh_cull_batch;
+	bool _multimesh_culling_available(const RenderBufferDataForwardClustered *p_buffers) const;
+	void _collect_multimesh_culling(RenderListType p_list, uint32_t p_from, uint32_t p_count, const MultiMeshCullView &p_view, bool p_shadow, MultiMeshCullBatch &r_batch);
+	bool _dispatch_multimesh_culling(MultiMeshCullBatch &p_batch, RenderBufferDataForwardClustered::MultiMeshCullBuffers &r_buffers, RID p_statistics, const String &p_label);
+	// GPU MultiMesh LOD uses at most four buckets over the index LODs the
+	// MultiMesh bounds span: from the CPU LOD of their nearest point (bucket 0)
+	// to that of their farthest point. With a wider span, bucket b maps to
+	// p_first + round(b * span / 3). An instance may get a finer LOD than the
+	// per-instance CPU rule would pick, never coarser.
+	static _FORCE_INLINE_ uint32_t _multimesh_lod_for_bucket(uint32_t p_bucket, uint32_t p_first, uint32_t p_last) {
+		const uint32_t span = p_last - p_first;
+		return p_first + (span < 4 ? p_bucket : (p_bucket * span + 1) / 3);
+	}
+	struct MultiMeshCull {
+		MultimeshCullShaderRD shader;
+		RID version;
+		RID pipelines[3];
+	} multimesh_cull;
+	void _prepare_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	struct MeshCLOD {
+		MeshClodSelectShaderRD shader;
+		RID version;
+		RID pipelines[2]; // Resident selection, and residency-aware selection for streamed surfaces.
+		bool multi_draw = false;
+	} mesh_clod;
+	void _occlude_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	void _begin_geometry_statistics(RenderBufferDataForwardClustered *p_buffers);
+	void _end_geometry_statistics(RenderBufferDataForwardClustered *p_buffers);
+	static void _receive_geometry_statistics(const Vector<uint8_t> &p_data, uint64_t p_buffers, uint32_t p_culled_surfaces, uint32_t p_skipped_surfaces, uint64_t p_skipped_instances, uint32_t p_clod_surfaces, uint32_t p_shadow_culled_surfaces, uint64_t p_frame);
+	struct MeshHiZ {
+		MeshHizReduceShaderRD reduce_shader;
+		RID reduce_version;
+		RID reduce_pipelines[2];
+		MeshHizOccludeShaderRD occlude_shader;
+		RID occlude_version;
+		RID occlude_pipeline;
+	} mesh_hiz;
 
 	struct RenderListParameters;
 	struct GeometryInstanceSurfaceDataCache;
@@ -250,6 +398,8 @@ protected:
 		bool use_directional_soft_shadow = false;
 		SceneShaderForwardClustered::ShaderSpecialization base_specialization = {};
 		bool use_material_feedback = false;
+		RID multimesh_cull_commands;
+		RID mesh_clod_commands;
 
 		RenderListParameters(GeometryInstanceSurfaceDataCache **p_elements, RenderElementInfo *p_element_info, int p_element_count, bool p_reverse_cull, PassMode p_pass_mode, uint32_t p_color_pass_flags, bool p_no_gi, bool p_use_directional_soft_shadows, RID p_render_pass_uniform_set, bool p_force_wireframe = false, const Vector2 &p_uv_offset = Vector2(), float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, uint32_t p_view_count = 1, uint32_t p_element_offset = 0, SceneShaderForwardClustered::ShaderSpecialization p_base_specialization = {}, bool p_use_material_feedback = false) {
 			elements = p_elements;
@@ -363,6 +513,7 @@ protected:
 			uint32_t uv_offset; //packed
 			uint32_t multimesh_motion_vectors_current_offset;
 			uint32_t multimesh_motion_vectors_previous_offset;
+			uint32_t multimesh_visible_ids_offset;
 			PushConstantUbershader ubershader;
 		};
 
@@ -475,9 +626,15 @@ protected:
 			bool flip_cull;
 
 			uint32_t uniform_buffer_index;
+
+			// Inputs of MultiMesh shadow culling.
+			Projection cam_projection;
+			Transform3D cam_transform;
+			Transform3D main_cam_transform;
 		};
 
 		LocalVector<ShadowPass> shadow_passes;
+		RID shadow_multimesh_cull_commands; // Valid while shadow passes use GPU culling.
 
 		void grow_instance_buffer(RenderListType p_render_list, uint32_t p_req_element_count, bool p_append);
 	} scene_state;
@@ -505,6 +662,11 @@ protected:
 			uint32_t value;
 		};
 		uint32_t repeat;
+		uint32_t multimesh_cull_draw; // First indirect command record.
+		uint32_t multimesh_visible_ids_offset;
+		uint32_t multimesh_cull_lod; // GPU LOD level count << 24 | visible IDs reserved per level.
+		uint32_t multimesh_cull_last_lod; // Index LOD of the last GPU LOD level; level 0 is lod_index.
+		uint32_t mesh_clod_offset;
 	};
 
 	static_assert(std::is_trivially_destructible_v<RenderElementInfo>);
@@ -838,7 +1000,7 @@ protected:
 	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
 	void _render_shadow_begin();
 	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_reverse_cull_face, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
-	void _render_shadow_process();
+	void _render_shadow_process(RenderBufferDataForwardClustered *p_cull_buffers = nullptr);
 	void _render_shadow_end();
 
 	/* Render Scene */

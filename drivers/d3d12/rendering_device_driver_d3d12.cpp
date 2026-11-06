@@ -6157,6 +6157,8 @@ bool RenderingDeviceDriverD3D12::has_feature(Features p_feature) {
 			return true;
 		case SUPPORTS_GPU_MAPPABLE_BUFFER:
 			return misc_features_support.uma_supported || misc_features_support.gpu_upload_heap_supported;
+		case SUPPORTS_MULTI_DRAW_INDIRECT:
+			return true; // ExecuteIndirect takes a command count.
 		default:
 			return false;
 	}

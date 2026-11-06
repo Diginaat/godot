@@ -82,6 +82,7 @@ public:
 	virtual String mesh_get_path(RID p_mesh) const = 0;
 
 	virtual void mesh_set_shadow_mesh(RID p_mesh, RID p_shadow_mesh) = 0;
+	virtual void mesh_set_cluster_data(RID p_mesh, const Array &p_data) {}
 
 	virtual void mesh_surface_remove(RID p_mesh, int p_surface) = 0;
 	virtual void mesh_clear(RID p_mesh) = 0;
@@ -164,6 +165,8 @@ public:
 	virtual void multimesh_instances_reset_physics_interpolation(RID p_multimesh);
 
 	virtual void multimesh_set_visible_instances(RID p_multimesh, int p_visible);
+	// Distance thinning is applied by GPU MultiMesh culling; other renderers ignore it.
+	virtual void multimesh_set_distance_thinning(RID p_multimesh, float p_begin, float p_end) {}
 	virtual int multimesh_get_visible_instances(RID p_multimesh) const;
 
 	virtual AABB multimesh_get_aabb(RID p_multimesh);

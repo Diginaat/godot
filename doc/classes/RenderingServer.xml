@@ -2652,6 +2652,15 @@
 				Sets a mesh's blend shape mode.
 			</description>
 		</method>
+		<method name="mesh_set_cluster_data">
+			<return type="void" />
+			<param index="0" name="mesh" type="RID" />
+			<param index="1" name="data" type="Array" />
+			<description>
+				Sets optional resident cluster hierarchies for a mesh RID, using the per-surface dictionaries returned by [method MeshClusterData.get_data]. An empty array clears resident data. Validates hierarchy ranges and source surface counts; callers must ensure bounds, errors and indices describe the current source geometry. Prefer [member ArrayMesh.cluster_data] for source-signature checking and resource lifetime handling. Source vertex/material buffers and conventional shadows remain unchanged.
+				Only the experimental Forward+ resident CLOD path consumes this data. Other rendering methods ignore it. Unsupported content or resident budgets fall back to source rendering. Resident limits are 4096 groups per surface and 64 MiB per mesh for group/index data. Surface removal/clear and vertex, attribute, skin or index region updates release the affected resident data.
+			</description>
+		</method>
 		<method name="mesh_set_custom_aabb">
 			<return type="void" />
 			<param index="0" name="mesh" type="RID" />
@@ -3089,6 +3098,15 @@
 			<description>
 				Sets the physics interpolation quality for the [MultiMesh].
 				A value of [constant MULTIMESH_INTERP_QUALITY_FAST] gives fast but low quality interpolation, a value of [constant MULTIMESH_INTERP_QUALITY_HIGH] gives slower but higher quality interpolation.
+			</description>
+		</method>
+		<method name="multimesh_set_distance_thinning">
+			<return type="void" />
+			<param index="0" name="multimesh" type="RID" />
+			<param index="1" name="begin" type="float" />
+			<param index="2" name="end" type="float" />
+			<description>
+				Sets distance thinning: between [param begin] and [param end] meters from the camera, a linearly falling, hash-selected fraction of instances is drawn; none beyond [param end]. [param end] [code]0.0[/code] disables it. Equivalent to [member MultiMesh.distance_thinning_begin] and [member MultiMesh.distance_thinning_end]; only applied by GPU MultiMesh culling in Forward+.
 			</description>
 		</method>
 		<method name="multimesh_set_visible_instances">
@@ -4333,6 +4351,14 @@
 			<param index="0" name="viewport" type="RID" />
 			<description>
 				Returns the DDGI probes the [param viewport] has traced for a fixed DDGI volume: the irradiance and distance atlases (as [Image]s), the probe offsets and states, and the volume layout. Returns an empty dictionary if the viewport doesn't use DDGI. Reads from the GPU, so it stalls. Used by [method DDGIVolume.bake].
+			</description>
+		</method>
+		<method name="viewport_get_gpu_geometry_statistics">
+			<return type="Dictionary" />
+			<param index="0" name="viewport" type="RID" />
+			<description>
+				Returns the latest counters of the experimental native GPU geometry paths for the [param viewport]'s main view (see [member ProjectSettings.rendering/geometry/multimesh_gpu_culling/enabled] and [member ProjectSettings.rendering/geometry/cluster_lod/enabled]). Keys: [code]frame[/code] (frame the counts belong to), [code]multimesh_surfaces_culled[/code], [code]multimesh_surfaces_fully_visible[/code] and [code]multimesh_instances_fully_visible[/code] (surfaces inside the whole frustum keep their direct draw), [code]multimesh_instances_tested[/code], [code]multimesh_instances_visible[/code], [code]multimesh_instances_visible_per_lod[/code] (visible instances per GPU LOD level 0-3; level 0 is the CPU-selected LOD of the MultiMesh), [code]clod_surfaces[/code], [code]clod_groups_tested[/code], [code]clod_groups_selected[/code] (in the screen-space error cut), [code]clod_groups_visible[/code] and [code]clod_triangles_visible[/code] (cut and inside the frustum), [code]hzb_groups_occluded[/code] and [code]hzb_triangles_occluded[/code], and for shadow passes (see [member ProjectSettings.rendering/geometry/multimesh_gpu_culling/shadows]) [code]shadow_multimesh_surfaces_culled[/code], [code]shadow_multimesh_instances_tested[/code] and [code]shadow_multimesh_instances_visible[/code].
+				Calling this method enables the counters for about 120 frames; they are read back asynchronously, so the result describes a frame a few frames ago, and the first calls return an empty dictionary. Returns an empty dictionary when the renderer doesn't support these paths. Forward+ only.
 			</description>
 		</method>
 		<method name="viewport_get_measured_render_time_cpu" qualifiers="const">

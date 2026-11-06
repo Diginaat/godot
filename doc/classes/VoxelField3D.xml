@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VoxelField3D" inherits="GeometryInstance3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Draws a far-field voxel stand-in whose voxel level the GPU picks per brick and frame.
+	</brief_description>
+	<description>
+		Draws the voxels of a [VoxelFieldData] as camera-facing discs. Every frame a compute pass picks one level per brick: the coarsest level whose voxels are at most [member voxel_pixels] wide at the brick's nearest point. Near bricks draw fine voxels, far bricks coarse ones, so the splats stay about the same size on screen and the stand-in keeps the look of the meshes it replaces. The pass frustum-culls the splats and writes the visible ones into an indirect [MultiMesh], so Godot's renderer draws them with its usual lighting, fog and depth.
+		Use it like a voxel proxy from [method VoxelProxyBuilder.build]: switch from the source meshes with [member GeometryInstance3D.visibility_range_begin] on the field and [member GeometryInstance3D.visibility_range_end] on the source. Outside its visibility range the field selects nothing and skips its compute pass.
+		Splats are selected for the current camera of the field's viewport. Shadows of splats outside its view would be missing, so the field does not cast shadows by default.
+		[b]Note:[/b] Experimental. Needs a RenderingDevice renderer (Forward+ or Mobile); draws nothing with Compatibility.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_gpu_memory_usage" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the GPU memory the field uses, in bytes: the instance buffer (80 bytes per splat of capacity) plus the voxel data and parameters.
+			</description>
+		</method>
+		<method name="get_splat_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of splats selected in a recent frame, read back asynchronously a few frames late, and at most the instance buffer's capacity. Returns [code]0[/code] before the first result arrives.
+			</description>
+		</method>
+		<method name="get_splat_material" qualifiers="const">
+			<return type="Material" />
+			<description>
+				Returns the default splat material. A [member GeometryInstance3D.material_override] replaces it; its shader must rebuild the disc the same way (see the default shader's code).
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cast_shadow" type="int" setter="set_cast_shadows_setting" getter="get_cast_shadows_setting" overrides="GeometryInstance3D" enum="GeometryInstance3D.ShadowCastingSetting" default="0" />
+		<member name="data" type="VoxelFieldData" setter="set_data" getter="get_data">
+			The voxel levels to draw, in the node's local space.
+		</member>
+		<member name="frustum_culling" type="bool" setter="set_frustum_culling" getter="is_frustum_culling_enabled" default="true">
+			If [code]true[/code], bricks and splats outside the camera's frustum are not drawn.
+		</member>
+		<member name="max_splats" type="int" setter="set_max_splats" getter="get_max_splats" default="0">
+			Capacity of the instance buffer. With [code]0[/code], it grows with the count the GPU asks for, up to [method VoxelFieldData.get_max_splat_count]; while it grows, for a few frames, only the first splats draw. A fixed capacity drops the splats beyond it.
+		</member>
+		<member name="voxel_pixels" type="float" setter="set_voxel_pixels" getter="get_voxel_pixels" default="2.0">
+			Largest on-screen voxel width, in pixels, before a brick switches to a finer level. Smaller values look closer to the source meshes and draw more splats.
+		</member>
+	</members>
+</class>

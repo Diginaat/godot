@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="MeshClusterData" inherits="Resource" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Optional index-only cluster hierarchy derived from a static triangle mesh.
+	</brief_description>
+	<description>
+		Builds and stores per-surface hierarchical simplification groups for native virtual geometry development. The source [Mesh] retains ownership of all vertex attributes; this resource stores only index alternatives, bounds, errors and hierarchy links. Generation requires the meshoptimizer module. Unsupported geometry returns an error instead of changing the source mesh.
+		[b]Note:[/b] Creating this resource alone does not enable a renderer, streaming or voxel representation. It is derived data, not a replacement scene or material system.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="generate">
+			<return type="int" enum="Error" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="cluster_triangles" type="int" default="64" />
+			<param index="2" name="group_size" type="int" default="8" />
+			<description>
+				Generates a hierarchy independently for every triangle surface of [param mesh]. Clusters contain at most 64 source vertices and [param cluster_triangles] triangles. The triangle limit must be a multiple of 4 between 4 and 124; [param group_size] must be between 2 and 16. Simplification locks group borders, retains source vertex indices and accumulates absolute simplification errors.
+				Supports positions, normals, tangents, colors and two UV sets. Blend shapes, skinning, custom vertex channels, non-triangle surfaces and invalid arrays return an error. Failed generation leaves previously valid data unchanged.
+			</description>
+		</method>
+		<method name="get_data" qualifiers="const">
+			<return type="Array" />
+			<description>
+				Returns a deep copy of all surface dictionaries. See [method get_surface_data] for the versioned layout.
+			</description>
+		</method>
+		<method name="get_surface_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of generated surface hierarchies.
+			</description>
+		</method>
+		<method name="clear_pages">
+			<return type="void" />
+			<description>
+				Forgets the page file written by [method save_pages]. Streaming then keeps every group in system memory again. Does not delete the file.
+			</description>
+		</method>
+		<method name="get_page_file" qualifiers="const">
+			<return type="String" />
+			<description>
+				Returns the page file written by [method save_pages], or an empty string.
+			</description>
+		</method>
+		<method name="get_residency_state" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="surface" type="int" />
+			<param index="1" name="resident_groups" type="PackedByteArray" />
+			<description>
+				Computes a CPU coverage snapshot for asset inspection and residency-selector verification. Supply one byte per group, each 0 (missing representation) or 1 (resident). Returns [code]groups[/code], a byte array whose bit 0 indicates resident representation and bit 1 indicates complete coverage by itself or resident descendants, and [code]complete[/code], whether every root region is covered. Children are evaluated before parents. Missing intermediate representations do not prevent a complete fine cut when their descendants cover the region.
+				An incomplete snapshot requires whole-surface conventional fallback, never partial submission. This method does not allocate GPU pages, perform eviction, stream files or change rendering. It describes a proposed residency snapshot, not current GPU allocation state.
+			</description>
+		</method>
+		<method name="get_surface_data" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="surface" type="int" />
+			<description>
+				Returns a deep copy of a surface hierarchy. Version 1 contains [code]version[/code], [code]vertex_count[/code], [code]source_index_count[/code] and [code]cluster_triangles[/code]. Packed integer [code]groups[/code] records contain five entries: first cluster, cluster count, first child-list entry, child count and parent group (or -1). Children precede parents. Packed integer [code]clusters[/code] records contain three entries: first index, index count and owning group.
+				Packed [code]indices[/code] refer to the original source vertex buffer; [code]children[/code] and [code]roots[/code] contain group IDs. Packed vector [code]bounds[/code] and [code]cluster_bounds[/code] contain two [Vector3] values per record: AABB position and size. Packed float [code]errors[/code] contains one nonnegative accumulated error per group. Leaves have zero error. Do not reinterpret this dictionary as a stable GPU binary ABI.
+			</description>
+		</method>
+		<method name="matches_mesh" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="mesh" type="Mesh" />
+			<description>
+				Returns whether this hierarchy has the same surface count, supported primitive types and source-array SHA-256 signatures as [param mesh]. Checks decoded source arrays, not material assignments or surface names. Intended for attachment/loading, not per-frame rendering; reading mesh arrays may synchronize with the renderer. Old caches without signatures return [code]false[/code] and must be regenerated before attachment. Signatures detect stale source data, not maliciously edited hierarchy bounds or errors.
+			</description>
+		</method>
+		<method name="save_pages">
+			<return type="int" enum="Error" />
+			<param index="0" name="path" type="String" />
+			<description>
+				Writes every surface's cluster indices to a page file at [param path] and records the file, its surface entry and a SHA-256 hash of the hierarchy in the surface data. With [member ProjectSettings.rendering/geometry/cluster_lod/streaming/enabled], the renderer then keeps only the root groups in system memory and reads the other groups from this file on worker threads when cluster selection asks for them. A missing file, or one whose hash does not match, is reported once and the mesh streams from memory instead. Indices read from the file are checked against the vertex count before upload; a group that fails stays unloaded and its ancestors draw instead.
+				The resource still holds all indices; saving it keeps the page file reference. Regenerating the hierarchy drops the reference.
+			</description>
+		</method>
+		<method name="select_clusters" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<param index="0" name="surface" type="int" />
+			<param index="1" name="camera_position" type="Vector3" />
+			<param index="2" name="projection_scale" type="float" />
+			<param index="3" name="error_pixels" type="float" />
+			<description>
+				Returns a CPU reference cut of cluster IDs for a local-space camera position. Projected group error is accumulated error times [param projection_scale] divided by distance to the group's AABB. Traversal starts at each root and refines only groups whose projected error exceeds [param error_pixels]. Leaves are always selectable. The result selects every descendant region exactly once and never mixes a selected parent with its children, including rounded-boundary cases. Projection uses double intermediate arithmetic to avoid overflow of finite float inputs.
+				This is a correctness reference and asset inspection method, not a recommended per-frame CPU rendering loop. [param projection_scale] must be positive and [param error_pixels] nonnegative.
+			</description>
+		</method>
+		<method name="set_data_checked">
+			<return type="int" enum="Error" />
+			<param index="0" name="data" type="Array" />
+			<description>
+				Validates and replaces serialized surface data. Rejects unsupported versions, invalid bounds/errors, out-of-range indices, overlapping or orphan ranges, cycles, inconsistent parents, missing roots and incomplete leaf index counts. Returns [constant ERR_INVALID_DATA] on failure and preserves existing data. Bounds and errors remain the cooker's responsibility; validation does not reconstruct the source geometry.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="data" type="Array" setter="_set_data" getter="get_data" default="[]">
+			Internal serialized hierarchy dictionaries. Use [method set_data_checked] when validating data supplied by code.
+		</member>
+	</members>
+</class>

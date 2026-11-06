@@ -244,6 +244,7 @@ public:
 	virtual String mesh_get_path(RID p_mesh) const = 0;
 
 	virtual void mesh_set_shadow_mesh(RID p_mesh, RID p_shadow_mesh) = 0;
+	virtual void mesh_set_cluster_data(RID p_mesh, const Array &p_data) = 0;
 
 	virtual void mesh_surface_remove(RID p_mesh, int p_surface) = 0;
 	virtual void mesh_clear(RID p_mesh) = 0;
@@ -297,6 +298,7 @@ public:
 	virtual void multimesh_instances_reset_physics_interpolation(RID p_multimesh) = 0;
 
 	virtual void multimesh_set_visible_instances(RID p_multimesh, int p_visible) = 0;
+	virtual void multimesh_set_distance_thinning(RID p_multimesh, float p_begin, float p_end) = 0;
 	virtual int multimesh_get_visible_instances(RID p_multimesh) const = 0;
 
 	/* SKELETON API */
@@ -643,6 +645,7 @@ public:
 	virtual double viewport_get_measured_render_time_cpu(RID p_viewport) const = 0;
 	virtual double viewport_get_measured_render_time_gpu(RID p_viewport) const = 0;
 	virtual Dictionary viewport_get_ddgi_probe_data(RID p_viewport) = 0;
+	virtual Dictionary viewport_get_gpu_geometry_statistics(RID p_viewport) = 0;
 
 	virtual RID viewport_find_from_screen_attachment(DisplayServerEnums::WindowID p_id = DisplayServerEnums::MAIN_WINDOW_ID) const = 0;
 

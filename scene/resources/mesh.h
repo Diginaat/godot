@@ -298,6 +298,8 @@ public:
 
 VARIANT_ENUM_CAST(MeshConvexDecompositionSettings::Mode);
 
+class MeshClusterData;
+
 class ArrayMesh : public Mesh {
 	GDCLASS(ArrayMesh, Mesh);
 	RES_BASE_EXTENSION("mesh");
@@ -308,6 +310,7 @@ class ArrayMesh : public Mesh {
 	Array _get_surfaces() const;
 	void _set_surfaces(const Array &p_data);
 	Ref<ArrayMesh> shadow_mesh;
+	Ref<MeshClusterData> cluster_data;
 
 private:
 	struct Surface {
@@ -330,6 +333,8 @@ private:
 
 	_FORCE_INLINE_ void _create_if_empty() const;
 	void _recompute_aabb();
+	void _cluster_data_changed();
+	void _clear_cluster_data();
 
 protected:
 	virtual bool _is_generated() const { return false; }
@@ -399,6 +404,9 @@ public:
 
 	void set_shadow_mesh(const Ref<ArrayMesh> &p_mesh);
 	Ref<ArrayMesh> get_shadow_mesh() const;
+	void set_cluster_data(const Ref<MeshClusterData> &p_data);
+	Ref<MeshClusterData> get_cluster_data() const;
+	Error generate_cluster_lods(int p_cluster_triangles = 64, int p_group_size = 8);
 
 	ArrayMesh();
 

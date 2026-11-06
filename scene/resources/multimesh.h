@@ -57,6 +57,8 @@ private:
 	bool use_custom_data = false;
 	int instance_count = 0;
 	int visible_instance_count = -1;
+	float distance_thinning_begin = 0.0f;
+	float distance_thinning_end = 0.0f;
 	PhysicsInterpolationQuality _physics_interpolation_quality = INTERP_QUALITY_FAST;
 
 protected:
@@ -100,6 +102,11 @@ public:
 
 	void set_visible_instance_count(int p_count);
 	int get_visible_instance_count() const;
+
+	void set_distance_thinning_begin(float p_distance);
+	float get_distance_thinning_begin() const;
+	void set_distance_thinning_end(float p_distance);
+	float get_distance_thinning_end() const;
 
 	void set_physics_interpolation_quality(PhysicsInterpolationQuality p_quality);
 	PhysicsInterpolationQuality get_physics_interpolation_quality() const { return _physics_interpolation_quality; }

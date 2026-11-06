@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="VoxelProxyBuilder" inherits="RefCounted" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Builds far-field voxel splat proxies from meshes and MultiMesh instances.
+	</brief_description>
+	<description>
+		Samples the surfaces of added meshes by area, merges the samples into a voxel grid and emits one camera-facing splat per occupied voxel ([method build]), or builds voxel levels for a [VoxelField3D], which picks a level per brick on the GPU ([method build_field]). Each voxel keeps the area-weighted centroid, mean normal and linear albedo of the surfaces inside it, and its splat, a disc, shrinks with coverage, so sparse foliage stays sparse at a distance instead of turning into solid blocks. Albedo comes from [BaseMaterial3D] albedo color, the mean color of its albedo texture and, when the material uses vertex color as albedo, vertex and instance colors.
+		Use the result as a distant stand-in, for example with [member GeometryInstance3D.visibility_range_begin] on the proxy and [member GeometryInstance3D.visibility_range_end] on the source. Splats face whichever camera renders them, shadow cameras included. Place proxies without rotation shear; scale and rotation are supported by the splat shader.
+		[b]Note:[/b] Experimental. The proxy is an ordinary [ArrayMesh] with a [ShaderMaterial]; it does not change how the source meshes render.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="add_mesh">
+			<return type="void" />
+			<param index="0" name="mesh" type="Mesh" />
+			<param index="1" name="transform" type="Transform3D" default="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)" />
+			<param index="2" name="modulate" type="Color" default="Color(1, 1, 1, 1)" />
+			<description>
+				Adds the triangle surfaces of [param mesh], placed by [param transform]. [param modulate] multiplies the albedo of surfaces whose material uses vertex color as albedo. Samples of each mesh are cached, so adding the same mesh many times is cheap.
+			</description>
+		</method>
+		<method name="add_multimesh">
+			<return type="void" />
+			<param index="0" name="multimesh" type="MultiMesh" />
+			<param index="1" name="transform" type="Transform3D" default="Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)" />
+			<description>
+				Adds every visible instance of [param multimesh] (3D transforms only), placed by [param transform] times the instance transform. Instance colors modulate albedo like [method add_mesh].
+			</description>
+		</method>
+		<method name="build" qualifiers="const">
+			<return type="ArrayMesh" />
+			<param index="0" name="bounds" type="AABB" />
+			<param index="1" name="resolution" type="int" />
+			<description>
+				Returns a splat mesh of the samples inside [param bounds], with cubic voxels whose edge is the longest side of [param bounds] divided by [param resolution] (1 to 1024). Returns [code]null[/code] when no sample lies inside. Mesh coordinates are those of the added transforms.
+			</description>
+		</method>
+		<method name="build_field" qualifiers="const">
+			<return type="VoxelFieldData" />
+			<param index="0" name="bounds" type="AABB" />
+			<param index="1" name="resolution" type="int" />
+			<param index="2" name="brick_resolution" type="int" />
+			<description>
+				Returns voxel levels of the samples inside [param bounds] for a [VoxelField3D]. The voxel grid is a cube on the longest side of [param bounds]; the finest level has [param resolution] voxels along its edge (a power of two up to 1024), and each coarser level merges 2×2×2 voxels, summing their area so coverage stays physical, down to [param brick_resolution] voxels (a power of two). The cube is split into [param brick_resolution]³ bricks, each holding at most 64 finest voxels per edge. Set [member sample_spacing] to at most half a finest voxel. Returns [code]null[/code] when no sample lies inside.
+			</description>
+		</method>
+		<method name="clear">
+			<return type="void" />
+			<description>
+				Removes all added samples. The per-mesh sample cache is kept.
+			</description>
+		</method>
+		<method name="get_sample_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of surface samples added so far.
+			</description>
+		</method>
+		<method name="get_splat_shader" qualifiers="const">
+			<return type="Shader" />
+			<description>
+				Returns the splat shader shared by every proxy this builder creates.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="sample_spacing" type="float" setter="set_sample_spacing" getter="get_sample_spacing" default="0.5">
+			Maximum distance between surface samples, in mesh units. Use at most half the planned voxel size. Changing it clears the per-mesh sample cache.
+		</member>
+	</members>
+</class>

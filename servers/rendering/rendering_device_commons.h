@@ -1040,6 +1040,8 @@ public:
 		SUPPORTS_HDR_OUTPUT,
 		SUPPORTS_RASTERIZATION_RATE_MAP,
 		SUPPORTS_GPU_MAPPABLE_BUFFER,
+		// A single indirect draw call may consume more than one command record.
+		SUPPORTS_MULTI_DRAW_INDIRECT,
 	};
 
 	enum SubgroupOperations {

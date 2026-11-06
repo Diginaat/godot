@@ -124,6 +124,10 @@ public:
 		NAVIGATION_3D_EDGE_FREE_COUNT,
 		NAVIGATION_3D_OBSTACLE_COUNT,
 #endif // _3D_DISABLED
+		RENDER_GPU_CULLED_INSTANCES_VISIBLE,
+		RENDER_CLOD_TRIANGLES_VISIBLE,
+		RENDER_HZB_TRIANGLES_OCCLUDED,
+		RENDER_CLOD_STREAMING_MEM_USED,
 #ifdef MODULE_TEXTURE_STREAMING_ENABLED
 		RENDER_STREAMING_TEXTURE_MEM_USED,
 #endif
@@ -138,6 +142,7 @@ public:
 	};
 
 	double get_monitor(Monitor p_monitor) const;
+	double _gpu_geometry_statistic(const StringName &p_key) const;
 	String get_monitor_name(Monitor p_monitor) const;
 
 	MonitorType get_monitor_type(Monitor p_monitor) const;

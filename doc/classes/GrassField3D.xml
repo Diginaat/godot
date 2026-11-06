@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="GrassField3D" inherits="GeometryInstance3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../class.xsd">
+	<brief_description>
+		Dense grass generated on the GPU around the camera every frame.
+	</brief_description>
+	<description>
+		Generates grass blades in a compute pass every frame, in a square grid of patches around the current camera of the node's viewport, and draws them as one indirect [MultiMesh]. Patches outside [member radius] or outside the camera frustum produce no blades. Each blade's position, rotation, lean, height and color are a fixed hash of its patch, its index and [member seed], so the same blades reappear wherever the camera goes and no per-blade data is stored.
+		Blades follow an optional height grid and are scaled by an optional density grid, both laid out over [member grid_size] points starting at [member grid_origin]. Values are interpolated over the two triangles of each grid cell, split along the diagonal from point [code](x + 1, z)[/code] to [code](x, z + 1)[/code]; a terrain mesh triangulated the same way has its blades exactly on its surface. Towards the edge of [member radius], the number of blades per patch falls continuously (see [member fade_fraction]).
+		All distances are in the node's local space. The default blade is a tapered strip lit from above on both sides and colored by [member color_a] and [member color_b]; a custom [member blade_mesh] is drawn with its own materials, with the blade color as the instance color ([code]COLOR[/code] in the shader).
+		[b]Note:[/b] Experimental. Requires a renderer based on [RenderingDevice] (Forward+ or Mobile); nothing is drawn with the Compatibility renderer. Blades are generated for the viewport's current camera only, so other viewports and shadow cameras see the same blades. Editor 3D viewport previews are not supported yet: blades follow only the current camera of the node's own viewport.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_generated_blade_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the number of blades generated in a recent frame, read back asynchronously a few frames late, and at most [member max_blades]. Returns [code]0[/code] before the first result arrives.
+			</description>
+		</method>
+		<method name="get_gpu_memory_usage" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the GPU memory used by this field in bytes: 64 bytes of instance data per [member max_blades], plus the grids and parameters.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="blade_height_max" type="float" setter="set_blade_height_max" getter="get_blade_height_max" default="0.55">
+			Largest blade height. Each blade picks a height between [member blade_height_min] and this value.
+		</member>
+		<member name="blade_height_min" type="float" setter="set_blade_height_min" getter="get_blade_height_min" default="0.25">
+			Smallest blade height.
+		</member>
+		<member name="blade_lean" type="float" setter="set_blade_lean" getter="get_blade_lean" default="0.35">
+			Largest lean of a blade away from vertical, in radians. Each blade leans by a random fraction of it, in a random direction.
+		</member>
+		<member name="blade_mesh" type="Mesh" setter="set_blade_mesh" getter="get_blade_mesh">
+			Mesh drawn for each blade, with its base at the origin, 1 unit wide along X and 1 unit high along Y; blades scale it by [member blade_width] and their height. If [code]null[/code], a built-in tapered blade is used.
+		</member>
+		<member name="blade_width" type="float" setter="set_blade_width" getter="get_blade_width" default="0.05">
+			Blade width. The last blade of a patch narrows by the fractional part of the patch's blade count, so counts change without popping.
+		</member>
+		<member name="blades_per_patch" type="int" setter="set_blades_per_patch" getter="get_blades_per_patch" default="16">
+			Number of blades in a patch at full density.
+		</member>
+		<member name="cast_shadow" type="int" setter="set_cast_shadows_setting" getter="get_cast_shadows_setting" overrides="GeometryInstance3D" enum="GeometryInstance3D.ShadowCastingSetting" default="0" />
+		<member name="color_a" type="Color" setter="set_color_a" getter="get_color_a" default="Color(0.16, 0.32, 0.07, 1)">
+			One end of the blade color range. Each blade picks a color between [member color_a] and [member color_b].
+		</member>
+		<member name="color_b" type="Color" setter="set_color_b" getter="get_color_b" default="Color(0.34, 0.46, 0.12, 1)">
+			Other end of the blade color range.
+		</member>
+		<member name="density_grid" type="PackedFloat32Array" setter="set_density_grid" getter="get_density_grid" default="PackedFloat32Array()">
+			Optional density in [code][0, 1][/code] per grid point, row by row along X ([code]grid_size.x * grid_size.y[/code] values). Scales the number of blades in each patch. When the height or density grid is set, patches outside the grid produce no blades.
+		</member>
+		<member name="fade_fraction" type="float" setter="set_fade_fraction" getter="get_fade_fraction" default="0.4">
+			Outer fraction of [member radius] over which the number of blades falls linearly to zero.
+		</member>
+		<member name="grid_cell_size" type="float" setter="set_grid_cell_size" getter="get_grid_cell_size" default="1.0">
+			Distance between neighboring grid points, along X and Z.
+		</member>
+		<member name="grid_origin" type="Vector2" setter="set_grid_origin" getter="get_grid_origin" default="Vector2(0, 0)">
+			Position of the first grid point on the X and Z axes.
+		</member>
+		<member name="grid_size" type="Vector2i" setter="set_grid_size" getter="get_grid_size" default="Vector2i(0, 0)">
+			Number of grid points along X and Z. At least 2 by 2 for the grids to be used.
+		</member>
+		<member name="height_grid" type="PackedFloat32Array" setter="set_height_grid" getter="get_height_grid" default="PackedFloat32Array()">
+			Optional ground height per grid point, row by row along X ([code]grid_size.x * grid_size.y[/code] values). Without it, blades stand on the plane [code]y = 0[/code].
+		</member>
+		<member name="max_blades" type="int" setter="set_max_blades" getter="get_max_blades" default="262144">
+			Capacity of the blade buffer, which takes 64 bytes per blade. Patches beyond the capacity in a frame are dropped; lower [member radius] or [member blades_per_patch] if [method get_generated_blade_count] reaches it.
+		</member>
+		<member name="patch_size" type="float" setter="set_patch_size" getter="get_patch_size" default="0.5">
+			Edge length of a square patch. One patch is the unit of culling and density.
+		</member>
+		<member name="radius" type="float" setter="set_radius" getter="get_radius" default="40.0">
+			Distance from the camera, on the X and Z axes, within which blades are generated.
+		</member>
+		<member name="seed" type="int" setter="set_seed" getter="get_seed" default="0">
+			Seed of the blade hash. Fields with different seeds place different blades.
+		</member>
+	</members>
+</class>

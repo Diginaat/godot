@@ -420,6 +420,7 @@ public:
 	FUNC1RC(String, mesh_get_path, RID)
 
 	FUNC2(mesh_set_shadow_mesh, RID, RID)
+	FUNC2(mesh_set_cluster_data, RID, const Array &)
 
 	FUNC2(mesh_surface_remove, RID, int)
 	FUNC1(mesh_clear, RID)
@@ -467,6 +468,7 @@ public:
 	FUNC1(multimesh_instances_reset_physics_interpolation, RID)
 
 	FUNC2(multimesh_set_visible_instances, RID, int)
+	FUNC3(multimesh_set_distance_thinning, RID, float, float)
 	FUNC1RC(int, multimesh_get_visible_instances, RID)
 
 	/* SKELETON API */
@@ -828,6 +830,7 @@ public:
 	FUNC1RC(double, viewport_get_measured_render_time_cpu, RID)
 	FUNC1RC(double, viewport_get_measured_render_time_gpu, RID)
 	FUNC1R(Dictionary, viewport_get_ddgi_probe_data, RID)
+	FUNC1R(Dictionary, viewport_get_gpu_geometry_statistics, RID)
 	FUNC1RC(RID, viewport_find_from_screen_attachment, DisplayServerEnums::WindowID)
 
 	FUNC2(call_set_vsync_mode, DisplayServerEnums::VSyncMode, DisplayServerEnums::WindowID)

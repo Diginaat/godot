@@ -272,6 +272,8 @@ public:
 	bool environment_get_ddgi_baked_only(RID p_env) const;
 	/// The DDGI probes of a viewport's render buffers (see DDGIProbeData), or an empty dictionary.
 	virtual Dictionary ddgi_get_probe_data(const Ref<RenderSceneBuffers> &p_render_buffers) { return Dictionary(); }
+	/// Latest asynchronously read native GPU geometry counters of a viewport, or an empty dictionary.
+	virtual Dictionary gpu_geometry_get_statistics(const Ref<RenderSceneBuffers> &p_render_buffers) { return Dictionary(); }
 	// Changes when reflection probes should be captured again because the DDGI
 	// probes their captures sample have converged further (0 without DDGI).
 	virtual uint64_t ddgi_get_capture_generation() const { return 0; }
