@@ -1,5 +1,64 @@
 # Update log
 
+## 2026-11-07 (MultiMesh HZB occlusion and the HZB bench)
+
+* **Implemented**: `rendering/geometry/multimesh_gpu_culling/occlusion`
+  (D024): instance HZB test after the depth pre-pass, colour passes only;
+  shared HZB setup/build; statistic `hzb_instances_occluded`; always-on stage
+  timestamps while GPU geometry is active.
+* **Measured**: `hzb_bench` city scene, four modes, Vulkan and D3D12: instance
+  occlusion -0.4 to -0.6 ms opaque; CLOD two-pass a net +0.2-0.3 ms here.
+* **Mistakes**: D3D12 buffer copy then compute write; a bench whose shared
+  mesh and material batched every CLOD object out of CLOD (now self-checked).
+
+## 2026-11-06 (CLOD HZB occlusion under jitter)
+
+* **Fixed**: HZB occlusion no longer switches off under TAA, FSR2 or DLSS
+  jitter; the test already used the jittered projection (D023).
+* **Validated**: `hzb_two_pass` TAA and FSR2 cases (bit-equal images, groups
+  occluded), forest TAA A/B 0 px, on Vulkan and D3D12.
+
+## 2026-11-06 (two-pass CLOD HZB occlusion)
+
+* **Implemented**: `rendering/geometry/cluster_lod/occlusion_two_pass`: split,
+  test and phase-2 depth with a per-viewport group history, after a reference
+  engine's culling (D023); four new statistics words.
+* **Validated**: `hzb` kernel fixture (two-pass rounds), new `hzb_two_pass`
+  scene fixture on Vulkan and D3D12, full large_world suites and smoke.
+
+## 2026-11-06 (GrassField3D level of detail rings)
+
+* **Implemented**: `GrassField3D.inner_radius`, `inner_fade`, `edge_dither`:
+  fields with the same seed hand each blade over between a detailed near
+  ring and a card ring (D022).
+* **Validated**: `grass_field` fixture LOD ring phase on Vulkan and D3D12
+  (2551 + 3447 = 5998 blades, same origins as one field).
+* **Measured**: grass test scene at 1080p 10.2 to 7.6 ms GPU.
+
+## 2026-11-06 (paged-out cluster indices, backup before opening)
+
+* **Implemented**: `MeshClusterData.save_pages(path, keep_indices)` and
+  `are_indices_paged()`; with `keep_indices` false the resource holds only the
+  roots' indices and the renderer reads the rest from the page file, or the
+  whole file without streaming (D020). Scene import uses it.
+* **Implemented**: the project manager requires a backup before this build
+  opens a project the first time, showing project size and free disk space
+  (D021).
+* **Validated**: `import_paged` extended (paged-out record checks, file-read
+  resident copy, missing file with streaming on and off) and all 16
+  large_world fixtures on Vulkan and D3D12. The backup dialog builds; it was
+  not clicked through yet.
+
+## 2026-11-06 (CLOD page files from scene import)
+
+* **Implemented**: import option `meshes/cluster_lod_page_files`; scene import
+  writes one `.clodpages` file per cooked mesh into the imported folder before
+  saving and lists it as a generated file, so export takes it along (D019).
+  Idea from CRYENGINE 5.7's split of a mesh into a header and a stream-only
+  geometry file (ideas only, no code).
+* **Validated**: new `import_paged` fixture and the full large_world suite on
+  Vulkan and D3D12; standard smoke passes.
+
 ## 2026-11-06 (modern compact editor theme)
 
 * **Font changed**: editor UI font is now Atkinson Hyperlegible Next 2.66
@@ -18,6 +77,7 @@
   neutral surface and outline rather than decorative accent lines.
 * **Scope**: shared editor theme settings and generation only; no editor control,
   layout, runtime project theme or plugin behavior changes.
+
 ## 2026-11-06 (GPU voxel levels for the far field)
 
 * **Implemented**: `VoxelFieldData`, `VoxelProxyBuilder.build_field` and

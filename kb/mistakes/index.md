@@ -33,3 +33,5 @@ What worked is in [successes](/successes/).
 * [Streaming pressure budget sized from the total data](/mistakes/pressure-budget-from-total-size.md) - measure per-view working sets before choosing a pressure budget
 * [GPU stage check read timestamps after a texture readback](/mistakes/timestamps-after-texture-readback.md) - read RD timestamps before get_image(); a readback stalls and begins a new frame
 * [Averaged noisy frames after the tonemapper](/mistakes/tonemapped-noise-averages-darker.md) - compare brightness in linear HDR at a fixed exposure; a reference must not depend on spp
+* [GPU buffer copy followed by compute writes broke D3D12](/mistakes/d3d12-buffer-copy-then-compute-write.md) - seed a buffer that compute writes with buffer_update, not buffer_copy; run new GPU paths on D3D12 too
+* [A benchmark ran with the feature it measures inactive](/mistakes/bench-without-the-feature-active.md) - check counters and timings are nonzero before printing numbers; shared mesh+material batches CLOD objects out of CLOD

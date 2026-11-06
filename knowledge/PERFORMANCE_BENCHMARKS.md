@@ -446,3 +446,59 @@ partial workgroups and carry propagation across multiple scan chunks.
 Only after matching geometry, materials, lighting, shadows, AA, distance cuts and
 quality can reference-engine and Godot timing be compared. Historical reference records are
 research inputs, not targets or rerun measurements.
+
+## HZB occlusion city bench — 2026-11-07
+
+`devtools/test/hzb_bench.ps1`, `misc/large_world_test_project/hzb_bench.tscn`.
+1920x1080, RTX 3060, no shadows, VSync off. 8x8 blocks of buildings (plain
+boxes), 225 CLOD spheres (66k source triangles each, 14.9 M in all) at street
+crossings and mid-streets, 3744 MultiMesh street props (1.1k triangles each,
+one GPU-culled MultiMesh per street). MultiMesh GPU culling and CLOD are on in
+every mode. Modes: off; CLOD single pass; CLOD two passes (D023); two passes
+plus MultiMesh occlusion (D024). Each mode 2 x 240 frames, alternating order
+after a warm-up. GPU p50 ms from `viewport_get_measured_render_time_gpu`;
+stages from always-on RD timestamps (`GPU Geometry Depth Pre-Pass`, `Mesh CLOD
+HZB`, `Mesh CLOD Phase 2 Depth`, `MultiMesh HZB Occlusion`, `GPU Geometry
+Opaque Pass`). One run per backend.
+
+| View | Backend | off | single | two-pass | two-pass + MultiMesh |
+| --- | --- | --- | --- | --- | --- |
+| street | Vulkan | 5.20 | 5.11 | 5.43 | 4.93 |
+| street | D3D12 | 5.02 | 5.10 | 5.32 | 4.76 |
+| corner | Vulkan | 3.23 | 3.33 | 3.65 | 3.29 |
+| corner | D3D12 | 3.15 | 3.21 | 3.44 | 3.09 |
+| aerial | Vulkan | 6.42 | 6.51 | 6.81 | 6.41 |
+| aerial | D3D12 | 6.31 | 6.40 | 6.63 | 6.20 |
+
+Stages, Vulkan street (D3D12 within 0.15 ms; its phase 2 is 0.21):
+
+| Mode | depth | of which phase 1 | HZB build + CLOD test | phase 2 | MultiMesh test | opaque |
+| --- | --- | --- | --- | --- | --- | --- |
+| off | 2.33 | 2.33 | - | - | - | 2.76 |
+| single | 2.46 | 2.31 | 0.13 | - | - | 2.56 |
+| two-pass | 2.76 | 2.34 | 0.16 | 0.28 | - | 2.56 |
+| + MultiMesh | 2.76 | 2.32 | 0.16 | 0.28 | 0.03 | 1.98 |
+
+Counters (street): CLOD selects 55 groups (227k triangles); 52 groups (214k
+triangles) are occluded, and with two passes all of them are deferred from
+phase 1, none recovered. MultiMesh: 3044 of 3096 frustum-visible instances
+occluded (corner 1967 of 2041, aerial 2412 of 3744).
+
+Findings:
+- MultiMesh occlusion is a clear win in occluded views: opaque -0.58 (street),
+  -0.37 (corner), -0.50 ms (aerial) on Vulkan for a 0.03 ms test; the frame is
+  0.35-0.56 ms faster than two-pass alone on both backends.
+- CLOD single pass costs 0.10-0.14 ms (HZB build and test) and saves about
+  0.2 ms of opaque work only in the street view; elsewhere it is neutral to
+  +0.1 ms. CLOD already reduces the far spheres to few triangles, so little
+  shading is hidden.
+- CLOD two passes is a net loss here (+0.2 to +0.3 ms against single):
+  deferring 214k triangles does not make phase 1 cheaper (2.31 vs 2.34 ms;
+  depth cost is dominated by buildings and props), and phase 2 costs a fixed
+  0.28 ms (Vulkan) / 0.21 ms (D3D12) in every view, also when it recovers
+  nothing. Not yet verified why; a likely cause is that phase 2 walks every
+  CLOD group command (one per group of each hierarchy, mostly zero
+  instances) for all 225 surfaces in a second depth draw list. Two-pass would
+  pay off only where hidden CLOD triangles dominate depth cost; compacting
+  phase-2 commands (or skipping surfaces with no deferred group) would be
+  needed before it is a good default.

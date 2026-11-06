@@ -53,3 +53,26 @@ single shutdown. The test runner rejected it rather than silently retrying.
 
 Sources: `mesh_hiz.cpp`, `mesh_hiz_reduce.glsl`, `mesh_hiz_occlude.glsl`,
 `hzb.gd`, `clod_raster.gd`, `devtools/test/large_world.ps1`.
+
+# Two passes (2026-11-06)
+
+With `occlusion_two_pass` (default on) the depth pre-pass draws only groups
+that were visible when last tested in the viewport; the HZB from that depth
+tests every selected group, and groups occluded before but visible now are
+drawn into depth (phase 2) before effects read it. A per-viewport history
+word per group drives it; a wrong word only costs a phase-2 draw. See D023 and
+the `hzb_two_pass` fixture.
+
+Jittered views (TAA, FSR2, DLSS) are tested too: the group rectangles use
+`get_cam_projection()`, which includes the frame's jitter, so they match the
+jittered depth. The earlier jitter guard was based on a wrong reading.
+
+# MultiMesh instances and timing (2026-11-07)
+
+The pyramid is shared. With `multimesh_gpu_culling/occlusion` each
+frustum-visible MultiMesh instance is tested against it after the pre-pass
+and dropped from the colour passes only (D024, `multimesh_occlusion`
+fixture). The city bench (`hzb_bench`) shows the instance test saving
+0.4-0.6 ms of opaque work for 0.03 ms, while CLOD two-pass costs a fixed
+0.2-0.3 ms phase 2 that this scene never earns back
+(PERFORMANCE_BENCHMARKS, "HZB occlusion city bench").

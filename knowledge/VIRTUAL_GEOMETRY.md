@@ -133,7 +133,11 @@ scene importer cooks after lightmap unwrap, source LOD generation and index
 optimization, before saving embedded/external mesh resources. Shared meshes are
 cooked only on first conversion; unsupported deformation/custom channels or an
 unavailable cooker warn and preserve conventional geometry instead of failing
-scene import. Automatic virtual page cooking/streaming is not implemented.
+scene import. With `meshes/cluster_lod_page_files` the importer also writes one
+page file per cooked mesh into the imported folder before the mesh is saved and
+lists it as a generated file, so it is exported with the scene (D019,
+`import_paged` fixture). The saved mesh keeps only the roots' indices (D020);
+without streaming the renderer reads the whole file at setup.
 
 Separate optimized shadow meshes are now compatible with resident CLOD: main
 camera depth uses source vertices with hierarchy indices; actual shadow passes

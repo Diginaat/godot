@@ -40,6 +40,10 @@ identical image; meshes freed with 28 KB of reads in flight release cleanly.
 
 # Limits
 
-The resource still holds every index, and scene import does not write page
-files yet. No timing measurement. Only the nearest fixture mesh needs groups
+`save_pages(path, false)` pages the indices out of the resource too: it keeps
+only the roots, and the renderer reads the rest from the file, or the whole
+file at setup without streaming; a missing file means no cluster LOD for that
+mesh (D020). Scene import writes page files this way with
+`meshes/cluster_lod_page_files` (D019; `import_paged` fixture: 72 disk reads,
+image equal to resident, 13,824 of 96,768 bytes held). No timing measurement. Only the nearest fixture mesh needs groups
 beyond its roots in the test view.

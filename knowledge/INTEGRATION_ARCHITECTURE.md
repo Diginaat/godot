@@ -89,8 +89,9 @@ Jittered views (2026-11-06). TAA and upscalers add the jitter to NDC x/y
 (`Projection::add_jitter_offset`). Culling divides the projection's x/y rows by
 1 + |jitter|, which widens the frustum to |ndc| <= 1 + |jitter| and so contains
 the jittered frustum of that frame: culling stays exact. CLOD selection uses the
-same widened planes; HZB occlusion stays off under jitter, because its group
-rectangles use the unjittered projection.
+same widened planes. HZB occlusion runs under jitter too (2026-11-06): its group
+rectangles use `get_cam_projection()`, which includes this frame's jitter, so
+they match the jittered depth they are tested against.
 
 Shadow passes (2026-11-06, opt-in `multimesh_gpu_culling/shadows`, default
 off). After shadow instance data is filled, one batch culls every

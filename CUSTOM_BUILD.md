@@ -143,6 +143,9 @@ straight.
     `--gpu-markers`, `--debug-shaders` and `--raytracing-validation` flags.
   - New projects default to the Vulkan driver (`EditorNode::get_initial_settings()`),
     because path tracing needs Vulkan.
+  - The project manager requires a backup before this build first opens a
+    project (`_fork_backup_*` in `editor/project_manager/project_manager.cpp`,
+    marker `.godot/nvidia_dlss_physx_backup.cfg`).
   - CI `static_checks.yml` runs `prek` via pip instead of the third-party action.
 
 ## Build (Windows)
