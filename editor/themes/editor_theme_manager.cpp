@@ -272,20 +272,29 @@ EditorThemeManager::ThemeConfiguration EditorThemeManager::_create_theme_config(
 
 	// Handle theme style.
 	if (config.preset != "Custom") {
+		int preset_border_size = 0;
 		if (config.style == "Classic") {
 			config.draw_relationship_lines = RELATIONSHIP_ALL;
 			config.corner_radius = 3;
+		} else if (config.preset == "Modern Compact") {
+			config.draw_relationship_lines = RELATIONSHIP_ALL;
+			config.corner_radius = 6;
+			preset_border_size = 1;
 		} else { // Default
 			config.draw_relationship_lines = config.default_relationship_lines;
 			config.corner_radius = config.default_corner_radius;
 		}
+		// One logical pixel in Modern Compact. Scaling keeps outlines crisp at each editor scale.
+		config.border_width = preset_border_size * MAX(1, EDSCALE);
 
 		EditorSettings::get_singleton()->set_initial_value("interface/theme/draw_relationship_lines", config.draw_relationship_lines);
 		EditorSettings::get_singleton()->set_initial_value("interface/theme/corner_radius", config.corner_radius);
+		EditorSettings::get_singleton()->set_initial_value("interface/theme/border_size", preset_border_size);
 
 		// Enforce values in case they were adjusted or overridden.
 		EditorSettings::get_singleton()->set_manually("interface/theme/draw_relationship_lines", config.draw_relationship_lines);
 		EditorSettings::get_singleton()->set_manually("interface/theme/corner_radius", config.corner_radius);
+		EditorSettings::get_singleton()->set_manually("interface/theme/border_size", preset_border_size);
 	}
 
 	// Handle color preset.
@@ -349,6 +358,13 @@ EditorThemeManager::ThemeConfiguration EditorThemeManager::_create_theme_config(
 				preset_base_color = Color(0.9, 0.9, 0.9);
 				preset_contrast = light_contrast;
 				preset_icon_saturation = 1;
+			} else if (config.preset == "Modern Compact") {
+				// Neutral charcoal surfaces with a restrained blue used only by interactive states.
+				preset_accent_color = Color::html("4d88d8");
+				preset_base_color = Color::html("202328");
+				preset_contrast = 0.22;
+				preset_draw_extra_borders = true;
+				preset_icon_saturation = 1.25;
 			} else if (config.preset == "Solarized (Dark)") {
 				preset_accent_color = Color(0.15, 0.55, 0.82);
 				preset_base_color = Color(0.03, 0.21, 0.26);

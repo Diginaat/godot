@@ -1,5 +1,24 @@
 # Update log
 
+## 2026-11-06 (modern compact editor theme)
+
+* **Font changed**: editor UI font is now Atkinson Hyperlegible Next 2.66
+  (OFL), with Inter kept as first fallback for Greek, Cyrillic and symbols.
+  Ubuntu Sans was reviewed and not bundled (Ubuntu Font Licence, not OFL).
+* **Typography research**: recommend existing embedded Inter UI and JetBrains
+  Mono code fonts; source confirms both already implemented, with user overrides
+  and international fallbacks. No font replacement required.
+* **Refined**: user-approved opaque antialiased outlines; Avalonia-inspired
+  opaque surface hierarchy, neutral hover/pressed buttons and muted-blue selection.
+  Icon saturation increased to 1.25 following visual feedback.
+* **Implemented**: native Modern Compact editor color preset and Compact default
+  spacing, using neutral charcoal surfaces, restrained blue interaction states,
+  colored native icons, small corner radii, subtle tree hierarchy guides and
+  low-contrast one-logical-pixel neutral outlines. Selected tabs use a raised
+  neutral surface and outline rather than decorative accent lines.
+* **Scope**: shared editor theme settings and generation only; no editor control,
+  layout, runtime project theme or plugin behavior changes.
+
 ## 2026-11-02 (release 0.8.1)
 
 * **Updated**: release 0.8.1 (reflections, DDGI adaptive update budget)

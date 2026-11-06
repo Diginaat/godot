@@ -285,6 +285,10 @@ Patches:
 
 ## fonts
 
+- `AtkinsonHyperlegibleNext*.woff2`:
+  * Upstream: https://github.com/googlefonts/atkinson-hyperlegible-next
+  * Version: 2.66 (7925f50f649b3813257faf2f4c0b381011f434f1, 2025)
+  * License: OFL-1.1
 - `DroidSans*.woff2`:
   * Upstream: https://android.googlesource.com/platform/frameworks/base/+/master/data/fonts/
   * Version: ? (pre-2014 commit when DroidSansJapanese.ttf was obsoleted)

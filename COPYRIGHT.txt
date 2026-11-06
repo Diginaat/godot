@@ -278,6 +278,11 @@ Comment: etcpak
 Copyright: 2013-2022, Bartosz Taudul
 License: BSD-3-clause
 
+Files: thirdparty/fonts/AtkinsonHyperlegibleNext*.woff2
+Comment: Atkinson Hyperlegible Next font
+Copyright: 2020-2024, The Atkinson Hyperlegible Next Project Authors
+License: OFL-1.1
+
 Files: thirdparty/fonts/DroidSans*.woff2
 Comment: DroidSans font
 Copyright: 2008, The Android Open Source Project
