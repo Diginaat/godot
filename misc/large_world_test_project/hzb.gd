@@ -20,10 +20,13 @@ func _test_gpu() -> void:
 	var rd := RenderingServer.get_rendering_device()
 	var shaders: Array[RID] = []
 	var pipelines: Array[RID] = []
-	for variant in ["copy", "reduce", "occlude"]:
-		var path := "res://../../servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_%s.glsl" % ("occlude" if variant == "occlude" else "reduce")
+	for variant in ["copy", "reduce", "occlude", "split"]:
+		var path := "res://../../servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_%s.glsl" % ("occlude" if variant == "occlude" or variant == "split" else "reduce")
+		var defines := {"copy": "#define MODE_COPY", "split": "#define MODE_SPLIT"}
 		var source := RDShaderSource.new()
-		source.source_compute = FileAccess.get_file_as_string(ProjectSettings.globalize_path(path)).replace("#[compute]", "").replace("#VERSION_DEFINES", "#define MODE_COPY" if variant == "copy" else "")
+		# The engine's shader builder resolves #include; this compiler does not.
+		var include := FileAccess.get_file_as_string(ProjectSettings.globalize_path(path.get_base_dir().path_join("mesh_hiz_inc.glsl")))
+		source.source_compute = FileAccess.get_file_as_string(ProjectSettings.globalize_path(path)).replace("#[compute]", "").replace("#VERSION_DEFINES", defines.get(variant, "")).replace("#include \"mesh_hiz_inc.glsl\"", include)
 		var spirv := rd.shader_compile_spirv_from_source(source)
 		if not spirv.compile_error_compute.is_empty():
 			for resource in pipelines + shaders:
@@ -80,7 +83,15 @@ func _test_gpu() -> void:
 	var input := PackedFloat32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).to_byte_array()
 	input.append_array(PackedFloat32Array([0, 0, 0, 0]).to_byte_array())
 	input.append_array(PackedInt32Array([boxes.size(), 16, WIDTH, HEIGHT]).to_byte_array())
-	var buffers: Array[RID] = [rd.storage_buffer_create(group_bytes.size(), group_bytes), rd.storage_buffer_create(input.size(), input), rd.storage_buffer_create(commands.size() * 4, commands.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT)]
+	input.append_array(PackedInt32Array([2, 0, 0, 0]).to_byte_array()) # History offset 2.
+	var history := PackedInt32Array()
+	history.resize(2 + boxes.size() + 2)
+	history.fill(0)
+	var pass_init := PackedInt32Array()
+	pass_init.resize(commands.size())
+	pass_init.fill(-1)
+	var buffers: Array[RID] = [rd.storage_buffer_create(group_bytes.size(), group_bytes), rd.storage_buffer_create(input.size(), input), rd.storage_buffer_create(commands.size() * 4, commands.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT),
+			rd.storage_buffer_create(history.size() * 4, history.to_byte_array()), rd.storage_buffer_create(pass_init.size() * 4, pass_init.to_byte_array()), rd.storage_buffer_create(pass_init.size() * 4, pass_init.to_byte_array())]
 	var sets: Array[RID] = []
 	for level in LEVELS:
 		var uniforms: Array[RDUniform] = [
@@ -92,7 +103,18 @@ func _test_gpu() -> void:
 	for binding in 3:
 		occlude_uniforms.append(_uniform(binding, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[binding]]))
 	occlude_uniforms.append(_uniform(3, RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, [sampler, pyramid]))
+	occlude_uniforms.append(_uniform(5, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[3]]))
+	occlude_uniforms.append(_uniform(6, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[5]])) # Phase-2 commands.
 	sets.append(rd.uniform_set_create(occlude_uniforms, shaders[2], 0))
+	var split_uniforms: Array[RDUniform] = []
+	for binding in 3:
+		split_uniforms.append(_uniform(binding, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[binding]]))
+	split_uniforms.append(_uniform(5, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[3]]))
+	split_uniforms.append(_uniform(6, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[4]])) # Phase-1 depth commands.
+	sets.append(rd.uniform_set_create(split_uniforms, shaders[3], 0))
+	# Two-pass expectations per round (groups 0..6). Group 0 is hidden except in
+	# round 1 (hole) and round 3 (uncertain bounds); group 5 is unselected.
+	var history_before := [0, 0, 0, 0, 0, 0, 0]
 	for round_id in 4:
 		var depths := PackedFloat32Array()
 		depths.resize(WIDTH * HEIGHT)
@@ -107,6 +129,12 @@ func _test_gpu() -> void:
 			rd.buffer_update(buffers[1], 0, uncertain.size(), uncertain)
 		rd.buffer_update(buffers[2], 0, commands.size() * 4, commands.to_byte_array())
 		var list := rd.compute_list_begin()
+		# Phase-1 split against the history left by the previous round.
+		rd.compute_list_bind_compute_pipeline(list, pipelines[3])
+		rd.compute_list_bind_uniform_set(list, sets[LEVELS + 1], 0)
+		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, 0, 0]).to_byte_array(), 16)
+		rd.compute_list_dispatch(list, 1, 1, 1)
+		rd.compute_list_add_barrier(list)
 		for level in LEVELS:
 			var size := PADDED >> level
 			var source_width := WIDTH if level == 0 else size * 2
@@ -118,7 +146,7 @@ func _test_gpu() -> void:
 			rd.compute_list_add_barrier(list)
 		rd.compute_list_bind_compute_pipeline(list, pipelines[2])
 		rd.compute_list_bind_uniform_set(list, sets[LEVELS], 0)
-		rd.compute_list_set_push_constant(list, PackedInt32Array([0]).to_byte_array(), 4)
+		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, 0, 0]).to_byte_array(), 16)
 		rd.compute_list_dispatch(list, 1, 1, 1)
 		rd.compute_list_end()
 		# Verify every mip against the exact padded min-depth CPU reduction.
@@ -154,6 +182,27 @@ func _test_gpu() -> void:
 		for guard in 16:
 			if result[guard] != -1 or result[result.size() - guard - 1] != -1:
 				failures.append("HZB wrote outside command capacity")
+		# Two passes: phase 1 leaves out selected groups occluded when last tested,
+		# phase 2 draws those of them that are visible now, history follows the test.
+		var depth_commands := rd.buffer_get_data(buffers[4]).to_int32_array()
+		var phase2 := rd.buffer_get_data(buffers[5]).to_int32_array()
+		var history_after := rd.buffer_get_data(buffers[3]).to_int32_array()
+		for group in boxes.size():
+			var offset := 16 + group * 5
+			var selected := group != 5
+			var deferred: bool = selected and history_before[group] != 0
+			var depth_wanted: int = 1 if selected and not deferred else 0
+			var phase2_wanted: int = 1 if deferred and wanted[group] == 1 else 0
+			var history_wanted: int = history_before[group] if not selected else (0 if wanted[group] == 1 else 1)
+			if depth_commands[offset + 1] != depth_wanted or phase2[offset + 1] != phase2_wanted or history_after[2 + group] != history_wanted:
+				failures.append("two-pass round %d group %d: depth %d (want %d), phase 2 %d (want %d), history %d (want %d)" % [round_id, group, depth_commands[offset + 1], depth_wanted, phase2[offset + 1], phase2_wanted, history_after[2 + group], history_wanted])
+			for word in [0, 2, 3, 4]:
+				if depth_commands[offset + word] != commands[offset + word] or phase2[offset + word] != commands[offset + word]:
+					failures.append("two-pass commands changed source geometry fields")
+			history_before[group] = history_after[2 + group]
+		for guard in 16:
+			if depth_commands[guard] != -1 or phase2[guard] != -1 or history_after[0] != 0 or history_after[1] != 0 or history_after[history_after.size() - 1] != 0:
+				failures.append("two-pass kernels wrote outside their ranges")
 	for resource in sets + pipelines + shaders + buffers + views + [pyramid, source_depth, sampler]:
 		rd.free_rid(resource)
 	_finish.call_deferred(failures)
@@ -161,7 +210,7 @@ func _test_gpu() -> void:
 
 func _finish(failures: Array) -> void:
 	if failures.is_empty():
-		print("HZB_TEST_PASS: real GPU padded min-depth mips, bounded occlusion, touching/near/edge protection and one-pixel-hole recovery")
+		print("HZB_TEST_PASS: real GPU padded min-depth mips, bounded occlusion, touching/near/edge protection, one-pixel-hole recovery and two-pass split/recovery/history")
 	else:
 		for failure in failures:
 			printerr("HZB_TEST_FAIL: ", failure)

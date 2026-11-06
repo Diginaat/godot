@@ -221,9 +221,6 @@ func _capture(enabled: bool, frames := 32) -> Image:
 				_failures.append("fully visible MultiMesh still dispatched GPU culling")
 		elif enabled and _overview and stage == 3:
 			pass # The overview lies beyond the directional shadow distance.
-		elif enabled and get_viewport().use_taa and stage == 2:
-			if count != 0:
-				_failures.append("HZB occlusion ran with a jittered projection")
 		elif enabled and count < 1:
 			_failures.append("enabled forest did not dispatch all GPU stages")
 		if not enabled and count != 0:

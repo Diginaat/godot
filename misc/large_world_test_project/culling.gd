@@ -91,7 +91,9 @@ func _check_kernel() -> void:
 	var pipelines: Array[RID] = []
 	for define in ["", "#define MODE_SCAN", "#define MODE_SCATTER"]:
 		var source := RDShaderSource.new()
-		source.source_compute = FileAccess.get_file_as_string(path).replace("#[compute]", "").replace("#VERSION_DEFINES", define)
+		# The engine's shader builder resolves #include; this compiler does not.
+		var include := FileAccess.get_file_as_string(path.get_base_dir().path_join("mesh_hiz_inc.glsl"))
+		source.source_compute = FileAccess.get_file_as_string(path).replace("#[compute]", "").replace("#VERSION_DEFINES", define).replace("#include \"mesh_hiz_inc.glsl\"", include)
 		var spirv := rd.shader_compile_spirv_from_source(source)
 		if not spirv.compile_error_compute.is_empty():
 			for resource in pipelines + shaders:

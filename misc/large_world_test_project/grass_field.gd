@@ -1,7 +1,9 @@
 extends Node3D
 ## GrassField3D: exact GPU blade counts against a CPU reference of the patch
 ## grid, blade heights on a triangulated non-linear height grid, density
-## masking, frustum bounds, the blade budget, determinism and coverage.
+## masking, frustum bounds, the blade budget, determinism and coverage, and
+## level of detail rings: edge-dithered near and inner-radius fields that
+## together place exactly the blades of one field.
 
 const RADIUS := 10.1
 const PATCH := 0.5
@@ -58,13 +60,15 @@ func _expected_patches() -> int:
 	return count
 
 
-func _count() -> int:
+func _count(field: GrassField3D = null) -> int:
 	# The count is read back asynchronously; wait until it is stable.
+	if field == null:
+		field = _grass
 	var last := -1
 	var stable := 0
 	for frame in 120:
 		await RenderingServer.frame_post_draw
-		var count := _grass.get_generated_blade_count()
+		var count := field.get_generated_blade_count()
 		stable = stable + 1 if count == last else 0
 		last = count
 		if stable >= 8:
@@ -73,9 +77,11 @@ func _count() -> int:
 	return last
 
 
-func _blades(count: int) -> PackedVector3Array:
+func _blades(count: int, field: GrassField3D = null) -> PackedVector3Array:
 	# Blade origins: translation column of each 3x4 row-major transform.
-	var buffer := RenderingServer.multimesh_get_buffer(_grass.get_base())
+	if field == null:
+		field = _grass
+	var buffer := RenderingServer.multimesh_get_buffer(field.get_base())
 	var origins := PackedVector3Array()
 	for i in count:
 		origins.append(Vector3(buffer[i * 16 + 3], buffer[i * 16 + 7], buffer[i * 16 + 11]))
@@ -189,8 +195,43 @@ func _run() -> void:
 	if _grass.get_gpu_memory_usage() < 100 * 64:
 		_failures.append("budget: memory %d B below the instance data" % _grass.get_gpu_memory_usage())
 
+	# 6. LOD rings: a near field (outer band 4-6 m) and a ring field (inner band
+	# 4-6 m, outer band like the single field) with edge dithering place
+	# exactly the blades of one dithered field: same count, same origins.
+	_grass.max_blades = 65536
+	_grass.fade_fraction = 0.5
+	_grass.edge_dither = true
+	var single := await _count()
+	var single_origins := _sorted(_blades(single))
+	var near := GrassField3D.new()
+	var ring := GrassField3D.new()
+	for field in [near, ring]:
+		field.patch_size = PATCH
+		field.blades_per_patch = BLADES
+		field.max_blades = 65536
+		field.blade_width = 0.08
+		field.edge_dither = true
+		for property in ["grid_origin", "grid_cell_size", "grid_size", "height_grid", "density_grid"]:
+			field.set(property, _grass.get(property))
+	near.radius = 6.0
+	near.fade_fraction = 2.0 / 6.0
+	ring.radius = RADIUS
+	ring.fade_fraction = 0.5
+	ring.inner_radius = 6.0
+	ring.inner_fade = 2.0
+	_grass.visible = false
+	add_child(near)
+	add_child(ring)
+	var near_count := await _count(near)
+	var ring_count := await _count(ring)
+	var union := _sorted(_blades(near_count, near) + _blades(ring_count, ring))
+	if near_count == 0 or ring_count == 0 or near_count + ring_count != single or union != single_origins:
+		_failures.append("rings: near %d + ring %d blades, single field %d, same origins %s" % [near_count, ring_count, single, union == single_origins])
+	near.queue_free()
+	ring.queue_free()
+
 	if _failures.is_empty():
-		print("GRASS_FIELD_TEST_PASS: %d blades exact on flat ground, stable across frames, %.3f covered inside the radius and none outside; heights within %.5f m on a non-linear grid; density mask; frustum; 100-blade cap" % [full, coverage, worst])
+		print("GRASS_FIELD_TEST_PASS: %d blades exact on flat ground, stable across frames, %.3f covered inside the radius and none outside; heights within %.5f m on a non-linear grid; density mask; frustum; 100-blade cap; LOD rings %d + %d = %d blades at the same origins" % [full, coverage, worst, near_count, ring_count, single])
 	for failure in _failures:
 		printerr("GRASS_FIELD_TEST_FAIL: ", failure)
 	get_tree().quit(0 if _failures.is_empty() else 1)
