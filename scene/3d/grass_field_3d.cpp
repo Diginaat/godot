@@ -44,6 +44,12 @@
 // single-invocation mode clamps the count into the indirect draw commands.
 // Blades are pure functions of (patch, blade, seed), so the same blades
 // reappear when the camera returns and nothing is stored between frames.
+// With edge dithering each blade also has a hash in [0, 1) that decides
+// whether it survives a fade band: the outer band keeps it while the hash is
+// at least the band's progress, the inner band while it is below. Two fields
+// with the same seed, patch size and blade count place the same blades, so
+// one field's outer band and another's matching inner band hand every blade
+// over exactly once (level of detail rings without gaps or doubles).
 static const char *grass_generate_shader = R"(
 #version 450
 
@@ -140,7 +146,14 @@ void main() {
 	vec2 center = corner + 0.5 * patch_size;
 	float radius = params.camera.w;
 	float distance_xz = length(center - params.camera.xz);
-	if (distance_xz >= radius) {
+	bool dither = params.misc.w != 0u;
+	// Dithered edges decide per blade, so only patches wholly outside are skipped.
+	if (distance_xz - (dither ? 0.7072 * patch_size : 0.0) >= radius) {
+		return;
+	}
+	float inner_radius = params.patch_info.z;
+	float inner_start = params.patch_info.w;
+	if (inner_radius > 0.0 && distance_xz + 0.7072 * patch_size < inner_start) {
 		return;
 	}
 	bool gridded = params.grid_size.z != 0 || params.grid_size.w != 0;
@@ -154,7 +167,7 @@ void main() {
 	// Fewer blades towards the edge of the radius, continuously: the last
 	// blade of a patch narrows instead of popping.
 	float fade_start = params.patch_info.y;
-	if (fade_start < radius) {
+	if (!dither && fade_start < radius) {
 		amount *= clamp((radius - distance_xz) / (radius - fade_start), 0.0, 1.0);
 	}
 	float wanted = amount * float(params.patches.w);
@@ -177,15 +190,47 @@ void main() {
 		}
 	}
 	uint count = uint(ceil(wanted));
-	uint first = atomicAdd(counter, count);
+	float last_width = wanted - floor(wanted);
+	uint patch_seed = hash(uint(patch_id.x) * 73856093u ^ hash(uint(patch_id.y) ^ params.misc.y));
+	// Blades this field keeps, as a bit mask (blades_per_patch is at most 256).
+	uint keep[8] = uint[8](0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u);
+	uint kept = 0u;
+	for (uint b = 0u; b < count; b++) {
+		bool keep_blade = true;
+		if (dither) {
+			uint state = hash(patch_seed ^ (b * 2654435761u));
+			vec2 position = corner + vec2(next_random(state), next_random(state)) * patch_size;
+			float d = length(position - params.camera.xz);
+			float h = float(hash(state ^ 0x68bc21ebu) >> 8u) * (1.0 / 16777216.0);
+			if (fade_start < radius) {
+				keep_blade = h >= clamp((d - fade_start) / (radius - fade_start), 0.0, 1.0);
+			} else {
+				keep_blade = d < radius;
+			}
+			if (inner_radius > 0.0) {
+				float t = inner_radius > inner_start ? clamp((d - inner_start) / (inner_radius - inner_start), 0.0, 1.0) : (d >= inner_radius ? 1.0 : 0.0);
+				keep_blade = keep_blade && h < t;
+			}
+		}
+		if (keep_blade) {
+			keep[b >> 5u] |= 1u << (b & 31u);
+			kept++;
+		}
+	}
+	if (kept == 0u) {
+		return;
+	}
+	uint first = atomicAdd(counter, kept);
 	uint max_blades = params.misc.x;
 	if (first >= max_blades) {
 		return;
 	}
-	uint written = min(count, max_blades - first);
-	float last_width = wanted - floor(wanted);
-	uint patch_seed = hash(uint(patch_id.x) * 73856093u ^ hash(uint(patch_id.y) ^ params.misc.y));
-	for (uint b = 0u; b < written; b++) {
+	uint written = min(kept, max_blades - first);
+	uint slot = 0u;
+	for (uint b = 0u; b < count && slot < written; b++) {
+		if ((keep[b >> 5u] & (1u << (b & 31u))) == 0u) {
+			continue;
+		}
 		uint state = hash(patch_seed ^ (b * 2654435761u));
 		vec2 position = corner + vec2(next_random(state), next_random(state)) * patch_size;
 		float yaw = next_random(state) * 6.2831853;
@@ -198,7 +243,8 @@ void main() {
 		float cl = cos(lean);
 		float sl = sin(lean);
 		// Basis rows of yaw * lean * scale(width, height, width).
-		uint base = (first + b) * 4u;
+		uint base = (first + slot) * 4u;
+		slot++;
 		instances[base + 0u] = vec4(cy * width, sy * sl * height, sy * cl * width, position.x);
 		instances[base + 1u] = vec4(0.0, cl * height, -sl * width, height_at(position));
 		instances[base + 2u] = vec4(-sy * width, cy * sl * height, cy * cl * width, position.y);
@@ -360,9 +406,12 @@ void GrassField3D::_queue_generation() {
 	params.patches[3] = blades_per_patch;
 	params.patch[0] = patch_size;
 	params.patch[1] = radius * (1.0f - fade_fraction);
+	params.patch[2] = inner_radius;
+	params.patch[3] = MAX(inner_radius - inner_fade, 0.0f);
 	params.misc[0] = uint32_t(max_blades);
 	params.misc[1] = uint32_t(seed);
 	params.misc[2] = uint32_t(_get_effective_mesh()->get_surface_count());
+	params.misc[3] = edge_dither ? 1u : 0u;
 	PackedByteArray bytes;
 	bytes.resize(sizeof(Params));
 	memcpy(bytes.ptrw(), &params, sizeof(Params));
@@ -629,6 +678,32 @@ float GrassField3D::get_fade_fraction() const {
 	return fade_fraction;
 }
 
+void GrassField3D::set_inner_radius(float p_radius) {
+	ERR_FAIL_COND(!(p_radius >= 0.0f) || p_radius > 4096.0f);
+	inner_radius = p_radius;
+}
+
+float GrassField3D::get_inner_radius() const {
+	return inner_radius;
+}
+
+void GrassField3D::set_inner_fade(float p_width) {
+	ERR_FAIL_COND(!(p_width >= 0.0f) || p_width > 4096.0f);
+	inner_fade = p_width;
+}
+
+float GrassField3D::get_inner_fade() const {
+	return inner_fade;
+}
+
+void GrassField3D::set_edge_dither(bool p_enabled) {
+	edge_dither = p_enabled;
+}
+
+bool GrassField3D::is_edge_dither_enabled() const {
+	return edge_dither;
+}
+
 void GrassField3D::set_seed(int p_seed) {
 	seed = p_seed;
 }
@@ -736,6 +811,12 @@ void GrassField3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_color_b"), &GrassField3D::get_color_b);
 	ClassDB::bind_method(D_METHOD("set_fade_fraction", "fraction"), &GrassField3D::set_fade_fraction);
 	ClassDB::bind_method(D_METHOD("get_fade_fraction"), &GrassField3D::get_fade_fraction);
+	ClassDB::bind_method(D_METHOD("set_inner_radius", "radius"), &GrassField3D::set_inner_radius);
+	ClassDB::bind_method(D_METHOD("get_inner_radius"), &GrassField3D::get_inner_radius);
+	ClassDB::bind_method(D_METHOD("set_inner_fade", "width"), &GrassField3D::set_inner_fade);
+	ClassDB::bind_method(D_METHOD("get_inner_fade"), &GrassField3D::get_inner_fade);
+	ClassDB::bind_method(D_METHOD("set_edge_dither", "enabled"), &GrassField3D::set_edge_dither);
+	ClassDB::bind_method(D_METHOD("is_edge_dither_enabled"), &GrassField3D::is_edge_dither_enabled);
 	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &GrassField3D::set_seed);
 	ClassDB::bind_method(D_METHOD("get_seed"), &GrassField3D::get_seed);
 	ClassDB::bind_method(D_METHOD("set_height_grid", "heights"), &GrassField3D::set_height_grid);
@@ -758,6 +839,9 @@ void GrassField3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "blades_per_patch", PROPERTY_HINT_RANGE, "1,256,1"), "set_blades_per_patch", "get_blades_per_patch");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_blades", PROPERTY_HINT_RANGE, "1,4194304,1"), "set_max_blades", "get_max_blades");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fade_fraction", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_fade_fraction", "get_fade_fraction");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "inner_radius", PROPERTY_HINT_RANGE, "0,1000,0.01,or_greater,suffix:m"), "set_inner_radius", "get_inner_radius");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "inner_fade", PROPERTY_HINT_RANGE, "0,100,0.01,or_greater,suffix:m"), "set_inner_fade", "get_inner_fade");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "edge_dither"), "set_edge_dither", "is_edge_dither_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed"), "set_seed", "get_seed");
 	ADD_GROUP("Blades", "blade_");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "blade_height_min", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater,suffix:m"), "set_blade_height_min", "get_blade_height_min");

@@ -72,8 +72,8 @@ public:
 		float color_b[4];
 		int32_t grid_size[4]; // Columns, rows (grid points), has height, has density.
 		int32_t patches[4]; // First patch x, first patch z, patches per side, blades per patch.
-		float patch[4]; // Patch size, fade start distance.
-		uint32_t misc[4]; // Max blades, seed, surface count.
+		float patch[4]; // Patch size, fade start distance, inner radius, inner fade start.
+		uint32_t misc[4]; // Max blades, seed, surface count, edge dither.
 	};
 
 private:
@@ -94,6 +94,9 @@ private:
 	Color color_a = Color(0.16f, 0.32f, 0.07f);
 	Color color_b = Color(0.34f, 0.46f, 0.12f);
 	float fade_fraction = 0.4f;
+	float inner_radius = 0.0f;
+	float inner_fade = 0.0f;
+	bool edge_dither = false;
 	int seed = 0;
 
 	PackedFloat32Array height_grid;
@@ -146,6 +149,12 @@ public:
 	Color get_color_b() const;
 	void set_fade_fraction(float p_fraction);
 	float get_fade_fraction() const;
+	void set_inner_radius(float p_radius);
+	float get_inner_radius() const;
+	void set_inner_fade(float p_width);
+	float get_inner_fade() const;
+	void set_edge_dither(bool p_enabled);
+	bool is_edge_dither_enabled() const;
 	void set_seed(int p_seed);
 	int get_seed() const;
 

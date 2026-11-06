@@ -97,7 +97,7 @@ protected:
 	SceneShaderForwardClustered scene_shader;
 
 public:
-	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 24;
+	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 29;
 	// MultiMesh culling words of shadow passes start here (same layout as the main view's).
 	static constexpr uint32_t GEOMETRY_STATISTICS_SHADOW_OFFSET = 12;
 	virtual Dictionary gpu_geometry_get_statistics(const Ref<RenderSceneBuffers> &p_render_buffers) override;
@@ -129,6 +129,24 @@ public:
 			uint32_t id_capacity = 0;
 			uint32_t draw_capacity = 0;
 			bool active = false;
+			// Per dispatched draw, for HZB occlusion after the depth pre-pass.
+			struct Draw {
+				RID transforms;
+				uint32_t count = 0;
+				Transform3D transform;
+			};
+			LocalVector<Draw> draws;
+			LocalVector<uint32_t> command_words; // As uploaded to `commands`.
+			// HZB occlusion (main view only): the frustum-visible instances that
+			// are not behind the depth pre-pass, compacted into a second ID and
+			// command buffer that only the opaque colour passes use.
+			RID occluded_ids;
+			RID occluded_commands;
+			RID occlusion_inputs;
+			uint32_t occluded_id_capacity = 0;
+			uint32_t occluded_draw_capacity = 0;
+			uint32_t occlusion_input_capacity = 0;
+			bool occlusion_ready = false;
 		};
 		// Main view and shadow passes keep separate buffers: shadow draws run
 		// between the main view's culling dispatch and its opaque draws.
@@ -142,7 +160,35 @@ public:
 			RID occlusion_inputs;
 			uint32_t occlusion_capacity = 0;
 			bool active = false;
+			// Two-pass occlusion: phase-1 and phase-2 depth commands (same layout
+			// as `commands`), and one history word per group. History slots are
+			// keyed by surface cache and kept while the surface keeps its group
+			// count; a stale slot only costs a phase-2 draw.
+			RID depth_commands;
+			RID phase2_commands;
+			uint32_t pass_command_capacity = 0;
+			RID history;
+			uint32_t history_capacity = 0;
+			uint32_t history_used = 0;
+			struct HistorySlot {
+				uint32_t offset = 0;
+				uint32_t count = 0;
+			};
+			HashMap<uint64_t, HistorySlot> history_slots;
+			struct OcclusionWork {
+				RID groups;
+				uint32_t count = 0;
+			};
+			LocalVector<OcclusionWork> occlusion_work;
+			bool occlusion_ready = false;
+			bool two_pass = false;
 		} mesh_clod;
+		// Depth pyramid shared by CLOD and MultiMesh HZB occlusion, built once
+		// per frame from the (phase-1) depth pre-pass.
+		struct HZB {
+			uint32_t mipmaps = 0;
+			bool ready = false;
+		} hzb;
 		// GPU geometry counters, see RenderingServer::viewport_get_gpu_geometry_statistics.
 		// Kernels always accumulate into `buffer`; it is cleared and read back
 		// asynchronously only while a caller polled recently. CPU counts are per frame.
@@ -277,6 +323,9 @@ protected:
 		float lod_distance_multiplier = 1.0f;
 		bool lod_allowed = false;
 		uint32_t statistics_offset = 0;
+		// Dispatch MultiMeshes that lie fully inside the frustum too, so that HZB
+		// occlusion can test their instances.
+		bool keep_fully_inside = false;
 	};
 	// Per-frame work list; kept as a member so its storage is reused.
 	struct MultiMeshCullBatch {
@@ -284,6 +333,7 @@ protected:
 		LocalVector<RID> transforms;
 		LocalVector<RenderElementInfo *> elements;
 		LocalVector<uint32_t> last_lods;
+		LocalVector<Transform3D> node_transforms;
 		LocalVector<uint32_t> commands;
 		uint32_t total_ids = 0;
 		uint32_t skipped_surfaces = 0;
@@ -293,6 +343,7 @@ protected:
 			transforms.clear();
 			elements.clear();
 			last_lods.clear();
+			node_transforms.clear();
 			commands.clear();
 			total_ids = 0;
 			skipped_surfaces = 0;
@@ -314,7 +365,7 @@ protected:
 	struct MultiMeshCull {
 		MultimeshCullShaderRD shader;
 		RID version;
-		RID pipelines[3];
+		RID pipelines[5]; // Cull, scan, scatter, HZB occlusion, scan without statistics.
 	} multimesh_cull;
 	void _prepare_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	struct MeshCLOD {
@@ -323,6 +374,22 @@ protected:
 		RID pipelines[2]; // Resident selection, and residency-aware selection for streamed surfaces.
 		bool multi_draw = false;
 	} mesh_clod;
+	// HZB shared by CLOD and MultiMesh occlusion. _hzb_possible() is the cheap
+	// part of the conditions, known before culling; _setup_hzb() runs before the
+	// depth pre-pass and _build_hzb() after it (phase 1 with two passes).
+	bool _hzb_possible(const RenderDataRD *p_render_data, const RenderBufferDataForwardClustered *p_buffers) const;
+	bool _setup_hzb(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	void _build_hzb(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	// HZB occlusion of GPU-culled MultiMesh instances, for the opaque colour
+	// passes; the depth pre-pass keeps the frustum-culled instances.
+	bool _setup_multimesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	void _occlude_multimesh(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	// HZB occlusion of resident CLOD groups. Setup runs before the depth
+	// pre-pass; with two passes the split restricts the pre-pass to groups
+	// visible when last tested, and after the HZB test the recovered groups
+	// are drawn into depth before anything reads it.
+	bool _setup_mesh_clod_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	void _split_mesh_clod_occlusion(RenderBufferDataForwardClustered *p_buffers);
 	void _occlude_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	void _begin_geometry_statistics(RenderBufferDataForwardClustered *p_buffers);
 	void _end_geometry_statistics(RenderBufferDataForwardClustered *p_buffers);
@@ -334,6 +401,7 @@ protected:
 		MeshHizOccludeShaderRD occlude_shader;
 		RID occlude_version;
 		RID occlude_pipeline;
+		RID split_pipeline;
 	} mesh_hiz;
 
 	struct RenderListParameters;
@@ -400,6 +468,7 @@ protected:
 		bool use_material_feedback = false;
 		RID multimesh_cull_commands;
 		RID mesh_clod_commands;
+		bool mesh_clod_only = false; // Draw only CLOD elements (phase-2 depth of two-pass occlusion).
 
 		RenderListParameters(GeometryInstanceSurfaceDataCache **p_elements, RenderElementInfo *p_element_info, int p_element_count, bool p_reverse_cull, PassMode p_pass_mode, uint32_t p_color_pass_flags, bool p_no_gi, bool p_use_directional_soft_shadows, RID p_render_pass_uniform_set, bool p_force_wireframe = false, const Vector2 &p_uv_offset = Vector2(), float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, uint32_t p_view_count = 1, uint32_t p_element_offset = 0, SceneShaderForwardClustered::ShaderSpecialization p_base_specialization = {}, bool p_use_material_feedback = false) {
 			elements = p_elements;

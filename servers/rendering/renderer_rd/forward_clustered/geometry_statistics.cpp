@@ -52,7 +52,16 @@ enum GeometryStatisticsWord {
 	// Shadow-pass MultiMesh culling repeats the words above from here
 	// (tested, visible, and per-level visible at +8); words +2..+7 are unused.
 	STAT_SHADOW_BASE = STAT_MULTIMESH_LOD0_VISIBLE + 4,
-	STAT_WORD_COUNT = STAT_SHADOW_BASE + 12,
+	// Two-pass HZB occlusion: selected groups left out of the phase-1 depth
+	// pass (occluded when last tested), and those drawn again in phase 2.
+	STAT_HZB_GROUPS_DEFERRED = STAT_SHADOW_BASE + 12,
+	STAT_HZB_TRIANGLES_DEFERRED,
+	STAT_HZB_GROUPS_RECOVERED,
+	STAT_HZB_TRIANGLES_RECOVERED,
+	// MultiMesh HZB occlusion: frustum-visible instances left out of the
+	// colour passes.
+	STAT_HZB_INSTANCES_OCCLUDED,
+	STAT_WORD_COUNT,
 };
 static_assert(STAT_SHADOW_BASE == RenderForwardClustered::GEOMETRY_STATISTICS_SHADOW_OFFSET);
 static_assert(STAT_WORD_COUNT == RenderForwardClustered::GEOMETRY_STATISTICS_WORDS);
@@ -117,6 +126,11 @@ void RenderForwardClustered::_receive_geometry_statistics(const Vector<uint8_t> 
 	result["clod_triangles_visible"] = words[STAT_CLOD_TRIANGLES_VISIBLE];
 	result["hzb_groups_occluded"] = words[STAT_HZB_GROUPS_OCCLUDED];
 	result["hzb_triangles_occluded"] = words[STAT_HZB_TRIANGLES_OCCLUDED];
+	result["hzb_groups_deferred"] = words[STAT_HZB_GROUPS_DEFERRED];
+	result["hzb_triangles_deferred"] = words[STAT_HZB_TRIANGLES_DEFERRED];
+	result["hzb_groups_recovered"] = words[STAT_HZB_GROUPS_RECOVERED];
+	result["hzb_triangles_recovered"] = words[STAT_HZB_TRIANGLES_RECOVERED];
+	result["hzb_instances_occluded"] = words[STAT_HZB_INSTANCES_OCCLUDED];
 	result["shadow_multimesh_surfaces_culled"] = p_shadow_culled_surfaces;
 	result["shadow_multimesh_instances_tested"] = words[STAT_SHADOW_BASE + STAT_MULTIMESH_INSTANCES_TESTED];
 	result["shadow_multimesh_instances_visible"] = words[STAT_SHADOW_BASE + STAT_MULTIMESH_INSTANCES_VISIBLE];

@@ -57,6 +57,9 @@
 		<member name="mesh_library/use_node_names_as_mesh_names" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], the mesh names will be set to the names of the nodes in the 3D model file. If [code]false[/code], the mesh names will be set to the names of the meshes in the 3D model file. Enabling this is a common work-around when the author of the 3D model file did not properly set the mesh names in Blender or other 3D modeling apps. For example, a file may have a node named "Turret" with a mesh named "Cube.002", so enabling this option will set the mesh name to "Turret" instead of "Cube_002".
 		</member>
+		<member name="meshes/cluster_lod_page_files" type="bool" setter="" getter="" default="false">
+			If [code]true[/code] and [member meshes/generate_cluster_lods] is enabled, writes each cooked mesh's cluster indices to a page file next to the imported scene and keeps only the hierarchy roots' indices in the saved mesh (see [method MeshClusterData.save_pages] with [code]keep_indices[/code] set to [code]false[/code]). The page files are exported with the scene. With [member ProjectSettings.rendering/geometry/cluster_lod/streaming/enabled], the renderer reads the other groups from the page file on demand; without streaming it reads the whole file once when the mesh is set up.
+		</member>
 		<member name="meshes/create_shadow_meshes" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], enables the generation of shadow meshes on import. This optimizes shadow rendering without reducing quality by welding vertices together when possible. This in turn reduces the memory bandwidth required to render shadows. Shadow mesh generation currently doesn't support using a lower detail level than the source mesh (but shadow rendering will make use of LODs when relevant).
 		</member>

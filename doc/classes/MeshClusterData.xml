@@ -32,10 +32,16 @@
 				Returns the number of generated surface hierarchies.
 			</description>
 		</method>
+		<method name="are_indices_paged" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] if [method save_pages] was called with [code]keep_indices[/code] set to [code]false[/code]. The surface data then holds only the root groups' indices, concatenated in group order, plus [code]index_count[/code], the full index count; the other indices are only in the page file.
+			</description>
+		</method>
 		<method name="clear_pages">
 			<return type="void" />
 			<description>
-				Forgets the page file written by [method save_pages]. Streaming then keeps every group in system memory again. Does not delete the file.
+				Forgets the page file written by [method save_pages]. Streaming then keeps every group in system memory again. Does not delete the file. Fails if the indices are paged out (see [method are_indices_paged]), because the file is then their only copy.
 			</description>
 		</method>
 		<method name="get_page_file" qualifiers="const">
@@ -71,9 +77,10 @@
 		<method name="save_pages">
 			<return type="int" enum="Error" />
 			<param index="0" name="path" type="String" />
+			<param index="1" name="keep_indices" type="bool" default="true" />
 			<description>
 				Writes every surface's cluster indices to a page file at [param path] and records the file, its surface entry and a SHA-256 hash of the hierarchy in the surface data. With [member ProjectSettings.rendering/geometry/cluster_lod/streaming/enabled], the renderer then keeps only the root groups in system memory and reads the other groups from this file on worker threads when cluster selection asks for them. A missing file, or one whose hash does not match, is reported once and the mesh streams from memory instead. Indices read from the file are checked against the vertex count before upload; a group that fails stays unloaded and its ancestors draw instead.
-				The resource still holds all indices; saving it keeps the page file reference. Regenerating the hierarchy drops the reference.
+				With [param keep_indices] [code]true[/code], the resource still holds all indices; saving it keeps the page file reference. With [code]false[/code], it keeps only the root groups' indices, and the page file must ship with it: without streaming, the renderer reads the whole file once when the mesh is set up, and if the file is missing or does not match, the mesh draws without cluster LOD. Fails with [constant ERR_UNAVAILABLE] once the indices are paged out. Regenerating the hierarchy drops the reference.
 			</description>
 		</method>
 		<method name="select_clusters" qualifiers="const">

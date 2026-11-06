@@ -42,6 +42,9 @@ namespace MeshClusterDataFormat {
 // one PAGE_SURFACE_BYTES entry per surface (SHA-256 of the surface's indices,
 // groups and clusters; index count; reserved; byte offset of its indices),
 // then each surface's indices as uint32, in the record's group order.
+// A record whose indices are paged (save_pages() without keep_indices) has
+// "index_count", the full count, and holds only its root groups' indices,
+// concatenated in group order; cluster ranges still address the full layout.
 static constexpr uint32_t PAGE_MAGIC = 0x504c4347; // "GCLP"
 static constexpr uint32_t PAGE_VERSION = 1;
 static constexpr uint32_t PAGE_HEADER_BYTES = 12;
@@ -69,6 +72,10 @@ inline bool validate_surface(const Dictionary &p_surface) {
 								  PackedByteArray(p_surface["page_hash"]).size() != 32 || p_surface["page_surface"].get_type() != Variant::INT || int(p_surface["page_surface"]) < 0))) {
 		return false;
 	}
+	const bool paged = p_surface.has("index_count");
+	if (paged && (!page_file || p_surface["index_count"].get_type() != Variant::INT)) {
+		return false;
+	}
 	const PackedInt32Array groups = p_surface["groups"];
 	const PackedInt32Array clusters = p_surface["clusters"];
 	const PackedInt32Array indices = p_surface["indices"];
@@ -80,10 +87,11 @@ inline bool validate_surface(const Dictionary &p_surface) {
 	const int64_t group_count = groups.size() / 5;
 	const int64_t cluster_count = clusters.size() / 3;
 	const int vertex_count = p_surface["vertex_count"];
+	const int64_t index_count = paged ? int64_t(p_surface["index_count"]) : int64_t(indices.size());
 	const int triangle_limit = p_surface.get("cluster_triangles", 0);
 	if (groups.is_empty() || groups.size() % 5 || clusters.is_empty() || clusters.size() % 3 ||
 			bounds.size() != group_count * 2 || cluster_bounds.size() != cluster_count * 2 || errors.size() != group_count ||
-			indices.is_empty() || indices.size() % 3 || roots.is_empty() || triangle_limit < 4 || triangle_limit > 124 ||
+			indices.is_empty() || indices.size() % 3 || index_count < indices.size() || index_count % 3 || roots.is_empty() || triangle_limit < 4 || triangle_limit > 124 ||
 			group_count > (1 << 20) || cluster_count > (1 << 22)) {
 		return false;
 	}
@@ -117,17 +125,17 @@ inline bool validate_surface(const Dictionary &p_surface) {
 		const AABB expanded = box.grow(0.0001 * (1.0 + box.size.length()));
 		for (int64_t c = first; c < first + count; c++) {
 			const int64_t first_index = clusters[c * 3];
-			const int64_t index_count = clusters[c * 3 + 1];
+			const int64_t cluster_index_count = clusters[c * 3 + 1];
 			const AABB cluster_box(cluster_bounds[c * 2], cluster_bounds[c * 2 + 1]);
-			if (seen_clusters[c] || clusters[c * 3 + 2] != group || first_index != next_index || index_count <= 0 || index_count % 3 ||
-					index_count > triangle_limit * 3 || first_index + index_count > indices.size() || !cluster_box.is_finite() ||
+			if (seen_clusters[c] || clusters[c * 3 + 2] != group || first_index != next_index || cluster_index_count <= 0 || cluster_index_count % 3 ||
+					cluster_index_count > triangle_limit * 3 || first_index + cluster_index_count > index_count || !cluster_box.is_finite() ||
 					cluster_box.size.x < 0 || cluster_box.size.y < 0 || cluster_box.size.z < 0 || !expanded.encloses(cluster_box)) {
 				return false;
 			}
 			seen_clusters.write[c] = 1;
-			next_index += index_count;
+			next_index += cluster_index_count;
 			if (child_count == 0) {
-				leaf_indices += index_count;
+				leaf_indices += cluster_index_count;
 			}
 		}
 		for (int64_t c = first_child; c < first_child + child_count; c++) {
@@ -141,7 +149,7 @@ inline bool validate_surface(const Dictionary &p_surface) {
 		next_cluster += count;
 		next_child += child_count;
 	}
-	if (next_cluster != cluster_count || next_index != indices.size() || next_child != children.size() || leaf_indices != int64_t(p_surface["source_index_count"])) {
+	if (next_cluster != cluster_count || next_index != index_count || next_child != children.size() || leaf_indices != int64_t(p_surface["source_index_count"])) {
 		return false;
 	}
 	for (int root : roots) {
@@ -149,6 +157,18 @@ inline bool validate_surface(const Dictionary &p_surface) {
 			return false;
 		}
 		seen_roots.write[root] = 1;
+	}
+	if (paged) {
+		// Only the roots' indices are held; the rest are checked when read.
+		int64_t root_indices = 0;
+		for (int root : roots) {
+			const int64_t first = groups[root * 5];
+			const int64_t last = first + groups[root * 5 + 1] - 1;
+			root_indices += clusters[last * 3] + clusters[last * 3 + 1] - clusters[first * 3];
+		}
+		if (root_indices != indices.size()) {
+			return false;
+		}
 	}
 	for (int64_t i = 0; i < group_count; i++) {
 		if (bool(seen_roots[i]) == bool(seen_children[i])) {

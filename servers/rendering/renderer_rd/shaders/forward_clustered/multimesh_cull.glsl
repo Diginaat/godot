@@ -64,6 +64,26 @@ layout(set = 1, binding = 0, std430) readonly buffer Transforms {
 }
 transforms;
 #endif
+#ifdef MODE_OCCLUDE
+// HZB occlusion of the frustum-visible instances, for the opaque colour
+// passes only. Runs after the depth pre-pass; reads the frustum pass's ranks
+// (visibility and LOD level) and ranks again, so the scan and scatter modes
+// then compact the unoccluded instances into a second ID and command buffer.
+struct OcclusionData {
+	mat4 local_to_clip; // MultiMesh-local space to jittered clip space.
+	mat4 abs_to_clip; // abs(P) * abs(V) * abs(M), bounds the rounding of local_to_clip.
+	uvec4 params; // Actual depth width/height.
+};
+layout(set = 0, binding = 6, std430) readonly buffer OcclusionInputs {
+	OcclusionData data[];
+}
+occlusion;
+layout(set = 0, binding = 7) uniform sampler2D depth_pyramid;
+
+#include "mesh_hiz_inc.glsl"
+
+const uint STAT_HZB_INSTANCES_OCCLUDED = 28u;
+#endif
 layout(push_constant, std430) uniform Params {
 	uint draw_index;
 }
@@ -85,7 +105,7 @@ uint inclusive_scan(uint value) {
 	return scan_data[lane];
 }
 
-#if !defined(MODE_SCAN) && !defined(MODE_SCATTER)
+#if !defined(MODE_SCAN) && !defined(MODE_SCATTER) && !defined(MODE_OCCLUDE)
 // Stable per-instance value in [0, 1): an instance is either always kept or
 // always dropped at a given distance, so thinning never flickers.
 float thinning_hash(uint x) {
@@ -179,7 +199,7 @@ void main() {
 		}
 		if (lane == 0u) {
 			commands.data[(input_data.lod_params.z + level) * 5u + 1u] = carry;
-#ifdef GEOMETRY_STATISTICS
+#if defined(GEOMETRY_STATISTICS) && !defined(SCAN_NO_STATISTICS)
 			if (level == 0u) {
 				atomicAdd(statistics.data[input_data.lod_params.w], input_data.params.x);
 			}
@@ -202,7 +222,37 @@ void main() {
 #else
 	uint instance_id = gl_GlobalInvocationID.x;
 	uint level = 0u;
+#ifdef MODE_OCCLUDE
+	bool visible = false;
+	if (instance_id < input_data.params.x) {
+		uint frustum_rank = ranks.data[input_data.params.w + instance_id];
+		if ((frustum_rank & 0x80000000u) != 0u) {
+			level = (frustum_rank >> 24u) & 0x7fu;
+			// The instance box in MultiMesh-local space, as in is_visible().
+			uint offset = (instance_id + input_data.params.z) * input_data.params.y;
+			vec4 r0 = transforms.data[offset];
+			vec4 r1 = transforms.data[offset + 1u];
+			vec4 r2 = transforms.data[offset + 2u];
+			vec4 center = vec4(input_data.center.xyz, 1.0);
+			vec3 transformed_center = vec3(dot(r0, center), dot(r1, center), dot(r2, center));
+			vec3 extent = input_data.half_extents.xyz;
+			vec3 transformed_extent = vec3(dot(abs(r0.xyz), extent), dot(abs(r1.xyz), extent), dot(abs(r2.xyz), extent));
+			OcclusionData occlusion_data = occlusion.data[params.draw_index];
+			// Rounding bound: the CPU matrix bound times the largest local
+			// magnitude of the box, with a margin for the instance transform.
+			vec3 magnitude = abs(transformed_center) + transformed_extent + 1.0;
+			vec4 error = (occlusion_data.abs_to_clip * vec4(magnitude, 1.0)) * (128.0 * 1.1920929e-7);
+			visible = !hzb_box_occluded(transformed_center - transformed_extent, transformed_extent * 2.0, occlusion_data.local_to_clip, error, ivec2(occlusion_data.params.xy));
+#ifdef GEOMETRY_STATISTICS
+			if (!visible) {
+				atomicAdd(statistics.data[STAT_HZB_INSTANCES_OCCLUDED], 1u);
+			}
+#endif
+		}
+	}
+#else
 	bool visible = instance_id < input_data.params.x && is_visible(input_data, instance_id, level);
+#endif
 	// One byte per level: 64 lanes never overflow a byte, so a single scan
 	// ranks all four buckets at once and keeps source order inside each.
 	uint prefix = inclusive_scan(visible ? (1u << (8u * level)) : 0u);

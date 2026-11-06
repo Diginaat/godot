@@ -106,9 +106,10 @@ PackedByteArray MeshClusterData::_page_hash(const Dictionary &p_surface) {
 	return hash;
 }
 
-Error MeshClusterData::save_pages(const String &p_path) {
+Error MeshClusterData::save_pages(const String &p_path, bool p_keep_indices) {
 	ERR_FAIL_COND_V_MSG(data.is_empty(), ERR_UNCONFIGURED, "No cluster hierarchy to page.");
 	ERR_FAIL_COND_V(p_path.is_empty(), ERR_INVALID_PARAMETER);
+	ERR_FAIL_COND_V_MSG(are_indices_paged(), ERR_UNAVAILABLE, "Cluster indices are already paged out; generate the hierarchy again to write another page file.");
 	Vector<PackedByteArray> hashes;
 	uint64_t offset = MeshClusterDataFormat::PAGE_HEADER_BYTES + uint64_t(data.size()) * MeshClusterDataFormat::PAGE_SURFACE_BYTES;
 	Error error = OK;
@@ -145,12 +146,39 @@ Error MeshClusterData::save_pages(const String &p_path) {
 		record["page_file"] = p_path;
 		record["page_hash"] = hashes[surface];
 		record["page_surface"] = surface;
+		if (!p_keep_indices) {
+			// Keep only the roots: renderers need them to draw a complete cut
+			// before any page is read.
+			const PackedInt32Array indices = record["indices"];
+			const PackedInt32Array groups = record["groups"];
+			const PackedInt32Array clusters = record["clusters"];
+			const PackedInt32Array roots = record["roots"];
+			Vector<int> sorted_roots;
+			for (int root : roots) {
+				sorted_roots.push_back(root);
+			}
+			sorted_roots.sort();
+			PackedInt32Array root_indices;
+			for (int root : sorted_roots) {
+				const int first = groups[root * 5];
+				const int last = first + groups[root * 5 + 1] - 1;
+				const int begin = clusters[first * 3];
+				root_indices.append_array(indices.slice(begin, clusters[last * 3] + clusters[last * 3 + 1]));
+			}
+			record["index_count"] = indices.size();
+			record["indices"] = root_indices;
+		}
 	}
 	emit_changed();
 	return OK;
 }
 
+bool MeshClusterData::are_indices_paged() const {
+	return !data.is_empty() && Dictionary(data[0]).has("index_count");
+}
+
 void MeshClusterData::clear_pages() {
+	ERR_FAIL_COND_MSG(are_indices_paged(), "Cluster indices are paged out; the page file is their only copy.");
 	bool changed = false;
 	for (int surface = 0; surface < data.size(); surface++) {
 		Dictionary record = data[surface];
@@ -272,7 +300,8 @@ void MeshClusterData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_surface_data", "surface"), &MeshClusterData::get_surface_data);
 	ClassDB::bind_method(D_METHOD("get_residency_state", "surface", "resident_groups"), &MeshClusterData::get_residency_state);
 	ClassDB::bind_method(D_METHOD("select_clusters", "surface", "camera_position", "projection_scale", "error_pixels"), &MeshClusterData::select_clusters);
-	ClassDB::bind_method(D_METHOD("save_pages", "path"), &MeshClusterData::save_pages);
+	ClassDB::bind_method(D_METHOD("save_pages", "path", "keep_indices"), &MeshClusterData::save_pages, DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("are_indices_paged"), &MeshClusterData::are_indices_paged);
 	ClassDB::bind_method(D_METHOD("clear_pages"), &MeshClusterData::clear_pages);
 	ClassDB::bind_method(D_METHOD("get_page_file"), &MeshClusterData::get_page_file);
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "data", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_INTERNAL), "_set_data", "get_data");

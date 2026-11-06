@@ -321,6 +321,7 @@ private:
 	uint64_t _cluster_streaming_keep_after() const;
 	static bool _cluster_page_file_check(const String &p_path, int p_surface, const PackedByteArray &p_hash, uint32_t p_index_count, uint64_t &r_offset);
 	static void _cluster_page_batch_read(void *p_batch);
+	static bool _cluster_page_file_read_all(const Dictionary &p_record, PackedInt32Array &r_indices);
 	void _cluster_page_batches_finish(bool p_wait);
 	void _cluster_streaming_unload(Mesh::Surface *p_surface, uint32_t p_group);
 	void _cluster_streaming_upload_table(Mesh::Surface *p_surface);

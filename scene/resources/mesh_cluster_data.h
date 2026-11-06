@@ -57,7 +57,8 @@ public:
 	Dictionary get_surface_data(int p_surface) const;
 	Dictionary get_residency_state(int p_surface, const PackedByteArray &p_resident_groups) const;
 	PackedInt32Array select_clusters(int p_surface, const Vector3 &p_camera_position, float p_projection_scale, float p_error_pixels) const;
-	Error save_pages(const String &p_path);
+	Error save_pages(const String &p_path, bool p_keep_indices = true);
+	bool are_indices_paged() const;
 	void clear_pages();
 	String get_page_file() const;
 };

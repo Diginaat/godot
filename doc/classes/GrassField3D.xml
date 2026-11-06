@@ -54,6 +54,9 @@
 		<member name="density_grid" type="PackedFloat32Array" setter="set_density_grid" getter="get_density_grid" default="PackedFloat32Array()">
 			Optional density in [code][0, 1][/code] per grid point, row by row along X ([code]grid_size.x * grid_size.y[/code] values). Scales the number of blades in each patch. When the height or density grid is set, patches outside the grid produce no blades.
 		</member>
+		<member name="edge_dither" type="bool" setter="set_edge_dither" getter="is_edge_dither_enabled" default="false">
+			If [code]true[/code], the outer fade band (see [member fade_fraction]) and the inner fade band (see [member inner_fade]) drop individual blades by a per-blade hash instead of lowering the number of blades per patch. Two fields with the same [member seed], [member patch_size], [member blades_per_patch] and grids place the same blades; if one field's outer band matches the other's inner band ([member inner_radius] equal to [member radius], [member inner_fade] equal to [member radius] times [member fade_fraction]), every blade is drawn by exactly one of them. This builds level of detail rings: a detailed [member blade_mesh] near the camera and a cheap one further out.
+		</member>
 		<member name="fade_fraction" type="float" setter="set_fade_fraction" getter="get_fade_fraction" default="0.4">
 			Outer fraction of [member radius] over which the number of blades falls linearly to zero.
 		</member>
@@ -68,6 +71,12 @@
 		</member>
 		<member name="height_grid" type="PackedFloat32Array" setter="set_height_grid" getter="get_height_grid" default="PackedFloat32Array()">
 			Optional ground height per grid point, row by row along X ([code]grid_size.x * grid_size.y[/code] values). Without it, blades stand on the plane [code]y = 0[/code].
+		</member>
+		<member name="inner_fade" type="float" setter="set_inner_fade" getter="get_inner_fade" default="0.0">
+			Width of the band inside [member inner_radius] over which blades fade in. Without [member edge_dither], blades in the band are not dropped one by one; only patches completely inside the band's start are skipped.
+		</member>
+		<member name="inner_radius" type="float" setter="set_inner_radius" getter="get_inner_radius" default="0.0">
+			Distance from the camera, on the X and Z axes, inside which no blades are generated. [code]0.0[/code] disables the inner edge. Blades between [member inner_radius] minus [member inner_fade] and [member inner_radius] fade in (see [member edge_dither]).
 		</member>
 		<member name="max_blades" type="int" setter="set_max_blades" getter="get_max_blades" default="262144">
 			Capacity of the blade buffer, which takes 64 bytes per blade. Patches beyond the capacity in a frame are dropped; lower [member radius] or [member blades_per_patch] if [method get_generated_blade_count] reaches it.

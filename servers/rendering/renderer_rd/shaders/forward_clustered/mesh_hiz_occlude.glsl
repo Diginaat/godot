@@ -20,6 +20,7 @@ struct Input {
 	mat4 local_to_clip;
 	vec4 clip_error; // Conservative float-operation bound, including world-coordinate cancellation.
 	uvec4 params; // Group count, command offset in words, actual depth width/height.
+	uvec4 history; // First history word of the surface.
 };
 layout(set = 0, binding = 1, std430) readonly buffer Inputs {
 	Input data[];
@@ -31,7 +32,9 @@ layout(set = 0, binding = 2, std430) buffer Commands {
 }
 commands;
 
+#ifndef MODE_SPLIT
 layout(set = 0, binding = 3) uniform sampler2D depth_pyramid;
+#endif
 
 #ifdef GEOMETRY_STATISTICS
 // Viewport counters (word layout in geometry_statistics.cpp), read back
@@ -42,10 +45,44 @@ layout(set = 0, binding = 4, std430) buffer Statistics {
 statistics;
 #endif
 
+// One word per group and viewport: nonzero if the group was occluded the last
+// time it was tested. Only a scheduling hint: a wrong value can cost a phase-2
+// draw, never a missing group.
+layout(set = 0, binding = 5, std430) buffer History {
+	uint data[];
+}
+history;
+
+// MODE_SPLIT: the phase-1 depth commands. Otherwise: the phase-2 depth commands
+// (groups occluded last frame that are visible now).
+layout(set = 0, binding = 6, std430) buffer PassCommands {
+	uint data[];
+}
+pass_commands;
+
 layout(push_constant, std430) uniform Params {
 	uint draw_index;
+	uint two_pass;
+	uint pad0;
+	uint pad1;
 }
 params;
+
+// Word layout of the statistics buffer (see geometry_statistics.cpp).
+const uint STAT_HZB_GROUPS_OCCLUDED = 6u;
+const uint STAT_HZB_TRIANGLES_OCCLUDED = 7u;
+const uint STAT_HZB_GROUPS_DEFERRED = 24u;
+const uint STAT_HZB_TRIANGLES_DEFERRED = 25u;
+const uint STAT_HZB_GROUPS_RECOVERED = 26u;
+const uint STAT_HZB_TRIANGLES_RECOVERED = 27u;
+
+#ifndef MODE_SPLIT
+#include "mesh_hiz_inc.glsl"
+
+bool is_occluded(Input input_data, Group group) {
+	return hzb_box_occluded(group.position_error.xyz, group.size.xyz, input_data.local_to_clip, input_data.clip_error, ivec2(input_data.params.zw));
+}
+#endif
 
 void main() {
 	Input input_data = inputs.data[params.draw_index];
@@ -54,64 +91,51 @@ void main() {
 		return;
 	}
 	uint command = input_data.params.y + id * 5u;
-	if (commands.data[command + 1u] == 0u) {
+	uint history_word = input_data.history.x + id;
+	bool selected = commands.data[command + 1u] != 0u;
+
+#ifdef MODE_SPLIT
+	// Phase 1 draws the selected groups that were visible when last tested.
+	for (uint i = 0u; i < 5u; i++) {
+		pass_commands.data[command + i] = commands.data[command + i];
+	}
+	if (selected && history.data[history_word] != 0u) {
+		pass_commands.data[command + 1u] = 0u;
+#ifdef GEOMETRY_STATISTICS
+		atomicAdd(statistics.data[STAT_HZB_GROUPS_DEFERRED], 1u);
+		atomicAdd(statistics.data[STAT_HZB_TRIANGLES_DEFERRED], groups.data[id].draw.y / 3u);
+#endif
+	}
+#else
+	bool deferred = params.two_pass != 0u && history.data[history_word] != 0u;
+	if (params.two_pass != 0u) {
+		for (uint i = 0u; i < 5u; i++) {
+			pass_commands.data[command + i] = commands.data[command + i];
+		}
+		pass_commands.data[command + 1u] = 0u;
+	}
+	if (!selected) {
 		return;
 	}
 	Group group = groups.data[id];
-	vec2 uv_min = vec2(1.0);
-	vec2 uv_max = vec2(0.0);
-	float nearest_depth = 0.0;
-	vec4 error = input_data.clip_error;
-	if (any(isnan(error)) || any(isinf(error))) {
-		return;
-	}
-	for (uint corner = 0u; corner < 8u; corner++) {
-		vec3 point = group.position_error.xyz + group.size.xyz * vec3(float(corner & 1u), float((corner >> 1u) & 1u), float((corner >> 2u) & 1u));
-		vec4 clip = input_data.local_to_clip * vec4(point, 1.0);
-		if (any(isnan(clip)) || any(isinf(clip)) || clip.w - error.w <= 0.0001) {
-			return;
-		}
-		vec3 a = (clip.xyz - error.xyz) / (clip.w - error.w);
-		vec3 b = (clip.xyz - error.xyz) / (clip.w + error.w);
-		vec3 c = (clip.xyz + error.xyz) / (clip.w - error.w);
-		vec3 d = (clip.xyz + error.xyz) / (clip.w + error.w);
-		if (any(isnan(a)) || any(isinf(a)) || any(isnan(b)) || any(isinf(b)) || any(isnan(c)) || any(isinf(c)) || any(isnan(d)) || any(isinf(d))) {
-			return;
-		}
-		vec3 ndc_min = min(min(a, b), min(c, d));
-		vec3 ndc_max = max(max(a, b), max(c, d));
-		// Clipped/near-plane-crossing bounds must remain visible. No corner-only
-		// projection is trusted for a box crossing the eye or near/far clip plane.
-		if (ndc_min.z < 0.0 || ndc_max.z > 1.0) {
-			return;
-		}
-		uv_min = min(uv_min, ndc_min.xy * 0.5 + 0.5);
-		uv_max = max(uv_max, ndc_max.xy * 0.5 + 0.5);
-		nearest_depth = max(nearest_depth, ndc_max.z);
-	}
-	if (any(lessThan(uv_min, vec2(0.0))) || any(greaterThan(uv_max, vec2(1.0)))) {
-		return;
-	}
-	ivec2 size = ivec2(input_data.params.zw);
-	ivec2 first = max(ivec2(floor(uv_min * vec2(size))) - 1, ivec2(0));
-	ivec2 last = min(ivec2(ceil(uv_max * vec2(size))) + 1, size - 1);
-	int level = 0;
-	while (any(greaterThan((last >> level) - (first >> level), ivec2(1)))) {
-		level++;
-	}
-	ivec2 low = first >> level;
-	ivec2 high = last >> level;
-	float farthest_occluder = 1.0;
-	for (int y = low.y; y <= high.y; y++) {
-		for (int x = low.x; x <= high.x; x++) {
-			farthest_occluder = min(farthest_occluder, texelFetch(depth_pyramid, ivec2(x, y), level).r);
-		}
-	}
-	if (nearest_depth + 0.00001 < farthest_occluder) {
+	if (is_occluded(input_data, group)) {
 		commands.data[command + 1u] = 0u;
+		history.data[history_word] = 1u;
 #ifdef GEOMETRY_STATISTICS
-		atomicAdd(statistics.data[6], 1u);
-		atomicAdd(statistics.data[7], group.draw.y / 3u);
+		atomicAdd(statistics.data[STAT_HZB_GROUPS_OCCLUDED], 1u);
+		atomicAdd(statistics.data[STAT_HZB_TRIANGLES_OCCLUDED], group.draw.y / 3u);
+#endif
+		return;
+	}
+	history.data[history_word] = 0u;
+	if (deferred) {
+		// Occluded last frame, visible against this frame's phase-1 depth:
+		// drawn into depth before anything reads it.
+		pass_commands.data[command + 1u] = commands.data[command + 1u];
+#ifdef GEOMETRY_STATISTICS
+		atomicAdd(statistics.data[STAT_HZB_GROUPS_RECOVERED], 1u);
+		atomicAdd(statistics.data[STAT_HZB_TRIANGLES_RECOVERED], group.draw.y / 3u);
 #endif
 	}
+#endif
 }

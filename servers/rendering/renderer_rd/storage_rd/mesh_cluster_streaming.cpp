@@ -214,6 +214,32 @@ bool MeshStorage::_cluster_page_file_check(const String &p_path, int p_surface, 
 	return true;
 }
 
+bool MeshStorage::_cluster_page_file_read_all(const Dictionary &p_record, PackedInt32Array &r_indices) {
+	// Render thread, once per setup: paged-out records drawn without streaming.
+	const String path = p_record["page_file"];
+	const uint32_t count = int(p_record["index_count"]);
+	uint64_t offset = 0;
+	Ref<FileAccess> file;
+	if (_cluster_page_file_check(path, p_record["page_surface"], p_record["page_hash"], count, offset)) {
+		file = FileAccess::open(path, FileAccess::READ);
+	}
+	bool valid = file.is_valid();
+	if (valid) {
+		file->seek(offset);
+		r_indices.resize(count);
+		const uint64_t bytes = uint64_t(count) * sizeof(uint32_t);
+		valid = file->get_buffer(reinterpret_cast<uint8_t *>(r_indices.ptrw()), bytes) == bytes;
+		const uint32_t vertex_count = int(p_record["vertex_count"]);
+		for (uint32_t i = 0; valid && i < count; i++) {
+			valid = uint32_t(r_indices[i]) < vertex_count;
+		}
+	}
+	if (!valid) {
+		WARN_PRINT(vformat("Cluster LOD page file \"%s\" is missing, damaged or does not match its mesh, and the mesh holds only its root indices; it draws without cluster LOD.", path));
+	}
+	return valid;
+}
+
 void MeshStorage::_cluster_page_batch_read(void *p_batch) {
 	// Worker thread: touches only its own batch until the render thread waits for it.
 	ClusterStreamingPool::PageBatch *batch = static_cast<ClusterStreamingPool::PageBatch *>(p_batch);
@@ -333,9 +359,12 @@ bool MeshStorage::_cluster_streaming_setup(Mesh::Surface *p_surface, const Dicti
 	const PackedInt32Array children = p_record["children"];
 	const PackedInt32Array roots = p_record["roots"];
 	const uint32_t group_count = groups.size() / 5;
+	// Paged-out records hold only the roots' indices, in group order.
+	const bool paged = p_record.has("index_count");
+	const uint32_t total_indices = paged ? uint32_t(int(p_record["index_count"])) : uint32_t(indices.size());
 	ClusterStreaming *streaming = memnew(ClusterStreaming);
 	streaming->id = cluster_pool.next_surface_id++;
-	streaming->total_indices = indices.size();
+	streaming->total_indices = total_indices;
 	streaming->vertex_count = int(p_record["vertex_count"]);
 	streaming->first_index.resize(group_count);
 	streaming->index_count.resize(group_count);
@@ -364,8 +393,12 @@ bool MeshStorage::_cluster_streaming_setup(Mesh::Surface *p_surface, const Dicti
 	}
 	if (p_record.has("page_file")) {
 		const String path = p_record["page_file"];
-		if (_cluster_page_file_check(path, p_record["page_surface"], p_record["page_hash"], indices.size(), streaming->page_offset)) {
+		if (_cluster_page_file_check(path, p_record["page_surface"], p_record["page_hash"], total_indices, streaming->page_offset)) {
 			streaming->page_file = path;
+		} else if (paged) {
+			// The resident fallback reads the file again and reports it.
+			memdelete(streaming);
+			return false;
 		} else {
 			WARN_PRINT(vformat("Cluster LOD page file \"%s\" is missing or does not match its mesh; streaming the mesh from memory.", path));
 		}
@@ -382,9 +415,12 @@ bool MeshStorage::_cluster_streaming_setup(Mesh::Surface *p_surface, const Dicti
 	}
 	streaming->indices.resize(held);
 	uint32_t *held_indices = streaming->indices.ptrw();
+	uint32_t paged_offset = 0;
 	for (uint32_t group = 0; group < group_count; group++) {
 		if (streaming->memory_offset[group] != UINT32_MAX) {
-			memcpy(held_indices + streaming->memory_offset[group], indices.ptr() + streaming->first_index[group], streaming->index_count[group] * sizeof(uint32_t));
+			const int32_t *source = indices.ptr() + (paged ? paged_offset : streaming->first_index[group]);
+			memcpy(held_indices + streaming->memory_offset[group], source, streaming->index_count[group] * sizeof(uint32_t));
+			paged_offset += streaming->index_count[group];
 		}
 	}
 	streaming->residency = rd->storage_buffer_create((group_count + 1) * 4 * sizeof(uint32_t));

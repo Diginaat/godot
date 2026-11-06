@@ -55,6 +55,7 @@ void RenderForwardClustered::_prepare_multimesh_culling(const RenderDataRD *p_re
 		return;
 	}
 	p_buffers->multimesh_cull.active = false;
+	p_buffers->multimesh_cull.occlusion_ready = false;
 	// Preserve conventional reflection and multiview semantics until those
 	// configurations have dedicated culling tests.
 	if (!_multimesh_culling_available(p_buffers) || p_render_data->reflection_probe.is_valid() || p_render_data->scene_data->view_count != 1 ||
@@ -68,6 +69,7 @@ void RenderForwardClustered::_prepare_multimesh_culling(const RenderDataRD *p_re
 	view.lod_allowed = view.lod_threshold > 0.0f && !p_render_data->scene_data->cam_orthogonal;
 	view.lod_camera = p_render_data->scene_data->main_cam_transform.origin;
 	view.statistics_offset = 0;
+	view.keep_fully_inside = bool(GLOBAL_GET("rendering/geometry/multimesh_gpu_culling/occlusion")) && _hzb_possible(p_render_data, p_buffers);
 	MultiMeshCullBatch &batch = multimesh_cull_batch;
 	batch.clear();
 	for (RenderListType list_type : { RENDER_LIST_OPAQUE, RENDER_LIST_MOTION }) {
@@ -191,8 +193,9 @@ void RenderForwardClustered::_collect_multimesh_culling(RenderListType p_list, u
 		// an instance: keep the direct draw and skip three dispatches. A wrong or
 		// too small custom AABB only draws everything (source behavior), never
 		// removes geometry; a non-finite bound keeps the GPU culling path.
-		// Surfaces spanning several LODs still need the dispatch to choose levels.
-		bool fully_inside = levels == 1 && !thinning;
+		// Surfaces spanning several LODs still need the dispatch to choose levels,
+		// and HZB occlusion needs it to test the instances.
+		bool fully_inside = levels == 1 && !thinning && !p_view.keep_fully_inside;
 		for (const Plane &plane : p_view.planes) {
 			if (!fully_inside) {
 				break;
@@ -259,6 +262,7 @@ void RenderForwardClustered::_collect_multimesh_culling(RenderListType p_list, u
 		r_batch.transforms.push_back(source);
 		r_batch.elements.push_back(&list.element_info[i]);
 		r_batch.last_lods.push_back(last_lod);
+		r_batch.node_transforms.push_back(instance->transform);
 		// One five-word indexed command per level; the kernel writes instance counts.
 		for (uint32_t level = 0; level < levels; level++) {
 			const uint32_t lod = _multimesh_lod_for_bucket(level, first_lod, last_lod);
@@ -312,9 +316,11 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 		modes.push_back("");
 		modes.push_back("\n#define MODE_SCAN\n");
 		modes.push_back("\n#define MODE_SCATTER\n");
+		modes.push_back("\n#define MODE_OCCLUDE\n");
+		modes.push_back("\n#define MODE_SCAN\n#define SCAN_NO_STATISTICS\n");
 		multimesh_cull.shader.initialize(modes, "\n#define GEOMETRY_STATISTICS\n");
 		multimesh_cull.version = multimesh_cull.shader.version_create();
-		for (uint32_t mode = 0; mode < 3; mode++) {
+		for (uint32_t mode = 0; mode < 5; mode++) {
 			multimesh_cull.pipelines[mode] = rd->compute_pipeline_create(multimesh_cull.shader.version_get_shader(multimesh_cull.version, mode));
 		}
 	}
@@ -365,6 +371,11 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 		element->multimesh_visible_ids_offset = p_batch.inputs[draw].ids_offset;
 		element->multimesh_cull_lod = (p_batch.inputs[draw].lod_levels << 24) | p_batch.inputs[draw].lod_stride;
 		element->multimesh_cull_last_lod = p_batch.last_lods[draw];
+	}
+	r_buffers.command_words = p_batch.commands;
+	r_buffers.draws.resize(draw_count);
+	for (uint32_t draw = 0; draw < draw_count; draw++) {
+		r_buffers.draws[draw] = { p_batch.transforms[draw], p_batch.inputs[draw].count, p_batch.node_transforms[draw] };
 	}
 	r_buffers.active = true;
 	return true;

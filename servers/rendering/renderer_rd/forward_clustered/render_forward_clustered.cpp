@@ -123,19 +123,20 @@ bool RenderForwardClustered::RenderBufferDataForwardClustered::ensure_mfx_tempor
 
 void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 	for (MultiMeshCullBuffers *cull : { &multimesh_cull, &multimesh_shadow_cull }) {
-		for (RID resource : { cull->visible_ids, cull->commands, cull->inputs, cull->ranks, cull->blocks }) {
+		for (RID resource : { cull->visible_ids, cull->commands, cull->inputs, cull->ranks, cull->blocks, cull->occluded_ids, cull->occluded_commands, cull->occlusion_inputs }) {
 			if (resource.is_valid()) {
 				RD::get_singleton()->free_rid(resource);
 			}
 		}
 		*cull = {};
 	}
-	for (RID resource : { mesh_clod.commands, mesh_clod.inputs, mesh_clod.occlusion_inputs }) {
+	for (RID resource : { mesh_clod.commands, mesh_clod.inputs, mesh_clod.occlusion_inputs, mesh_clod.depth_commands, mesh_clod.phase2_commands, mesh_clod.history }) {
 		if (resource.is_valid()) {
 			RD::get_singleton()->free_rid(resource);
 		}
 	}
 	mesh_clod = {};
+	hzb = {};
 	if (geometry_statistics.buffer.is_valid()) {
 		RD::get_singleton()->free_rid(geometry_statistics.buffer);
 	}
@@ -385,6 +386,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		const GeometryInstanceSurfaceDataCache *surf = p_params->elements[i];
 		const RenderElementInfo &element_info = p_params->element_info[i];
 		const bool use_clod = p_params->mesh_clod_commands.is_valid() && element_info.mesh_clod_offset != UINT32_MAX;
+		if (p_params->mesh_clod_only && !use_clod) {
+			continue;
+		}
 
 		if (p_pass_mode == PASS_MODE_COLOR && surf->color_pass_inclusion_mask && (p_color_pass_flags & surf->color_pass_inclusion_mask) == 0) {
 			// Some surfaces can be repeated in multiple render lists. We exclude them from being rendered on the color pass based on the
@@ -2430,6 +2434,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		multimesh_visible_ids = rb_data->multimesh_cull.visible_ids;
 		multimesh_cull_commands = rb_data->multimesh_cull.commands;
 	}
+	const bool gpu_geometry_timestamps = mesh_clod_commands.is_valid() || multimesh_cull_commands.is_valid();
 
 	RD::get_singleton()->draw_command_end_label();
 
@@ -2655,11 +2660,54 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_visible_ids);
 
+		// HZB occlusion: with two passes the pre-pass draws only CLOD groups
+		// that were visible when last tested. MultiMesh instances are tested
+		// after the pre-pass and removed from the colour passes only.
+		const bool hzb_wanted = rb_data.is_valid() && ((mesh_clod_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_enabled"))) || (multimesh_cull_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/multimesh_gpu_culling/occlusion"))));
+		const bool hzb = hzb_wanted && _setup_hzb(p_render_data, rb_data.ptr());
+		const bool clod_occlusion = hzb && mesh_clod_commands.is_valid() && _setup_mesh_clod_occlusion(p_render_data, rb_data.ptr());
+		const bool multimesh_occlusion = hzb && multimesh_cull_commands.is_valid() && _setup_multimesh_occlusion(p_render_data, rb_data.ptr());
+		const bool clod_two_pass = clod_occlusion && rb_data->mesh_clod.two_pass;
+		// Always-on stage timestamps while a GPU geometry path is active, for
+		// benchmarks (RENDER_TIMESTAMP needs the profiler).
+		if (gpu_geometry_timestamps) {
+			RD::get_singleton()->capture_timestamp("GPU Geometry Depth Pre-Pass");
+		}
+		if (clod_two_pass) {
+			_split_mesh_clod_occlusion(rb_data.ptr());
+		}
+
 		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || using_planar || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 		render_list_params.multimesh_cull_commands = multimesh_cull_commands;
-		render_list_params.mesh_clod_commands = mesh_clod_commands;
+		render_list_params.mesh_clod_commands = clod_two_pass ? rb_data->mesh_clod.depth_commands : mesh_clod_commands;
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
+
+		if (clod_occlusion || multimesh_occlusion) {
+			// HZB from the phase-1 depth; the test clears occluded groups' opaque
+			// commands. Phase 2 adds the recovered groups to depth (and normals).
+			_build_hzb(p_render_data, rb_data.ptr());
+			if (clod_occlusion) {
+				_occlude_mesh_clod(p_render_data, rb_data.ptr());
+			}
+			if (clod_two_pass) {
+				RENDER_TIMESTAMP("Render Mesh CLOD Phase 2 Depth");
+				RD::get_singleton()->capture_timestamp("Mesh CLOD Phase 2 Depth");
+				render_list_params.mesh_clod_commands = rb_data->mesh_clod.phase2_commands;
+				render_list_params.mesh_clod_only = true;
+				_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DRAW_DEFAULT_ALL, depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
+			}
+			if (multimesh_occlusion) {
+				// Phase-1 depth is a subset of the final depth, so anything behind
+				// it stays hidden. Opaque and motion passes use the occluded lists.
+				_occlude_multimesh(p_render_data, rb_data.ptr());
+				multimesh_cull_commands = rb_data->multimesh_cull.occluded_commands;
+				multimesh_visible_ids = rb_data->multimesh_cull.occluded_ids;
+			}
+		}
+		if (gpu_geometry_timestamps) {
+			RD::get_singleton()->capture_timestamp("GPU Geometry Depth Pre-Pass End");
+		}
 
 		RD::get_singleton()->draw_command_end_label();
 
@@ -2712,9 +2760,6 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	ddgi_active_this_frame = using_ddgi;
 	_pre_opaque_render(p_render_data, using_ssao, using_ssil, using_ssr, using_sscs, using_sdfgi || using_voxelgi || using_ddgi, normal_roughness_views, voxel_gi_views);
 	ddgi_active_this_frame = false;
-	if (depth_pre_pass && rb_data.is_valid()) {
-		_occlude_mesh_clod(p_render_data, rb_data.ptr());
-	}
 	if (rb_data.is_valid()) {
 		_end_geometry_statistics(rb_data.ptr());
 	}
@@ -2735,7 +2780,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	uint32_t opaque_pass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, true, using_motion_pass);
 
-	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true);
+	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true, multimesh_visible_ids);
 
 	{
 		bool render_motion_pass = !render_list[RENDER_LIST_MOTION].elements.is_empty();
@@ -2760,7 +2805,13 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, PASS_MODE_COLOR, opaque_color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 			render_list_params.multimesh_cull_commands = multimesh_cull_commands;
 			render_list_params.mesh_clod_commands = mesh_clod_commands;
+			if (gpu_geometry_timestamps) {
+				RD::get_singleton()->capture_timestamp("GPU Geometry Opaque Pass");
+			}
 			_render_list_with_draw_list(&render_list_params, opaque_framebuffer, RD::DrawFlags(load_color ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_COLOR_ALL) | (depth_pre_pass ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_DEPTH), c, 0.0f, 0u, p_render_data->render_region);
+			if (gpu_geometry_timestamps) {
+				RD::get_singleton()->capture_timestamp("GPU Geometry Opaque Pass End");
+			}
 		}
 
 		RD::get_singleton()->draw_command_end_label();
@@ -2783,7 +2834,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 			RENDER_TIMESTAMP("Render Motion Pass");
 
-			rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_MOTION, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true);
+			rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_MOTION, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true, multimesh_visible_ids);
 
 			RenderListParameters render_list_params(render_list[RENDER_LIST_MOTION].elements.ptr(), render_list[RENDER_LIST_MOTION].element_info.ptr(), render_list[RENDER_LIST_MOTION].elements.size(), reverse_cull, PASS_MODE_COLOR, color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 			render_list_params.multimesh_cull_commands = multimesh_cull_commands;
@@ -5766,8 +5817,10 @@ void RenderForwardClustered::_update_shader_quality_settings() {
 RenderForwardClustered::RenderForwardClustered() {
 	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/enabled", false);
 	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/shadows", false);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/occlusion", false);
 	GLOBAL_DEF("rendering/geometry/cluster_lod/enabled", false);
 	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_enabled", false);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_two_pass", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/error_pixels", PROPERTY_HINT_RANGE, "0,64,0.1,or_greater"), 1.0);
 	singleton = this;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);

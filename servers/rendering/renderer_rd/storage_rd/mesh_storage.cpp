@@ -961,8 +961,8 @@ void MeshStorage::mesh_set_cluster_data(RID p_mesh, const Array &p_data) {
 		const Mesh::Surface *source = mesh->surfaces[surface];
 		ERR_FAIL_COND(int(record["vertex_count"]) != source->vertex_count || int(record["source_index_count"]) != (source->index_count ? source->index_count : source->vertex_count));
 		const PackedInt32Array groups = record["groups"];
-		const PackedInt32Array indices = record["indices"];
-		total_bytes += uint64_t(indices.size()) * sizeof(uint32_t) + uint64_t(groups.size() / 5) * 48;
+		const uint64_t index_count = record.has("index_count") ? uint64_t(int(record["index_count"])) : uint64_t(PackedInt32Array(record["indices"]).size());
+		total_bytes += index_count * sizeof(uint32_t) + uint64_t(groups.size() / 5) * 48;
 		// Initial resident raster is intentionally budgeted. Unsupported content
 		// keeps native source submission, never a partial or missing hierarchy.
 		if (mesh->blend_shape_count || source->skin_buffer.is_valid() || source->primitive != RSE::PRIMITIVE_TRIANGLES || groups.size() / 5 > 4096 || total_bytes > 64 * 1024 * 1024) {
@@ -983,7 +983,7 @@ void MeshStorage::mesh_set_cluster_data(RID p_mesh, const Array &p_data) {
 		const Dictionary record = p_data[surface];
 		const PackedInt32Array groups = record["groups"];
 		const PackedInt32Array clusters = record["clusters"];
-		const PackedInt32Array indices = record["indices"];
+		PackedInt32Array indices = record["indices"];
 		const PackedVector3Array bounds = record["bounds"];
 		const PackedFloat32Array errors = record["errors"];
 		Vector<Group> gpu_groups;
@@ -1006,13 +1006,16 @@ void MeshStorage::mesh_set_cluster_data(RID p_mesh, const Array &p_data) {
 		Vector<uint8_t> group_bytes;
 		group_bytes.resize(gpu_groups.size() * sizeof(Group));
 		memcpy(group_bytes.ptrw(), gpu_groups.ptr(), group_bytes.size());
-		Vector<uint8_t> index_bytes;
-		index_bytes.resize(indices.size() * sizeof(uint32_t));
-		memcpy(index_bytes.ptrw(), indices.ptr(), index_bytes.size());
 		ClusterData &resident = mesh->surfaces[surface]->cluster_data;
 		resident.groups = rd->storage_buffer_create(group_bytes.size(), group_bytes);
 		// A surface that cannot stream (pool too small for its roots) stays resident.
-		if (!(streaming && resident.groups.is_valid() && _cluster_streaming_setup(mesh->surfaces[surface], record))) {
+		// Paged-out indices are then read from the page file; without it the
+		// whole mesh keeps conventional rendering.
+		if (!(streaming && resident.groups.is_valid() && _cluster_streaming_setup(mesh->surfaces[surface], record)) &&
+				(!record.has("index_count") || _cluster_page_file_read_all(record, indices))) {
+			Vector<uint8_t> index_bytes;
+			index_bytes.resize(indices.size() * sizeof(uint32_t));
+			memcpy(index_bytes.ptrw(), indices.ptr(), index_bytes.size());
 			resident.index_buffer = rd->index_buffer_create(indices.size(), RD::INDEX_BUFFER_FORMAT_UINT32, index_bytes);
 			if (resident.index_buffer.is_valid()) {
 				resident.index_array = rd->index_array_create(resident.index_buffer, 0, indices.size());
