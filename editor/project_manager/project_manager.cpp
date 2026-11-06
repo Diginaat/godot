@@ -39,6 +39,7 @@
 #include "core/object/callable_mp.h"
 #include "core/os/keyboard.h"
 #include "core/os/os.h"
+#include "core/os/time.h"
 #include "core/version.h"
 #include "editor/asset_library/asset_library_editor_plugin.h"
 #include "editor/doc/editor_help.h"
@@ -651,6 +652,72 @@ void ProjectManager::_open_selected_projects() {
 	get_tree()->quit();
 }
 
+// Written into the project's .godot folder once it is backed up (or was created
+// with this build). Deleting .godot asks for a backup again.
+static const char *FORK_BACKUP_MARKER = ".godot/nvidia_dlss_physx_backup.cfg";
+
+bool ProjectManager::_fork_backup_done(const String &p_path) {
+	return FileAccess::exists(p_path.path_join(FORK_BACKUP_MARKER));
+}
+
+void ProjectManager::_fork_backup_mark(const String &p_path, const String &p_backup_path) {
+	Ref<DirAccess> dir = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
+	dir->make_dir_recursive(p_path.path_join(".godot"));
+	Ref<ConfigFile> marker;
+	marker.instantiate();
+	marker->set_value("backup", "path", p_backup_path);
+	marker->set_value("backup", "date", Time::get_singleton()->get_datetime_string_from_system());
+	const Error err = marker->save(p_path.path_join(FORK_BACKUP_MARKER));
+	if (err != OK) {
+		ERR_PRINT(vformat("Couldn't write the backup marker for the project at '%s' (error %d).", p_path, err));
+	}
+}
+
+uint64_t ProjectManager::_fork_backup_project_size(const String &p_path) {
+	// Everything the duplicate copies, including .godot. Links are copied as links.
+	uint64_t total = 0;
+	Vector<String> pending = { p_path };
+	while (!pending.is_empty()) {
+		const String dir_path = pending[pending.size() - 1];
+		pending.resize(pending.size() - 1);
+		Ref<DirAccess> dir = DirAccess::open(dir_path);
+		if (dir.is_null()) {
+			continue;
+		}
+		dir->set_include_hidden(true);
+		dir->list_dir_begin();
+		for (String name = dir->get_next(); !name.is_empty(); name = dir->get_next()) {
+			if (name == "." || name == ".." || dir->is_link(name)) {
+				continue;
+			}
+			if (dir->current_is_dir()) {
+				pending.push_back(dir_path.path_join(name));
+			} else {
+				total += MAX(FileAccess::get_size(dir_path.path_join(name)), 0);
+			}
+		}
+		dir->list_dir_end();
+	}
+	return total;
+}
+
+void ProjectManager::_fork_backup_ask_show(const String &p_name, const String &p_path) {
+	const uint64_t size = _fork_backup_project_size(p_path);
+	Ref<DirAccess> dir = DirAccess::open(p_path.get_base_dir());
+	const uint64_t space = dir.is_valid() ? dir->get_space_left() : 0;
+	String text = vformat(TTR("This editor is a custom Godot build (NVIDIA DLSS and path tracer, PhysX 5) that changes Godot's core renderer. Opening \"%s\" in it can change the project's files so that it no longer works in official Godot, and can break your game.\n\nYou must back up the project before this editor opens it. This step cannot be skipped.\n\nProject path: %s\nProject size: %s (the backup needs this much free space)\nFree space on this drive: %s"), p_name, p_path, String::humanize_size(size), String::humanize_size(space));
+	if (space < size) {
+		text += "\n\n" + TTR("This drive does not have enough free space for the backup. Choose a folder on another drive in the next step, or free up space first.");
+	}
+	fork_backup_ask->set_text(text);
+	fork_backup_ask->popup_centered(Size2i(560 * EDSCALE, 0));
+	fork_backup_ask->get_cancel_button()->grab_focus(); // To prevent accidents.
+}
+
+void ProjectManager::_fork_backup_confirmed() {
+	_duplicate_project_with_action(POST_DUPLICATE_ACTION_FORK_BACKUP);
+}
+
 void ProjectManager::_open_selected_projects_check_warnings() {
 	const HashSet<String> &selected_list = project_list->get_selected_project_keys();
 	if (selected_list.size() < 1) {
@@ -660,6 +727,12 @@ void ProjectManager::_open_selected_projects_check_warnings() {
 	const Size2i popup_min_size = Size2i(400.0 * EDSCALE, 0);
 
 	if (selected_list.size() > 1) {
+		for (const ProjectList::Item &item : project_list->get_selected_projects()) {
+			if (!item.missing && !_fork_backup_done(item.path)) {
+				_show_error(vformat(TTR("\"%s\" has not been backed up for this editor yet. Open it on its own first, so that it can be backed up."), item.project_name), popup_min_size);
+				return;
+			}
+		}
 		multi_open_ask->set_text(vformat(TTR("You requested to open %d projects in parallel. Do you confirm?\nNote that usual checks for engine version compatibility will be bypassed."), selected_list.size()));
 		multi_open_ask->popup_centered(popup_min_size);
 		return;
@@ -667,6 +740,11 @@ void ProjectManager::_open_selected_projects_check_warnings() {
 
 	ProjectList::Item project = project_list->get_selected_projects()[0];
 	if (project.missing) {
+		return;
+	}
+
+	if (!_fork_backup_done(project.path)) {
+		_fork_backup_ask_show(project.project_name, project.path);
 		return;
 	}
 
@@ -841,7 +919,7 @@ void ProjectManager::_duplicate_project_with_action(PostDuplicateAction p_post_a
 	const ProjectList::Item &project = selected_projects[0];
 
 	project_dialog->set_mode(ProjectDialog::MODE_DUPLICATE);
-	project_dialog->set_project_name(vformat("%s (%s)", project.project_name, p_post_action == POST_DUPLICATE_ACTION_NONE ? "Copy" : project.project_version));
+	project_dialog->set_project_name(vformat("%s (%s)", project.project_name, p_post_action == POST_DUPLICATE_ACTION_NONE ? "Copy" : (p_post_action == POST_DUPLICATE_ACTION_FORK_BACKUP ? "Backup" : project.project_version)));
 	project_dialog->set_original_project_path(project.path);
 	project_dialog->set_duplicate_can_edit(p_post_action == POST_DUPLICATE_ACTION_NONE);
 	project_dialog->show_dialog(false);
@@ -986,6 +1064,10 @@ void ProjectManager::_on_recovery_mode_popup_open_recovery() {
 }
 
 void ProjectManager::_on_project_created(const String &dir, bool edit) {
+	if (project_dialog->get_mode() == ProjectDialog::MODE_NEW) {
+		// Nothing to back up in a project created with this build.
+		_fork_backup_mark(dir, String());
+	}
 	project_list->add_project(dir, false);
 	project_list->save_config();
 	search_box->clear();
@@ -1012,6 +1094,11 @@ void ProjectManager::_on_project_duplicated(const String &p_original_path, const
 			_open_selected_projects_with_migration();
 		} else if (post_duplicate_action == POST_DUPLICATE_ACTION_FULL_CONVERSION) {
 			_full_convert_button_pressed();
+		} else if (post_duplicate_action == POST_DUPLICATE_ACTION_FORK_BACKUP) {
+			// The copy stays unmarked, so this build asks again before opening it.
+			_fork_backup_mark(p_original_path, p_duplicate_path);
+			post_duplicate_action = POST_DUPLICATE_ACTION_NONE;
+			_open_selected_projects_check_warnings();
 		}
 
 		project_list->update_dock_menu();
@@ -1950,6 +2037,13 @@ ProjectManager::ProjectManager() {
 		open_recovery_mode_ask->set_ok_button_text(TTRC("Edit in Recovery Mode"));
 		open_recovery_mode_ask->get_ok_button()->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_on_recovery_mode_popup_open_recovery));
 		add_child(open_recovery_mode_ask);
+
+		fork_backup_ask = memnew(ConfirmationDialog);
+		fork_backup_ask->set_title(TTRC("Backup Required"));
+		fork_backup_ask->set_autowrap(true);
+		fork_backup_ask->set_ok_button_text(TTRC("Back Up and Open"));
+		fork_backup_ask->get_ok_button()->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_fork_backup_confirmed));
+		add_child(fork_backup_ask);
 
 		ask_update_settings = memnew(ConfirmationDialog);
 		add_child(ask_update_settings);

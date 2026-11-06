@@ -153,6 +153,7 @@ protected:
 
 public:
 	void set_mode(Mode p_mode);
+	Mode get_mode() const { return mode; }
 	void set_project_name(const String &p_name);
 	void set_project_path(const String &p_path);
 	void set_zip_path(const String &p_path);

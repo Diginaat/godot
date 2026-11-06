@@ -69,6 +69,7 @@ class ProjectManager : public Control {
 		POST_DUPLICATE_ACTION_NONE,
 		POST_DUPLICATE_ACTION_OPEN,
 		POST_DUPLICATE_ACTION_FULL_CONVERSION,
+		POST_DUPLICATE_ACTION_FORK_BACKUP,
 	};
 
 	PostDuplicateAction post_duplicate_action = POST_DUPLICATE_ACTION_NONE;
@@ -183,6 +184,13 @@ class ProjectManager : public Control {
 	ConfirmationDialog *multi_open_ask = nullptr;
 	ConfirmationDialog *multi_run_ask = nullptr;
 	ConfirmationDialog *open_recovery_mode_ask = nullptr;
+	// This build changes Godot's renderer: a project is backed up before its first open.
+	ConfirmationDialog *fork_backup_ask = nullptr;
+	static bool _fork_backup_done(const String &p_path);
+	static void _fork_backup_mark(const String &p_path, const String &p_backup_path);
+	static uint64_t _fork_backup_project_size(const String &p_path);
+	void _fork_backup_ask_show(const String &p_name, const String &p_path);
+	void _fork_backup_confirmed();
 
 	ProjectDialog *project_dialog = nullptr;
 
