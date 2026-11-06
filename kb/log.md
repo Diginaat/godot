@@ -18,6 +18,275 @@
   neutral surface and outline rather than decorative accent lines.
 * **Scope**: shared editor theme settings and generation only; no editor control,
   layout, runtime project theme or plugin behavior changes.
+## 2026-11-06 (GPU voxel levels for the far field)
+
+* **Implemented**: `VoxelFieldData`, `VoxelProxyBuilder.build_field` and
+  `VoxelField3D`, voxel levels with per-brick level selection in a
+  compute pass that fills an indirect MultiMesh (D018). Splats are round discs,
+  for the static proxies too. The valley flies with GPU levels (64 voxels,
+  2 px).
+* **Validated**: new `voxel_field` fixture (GPU selection exactly matches the
+  CPU at 300-4000 m and orthogonal, frustum, cap, coverage and colour) and the
+  full large_world suite on Vulkan and D3D12. Smoke passes.
+* **Measured**: image error against the source meshes 3.69 against 5.13 for
+  the static proxies; +0.71 ms GPU in the widest valley view. The first bench
+  loop measured static in both modes (args dropped by `powershell -File`;
+  mistake updated).
+
+## 2026-11-06 (CLOD pages from disk)
+
+* **Implemented**: `MeshClusterData.save_pages` / `clear_pages` /
+  `get_page_file` write and record a checked `.clodpages` file; CLOD streaming
+  then holds only root indices and reads other groups on worker threads,
+  dropping reads of released surfaces (D017).
+* **Validated**: new `streaming_disk` fixture (disk convergence, pool rebuild,
+  damaged and stale files, free with reads in flight) on Vulkan/D3D12.
+  Found and fixed: finished reads were not collected once no streamed surface
+  was left.
+
+## 2026-11-06 (GPU grass, far-field cross-fade)
+
+* **Implemented**: `GrassField3D`, GPU-generated grass in a compute-filled
+  indirect MultiMesh (hashed blades, height and density grids, frustum-culled
+  patches, continuous fade); the valley's meadows use it (key B,
+  `--gpu-grass`). The far-field switch cross-fades over 8 m with Godot's
+  visibility-range fade (`--far-hard-cut` keeps the old switch). The streaming
+  fixture checks the streaming-memory monitor.
+* **Validated**: new `grass_field` fixture (exact blade count, heights exact on
+  a non-linear triangulated grid, density mask, frustum bounds, budget cap,
+  coverage) and all large_world suites, dense forest and valley day/night on
+  Vulkan/D3D12.
+* **Measured**: grass +0.21-0.45 ms GPU for 72-93k blades (D015); cross-fade
+  costs nothing measurable against the hard cut (D016).
+
+## 2026-11-06 (CLOD paging, voxel far field, distance thinning, monitors)
+
+* **Implemented**: opt-in in-memory CLOD paging (one page per cluster group in a
+  budgeted GPU index pool, pinned roots, async feedback, LRU eviction);
+  `VoxelProxyBuilder` far-field splat proxies, used for valley patches beyond
+  180 m; `MultiMesh.distance_thinning_*` applied in the GPU culling kernel;
+  Performance monitors for GPU-culled instances, CLOD triangles, HZB-occluded
+  triangles and CLOD streaming memory.
+* **Validated**: new `streaming` and `voxel_proxy` fixtures and a thinning phase
+  in `multimesh_lod`; all large_world suites, dense forest and valley day/night
+  on Vulkan/D3D12; standard smoke.
+* **Measured**: far field saves 0.23-1.0 ms GPU (7-16%) per valley view,
+  repeated on Vulkan and D3D12 (D013). Thinning draws 13-23% fewer instances
+  with no GPU change in the valley (D014). Streaming has no timing yet (D012).
+* **Mistakes recorded**: splats wound as back faces lost direct light under
+  `cull_disabled`; a pressure budget taken as a fraction of the cooked size never
+  constrained the test views.
+
+## 2026-11-06 (shadow-pass culling, jittered views, kernel binding)
+
+* **Implemented**: opt-in `multimesh_gpu_culling/shadows` culls MultiMesh
+  casters per shadow camera (near plane never culls); GPU culling and CLOD now
+  run under TAA/upscaler jitter with a jitter-widened frustum (HZB stays off);
+  cull kernel binds shared buffers once per mode; shadow counters in statistics.
+* **Validated**: all large_world suites on Vulkan/D3D12 (statistics: exact spot
+  shadow counts), dense forest with shadow culling and a TAA A/B (0 px), valley
+  day/night, standard smoke.
+* **Measured**: shadow culling costs 0.05-0.1 ms CPU without a clear GPU gain in
+  the valley, so it is off by default (D011). Mistake recorded: positional
+  shadows are cached, so static tests must dirty them.
+
+## 2026-11-06 (per-instance MultiMesh LOD on the GPU)
+
+* **Implemented**: the MultiMesh culling kernel picks an index LOD per visible
+  instance (up to four levels between the CPU LOD of the bounds' nearest and
+  farthest points); reduced-LOD surfaces are now culled too. Statistics report
+  visible instances per level. Valley vegetation generates index LODs by default.
+* **Validated**: new `multimesh_lod` fixture (exact per-level counts, coverage
+  against per-instance CPU LOD, LOD-off pixel identity) and all large_world
+  suites on Vulkan/D3D12, dense forest, valley day/night, standard smoke.
+* **Measured**: large-range MultiMesh GPU 1.24 ms to 0.42 ms; valley GPU
+  unchanged within noise, CPU +0.05-0.1 ms. A fixed-bucket first version
+  regressed and was replaced (D010).
+
+## 2026-11-06 (native GPU geometry statistics)
+
+* **Implemented**: `RenderingServer.viewport_get_gpu_geometry_statistics`;
+  MultiMesh culling, CLOD selection and HZB kernels add into a per-viewport
+  buffer, cleared and read back asynchronously only while polled. Valley HUD and
+  bench show the counts.
+* **Validated**: new exact-count fixture (`statistics.tscn`) on Vulkan/D3D12,
+  all large_world suites, dense-forest A/B, valley day/night and standard smoke.
+* **Finding**: CLOD draws 17k–95k triangles in the valley while the frame
+  submits 1.3–6.5 M primitives, mostly full-detail MultiMesh vegetation.
+
+## 2026-11-06 (skip GPU culling for fully visible MultiMeshes)
+
+* **Implemented**: MultiMeshes inside all frustum planes keep the direct draw and
+  skip their three culling dispatches; never removes geometry.
+* **Validated**: large_world suites and dense-forest A/B (new fully visible view:
+  identical pixels, no culling dispatch) on Vulkan/D3D12. Valley bench: culling
+  CPU overhead 0.1–0.18 ms lower where 112 of 172 patches were fully inside; no
+  change in a view without such patches (noise about 0.1 ms).
+
+## 2026-11-06 (CLOD multi-draw submission and valley benchmark)
+
+* **Measured first**: new `devtools/test/forest_bench.ps1` (three fixed valley
+  views, four modes, two alternating rounds of 240 frames). Resident CLOD added
+  +0.17–0.31 ms render-thread CPU p50 over culling alone because it recorded one
+  indirect call per group record.
+* **Implemented**: internal `RD::SUPPORTS_MULTI_DRAW_INDIRECT` (Vulkan feature
+  bit, D3D12 true, Metal false); CLOD submits each surface's records in one call,
+  with the per-record loop as fallback.
+* **Validated**: CLOD overhead now +0.02–0.06 ms on Vulkan and D3D12, GPU time
+  unchanged; large_world suites, dense-forest pixel A/B, valley day/night and
+  standard PhysX/PT/DDGI smoke pass. Also measured: GPU culling saves 0.17–0.36 ms
+  GPU but costs up to 0.29 ms CPU; HZB costs 0.03–0.13 ms GPU and saves nothing
+  in this scene.
+
+## 2026-11-06 (visual valley smoke tests)
+
+* **Added**: day and night valley fly-through scenes built from ordinary Godot
+  nodes (720 m CLOD terrain, about 26k MultiMesh trees in 48 m patches, grass,
+  flowers, 280 CLOD rocks, SSR water). Night adds volumetric fog, a lake
+  FogVolume, 68 local lights, emissive props and vertex-animated fireflies that
+  must use the conventional path. Also kept the dense-forest A/B pixel test.
+* **Validated**: day/night on Vulkan and D3D12: all eight route views dispatch
+  culling, CLOD and HZB; disabling GPU geometry dispatches none; night light and
+  volumetric-fog negative controls differ. Dense-forest A/B passes on both.
+* **Testing correction**: the first fly-through read timestamps after
+  `get_image()`, which resets them; see the new mistake entry. One-run GPU times
+  (enabled vs disabled, one view) differ by about 1%; no performance claim.
+
+## 2026-11-05 (residency cut protocol)
+
+* **Implemented**: CPU coverage snapshots and GPU missing-representation cuts,
+  complete coarse fallback and shared requested/used feedback. No page pool or
+  streaming claimed; native raster retains full residency.
+* **Validated**: production build, Vulkan/D3D12 eight-part suites and standard
+  smoke; 24 snapshots, two thresholds, two roots, cut coverage and guarded commands.
+
+## 2026-11-05 (deferred editor help lifetime)
+
+* **Investigated**: repeated editor --import shutdown failure; static help-worker
+  callback can outlive EditorNode and enter script-cache work after teardown.
+* **Patched**: guard editor lifetime at script-doc-cache entry; no automatic retry
+  or broad singleton behavior change. Production build, six repeated imports
+  (exit 0, no errors) and standard PhysX/PT/DDGI smoke pass. Other shutdown races
+  are not claimed excluded without a crash stack.
+
+## 2026-11-05 (current-frame CLOD HZB)
+
+* **Implemented**: optional complete-depth-then-opaque occlusion, per-viewport
+  padded reverse-Z minimum-depth pyramid, guarded native commands and conservative
+  clip/coverage/float-uncertainty bounds. No temporal visibility or CPU readback.
+* **Validated**: production build, final Vulkan/D3D12 seven-part matrices,
+  exact mip oracle, actual command rejection and one-pixel-hole recovery; native
+  material/shadow pixels, moving occluders, MSAA/depth fallback and lifetime.
+  Numerical uncertainty and 100000-unit source/camera cancellation also pass;
+  final standard PhysX/PT/DDGI smoke rerun passes. No performance improvement is claimed.
+* **Testing correction**: shared mip-view readback used the wrong base subresource;
+  owner-chain readback proves the actual GPU pyramid without a production fix.
+* **Unresolved observation**: one editor --import shutdown hit null EditorNode;
+  isolated retry, five repeated imports and subsequent complete suites pass.
+  Root cause unknown, not hidden by automatic retries.
+
+## 2026-11-05 (scene-import cook and optimized shadows)
+
+* **Implemented**: default-off scene import cluster cooking after final source
+  processing, before embedded/external save, once per shared mesh; unsupported
+  geometry retains conventional data with warning.
+* **Extended**: native CLOD camera depth uses source vertices even with separately
+  indexed shadow meshes; shadows retain their own resource.
+* **Validated**: production build, class-help checks, real enabled/disabled/morph
+  glTF imports and Vulkan/D3D12 six-part matrices. Reversed shadow vertex IDs,
+  source/fine pixels and coarse-cast-shadow receiver proof pass. Final standard
+  PhysX/PT/DDGI smoke also passes.
+* **Runner finding**: first 120-second outer budget expired; targeted import
+  checks and complete 300-second-budget reruns pass, with no engine fix inferred.
+
+## 2026-11-05 (native resident CLOD raster integration)
+
+* **Implemented**: ArrayMesh attachment uploads checked
+  resident group/index buffers through RenderingServer; per-viewport native
+  selection produces source-index commands for existing depth/opaque materials.
+* **Preserved**: source geometry/material RID, ordinary shadow/RT geometry,
+  conventional fallback for unsupported views, deformation and budgets.
+* **Limits**: 4096 groups/surface, 64 MiB/mesh resident index/group data;
+  65536 groups and 4096 draws per viewport. No streaming or speedup claim.
+* **Validated**: production build and Vulkan/D3D12 five-part matrices. Native
+  raster fine/coarse, original materials, three views, transforms, source/RD
+  mutation, recook, shadow pixels, fallback and destruction pass. Final standard
+  PhysX/PT/DDGI smoke rerun also passes after multi-pass fallback hardening.
+
+## 2026-11-05 (GPU hierarchy selection kernel)
+
+* **Implemented**: source-index group commands selected by projected error and
+  ancestor veto, equivalent to exclusive root cuts without a bounded local stack.
+* **Validated**: real Vulkan/D3D12 compute versus independent root
+  oracle, perspective/orthographic and frustum views, guarded five-word commands.
+  Changing-input/recovery and repeated reverse submission pass on both backends.
+  Production build and standard smoke pass. Not native raster integration.
+
+## 2026-11-05 (ArrayMesh cluster attachment)
+
+* **Implemented**: serialized optional cluster hierarchy, convenience generation,
+  SHA-256 source-array matching, shared-resource change checks and conservative
+  mutation invalidation. Materials, names and source RID remain authoritative.
+* **Refactored**: same cache validator shared below scene/rendering boundary.
+* **Validated**: production build, Vulkan/D3D12 tests of source mismatch, shared
+  cache mutation, save/load, region updates and surface lifetime; focused XML
+  checks and standard PhysX/PT/DDGI smoke pass. No GPU CLOD submission claimed.
+
+## 2026-11-05 (stable GPU compaction)
+
+* **Fixed**: unordered atomic append replaced by local ranks, block-prefix scan
+  and stable scatter, preserving coplanar instance draw order and source identity.
+* **Validated**: Vulkan/D3D12 ordered-ID kernel checks across 261 scan blocks,
+  shared-view/resource A/B and 100k instances with coplanar colored IDs; standard
+  PhysX/PT/DDGI smoke suite passes. No performance improvement claimed.
+
+## 2026-11-05 (native cluster cooker)
+
+* **Implemented**: MeshClusterData resource, module-backed meshlet/group cooker,
+  checked cache, border-locked attribute-aware simplification and root-traversed
+  reference cuts. Existing meshoptimizer 1.2, no new dependency or copied engine code.
+* **Validated**: production build, headless and Vulkan/D3D12 fixture runs;
+  curved-grid topology/cut coverage, source preservation, resource roundtrip,
+  corrupt-data rejection and extreme-finite projection inputs.
+* **Fixed during smoke**: self-closing tutorials section was accepted by RST but
+  rejected by native editor help parser; explicit section closing added. Final
+  standard PhysX/PT/DDGI smoke rerun passes.
+
+## 2026-11-05 (signed instance-ID compatibility)
+
+* **Fixed**: visible-ID remap must return shader-language `int`, not `uint`.
+  Regression shader exercises signed arithmetic and an `int` function argument
+  with both conventional and GPU-culled rendering. Production build and
+  Vulkan/D3D12 focused regression matrices pass.
+
+## 2026-11-05 (continuous implementation and commits)
+
+* **Updated**: working rules: commit each tested part with its records, then
+  continue the explicitly authorized implementation rather than stop per slice.
+
+## 2026-11-05 (native GPU frustum culling)
+
+* **Implemented**: experimental Forward+ MultiMesh compute visibility, stable
+  source IDs, per-viewport buffers/indirect commands and conventional fallback.
+* **Validated**: final production build; Vulkan/D3D12 native-kernel and native
+  raster A/B checks at 65/100k potential instances, dual viewport dispatch,
+  resize and shared-resource replacement. Standard PhysX/PT/DDGI smoke rerun passes.
+* **Recorded**: explicit virtual geometry / CLOD / far-field voxel follow-on
+  scope in `knowledge/VIRTUAL_GEOMETRY.md`; no placeholders called implemented.
+* **Updated**: project concepts, source audit, architecture, status and validation;
+  new-TU and typed-GDScript-fixture mistakes. Full docs check has unrelated
+  existing PhysX errors; focused ProjectSettings docs check passes.
+
+## 2026-11-05 (native large-world rendering foundation)
+
+* **Added**: source audit, architecture, decisions, port status and validation
+  runbooks in `knowledge/`; project/native-indirect-foundation.md links them.
+* **Found**: indirect MultiMesh setter uploaded the CPU `-1` sentinel as an
+  unsigned GPU count; real-RD reproducer checks both surface command layouts.
+* **Validated**: production editor build, focused Vulkan/D3D12 command/pixel
+  tests and standard PhysX/PT/DDGI smoke suite pass. No scalability/performance claim.
+* **Added**: mistakes/python-build-interpreter.md and
+  successes/inspect-indirect-before-draw.md.
 
 ## 2026-11-02 (release 0.8.1)
 

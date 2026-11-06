@@ -1,0 +1,29 @@
+# Porting status
+
+Updated: 2026-11-06. Starting Godot `b23737c64e`.
+
+| Slice | State | Evidence / remaining gate |
+| --- | --- | --- |
+| Source comparison and initial architecture | Source-audited | Audit cites actual implementations and distinguishes planned features |
+| License/dependency review | Done | Dependency texts inspected; ported reference code is cleared for use in this build by its owner (D005) |
+| Native indirect MultiMesh foundation | Implemented and validated | Narrow C++ sentinel fix; real Vulkan/D3D12 command-byte, bounded GPU-write and native material pixel assertions; standard smoke suite passes |
+| GPU frustum/instance culling | Implemented and validated baseline | Native opt-in Forward+ compute, source-ID remap, per-viewport outputs; per-instance index LOD (up to four levels, exact-count fixture); jittered views (TAA/upscalers) via a widened frustum; opt-in shadow-pass culling; final Vulkan/D3D12 kernel/pixel A/B and standard smoke rerun pass; see architecture for fallbacks |
+| Cluster cooker and CLOD cut resource | Implemented and tested | Native MeshClusterData, vendored meshoptimizer 1.2, border-locked hierarchy, source attributes retained, checked cache and root-traversed CPU reference; headless/Vulkan/D3D12 fixture passes |
+| ArrayMesh hierarchy attachment/lifetime | Implemented and tested | Serialized optional cluster_data, SHA-256 source matching, convenience generation, shared mutation and geometry invalidation tests; Vulkan/D3D12 + standard smoke pass |
+| GPU hierarchy selection kernel | Implemented and tested independently | Vulkan/D3D12 root-oracle cuts, per-view guarded commands, perspective/orthographic, changing inputs and visibility recovery; not native scene raster yet |
+| Resident CLOD raster | Implemented and tested baseline | Native checked RD storage, viewport GPU selection and original vertex/material indirect depth/opaque; Vulkan/D3D12 fine/coarse/material/shadow/lifetime/fallback tests and final standard smoke pass |
+| Scene-import cluster cook/cache | Implemented and tested | Default-off meshes/generate_cluster_lods cooks final source arrays once per shared mesh before save; real enabled/disabled/morph glTF cache tests, separate-shadow native raster Vulkan/D3D12 and final smoke pass |
+| Virtual geometry paging | Implemented and tested in-memory baseline | Opt-in `cluster_lod/streaming/enabled`: one page per cluster group in a budgeted GPU index pool, pinned roots, async request/used feedback, LRU eviction, per-frame upload cap. Vulkan/D3D12 fixture: ample pool matches resident byte for byte; a pool between one view's and both views' working sets evicts without holes; a pool too small for the roots falls back. With a page file (`MeshClusterData.save_pages`) only the roots stay in system memory and other groups are read on worker threads (D017; `streaming_disk` fixture) |
+| Residency-aware cut protocol | Implemented and tested | CPU coverage, GPU complete fallback and requested/used bits; two-root/missing-ancestor cases pass on Vulkan/D3D12; drives the streaming page pool |
+| HZB occlusion | Implemented and tested resident-CLOD baseline | Complete current-frame depth, padded reverse-Z farthest pyramid, opaque-only group rejection; Vulkan/D3D12 mip/command/recovery/native pixels, large-coordinate uncertainty and final smoke pass; no MultiMesh/depth-work reduction or temporal predictor yet |
+| Geometry streaming | Partial | CLOD pages from memory or from a page file (above). The page file is written by script, not by scene import; the resource still holds every index; texture coupling remains |
+| Far-field voxel representations | Implemented and tested baseline | `VoxelProxyBuilder` merges area-weighted surface samples per voxel into camera-facing splats (coverage-scaled size, flatness-blended normal); exact voxel statistics and a grove coverage/colour check pass on Vulkan/D3D12; the valley swaps far patches for proxies with an 8 m cross-fade (`--far-field`, key P). GPU voxel levels (`VoxelField3D`, D018): per-brick level selection in a compute pass into an indirect MultiMesh, exact against the CPU selection on Vulkan/D3D12; the valley's flying default (64 voxels, 2 px), image error 3.69 against 5.13 for the static proxies, +0.71 ms GPU in the widest view |
+| Vegetation patches | Partial | MultiMesh distance thinning (`MultiMesh.distance_thinning_*`, hash-stable, applied in the GPU culling kernel; exact-count fixture); `GrassField3D` GPU-generated grass (compute-filled indirect MultiMesh, height/density grids, frustum-culled patches; exact counts, exact heights, density, frustum and budget fixture on Vulkan/D3D12; valley meadows). Wind, per-shadow-camera blades and editor preview remain |
+| Native profiling | Implemented and tested baseline | RD timestamps plus `RenderingServer.viewport_get_gpu_geometry_statistics` (async GPU counters while polled; exact-count fixture on Vulkan/D3D12); valley HUD and bench print them. Performance monitors for GPU-culled instances, CLOD triangles, HZB-occluded triangles and CLOD streaming memory |
+| Visual large-world smoke scenes | Implemented and tested | Dense-forest A/B pixel test plus day/night valley fly-throughs (volumetric fog, 68 lights, emissives, fallback fireflies); Vulkan/D3D12 pass; not a benchmark |
+| Full portability / full-scene matrix | Partial | Focused Vulkan/D3D12 and standard smoke pass on one GPU; double builds, other GPU families and broad full-scene/performance comparisons remain untested |
+
+Foundation work does not complete the user's Stage 1 or the seven-stage project.
+Keep each part small, functional and measured. The user requested a commit after
+every completed part and continuous implementation of the remaining scope.
+Commits are local; no merges, upstream syncs or pushes are authorized here.
