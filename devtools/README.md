@@ -14,6 +14,9 @@ versioning) are in [CUSTOM_BUILD.md](../CUSTOM_BUILD.md). Feature notes:
 | `setup/` | `setup_dev_windows.ps1` | Sets up a new PC in one go (below) |
 | `build/` | `build.ps1` | Builds the editor, the .NET editor, the export templates or a whole release |
 | `test/` | `smoke.ps1` | The smoke tests every merge and release must pass |
+| `test/` | `large_world.ps1` | Real scene import, GPU culling/CLOD commands, native materials/shadows and lifetime regressions |
+| `test/` | `forest.ps1` | Dense lit forest: source versus GPU culling/CLOD/HZB pixel A/B with light and shadow controls |
+| `test/` | `forest_map.ps1` | Day/night valley fly-through with GPU geometry, volumetric fog, many lights and emissives; route screenshots |
 | `test/ddgi/` | `ddgi_tests.ps1`, `ddgi_eval.py` | DDGI measurements: flicker, light switch, weather, scrolling, GPU time, baking, comparison shots |
 | `docs/` | `update_class_docs.ps1`, `check_class_docs.py` | Keeps the class reference (editor help) complete |
 | `package/` | `package_editor_win64.ps1`, `package_templates_win64.ps1` | Release zips and export template `.tpz` files |
@@ -83,6 +86,30 @@ The PhysX tests use Wild Ox Studios' example project; clone it next to this
 repository (`git clone https://github.com/uno1982/godot-physx-example`) or
 pass `-PhysXExample <folder>`. Without it they are skipped. Logs and the
 screenshot are in `devtools\out\smoke`.
+
+Native indirect foundation checks (requires real GPU rendering, not headless):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File devtools/test/large_world.ps1 -Driver vulkan
+powershell -ExecutionPolicy Bypass -File devtools/test/large_world.ps1 -Driver d3d12
+```
+
+Conditions and limitations: [large-world validation](../knowledge/PERFORMANCE_BENCHMARKS.md).
+Runner checks both indirect command safety and the native GPU frustum culler.
+The latter validates source IDs, two simultaneous viewports and native material
+pixels at 65/100k potential instances. It is not a frame-time benchmark.
+
+Visual large-world scenes (real GPU rendering; screenshots in `devtools/out/`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File devtools/test/forest.ps1 -Driver vulkan
+powershell -ExecutionPolicy Bypass -File devtools/test/forest_map.ps1 -Driver vulkan -Variant day
+powershell -ExecutionPolicy Bypass -File devtools/test/forest_map.ps1 -Driver vulkan -Variant night
+```
+
+To fly through the valley yourself, open `misc/large_world_test_project` and run
+`forest_map.tscn` (day) or `forest_night.tscn` (night). F switches between the
+automatic route and free flight, G toggles GPU culling/CLOD/HZB live.
 
 ### DDGI measurements
 
