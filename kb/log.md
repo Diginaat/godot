@@ -1,5 +1,16 @@
 # Update log
 
+## 2026-11-07 (split workspace and Live Runtime view)
+
+* **Implemented**: second main screen panel (`DOCK_SLOT_MAIN_SCREEN_SPLIT`) so
+  the Game view and the 2D/3D editor show at once; Live Runtime toggle in the
+  2D/3D toolbars that streams changed transforms and visibility from the game
+  over the debugger and applies them to rendering server instances, with
+  ghosts for spawned instances. Design, evaluation of a runtime camera,
+  limits and costs in `SPLIT_WORKSPACE.md`.
+* **Validated**: scratch 3D (rigid bodies, spawner) and 2D (parented sprites,
+  despawning bullets) scenes, play/stop cycles, hidden views, smoke tests.
+
 ## 2026-11-07 (transparent popup perimeter)
 
 * **Refined**: reserve 2px fully transparent padding around compact popup menus,
