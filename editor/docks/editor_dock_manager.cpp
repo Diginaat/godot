@@ -684,6 +684,16 @@ void EditorDockManager::close_dock(EditorDock *p_dock) {
 		return;
 	}
 
+	DockTabContainer *from_container = p_dock->get_parent_container();
+	if (from_container && from_container->dock_slot == EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT) {
+		// Closing a dock in the split panel closes the panel, not the dock: it goes back to the
+		// main screen (without becoming the current one), so it stays in the title bar.
+		DockTabContainer *main_screen = dock_slots[EditorDock::DOCK_SLOT_MAIN_SCREEN];
+		_move_dock(p_dock, main_screen, main_screen->get_tab_count(), false);
+		_update_layout();
+		return;
+	}
+
 	p_dock->is_open = false;
 	p_dock->emit_signal(SNAME("closed"));
 
@@ -1006,7 +1016,11 @@ void DockContextPopup::_workspace_swap() {
 }
 
 void DockContextPopup::_update_buttons() {
-	if (context_dock->global || context_dock->closable) {
+	DockTabContainer *context_container = context_dock->get_parent_container();
+	if (context_container && context_container->dock_slot == EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT) {
+		close_button->set_tooltip_text(TTRC("Close the split panel. The dock goes back to the main screen."));
+		close_button->set_disabled(false);
+	} else if (context_dock->global || context_dock->closable) {
 		close_button->set_tooltip_text(TTRC("Close this dock."));
 		close_button->set_disabled(false);
 	} else {
