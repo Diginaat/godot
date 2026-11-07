@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherLightingEffect" inherits="WeatherEffect" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Sun, sky light, exposure and fog for the weather.
+	</brief_description>
+	<description>
+		Clouds dim the sun and soften its shadows (clouds act like a softbox), an overcast removes the sun's highlights, storm clouds darken the sky light (and with it ambient light, reflections and GI), thick clouds lower the exposure, weather fog adds to the volumetric fog, and distance fog takes the horizon's color so far hills fade into the sky.
+	</description>
+	<tutorials>
+	</tutorials>
+	<members>
+		<member name="overcast_shadow_blur" type="float" setter="set_overcast_shadow_blur" getter="get_overcast_shadow_blur" default="6.0">
+			The sun's shadow blur under a full overcast. Clouds spread the light, so shadows get very soft instead of disappearing.
+		</member>
+		<member name="storm_fog_color" type="Color" setter="set_storm_fog_color" getter="get_storm_fog_color" default="Color(0.16, 0.17, 0.19, 1)">
+			Tint of the volumetric fog in the darkest weather.
+		</member>
+		<member name="storm_sky_dimming" type="float" setter="set_storm_sky_dimming" getter="get_storm_sky_dimming" default="0.5">
+			How much storm clouds ([member WeatherProfile.cloud_darkness]) dim the sky light, through [member Environment.background_energy_multiplier].
+		</member>
+	</members>
+</class>

@@ -1,5 +1,62 @@
 # Update log
 
+## 2026-11-07 (weather step 7: sound)
+
+* **Implemented**: `WeatherSoundEffect` and `WeatherSoundSynth`: rain,
+  wind and thunder synthesized in C++ on worker threads (no audio files),
+  crossfaded rain, wind by speed, thunder delayed by distance through a
+  low-pass and reverb bus. 22 checks. See
+  [World wind and weather core](/project/world-wind.md).
+
+## 2026-11-07 (weather step 6: lightning)
+
+* **Implemented**: `WeatherLightningEffect` (return-stroke flashes lighting
+  the scene and the sky, branched bolts, Strike Lightning button) and
+  `Weather.lightning_struck`. Fixed: the sun search took internal lights.
+  20 checks headless and on Vulkan. See
+  [World wind and weather core](/project/world-wind.md).
+
+## 2026-11-07 (weather step 5: haze and motes)
+
+* **Implemented**: `WeatherHazeEffect` (volumetric ground mist, rain shafts
+  and spray in a camera-following `FogVolume`), `WeatherMotesEffect`
+  (floating droplets) and `Weather.get_effect()`. 16 checks headless and on
+  Vulkan. See [World wind and weather core](/project/world-wind.md).
+
+## 2026-11-07 (weather step 4: rain)
+
+* **Implemented**: `WeatherRainEffect` (GPU drops and impacts around the
+  camera, collision height field, top-down rain occlusion map) and the
+  built-in wetness include and wet surface shader, served from memory and
+  left out of exports. Wet ground darkened to 0.77 on Vulkan while the
+  ground under a roof stayed dry. See
+  [World wind and weather core](/project/world-wind.md).
+
+## 2026-11-07 (weather step 3: sky)
+
+* **Implemented**: `WeatherSkyEffect`: drives a weather-ready sky material
+  in place, or shows the built-in weather sky (shader kept as a C++ string,
+  noise textures built in code) in place of the scene's while it runs.
+  Clouds drift with the wind aloft. 17 headless checks and Vulkan
+  screenshots. See [World wind and weather core](/project/world-wind.md).
+
+## 2026-11-07 (weather step 2: core)
+
+* **Implemented**: `WeatherProfile`, `WeatherLibrary` (11 built-in types),
+  `Weather` node (blending, wind driving, wetness globals, borrowed scene
+  values restored before save), `WeatherEffect` resources and
+  `WeatherLightingEffect`. 24 headless checks pass. See
+  [World wind and weather core](/project/world-wind.md) and `WEATHER.md`.
+
+## 2026-11-07 (weather step 1: wind)
+
+* **Implemented**: `modules/weather/` with the `WindServer` singleton (gusts
+  that travel with the wind, same noise in C++ and in the built-in shader
+  include `res://.builtin/wind.gdshaderinc`), `WindReceiver3D` (drag on rigid
+  bodies), wind in `GrassField3D`'s default material and
+  `PhysXCloth3D.use_global_wind`. GPU matched CPU within 0.043 m/s. See
+  [World wind](/project/world-wind.md) and `WEATHER.md`.
+
 ## 2026-11-07 (sync)
 
 * **Updated**: CUSTOM_BUILD.md sync log: upstream `b47a795aa5`, physx module

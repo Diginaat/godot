@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherProfile" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		One weather state: clouds, rain, wind, fog and light.
+	</brief_description>
+	<description>
+		A [Weather] node blends between profiles. Every float, color and vector property is blended (angles marked as degrees the short way round), including properties a script subclass adds, so a profile can carry values for your own [WeatherEffect]s:
+		[codeblock]
+		class_name SnowProfile extends WeatherProfile
+		@export_range(0.0, 1.0) var snow := 0.0
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="blend" qualifiers="static">
+			<return type="WeatherProfile" />
+			<param index="0" name="from" type="WeatherProfile" />
+			<param index="1" name="to" type="WeatherProfile" />
+			<param index="2" name="weight" type="float" />
+			<description>
+				Returns a new profile between [param from] and [param to] at [param weight] ([code]0.0[/code] is [param from]).
+			</description>
+		</method>
+		<method name="get_param" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="param" type="int" enum="WeatherProfile.Param" />
+			<description>
+				Returns the value of a built-in parameter.
+			</description>
+		</method>
+		<method name="set_param">
+			<return type="void" />
+			<param index="0" name="param" type="int" enum="WeatherProfile.Param" />
+			<param index="1" name="value" type="float" />
+			<description>
+				Sets the value of a built-in parameter.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cloud_coverage" type="float" setter="set_param" getter="get_param" default="0.2">
+			How much of the sky is covered by clouds.
+		</member>
+		<member name="cloud_darkness" type="float" setter="set_param" getter="get_param" default="0.0">
+			Darkens cloud undersides, for rain and storm clouds. Also dims the sky light (see [member WeatherLightingEffect.storm_sky_dimming]).
+		</member>
+		<member name="cloud_density" type="float" setter="set_param" getter="get_param" default="0.8">
+			How opaque the clouds are.
+		</member>
+		<member name="display_name" type="String" setter="set_display_name" getter="get_display_name" default="&quot;Clear&quot;">
+			The weather type's name, used to pick it in a [WeatherLibrary].
+		</member>
+		<member name="distance_fog" type="float" setter="set_param" getter="get_param" default="0.0">
+			Density of the cheap exponential distance fog ([member Environment.fog_density]). [code]0.0[/code] is off.
+		</member>
+		<member name="fog_density" type="float" setter="set_param" getter="get_param" default="0.0">
+			Added to the environment's volumetric fog density.
+		</member>
+		<member name="gustiness" type="float" setter="set_param" getter="get_param" default="0.2">
+			How much the wind varies in gusts, from [code]0.0[/code] to [code]1.0[/code].
+		</member>
+		<member name="lightning_per_minute" type="float" setter="set_param" getter="get_param" default="0.0">
+			Lightning flashes per minute. [code]0.0[/code] is none; a thunderstorm has 4 to 10.
+		</member>
+		<member name="overcast" type="float" setter="set_param" getter="get_param" default="0.0">
+			Pulls the whole sky toward a flat grey and turns off the direct sun.
+		</member>
+		<member name="rain_intensity" type="float" setter="set_param" getter="get_param" default="0.0">
+			Rain, from [code]0.0[/code] to [code]1.0[/code]: drops, splashes, haze, sound and wetness.
+		</member>
+		<member name="scene_brightness" type="float" setter="set_param" getter="get_param" default="1.0">
+			Exposure multiplier. Below [code]1.0[/code] darkens the picture for thick clouds.
+		</member>
+		<member name="sun_energy_scale" type="float" setter="set_param" getter="get_param" default="1.0">
+			Multiplier for the sun's energy.
+		</member>
+		<member name="wind_direction_degrees" type="float" setter="set_param" getter="get_param" default="30.0">
+			Wind heading in degrees: [code]0[/code] blows toward -Z, increasing clockwise seen from above.
+		</member>
+		<member name="wind_speed" type="float" setter="set_param" getter="get_param" default="3.0">
+			Wind speed near the ground, in m/s.
+		</member>
+	</members>
+	<constants>
+		<constant name="PARAM_CLOUD_COVERAGE" value="0" enum="Param">
+			[member cloud_coverage].
+		</constant>
+		<constant name="PARAM_CLOUD_DENSITY" value="1" enum="Param">
+			[member cloud_density].
+		</constant>
+		<constant name="PARAM_CLOUD_DARKNESS" value="2" enum="Param">
+			[member cloud_darkness].
+		</constant>
+		<constant name="PARAM_OVERCAST" value="3" enum="Param">
+			[member overcast].
+		</constant>
+		<constant name="PARAM_RAIN_INTENSITY" value="4" enum="Param">
+			[member rain_intensity].
+		</constant>
+		<constant name="PARAM_LIGHTNING_PER_MINUTE" value="5" enum="Param">
+			[member lightning_per_minute].
+		</constant>
+		<constant name="PARAM_WIND_SPEED" value="6" enum="Param">
+			[member wind_speed].
+		</constant>
+		<constant name="PARAM_WIND_DIRECTION_DEGREES" value="7" enum="Param">
+			[member wind_direction_degrees].
+		</constant>
+		<constant name="PARAM_GUSTINESS" value="8" enum="Param">
+			[member gustiness].
+		</constant>
+		<constant name="PARAM_FOG_DENSITY" value="9" enum="Param">
+			[member fog_density].
+		</constant>
+		<constant name="PARAM_DISTANCE_FOG" value="10" enum="Param">
+			[member distance_fog].
+		</constant>
+		<constant name="PARAM_SUN_ENERGY_SCALE" value="11" enum="Param">
+			[member sun_energy_scale].
+		</constant>
+		<constant name="PARAM_SCENE_BRIGHTNESS" value="12" enum="Param">
+			[member scene_brightness].
+		</constant>
+		<constant name="PARAM_MAX" value="13" enum="Param">
+			The number of built-in parameters.
+		</constant>
+	</constants>
+</class>

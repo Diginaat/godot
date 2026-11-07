@@ -49,10 +49,11 @@ git remote add fork https://github.com/Diginaat/godot.git
   other engine file that matters for PhysX.
 - `modules/godot_physx/` carries local changes on top of the vendored copy:
   adaptations to upstream master API changes, the `generator="ninja"` line in
-  `misc/physx_presets/vc17win64-godot-gpu.xml`, and SCons options for
+  `misc/physx_presets/vc17win64-godot-gpu.xml`, SCons options for
   `physx_sdk`, `physx_gpu`, `blast_sdk` and `flow_sdk` in `config.py`
-  (`get_opts()`, so `custom.py` can set them). Never overwrite the directory
-  wholesale; merge 3-way (see below).
+  (`get_opts()`, so `custom.py` can set them), and
+  `PhysXCloth3D.use_global_wind` (the weather module's world wind). Never
+  overwrite the directory wholesale; merge 3-way (see below).
 
 ### Sync state log
 
@@ -153,6 +154,9 @@ straight.
     (`scene/debugger/runtime_state_observer.cpp`,
     `editor/run/live_runtime_plugin.cpp`). See
     [SPLIT_WORKSPACE.md](SPLIT_WORKSPACE.md).
+  - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
+    the wind in `GrassField3D`'s default material and
+    `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).
 
 ## Build (Windows)
 

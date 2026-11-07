@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherSkyEffect" inherits="WeatherEffect" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Sky and clouds for a [Weather] node.
+	</brief_description>
+	<description>
+		Shows the weather in the sky: cloud cover, cloud thickness, storm clouds and the grey of an overcast follow the [Weather]'s current [WeatherProfile], and the clouds drift with the wind aloft.
+		If the [Environment]'s sky already uses a [ShaderMaterial] with the weather uniforms (a [code]cloud_coverage[/code] uniform, as in [method create_default_material]), that material is driven, and its own appearance settings stay as they are. Otherwise the effect shows the built-in weather sky in place of the scene's while it runs (a [ProceduralSkyMaterial]'s colours are taken over), and switches the background to the sky. Either way, the scene gets its own sky and values back before it is saved and when the effect stops.
+		The built-in sky draws a gradient, a sun disk and a cloud layer from two tiling noise textures, computed in the half resolution pass. To change its look, save the material from [method create_default_material] as a resource, edit it, and use it as the environment's sky.
+		The uniforms set every frame are [code]cloud_coverage[/code], [code]cloud_density[/code], [code]cloud_darkness[/code], [code]overcast[/code] and [code]cloud_offset[/code]; the sky's [code]sky_horizon_color[/code], [code]overcast_color[/code] and [code]sky_energy[/code] are passed on with [method Weather.set_sky_colors]. Keep this effect before [WeatherLightingEffect] in [member Weather.effects], so the lighting matches the sky.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="create_default_material" qualifiers="static">
+			<return type="ShaderMaterial" />
+			<description>
+				Returns a new copy of the built-in weather sky: its shader, two [NoiseTexture2D] cloud textures and every parameter set. Save it as a resource to change the look of the sky.
+			</description>
+		</method>
+		<method name="get_cloud_offset" qualifiers="const">
+			<return type="Vector2" />
+			<description>
+				How far the clouds have drifted, in meters on the cloud layer. It wraps at the size of the cloud texture, so it never grows large.
+			</description>
+		</method>
+		<method name="get_sky_material" qualifiers="const">
+			<return type="ShaderMaterial" />
+			<description>
+				The sky material the effect drives while it runs: the scene's own or the built-in one. [code]null[/code] when the effect isn't running or there is no [Environment].
+			</description>
+		</method>
+		<method name="set_lightning">
+			<return type="void" />
+			<param index="0" name="weather" type="Weather" />
+			<param index="1" name="flash" type="float" />
+			<param index="2" name="direction" type="Vector3" />
+			<param index="3" name="color" type="Color" />
+			<description>
+				Lights the clouds with a lightning flash: [param flash] from [code]0.0[/code] (none) up, brightest toward [param direction] (from the camera), in [param color]. Used by the [WeatherLightningEffect]. A scene sky whose shader has no [code]lightning_flash[/code] uniform doesn't flash.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="cloud_wind_multiplier" type="float" setter="set_cloud_wind_multiplier" getter="get_cloud_wind_multiplier" default="3.0">
+			How much faster the clouds drift than the wind at the ground: wind gets stronger with height. The clouds are about 1.5 km up.
+		</member>
+		<member name="cloud_wind_veer_degrees" type="float" setter="set_cloud_wind_veer_degrees" getter="get_cloud_wind_veer_degrees" default="15.0">
+			How far the wind aloft is turned from the wind at the ground, in degrees, clockwise seen from above. Wind turns with height (the Ekman spiral), so clouds drift at an angle to the grass.
+		</member>
+	</members>
+</class>

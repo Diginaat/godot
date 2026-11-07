@@ -30,6 +30,7 @@
 
 #include "grass_field_3d.h"
 
+#include "core/config/engine.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "scene/3d/camera_3d.h"
@@ -255,13 +256,27 @@ void main() {
 
 // Lit from above on both sides: the fragment normal ignores the facing, so
 // back faces of the double-sided blades are not darkened by the flipped normal.
+// With the weather module, the blades bend in the WindServer's wind.
 static const char *grass_default_material_shader = R"(shader_type spatial;
 render_mode cull_disabled;
+
+#ifdef WIND
+#include "res://.builtin/wind.gdshaderinc"
+
+uniform float wind_strength : hint_range(0.0, 2.0) = 1.0;
+// Wind speed in m/s that bends the blades two thirds of the way.
+uniform float wind_stiffness : hint_range(0.5, 30.0) = 5.0;
+#endif
 
 varying float blade_height;
 
 void vertex() {
 	blade_height = UV.y;
+#ifdef WIND
+	vec3 root = MODEL_MATRIX[3].xyz;
+	float height = length(MODEL_MATRIX[1].xyz);
+	VERTEX += wind_to_local(MODEL_MATRIX, wind_grass_offset(root, UV.y, height, wind_stiffness, TIME) * wind_strength);
+#endif
 }
 
 void fragment() {
@@ -307,7 +322,11 @@ void GrassField3D::_make_default_mesh() {
 	mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays);
 	Ref<Shader> shader;
 	shader.instantiate();
-	shader->set_code(grass_default_material_shader);
+	String code = grass_default_material_shader;
+	if (Engine::get_singleton()->has_singleton("WindServer")) {
+		code = code.replace("render_mode cull_disabled;\n", "render_mode cull_disabled;\n#define WIND\n");
+	}
+	shader->set_code(code);
 	Ref<ShaderMaterial> material;
 	material.instantiate();
 	material->set_shader(shader);

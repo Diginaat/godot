@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherMotesEffect" inherits="WeatherEffect" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Tiny droplets floating around the camera in fog and rain, for a [Weather] node.
+	</brief_description>
+	<description>
+		Fills a box around the camera with tiny droplets that drift with the wind and swirl, so fog and rain read as countless small particles instead of one smooth wash. Volumetric fog can't show detail this fine. The motes are lit by the scene's lights, glitter in light beams and take the sky's light under clouds.
+		Their number follows the weather's fog density and the rain. The motes wrap around inside the box, so they follow any wind at once and the box stays full. [constant Weather.QUALITY_LOW] has none; higher quality levels have more ([method get_max_motes]).
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_intensity" qualifiers="const">
+			<return type="float" />
+			<description>
+				How many of the [method get_max_motes] motes are shown, from [code]0.0[/code] to [code]1.0[/code].
+			</description>
+		</method>
+		<method name="get_max_motes" qualifiers="const">
+			<return type="int" />
+			<description>
+				The number of motes at full fog and rain, set by the quality level.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="amount" type="float" setter="set_amount" getter="get_amount" default="1.0">
+			Scales the number of motes shown.
+		</member>
+		<member name="height" type="float" setter="set_height" getter="get_height" default="6.0">
+			The height of the box of motes. It sits a little below the camera.
+		</member>
+		<member name="lifetime" type="float" setter="set_lifetime" getter="get_lifetime" default="5.0">
+			Seconds a mote lives before it fades and a new one appears.
+		</member>
+		<member name="max_drift_speed" type="float" setter="set_max_drift_speed" getter="get_max_drift_speed" default="1.5">
+			The fastest the motes drift with the wind, in meters per second. Faster motes streak past and read as noise.
+		</member>
+		<member name="mote_layers" type="int" setter="set_mote_layers" getter="get_mote_layers" default="524288">
+			The render layers of the motes.
+		</member>
+		<member name="radius" type="float" setter="set_radius" getter="get_radius" default="14.0">
+			Half the width of the box of motes around the camera. They fade out before its edge.
+		</member>
+		<member name="wind_drift" type="float" setter="set_wind_drift" getter="get_wind_drift" default="0.06">
+			How much of the wind speed the motes drift with.
+		</member>
+	</members>
+</class>

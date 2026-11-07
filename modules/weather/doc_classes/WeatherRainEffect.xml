@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherRainEffect" inherits="WeatherEffect" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Rain for a [Weather] node: raindrops, impacts and a rain occlusion map.
+	</brief_description>
+	<description>
+		Rains around the camera as much as [method Weather.get_rain_amount] says, slanted by the wind. Drops are lit, see-through streaks that refract the scene and reflect the sky's light ([method Weather.get_horizon_light]), so rain shows against dark ground under clouds. Where a drop hits geometry, an impact draws a ring (on wet surfaces), a crown of droplets and a thin cup of water.
+		Only a box of [member area_size] around the camera is simulated, by [GPUParticles3D] with a [GPUParticlesCollisionHeightField3D] that follows the camera, so drops stop on the first surface they hit: no rain under roofs. The rain amount scales the live particle count, so changes never restart the rain. The particle counts and map sizes follow [member Weather.quality].
+		The rain occlusion map is a top-down height map around the camera, re-rendered only after moving [member occlusion_update_step] and only while something is wet. Wet surface shaders ([code]res://.builtin/wet_surface.gdshader[/code], or [code]weather_apply_wetness()[/code] from [code]res://.builtin/weather_wetness.gdshaderinc[/code]) compare each surface with the highest cover above it, so the ground under roofs, overhangs and tables stays dry. It is passed in the global shader parameters [code]weather_rain_occlusion[/code] and [code]weather_occlusion_area[/code].
+		The nodes are internal children of the [Weather] node and are never saved.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_max_drops" qualifiers="const">
+			<return type="int" />
+			<description>
+				The number of drops at full rain, set by the quality level.
+			</description>
+		</method>
+		<method name="get_max_impacts" qualifiers="const">
+			<return type="int" />
+			<description>
+				The number of impacts at full rain, set by the quality level.
+			</description>
+		</method>
+		<method name="get_occlusion_area" qualifiers="const">
+			<return type="Vector4" />
+			<description>
+				The area the occlusion map covers: center x and z, width in meters, and [code]1.0[/code] in w while the map is in use ([code]Vector4(0, 0, 0, 0)[/code] when it isn't). The same value as the [code]weather_occlusion_area[/code] global shader parameter.
+			</description>
+		</method>
+		<method name="get_occlusion_texture" qualifiers="const">
+			<return type="Texture2D" />
+			<description>
+				The occlusion map: the height in meters of the highest surface above each point, in the red channel. [code]null[/code] when the effect isn't running or [member occlusion_enabled] is off.
+			</description>
+		</method>
+		<method name="refresh_occlusion">
+			<return type="void" />
+			<description>
+				Renders the occlusion map again now, for example after building or moving a cover. Otherwise it is only rendered after the camera moves [member occlusion_update_step].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="area_size" type="float" setter="set_area_size" getter="get_area_size" default="36.0">
+			Width of the box around the camera where it rains, in meters. Rain further away is the haze's job.
+		</member>
+		<member name="collision_refresh_interval" type="float" setter="set_collision_refresh_interval" getter="get_collision_refresh_interval" default="0.2">
+			Seconds between captures of the collision height field while it rains, even when the camera doesn't move, so moved objects (doors, vehicles, pushed props) don't leave invisible surfaces that drops splash on. [code]0.0[/code] captures only after moving.
+		</member>
+		<member name="cover_layers" type="int" setter="set_cover_layers" getter="get_cover_layers" default="262143">
+			Render layers that count as cover for the occlusion map. The rain's own layers are left out.
+		</member>
+		<member name="emit_height" type="float" setter="set_emit_height" getter="get_emit_height" default="14.0">
+			Height above the camera where drops start, in meters.
+		</member>
+		<member name="fall_speed" type="float" setter="set_fall_speed" getter="get_fall_speed" default="11.0">
+			Speed of the falling drops, in meters per second. Real raindrops fall at 5 to 9 m/s; a little faster reads better on screen.
+		</member>
+		<member name="impact_mist" type="bool" setter="set_impact_mist" getter="is_impact_mist" default="false">
+			If [code]true[/code], each impact also puffs a faint spray. Off by default: single puffs tend to look like snowflakes.
+		</member>
+		<member name="impacts_enabled" type="bool" setter="set_impacts_enabled" getter="is_impacts_enabled" default="true">
+			If [code]true[/code], drops that hit geometry splash. The splashes are a sub-emitter of the drops.
+		</member>
+		<member name="occlusion_area_size" type="float" setter="set_occlusion_area_size" getter="get_occlusion_area_size" default="64.0">
+			Width of the occlusion map, in meters. Surfaces outside it are always exposed to the rain.
+		</member>
+		<member name="occlusion_capture_height" type="float" setter="set_occlusion_capture_height" getter="get_occlusion_capture_height" default="60.0">
+			Height above the camera from which the occlusion map is captured, in meters. Covers higher than this don't count.
+		</member>
+		<member name="occlusion_enabled" type="bool" setter="set_occlusion_enabled" getter="is_occlusion_enabled" default="true">
+			If [code]true[/code], surfaces under cover stay dry. Without it, wet surface shaders treat everything as open to the sky.
+		</member>
+		<member name="occlusion_update_step" type="float" setter="set_occlusion_update_step" getter="get_occlusion_update_step" default="4.0">
+			The occlusion map is rendered again after the camera moves this far, in meters. Its position snaps to this grid, so it never shimmers.
+		</member>
+		<member name="opacity" type="float" setter="set_opacity" getter="get_opacity" default="0.35">
+			Opacity of the drops.
+		</member>
+		<member name="rain_layers" type="int" setter="set_rain_layers" getter="get_rain_layers" default="524288">
+			Render layers of the drops and impacts. The collision height field and the occlusion map ignore these layers.
+		</member>
+		<member name="sky_reflection" type="float" setter="set_sky_reflection" getter="get_sky_reflection" default="1.6">
+			How bright the sky's light looks in the drops.
+		</member>
+		<member name="streak_length" type="float" setter="set_streak_length" getter="get_streak_length" default="1.1">
+			Length of a drop's streak, in meters: a camera exposure smears each drop into a line.
+		</member>
+		<member name="streak_width" type="float" setter="set_streak_width" getter="get_streak_width" default="0.005">
+			Width of a drop's streak, in meters. Far drops are never drawn thinner than a pixel and a half; they get fainter instead.
+		</member>
+		<member name="wind_multiplier" type="float" setter="set_wind_multiplier" getter="get_wind_multiplier" default="0.85">
+			How much of the wind's speed the drops take on. Drops nearly reach the wind's speed in a fraction of a second.
+		</member>
+	</members>
+</class>

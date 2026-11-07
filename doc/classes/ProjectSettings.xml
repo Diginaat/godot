@@ -3791,6 +3791,24 @@
 		<member name="threading/worker_pool/max_threads" type="int" setter="" getter="" default="-1">
 			Maximum number of threads to be used by [WorkerThreadPool]. On Web, a value of [code]-1[/code] means [code]1[/code]. On other platforms, it means all [i]logical[/i] CPU cores available (see [method OS.get_processor_count]).
 		</member>
+		<member name="weather/quality" type="int" setter="" getter="" default="2">
+			Quality of the weather effects for [Weather] nodes whose [member Weather.quality] is [b]Auto[/b]: [b]Low[/b], [b]Medium[/b], [b]High[/b] or [b]Ultra[/b]. Effects use it to pick particle counts, map sizes and shader detail.
+		</member>
+		<member name="weather/wind/default_direction_degrees" type="float" setter="" getter="" default="30.0">
+			Heading of the [WindServer]'s wind at startup, in degrees: [code]0[/code] blows toward -Z, increasing clockwise seen from above ([code]90[/code] blows toward +X). A weather node changes it at runtime.
+		</member>
+		<member name="weather/wind/default_gustiness" type="float" setter="" getter="" default="0.3">
+			How much the [WindServer]'s wind varies in gusts at startup, from [code]0[/code] (steady) to [code]1[/code].
+		</member>
+		<member name="weather/wind/default_speed" type="float" setter="" getter="" default="3.0">
+			Mean speed of the [WindServer]'s wind at startup, in meters per second. Grass, trees, cloth and [WindReceiver3D] bodies react to it in the editor too.
+		</member>
+		<member name="weather/wind/default_turbulence" type="float" setter="" getter="" default="0.3">
+			Small-scale unsteadiness of the [WindServer]'s wind at startup, from [code]0[/code] to [code]1[/code]: how much grass blades and leaves flutter.
+		</member>
+		<member name="weather/wind/gust_scale" type="float" setter="" getter="" default="40.0">
+			Size of the [WindServer]'s gusts, in meters. Gust fronts this size sweep across the world at the wind's speed.
+		</member>
 		<member name="xr/openxr/binding_modifiers/analog_threshold" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], enables the analog threshold binding modifier if supported by the XR runtime.
 		</member>

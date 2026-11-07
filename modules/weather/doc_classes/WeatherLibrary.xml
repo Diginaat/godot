@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherLibrary" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		The weather types a [Weather] node can choose from.
+	</brief_description>
+	<description>
+		A list of [WeatherProfile]s, chosen by their [member WeatherProfile.display_name]. A new weather type is a new profile in the list; no code. Save a library as a resource to share it between levels.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="create_default" qualifiers="static">
+			<return type="WeatherLibrary" />
+			<description>
+				Returns a new library with the built-in weather types: Clear, Partly Cloudy, Windy, Overcast, Mist, Fog, Drizzle, Light Rain, Heavy Rain, Storm and Thunderstorm. Use it as a starting point for your own.
+			</description>
+		</method>
+		<method name="find" qualifiers="const">
+			<return type="WeatherProfile" />
+			<param index="0" name="name" type="String" />
+			<description>
+				The profile whose display name is [param name], or [code]null[/code].
+			</description>
+		</method>
+		<method name="get_default" qualifiers="static">
+			<return type="WeatherLibrary" />
+			<description>
+				The built-in library, used by [Weather] nodes without one. It is shared: [method Resource.duplicate] a profile before changing it.
+			</description>
+		</method>
+		<method name="get_names" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				The display names of the profiles, in order.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="profiles" type="WeatherProfile[]" setter="set_profiles" getter="get_profiles" default="[]">
+			The weather types.
+		</member>
+	</members>
+</class>

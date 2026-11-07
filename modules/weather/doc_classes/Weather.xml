@@ -1,0 +1,326 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="Weather" inherits="Node" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		The weather of a level: blends between weather types and runs the weather effects.
+	</brief_description>
+	<description>
+		Picks a weather type from its [member library] (or [member custom_profile] when [member weather] is [code]"Custom"[/code]) and blends to it over [member transition_time]. Every frame it drives the [WindServer] from the blended [WeatherProfile], updates the surface wetness, and runs its [member effects]: sky ([WeatherSkyEffect]), lighting ([WeatherLightingEffect]), rain ([WeatherRainEffect]), haze ([WeatherHazeEffect]), floating droplets ([WeatherMotesEffect]), lightning ([WeatherLightningEffect]) and sound ([WeatherSoundEffect]).
+		The node runs in the editor too, so the viewport shows the weather. Every scene value the weather changes (sun, environment, exposure, wind) goes through [method drive], which remembers the scene's own value and puts it back before the scene is saved and when the node leaves the tree. A value edited in the inspector while the weather drives it becomes the new base the weather works from.
+		[b]Weather types:[/b] a new type is a new [WeatherProfile] in a [WeatherLibrary]; no code. [b]New effects:[/b] extend [WeatherEffect] and add it to [member effects].
+		Surface shaders can read the global shader parameters [code]weather_wetness[/code] (0 to 1, lags behind the rain) and [code]weather_rain[/code] (0 to 1, the rain now, with gust bursts).
+		[b]Wet surfaces:[/b] use the built-in shader [code]res://.builtin/wet_surface.gdshader[/code] in a [ShaderMaterial] (albedo, roughness and normal textures, plus wetness), or call [code]weather_apply_wetness()[/code] from your own spatial shader after [code]#include "res://.builtin/weather_wetness.gdshaderinc"[/code]. Surfaces darken in patches, puddles form on flat ground with rain ripples, water runs down walls, and anything under cover stays dry ([WeatherRainEffect]'s occlusion map). Both files are served from memory, so they need no files in the project; exports leave them out.
+		[codeblock]
+		var weather := get_tree().get_first_node_in_group(&amp;"weather") as Weather
+		weather.change_weather("Storm")         # Blends over transition_time.
+		weather.change_weather("Fog", 30.0)     # Over 30 seconds; 0 switches at once.
+		var profile := WeatherProfile.new()     # Any settings: becomes Custom.
+		profile.rain_intensity = 0.5
+		weather.change_profile(profile)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="change_profile">
+			<return type="void" />
+			<param index="0" name="profile" type="WeatherProfile" />
+			<param index="1" name="duration" type="float" default="-1.0" />
+			<description>
+				Blends to [param profile] over [param duration] seconds ([member transition_time] when negative, at once when [code]0.0[/code]). A profile that is not in the library becomes the [member custom_profile] and [member weather] becomes [code]"Custom"[/code].
+			</description>
+		</method>
+		<method name="change_weather">
+			<return type="void" />
+			<param index="0" name="name" type="String" />
+			<param index="1" name="duration" type="float" default="-1.0" />
+			<description>
+				Blends to the weather type named [param name] (a profile's [member WeatherProfile.display_name] in the library, or [code]"Custom"[/code]) over [param duration] seconds ([member transition_time] when negative, at once when [code]0.0[/code]).
+			</description>
+		</method>
+		<method name="create_default_effects" qualifiers="static">
+			<return type="WeatherEffect[]" />
+			<description>
+				Returns new instances of the built-in effects, in the order they run. A new [Weather] node starts with these.
+			</description>
+		</method>
+		<method name="drive">
+			<return type="void" />
+			<param index="0" name="object" type="Object" />
+			<param index="1" name="property" type="StringName" />
+			<param index="2" name="value" type="Variant" />
+			<description>
+				Sets [param property] of [param object] to [param value] and remembers the object's own value, to be restored by [method restore_scene]. Effects use it for every scene value they change.
+			</description>
+		</method>
+		<method name="get_base">
+			<return type="Variant" />
+			<param index="0" name="object" type="Object" />
+			<param index="1" name="property" type="StringName" />
+			<description>
+				The scene's own value of a property the weather drives: the value before the weather first changed it, or the value something else set since the weather last wrote it.
+			</description>
+		</method>
+		<method name="get_camera_attributes" qualifiers="const">
+			<return type="CameraAttributes" />
+			<description>
+				The camera attributes of the [WorldEnvironment] the weather drives, if any.
+			</description>
+		</method>
+		<method name="get_current" qualifiers="const">
+			<return type="WeatherProfile" />
+			<description>
+				The blended profile being shown. Read it; don't change it.
+			</description>
+		</method>
+		<method name="get_effect" qualifiers="const">
+			<return type="WeatherEffect" />
+			<param index="0" name="class_name" type="StringName" />
+			<description>
+				The first running effect in [member effects] that is a [param class_name] or inherits from it, or [code]null[/code]. Effects use it to work together, for example the haze leans its rain shafts like the drops of the [WeatherRainEffect].
+			</description>
+		</method>
+		<method name="get_effective_library" qualifiers="const">
+			<return type="WeatherLibrary" />
+			<description>
+				[member library], or the built-in [method WeatherLibrary.get_default] when it is empty.
+			</description>
+		</method>
+		<method name="get_effective_quality" qualifiers="const">
+			<return type="int" enum="Weather.Quality" />
+			<description>
+				The quality level in use: [member quality], or the [code]weather/quality[/code] project setting when [member quality] is [constant QUALITY_AUTO].
+			</description>
+		</method>
+		<method name="get_environment" qualifiers="const">
+			<return type="Environment" />
+			<description>
+				The [Environment] the weather drives, if any.
+			</description>
+		</method>
+		<method name="get_gust" qualifiers="const">
+			<return type="float" />
+			<description>
+				The gust strength at the camera, from [code]0.0[/code] to [code]1.0[/code] (see [method WindServer.get_gust]).
+			</description>
+		</method>
+		<method name="get_horizon_light" qualifiers="const">
+			<return type="Color" />
+			<description>
+				The light of the sky near the horizon in linear color, at the sky's current brightness. Rain, haze and distant fog take this color.
+			</description>
+		</method>
+		<method name="get_profile">
+			<return type="WeatherProfile" />
+			<param index="0" name="name" type="String" />
+			<description>
+				The profile of the weather type [param name]: the library's (shared, so [method Resource.duplicate] it before changing it from code) or [member custom_profile] for [code]"Custom"[/code].
+			</description>
+		</method>
+		<method name="get_rain_amount" qualifiers="const">
+			<return type="float" />
+			<description>
+				The rain now, from [code]0.0[/code] to [code]1.0[/code]: the profile's rain intensity, heavier in gusts (see [member gust_rain_bursts]).
+			</description>
+		</method>
+		<method name="get_sky_energy" qualifiers="const">
+			<return type="float" />
+			<description>
+				The sky's own brightness, read from the sky material when the node enters the tree.
+			</description>
+		</method>
+		<method name="get_sky_horizon_color" qualifiers="const">
+			<return type="Color" />
+			<description>
+				The sky's horizon color (sRGB), read from the sky material or the background color when the node enters the tree.
+			</description>
+		</method>
+		<method name="get_sky_overcast_color" qualifiers="const">
+			<return type="Color" />
+			<description>
+				The grey the sky turns under an overcast (sRGB): the sky shader's [code]overcast_color[/code] parameter when it has one.
+			</description>
+		</method>
+		<method name="get_sun" qualifiers="const">
+			<return type="DirectionalLight3D" />
+			<description>
+				The [DirectionalLight3D] the weather drives: [member sun_path], or the first one in the scene.
+			</description>
+		</method>
+		<method name="get_sun_through_clouds" qualifiers="const">
+			<return type="float" />
+			<description>
+				How much direct sunlight gets below the clouds, from [code]0.0[/code] to [code]1.0[/code].
+			</description>
+		</method>
+		<method name="get_target" qualifiers="const">
+			<return type="WeatherProfile" />
+			<description>
+				The profile the weather is blending to (or showing).
+			</description>
+		</method>
+		<method name="get_time" qualifiers="const">
+			<return type="float" />
+			<description>
+				Seconds the weather has been running.
+			</description>
+		</method>
+		<method name="get_view_camera" qualifiers="const">
+			<return type="Camera3D" />
+			<description>
+				The camera the weather follows: the active camera in the game, the 3D editor viewport's camera in the editor.
+			</description>
+		</method>
+		<method name="get_weather_name" qualifiers="const">
+			<return type="String" />
+			<description>
+				The display name of the profile being shown or blended to.
+			</description>
+		</method>
+		<method name="get_weather_names" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				The weather types to choose from: the library's profile names, then [code]"Custom"[/code].
+			</description>
+		</method>
+		<method name="get_wetness" qualifiers="const">
+			<return type="float" />
+			<description>
+				How wet surfaces are, from [code]0.0[/code] to [code]1.0[/code]. Rises in rain over [member wetting_time] and falls over [member drying_time].
+			</description>
+		</method>
+		<method name="get_wind" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				The wind at the camera, in m/s.
+			</description>
+		</method>
+		<method name="get_world_environment" qualifiers="const">
+			<return type="WorldEnvironment" />
+			<description>
+				The [WorldEnvironment] the weather drives: [member world_environment_path], or the first one in the scene.
+			</description>
+		</method>
+		<method name="is_previewing" qualifiers="const">
+			<return type="bool" />
+			<description>
+				[code]false[/code] in the editor while [member preview_in_editor] is off.
+			</description>
+		</method>
+		<method name="next_weather">
+			<return type="void" />
+			<description>
+				Blends to the next weather type in [method get_weather_names]. Skips [code]"Custom"[/code] while there is no custom profile.
+			</description>
+		</method>
+		<method name="release">
+			<return type="void" />
+			<param index="0" name="object" type="Object" />
+			<param index="1" name="property" type="StringName" />
+			<description>
+				Gives a property back to the scene: puts back the value it had before [method drive] took it over, and stops tracking it. Effects call it from [method WeatherEffect._stop] for every property they drove, so a stopped effect leaves the scene as it found it.
+			</description>
+		</method>
+		<method name="restore_scene">
+			<return type="void" />
+			<description>
+				Puts every scene value the weather drives back to the scene's own value. The next frame drives them again.
+			</description>
+		</method>
+		<method name="set_horizon_light">
+			<return type="void" />
+			<param index="0" name="color" type="Color" />
+			<description>
+				Sets the value returned by [method get_horizon_light] for this frame. The lighting effect calls it with the dimmed sky.
+			</description>
+		</method>
+		<method name="set_sky_colors">
+			<return type="void" />
+			<param index="0" name="horizon" type="Color" />
+			<param index="1" name="overcast" type="Color" />
+			<param index="2" name="energy" type="float" />
+			<description>
+				Sets the colors and energy returned by [method get_sky_horizon_color], [method get_sky_overcast_color] and [method get_sky_energy]. The sky effect calls it every frame, so effects that run after it (haze, rain) can tint themselves to match the sky.
+			</description>
+		</method>
+		<method name="set_wetness">
+			<return type="void" />
+			<param index="0" name="wetness" type="float" />
+			<description>
+				Sets how wet surfaces are, for example to start a level after rain.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="custom_profile" type="WeatherProfile" setter="set_custom_profile" getter="get_custom_profile">
+			The settings used when [member weather] is [code]"Custom"[/code], edited right here. Picking [code]"Custom"[/code] without one starts from the weather showing.
+		</member>
+		<member name="drying_time" type="float" setter="set_drying_time" getter="get_drying_time" default="90.0">
+			Seconds for surfaces to dry after the rain stops.
+		</member>
+		<member name="effects" type="WeatherEffect[]" setter="set_effects" getter="get_effects" default="[Object(WeatherSkyEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;cloud_wind_multiplier&quot;:3.0,&quot;cloud_wind_veer_degrees&quot;:15.0,&quot;script&quot;:null) , Object(WeatherLightingEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;storm_sky_dimming&quot;:0.5,&quot;storm_fog_color&quot;:Color(0.16, 0.17, 0.19, 1),&quot;overcast_shadow_blur&quot;:6.0,&quot;script&quot;:null) , Object(WeatherRainEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;wind_multiplier&quot;:0.85,&quot;area_size&quot;:36.0,&quot;emit_height&quot;:14.0,&quot;fall_speed&quot;:11.0,&quot;streak_length&quot;:1.1,&quot;streak_width&quot;:0.005,&quot;opacity&quot;:0.35,&quot;sky_reflection&quot;:1.6,&quot;impacts_enabled&quot;:true,&quot;impact_mist&quot;:false,&quot;collision_refresh_interval&quot;:0.2,&quot;rain_layers&quot;:524288,&quot;occlusion_enabled&quot;:true,&quot;occlusion_area_size&quot;:64.0,&quot;occlusion_update_step&quot;:4.0,&quot;occlusion_capture_height&quot;:60.0,&quot;cover_layers&quot;:262143,&quot;script&quot;:null) , Object(WeatherHazeEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;density&quot;:0.7,&quot;brightness&quot;:1.0,&quot;distance&quot;:128.0,&quot;sky_affect&quot;:0.75,&quot;rain_density&quot;:0.012,&quot;spray_density&quot;:0.06,&quot;rain_height&quot;:15.0,&quot;shaft_evolve_speed&quot;:0.006,&quot;height_falloff&quot;:0.15,&quot;patchiness&quot;:0.6,&quot;wisp_strength&quot;:0.45,&quot;patch_size&quot;:96.0,&quot;ground_smoothing&quot;:1.0,&quot;camera_height&quot;:1.7,&quot;ground_mask&quot;:4294967295,&quot;script&quot;:null) , Object(WeatherMotesEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;amount&quot;:1.0,&quot;radius&quot;:14.0,&quot;height&quot;:6.0,&quot;lifetime&quot;:5.0,&quot;wind_drift&quot;:0.06,&quot;max_drift_speed&quot;:1.5,&quot;mote_layers&quot;:524288,&quot;script&quot;:null) , Object(WeatherLightningEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;energy&quot;:2.5,&quot;color&quot;:Color(0.78, 0.84, 1, 1),&quot;distance_min&quot;:300.0,&quot;distance_max&quot;:3000.0,&quot;ground_strike_chance&quot;:0.4,&quot;cloud_base_height&quot;:1200.0,&quot;glow_color&quot;:Color(0.55, 0.62, 1, 1),&quot;bolt_levels&quot;:7,&quot;bolt_roughness&quot;:0.22,&quot;max_branches&quot;:6,&quot;preview_hold_time&quot;:8.0,&quot;bolt_layers&quot;:524288,&quot;script&quot;:null) , Object(WeatherSoundEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;volume_db&quot;:-4.0,&quot;rain_volume_db&quot;:0.0,&quot;wind_volume_db&quot;:0.0,&quot;thunder_volume_db&quot;:0.0,&quot;wind_full_speed&quot;:20.0,&quot;audio_bus&quot;:&amp;&quot;Master&quot;,&quot;rain_sound&quot;:null,&quot;heavy_rain_sound&quot;:null,&quot;wind_sound&quot;:null,&quot;thunder_sounds&quot;:Array[AudioStream]([]),&quot;near_thunder_sounds&quot;:Array[AudioStream]([]),&quot;script&quot;:null) ]">
+			The effects the weather runs every frame, in order. Each is a [WeatherEffect] with its own settings. Remove one to turn it off, or add your own.
+		</member>
+		<member name="gust_direction_swing" type="float" setter="set_gust_direction_swing" getter="get_gust_direction_swing" default="20.0">
+			How far gusts swing the wind's direction at full gustiness, in degrees (sets [member WindServer.direction_swing_degrees]).
+		</member>
+		<member name="gust_rain_bursts" type="float" setter="set_gust_rain_bursts" getter="get_gust_rain_bursts" default="0.5">
+			How much heavier the rain gets in gusts. [code]0.0[/code] keeps it steady.
+		</member>
+		<member name="library" type="WeatherLibrary" setter="set_library" getter="get_library">
+			The weather types to choose from. Empty uses [method WeatherLibrary.get_default].
+		</member>
+		<member name="preview_in_editor" type="bool" setter="set_preview_in_editor" getter="is_preview_in_editor" default="true">
+			If [code]true[/code], the editor viewport shows the weather. If [code]false[/code], the scene's own values are restored.
+		</member>
+		<member name="quality" type="int" setter="set_quality" getter="get_quality" enum="Weather.Quality" default="0">
+			The effects' quality level. [constant QUALITY_AUTO] uses the [code]weather/quality[/code] project setting.
+		</member>
+		<member name="sun_path" type="NodePath" setter="set_sun_path" getter="get_sun_path" default="NodePath(&quot;&quot;)">
+			The sun the weather drives. Empty finds the first [DirectionalLight3D] in the scene.
+		</member>
+		<member name="transition_time" type="float" setter="set_transition_time" getter="get_transition_time" default="12.0">
+			Default blend time between weather types, in seconds. In the editor, changing [member weather] switches at once.
+		</member>
+		<member name="weather" type="String" setter="set_weather" getter="get_weather" default="&quot;Clear&quot;">
+			The weather type: a profile name from the library, or [code]"Custom"[/code]. Changing it blends to the new type over [member transition_time].
+		</member>
+		<member name="wetting_time" type="float" setter="set_wetting_time" getter="get_wetting_time" default="20.0">
+			Seconds for surfaces to get fully wet in heavy rain (longer in light rain).
+		</member>
+		<member name="world_environment_path" type="NodePath" setter="set_world_environment_path" getter="get_world_environment_path" default="NodePath(&quot;&quot;)">
+			The [WorldEnvironment] the weather drives. Empty finds the first one in the scene.
+		</member>
+	</members>
+	<signals>
+		<signal name="lightning_struck">
+			<param index="0" name="position" type="Vector3" />
+			<param index="1" name="distance" type="float" />
+			<description>
+				Emitted at each lightning flash of the [WeatherLightningEffect]. [param position] is where it struck: the ground point of a bolt, or the flash inside the clouds. [param distance] is in meters from the camera; thunder comes [code]distance / 343[/code] seconds later.
+			</description>
+		</signal>
+		<signal name="weather_changed">
+			<param index="0" name="profile" type="WeatherProfile" />
+			<description>
+				Emitted when the weather starts blending to [param profile].
+			</description>
+		</signal>
+	</signals>
+	<constants>
+		<constant name="QUALITY_AUTO" value="0" enum="Quality">
+			Use the [code]weather/quality[/code] project setting.
+		</constant>
+		<constant name="QUALITY_LOW" value="1" enum="Quality">
+			Fewest particles and lowest resolution.
+		</constant>
+		<constant name="QUALITY_MEDIUM" value="2" enum="Quality">
+			Medium quality.
+		</constant>
+		<constant name="QUALITY_HIGH" value="3" enum="Quality">
+			High quality (the default).
+		</constant>
+		<constant name="QUALITY_ULTRA" value="4" enum="Quality">
+			Most particles and highest resolution.
+		</constant>
+	</constants>
+</class>

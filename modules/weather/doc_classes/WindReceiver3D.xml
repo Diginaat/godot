@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WindReceiver3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Lets the [WindServer]'s wind push a [RigidBody3D].
+	</brief_description>
+	<description>
+		Add it as a child of a [RigidBody3D] (or a [VehicleBody3D]) to push the body with the wind. Every physics tick it applies aerodynamic drag, [code]0.5 * air density * drag_coefficient * area * speed²[/code], along the wind relative to the body, so a body moving with the wind feels no force.
+		The force acts at this node's position. Place it above the body's center to make tall objects tip over, or at the center to only push them. Without an [member area], the area facing the wind is worked out from the body's [CollisionShape3D] children and the body's rotation: a plank broadside to the wind catches more of it than end-on.
+		Under a parent that is not a [RigidBody3D], it only computes the force; read it with [method get_wind_force], for example to push a [CharacterBody3D] from a script.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_effective_area" qualifiers="const">
+			<return type="float" />
+			<description>
+				The area facing the current wind, in square meters: [member area], or the one worked out from the collision shapes.
+			</description>
+		</method>
+		<method name="get_wind_force" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				The drag force of the last physics tick, in newtons.
+			</description>
+		</method>
+		<method name="get_wind_velocity" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				The wind at this node in the last physics tick, in meters per second.
+			</description>
+		</method>
+		<method name="update_shape_size">
+			<return type="void" />
+			<description>
+				Measures the parent's collision shapes again. Call it after changing them; it happens by itself when the node enters the tree.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="area" type="float" setter="set_area" getter="get_area" default="0.0">
+			Area facing the wind in square meters. [code]0.0[/code] works it out from the parent's collision shapes.
+		</member>
+		<member name="drag_coefficient" type="float" setter="set_drag_coefficient" getter="get_drag_coefficient" default="1.0">
+			Drag coefficient of the body's shape: about [code]0.5[/code] for a sphere, [code]1.0[/code] for a cube, [code]1.2[/code] for a flat plate face-on.
+		</member>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="true">
+			If [code]false[/code], the wind doesn't push the body.
+		</member>
+		<member name="strength" type="float" setter="set_strength" getter="get_strength" default="1.0">
+			Multiplier for the force, to exaggerate or soften the wind on this body.
+		</member>
+		<member name="wake_acceleration" type="float" setter="set_wake_acceleration" getter="get_wake_acceleration" default="0.3">
+			A sleeping body is only woken when the wind would accelerate it by more than this, in m/s². Keeps resting bodies asleep in a light breeze.
+		</member>
+	</members>
+</class>
