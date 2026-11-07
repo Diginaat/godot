@@ -34,6 +34,13 @@ per-pixel-transparency setting. Image alpha does not prove desktop composition;
 also check `DisplayServer.is_window_transparency_available()` and the visible
 native popup. Keep any startup correction editor-only, not a game-setting change.
 
+A later corner-fringe report required checking the complete native popup
+perimeter, not only `(0, 0)`: with no inset, straight edges reached the window
+boundary and their AA fringe was clipped. A compact-only transparent gutter can
+use the existing popup shadow-inset mechanism without changing control logic.
+Require zero alpha on the full outer perimeter, and still obtain desktop visual
+confirmation rather than equating that check with compositor correctness.
+
 On hosts that disable local PowerShell scripts, invoke the approved test runner
 with an explicit process-scoped execution policy rather than changing the
 machine/user policy. The process still needs the expected completion marker and

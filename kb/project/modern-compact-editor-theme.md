@@ -38,6 +38,14 @@ share the increased padding. Main-screen switch padding remains unchanged.
 Context menus (including submenus), popup panels and tooltips also use the shared
 six-logical-pixel corner radius, full antialiasing and opaque 1px outlines in both
 compact presets. Other presets and OS-managed native menus/dialogs are unchanged.
+Compact popups reserve a 2px fully transparent gutter through the native popup
+controls' existing shadow-inset mechanism (shadow color is fully transparent).
+This keeps rounded antialiasing away from the native window boundary without
+changing menu fill opacity, corner radius, item spacing, or control behavior.
+An earlier readback only checked corner pixels; its straight window-edge pixels
+were still opaque. The regression check now requires the complete outer pixel
+perimeter to be fully transparent. Desktop fringe appearance needs fresh visual
+confirmation for this gutter revision.
 For native popup corners, editor/Project Manager startup enables layered-window
 composition independently of `display/window/per_pixel_transparency/allowed`.
 Otherwise rounded popup images can contain transparent pixels that the native

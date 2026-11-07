@@ -1,5 +1,19 @@
 # Update log
 
+## 2026-11-07 (transparent popup perimeter)
+
+* **Refined**: reserve 2px fully transparent padding around compact popup menus,
+  panels and tooltips using existing shadow insets, with no visible shadow.
+  Rounded antialiasing no longer touches the native window boundary; fill,
+  radius and item spacing stay unchanged.
+* **Evidence**: prior popup readback had transparent corner pixels but opaque
+  straight-edge pixels at the window boundary. Add a full-perimeter alpha check,
+  rather than treating one transparent corner pixel as sufficient proof.
+* **Validated**: production build and OpenGL/Vulkan/D3D12 checks passed. The
+  complete outer popup perimeter now has zero alpha in both compact presets;
+  dock defaults, floating tabs and switch stability still pass. Project Manager
+  and unchanged game-default checks pass. Desktop visual confirmation pending.
+
 ## 2026-11-07 (compact header and gray theme)
 
 * **Implemented**: darker compact header, selectable Modern Compact Gray with

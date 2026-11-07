@@ -42,6 +42,14 @@
 #include "scene/resources/style_box_line.h"
 
 // Helper.
+static void _set_transparent_popup_gutter(const Ref<StyleBoxFlat> &p_style) {
+	// Popup controls reserve their shadow area inside the native window. Use a
+	// fully transparent gutter so rounded AA never touches the window boundary.
+	p_style->set_shadow_size(EDSCALE_RND(2));
+	p_style->set_shadow_offset(Vector2());
+	p_style->set_shadow_color(Color(0, 0, 0, 0));
+}
+
 static Color _get_base_color(EditorThemeManager::ThemeConfiguration &p_config, float p_dimness_ofs = 0.0, float p_saturation_mult = 1.0) {
 	Color color = p_config.base_color;
 	const float final_contrast = (p_dimness_ofs < 0) ? CLAMP(p_config.contrast, -0.1, 0.5) : p_config.contrast;
@@ -410,6 +418,9 @@ void ThemeModern::populate_shared_styles(const Ref<EditorTheme> &p_theme, Editor
 			p_config.popup_panel_style->set_shadow_size(EDSCALE_RND(p_config.base_margin * 0.75));
 			p_config.popup_panel_style->set_content_margin_all(EDSCALE_RND(p_config.popup_margin));
 			p_config.popup_panel_style->set_corner_radius_all(p_config.is_modern_compact() ? EDSCALE_RND(p_config.corner_radius) : 0);
+			if (p_config.is_modern_compact()) {
+				_set_transparent_popup_gutter(p_config.popup_panel_style);
+			}
 			if (p_config.draw_extra_borders) {
 				p_config.popup_panel_style->set_border_width_all(EDSCALE_RND(1));
 				p_config.popup_panel_style->set_border_color(p_config.extra_border_color_2);
@@ -495,6 +506,9 @@ void ThemeModern::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edit
 			Ref<StyleBoxFlat> tooltip_style = p_config.base_style->duplicate();
 			tooltip_style->set_bg_color(p_config.surface_popup_color);
 			tooltip_style->set_corner_radius_all(p_config.is_modern_compact() ? EDSCALE_RND(p_config.corner_radius) : 0);
+			if (p_config.is_modern_compact()) {
+				_set_transparent_popup_gutter(tooltip_style);
+			}
 			if (p_config.draw_extra_borders) {
 				tooltip_style->set_border_width_all(EDSCALE_RND(1));
 				tooltip_style->set_border_color(p_config.extra_border_color_2);
@@ -1164,6 +1178,9 @@ void ThemeModern::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edit
 			style_popup_menu->set_bg_color(p_config.surface_popup_color);
 			style_popup_menu->set_content_margin_all(p_config.popup_margin);
 			style_popup_menu->set_corner_radius_all(p_config.is_modern_compact() ? EDSCALE_RND(p_config.corner_radius) : 0);
+			if (p_config.is_modern_compact()) {
+				_set_transparent_popup_gutter(style_popup_menu);
+			}
 			if (p_config.draw_extra_borders) {
 				style_popup_menu->set_border_width_all(EDSCALE_RND(1));
 				style_popup_menu->set_border_color(p_config.extra_border_color_2);
