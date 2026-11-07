@@ -9,6 +9,7 @@ What worked is in [successes](/successes/).
 * [Editor theme validation](/mistakes/editor-theme-validation.md) - query the generated editor theme, not a Control's possibly null local theme
 
 * [Build interpreter mismatch](/mistakes/python-build-interpreter.md) - check existing Python installations before installing SCons or rebuilding SDKs
+* [Popup alpha without native composition](/mistakes/popup-alpha-without-native-composition.md) - compare desktop pixels as well as viewport alpha; account for screen origins
 * [New translation-unit assumptions](/mistakes/new-translation-unit-assumptions.md) - check explicit includes, namespaces and container signatures in this fork
 * [Native doc self-closing section](/mistakes/native-doc-self-closing-section.md) - validate embedded class help in editor startup as well as RST
 * [Shared texture mip readback](/mistakes/shared-texture-mip-readback.md) - inspect owner mip chains, not assumed shared-view copy offsets

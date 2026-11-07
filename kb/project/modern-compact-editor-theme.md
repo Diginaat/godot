@@ -95,6 +95,31 @@ All checks passed without script errors; captured editor screenshots for both
 compact presets were inspected. Other DPI scales and native OS title-bar styling
 were not visually validated in this pass. No physics/path-tracer smoke claim.
 
+## Popup transparency (2026-11-07)
+
+Integration into `dev` preserves both compact presets and their transparent
+gutter. Startup already enabled layered windows here; the additional code change
+is the Windows GDI erase fix. Measurements below were taken on the source branch
+before cherry-picking, with its six-pixel corners and no gutter.
+
+Editor and project-manager startup now allow per-pixel window transparency
+independently of the project's setting. PopupMenu already requests a transparent
+viewport/window; disabling layered windows prevented native alpha composition.
+Modern Compact menus use the configured corner radius rather than forcing square
+corners, with no theme shadow. Runtime project settings retain their defaults.
+Validation: production editor build passed with Python 3.14/SCons, `-j10`;
+project-manager startup passed on Vulkan and D3D12 (`--quit-after 10`, exit 0).
+Follow-up: viewport readback was transparent black, but native Vulkan popup
+corners still added RGB (25, 27, 30)/255 to the desktop. `WM_ERASEBKGND` painted
+the editor's early-clear color into the GDI backing surface. Clearing that
+surface to black at runtime made zero-alpha corner pixels match the background
+exactly; disabling DWM borders, rounding, or backdrop did not. D3D12 did not
+show the additive rectangle. Transparent windows now use a black GDI erase
+brush rather than the opaque editor early-clear color. Production rebuild passed.
+Native Vulkan and D3D12 checks each found 24 zero-alpha corner pixels and zero
+desktop-background mismatches (RTX 3060, radius 6, 100% scale). The user confirmed
+the fix works.
+
 ## Typography
 
 Update (2026-11-06): the user chose **Atkinson Hyperlegible Next** 2.66

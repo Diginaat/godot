@@ -5878,6 +5878,15 @@ LRESULT DisplayServerWindows::WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARA
 			}
 		} break;
 		case WM_ERASEBKGND: {
+			if (windows[window_id].layered_window) {
+				// DWM adds the GDI background to transparent Vulkan/OpenGL windows.
+				// Keep it black so zero-alpha pixels reveal only the windows behind them.
+				RECT rect = {};
+				if (GetUpdateRect(hWnd, &rect, true)) {
+					FillRect((HDC)wParam, &rect, (HBRUSH)GetStockObject(BLACK_BRUSH));
+				}
+				return 1;
+			}
 			Color early_color;
 			if (!_get_window_early_clear_override(early_color)) {
 				break;

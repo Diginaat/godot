@@ -36,6 +36,9 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   Popup image alpha alone does not prove native-window transparency: check
   `DisplayServer.is_window_transparency_available()` too. Editor startup enables
   layered windows independently of the game's per-pixel-transparency setting.
+- Verify native popup screenshots as well as viewport alpha: Windows GDI
+  `WM_ERASEBKGND` must clear transparent windows to black, or Vulkan composition
+  adds the early-clear RGB behind zero-alpha corners.
 
 - Setup, build, smoke test, DDGI test and release scripts are in `devtools/`
   (see devtools/README.md). `devtools/setup/setup_dev_windows.ps1` writes the

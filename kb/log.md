@@ -12,6 +12,20 @@
   `135dff3887`. A later merge should use `135dff3887` as the base
   (`git merge-tree --merge-base=135dff3887`), not the upstream merge base.
 
+## 2026-11-07 (popup corner transparency)
+
+* Follow-up reproduced the remaining rectangle: native Vulkan composition added
+  the GDI early-clear RGB behind an already zero-alpha popup texture. A black
+  GDI erase experimentally restores exact background pixels; patched
+  `WM_ERASEBKGND` for transparent windows. Production rebuild passed; Vulkan and
+  D3D12 each verified 24 zero-alpha pixels with zero background mismatches.
+  User confirmed the fix works.
+
+* Enabled editor/project-manager per-pixel transparency independently of project
+  settings; Modern Compact menus now retain rounded corners without a theme shadow.
+  See [theme notes](/project/modern-compact-editor-theme.md). Production build and
+  Vulkan/D3D12 project-manager startup passed; user confirmed popup appearance.
+
 ## 2026-11-07 (split workspace and Live Runtime view)
 
 * **Implemented**: second main screen panel (`DOCK_SLOT_MAIN_SCREEN_SPLIT`) so
