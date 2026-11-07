@@ -31,7 +31,9 @@
 #include "weather.h"
 
 #include "effects/weather_lighting_effect.h"
+#include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
+#include "weather_wetness_shaders.h"
 #include "wind/wind_server.h"
 
 #include "core/config/engine.h"
@@ -47,6 +49,8 @@
 #include "scene/resources/3d/sky_material.h"
 #include "scene/resources/environment.h"
 #include "scene/resources/material.h"
+#include "scene/resources/shader.h"
+#include "scene/resources/shader_include.h"
 #include "servers/rendering/rendering_server.h"
 
 #ifdef TOOLS_ENABLED
@@ -55,6 +59,12 @@
 
 const char *Weather::GLOBAL_WETNESS = "weather_wetness";
 const char *Weather::GLOBAL_RAIN = "weather_rain";
+const char *Weather::GLOBAL_RAIN_OCCLUSION = "weather_rain_occlusion";
+const char *Weather::GLOBAL_OCCLUSION_AREA = "weather_occlusion_area";
+
+// Served from the resource cache, so they load and #include without files.
+static Ref<ShaderInclude> wetness_include;
+static Ref<Shader> wet_surface_shader;
 
 void Weather::register_project_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "weather/quality", PROPERTY_HINT_ENUM, "Low,Medium,High,Ultra"), 2);
@@ -68,6 +78,24 @@ void Weather::register_shader_globals() {
 	// Surface shaders read these for wet surfaces; see WEATHER.md.
 	rs->global_shader_parameter_add(GLOBAL_WETNESS, RSE::GLOBAL_VAR_TYPE_FLOAT, 0.0f);
 	rs->global_shader_parameter_add(GLOBAL_RAIN, RSE::GLOBAL_VAR_TYPE_FLOAT, 0.0f);
+	// Height of the highest cover above each point, and the map's area
+	// (center x, z, width, valid); set by the rain effect.
+	rs->global_shader_parameter_add(GLOBAL_RAIN_OCCLUSION, RSE::GLOBAL_VAR_TYPE_SAMPLER2D, Variant());
+	rs->global_shader_parameter_add(GLOBAL_OCCLUSION_AREA, RSE::GLOBAL_VAR_TYPE_VEC4, Vector4());
+}
+
+void Weather::register_builtin_resources() {
+	wetness_include.instantiate();
+	wetness_include->set_code(weather_wetness_include_code);
+	wetness_include->set_path(WETNESS_INCLUDE_PATH, true);
+	wet_surface_shader.instantiate();
+	wet_surface_shader->set_code(weather_wet_surface_shader_code);
+	wet_surface_shader->set_path(WET_SURFACE_SHADER_PATH, true);
+}
+
+void Weather::free_builtin_resources() {
+	wet_surface_shader.unref();
+	wetness_include.unref();
 }
 
 TypedArray<WeatherEffect> Weather::create_default_effects() {
@@ -75,6 +103,7 @@ TypedArray<WeatherEffect> Weather::create_default_effects() {
 	// The sky first: the lighting takes the sky's colours.
 	list.push_back(memnew(WeatherSkyEffect));
 	list.push_back(memnew(WeatherLightingEffect));
+	list.push_back(memnew(WeatherRainEffect));
 	return list;
 }
 

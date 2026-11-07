@@ -60,3 +60,18 @@ Step 1 of the native weather (see `WEATHER.md` at the repository root):
   depends on `noise`).
 * **Clouds and wind.** The drift is subtracted (the shader adds it to its
   lookup) and wrapped where the textures repeat.
+
+# Rain and wet surfaces (step 4)
+
+* **Effects own internal nodes.** The rain's particles, collider and
+  occlusion viewport are internal children of the `Weather` node, built on
+  start and freed on stop, so they are never saved.
+* **Built-in shaders by path.** The wetness include and a wet surface
+  shader live in the resource cache under `res://.builtin/`. Includes are
+  not dependencies; a material using the built-in shader is, so an export
+  plugin skips those paths.
+* **Occlusion only when it matters.** The top-down height map renders once
+  per grid step of camera movement, and only while something is wet.
+* **Read back what you set.** `global_shader_parameter_get()` is
+  editor-only on real renderers; effects keep their own copy.
+

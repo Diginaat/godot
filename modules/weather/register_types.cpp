@@ -31,6 +31,7 @@
 #include "register_types.h"
 
 #include "effects/weather_lighting_effect.h"
+#include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
 #include "weather.h"
 #include "weather_effect.h"
@@ -41,6 +42,18 @@
 
 #include "core/config/engine.h"
 #include "core/object/class_db.h"
+
+#ifdef TOOLS_ENABLED
+#include "editor/editor_node.h"
+#include "editor/export/editor_export.h"
+#include "editor/weather_export_plugin.h"
+
+static void _weather_editor_init() {
+	Ref<WeatherExportPlugin> export_plugin;
+	export_plugin.instantiate();
+	EditorExport::get_singleton()->add_export_plugin(export_plugin);
+}
+#endif
 
 static WindServer *wind_server = nullptr;
 
@@ -58,6 +71,7 @@ void initialize_weather_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(WeatherEffect);
 		GDREGISTER_CLASS(WeatherLightingEffect);
 		GDREGISTER_CLASS(WeatherSkyEffect);
+		GDREGISTER_CLASS(WeatherRainEffect);
 		GDREGISTER_CLASS(Weather);
 
 		// Created at the scene level, after the RenderingServer: it registers
@@ -66,12 +80,20 @@ void initialize_weather_module(ModuleInitializationLevel p_level) {
 		wind_server->initialize();
 		Engine::get_singleton()->add_singleton(Engine::Singleton("WindServer", WindServer::get_singleton()));
 		Weather::register_shader_globals();
+		Weather::register_builtin_resources();
 	}
+
+#ifdef TOOLS_ENABLED
+	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		EditorNode::add_init_callback(_weather_editor_init);
+	}
+#endif
 }
 
 void uninitialize_weather_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		WeatherLibrary::free_default();
+		Weather::free_builtin_resources();
 	}
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE && wind_server) {
 		wind_server->finalize();

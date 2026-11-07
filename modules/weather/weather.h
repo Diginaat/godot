@@ -65,6 +65,10 @@ public:
 	static constexpr const char *CUSTOM_NAME = "Custom";
 	static const char *GLOBAL_WETNESS;
 	static const char *GLOBAL_RAIN;
+	static const char *GLOBAL_RAIN_OCCLUSION;
+	static const char *GLOBAL_OCCLUSION_AREA;
+	static constexpr const char *WETNESS_INCLUDE_PATH = "res://.builtin/weather_wetness.gdshaderinc";
+	static constexpr const char *WET_SURFACE_SHADER_PATH = "res://.builtin/wet_surface.gdshader";
 
 private:
 	Ref<WeatherLibrary> library;
@@ -127,6 +131,8 @@ protected:
 public:
 	static void register_project_settings();
 	static void register_shader_globals();
+	static void register_builtin_resources();
+	static void free_builtin_resources();
 	static TypedArray<WeatherEffect> create_default_effects();
 
 	void set_library(const Ref<WeatherLibrary> &p_library);

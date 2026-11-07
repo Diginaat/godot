@@ -26,7 +26,8 @@ passes the build, the smoke tests and the wind tests below.
 | `WeatherEffect` (resource) | Listed in `Weather.effects`, settings edited inline. Virtual `_start`, `_stop`, `_update`, `_apply_quality`. Rain, haze, mist motes, lightning, sky and sound are effects; snow or hail later are new subclasses (GDScript too). | 2 |
 | `WeatherLightingEffect` | Sun, sky light, exposure, volumetric and distance fog. | 2 |
 | `WeatherSkyEffect` | Sky and clouds: drives a weather-ready sky material, or shows the built-in weather sky in place of the scene's. Clouds drift with the wind aloft. | 3 |
-| Rain, rain occlusion, wetness | GPU rain streaks and impacts, top-down occlusion map, wet surfaces. | 4 |
+| `WeatherRainEffect` | GPU raindrops and impacts around the camera, collision height field, top-down rain occlusion map. | 4 |
+| `res://.builtin/weather_wetness.gdshaderinc`, `res://.builtin/wet_surface.gdshader` | Wet surfaces: darkening in patches, puddles with ripples, water down walls, dry under cover. Served from memory; exports leave them out (`WeatherExportPlugin`). | 4 |
 | Ground haze, mist motes | Volumetric haze and near-camera droplets. | 5 |
 | Lightning | Bolts, flashes, thunder timing. | 6 |
 | Sound | Rain, wind and thunder synthesized in C++ at startup; own files override. | 7 |
@@ -42,8 +43,8 @@ keeps working until it switches.
 | 1 | Wind core: `WindServer`, shader include, `WindReceiver3D`, grass default material, PhysX cloth | Done |
 | 2 | Weather core: `WeatherProfile`, `WeatherLibrary`, `Weather` node, `WeatherEffect`, `WeatherLightingEffect`, scene driving, wetness | Done |
 | 3 | Sky and clouds: `WeatherSkyEffect`, built-in weather sky | Done |
-| 4 | Rain, occlusion, wet surfaces | Next |
-| 5 | Ground haze, mist motes | |
+| 4 | Rain, occlusion, wet surfaces: `WeatherRainEffect`, built-in wetness include and wet surface shader | Done |
+| 5 | Ground haze, mist motes | Next |
 | 6 | Lightning | |
 | 7 | Sound synthesis | |
 
@@ -105,6 +106,43 @@ repeats there too as long as `detail_scale` is a whole number).
 
 The lightning step adds `lightning_flash`, `lightning_direction` and
 `lightning_color` through `get_sky_material()`.
+
+## Rain and wet surfaces
+
+`WeatherRainEffect` builds its nodes as internal children of the `Weather`
+node when it starts and frees them when it stops; nothing is saved. A
+property change or a quality change rebuilds them on the next frame (the old
+nodes leave the tree at once, so the new ones keep their names).
+
+* **Drops**: `GPUParticles3D` in a box of `area_size` around the camera,
+  emitted upwind so slanted rain lands around it. `amount_ratio` follows
+  `Weather.get_rain_amount()`, so the rain never restarts. The streak shader
+  gets the horizon light every frame.
+* **Impacts**: a sub-emitter at collision, with draw passes for the ring,
+  the crown sheet and (from Medium) the droplet crown.
+* **Collision**: a `GPUParticlesCollisionHeightField3D` following the
+  camera, recaptured every `collision_refresh_interval` while it rains.
+* **Occlusion map**: an orthographic camera in a `SubViewport` looks down
+  from `occlusion_capture_height`; a full-screen pass writes world height
+  into a float texture. It is rendered once per `occlusion_update_step` of
+  camera movement, and only while something is wet or it rains.
+
+| Quality | Drops | Impacts | Crown droplets | Collision | Occlusion map |
+| --- | --- | --- | --- | --- | --- |
+| Low | 8000 | 2500 | 0 | 256 | 256 |
+| Medium | 14000 | 5000 | 4 | 512 | 512 |
+| High | 24000 | 8000 | 6 | 512 | 512 |
+| Ultra | 40000 | 12000 | 8 | 1024 | 1024 |
+
+Surfaces get wet only through a shader that includes the wetness functions:
+`res://.builtin/wet_surface.gdshader` (albedo, roughness and normal
+textures plus wetness) or `weather_apply_wetness()` from
+`res://.builtin/weather_wetness.gdshaderinc` in a project's own shader. The
+module registers the globals `weather_rain_occlusion` (sampler2D) and
+`weather_occlusion_area` (vec4) next to `weather_wetness` and
+`weather_rain`. A material saved with the built-in shader refers to it by
+path; `WeatherExportPlugin` leaves `res://.builtin/` paths out of exports,
+since the game has them in memory.
 
 ## Wind
 
@@ -184,6 +222,20 @@ restore its own values. Screenshots on Vulkan: Clear, Partly Cloudy,
 Overcast and Storm look as in the GDScript system. The weather core test
 still passes (24 checks).
 
+Rain test (2026-11-07, 20 checks headless, 21 on Vulkan): the built-in
+include and wet surface shader load, the globals exist; Clear has no drops
+and no occlusion capture; the rain follows the camera; High quality has
+24000 drops, 8000 impacts, 3 impact passes; Storm drops at the rain amount
+(0.83), falling downwind and spawned upwind; the drops get the horizon
+light; the occlusion map is centered on the camera, with 3.10 m under a
+3.1 m roof and 0.00 m on open ground; wet ground darkens to 0.77 of its dry
+brightness while the ground under the roof stays at 1.00; Low quality
+rebuilds with 8000 drops; a changed area rebuilds; dry weather turns the
+map off; disabling the effect frees its nodes; leaving the tree clears the
+map. A saved material with the built-in wet shader refers to it by path and
+loads in a new process; the editor opens a scene with the weather without
+errors and leaves the file unchanged.
+
 ## Findings
 
 * `RenderingServer.global_shader_parameter_add()` at the module's scene
@@ -201,3 +253,12 @@ still passes (24 checks).
   its defaults from the script. A fresh instance of the class does.
 * Godot doc XML: `&` in a code sample (`&"weather"`) must be written
   `&amp;`, or the whole file fails to parse.
+* `RenderingServer.global_shader_parameter_get()` only works in the editor
+  (and with the dummy renderer), so effects keep the values they set
+  (`WeatherRainEffect.get_occlusion_area()`) for scripts and tests.
+* Nodes freed with `queue_free()` keep their names until the end of the
+  frame: rebuilt nodes added under the same name got renamed. Remove them
+  from the tree first.
+* Shader includes are not resource dependencies, so a shader that
+  includes a `res://.builtin/` file exports cleanly; a material that uses a
+  built-in shader lists it as a dependency, hence the export plugin.

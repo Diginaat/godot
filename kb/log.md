@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-07 (weather step 4: rain)
+
+* **Implemented**: `WeatherRainEffect` (GPU drops and impacts around the
+  camera, collision height field, top-down rain occlusion map) and the
+  built-in wetness include and wet surface shader, served from memory and
+  left out of exports. Wet ground darkened to 0.77 on Vulkan while the
+  ground under a roof stayed dry. See
+  [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-07 (weather step 3: sky)
 
 * **Implemented**: `WeatherSkyEffect`: drives a weather-ready sky material
