@@ -458,6 +458,7 @@ private:
 	ConfirmationDialog *project_data_missing = nullptr;
 
 	bool scene_distraction_free = false;
+	bool workspace_split_maximized = false; // Distraction-free mode entered from the split panel's button.
 	bool script_distraction_free = false;
 
 	bool changing_scene = false;
@@ -706,6 +707,7 @@ private:
 	void _update_addon_config();
 
 	void _toggle_distraction_free_mode();
+	void _main_screen_tab_clicked(int p_tab);
 
 	void _inherit_imported(const String &p_action);
 	void _open_imported();
@@ -847,6 +849,8 @@ public:
 
 	void update_distraction_free_mode();
 	void set_distraction_free_mode(bool p_enter);
+	// Maximizes the split panel: distraction-free mode with the main screen side hidden.
+	void set_workspace_split_maximized(bool p_maximized);
 	bool is_distraction_free_mode_enabled() const;
 	void update_distraction_free_button_theme();
 
