@@ -50,12 +50,13 @@ Patches:
 ## angle
 
 - Upstream: https://chromium.googlesource.com/angle/angle/
-- Version: git (chromium/5907, 430a4f559cbc2bcd5d026e8b36ee46ddd80e9651, 2023)
+- Version: git (chromium/8118, d39da9a2abc47fc5fee3711b18b461feab80d34c, 2026)
 - License: BSD-3-Clause
 
 Files extracted from upstream source:
 
-- `include/*`
+- `include/EGL/*`
+- `include/KHR/*`
 - `LICENSE`
 
 
@@ -187,7 +188,7 @@ Patches:
 ## doctest
 
 - Upstream: https://github.com/onqtam/doctest
-- Version: 2.4.12 (1da23a3e8119ec5cce4f9388e91b065e20bf06f5, 2025)
+- Version: 2.5.3 (2d0a9359a60c51affe2a9bebb1be1dca47868151, 2026)
 - License: MIT
 
 Files extracted from upstream source:
@@ -195,15 +196,11 @@ Files extracted from upstream source:
 - `doctest/doctest.h` as `doctest.h`
 - `LICENSE.txt`
 
-Patches:
-
-- `0001-ciso646-version.patch` ([GH-105913](https://github.com/godotengine/godot/pull/105913))
-
 
 ## dr_libs
 
 - Upstream: https://github.com/mackron/dr_libs
-- Version: mp3-0.7.3 (5690d4671d7ad07ae6021756d7222eb159745f06, 2026)
+- Version: mp3-0.7.4 (aec2dd20667f54acfdb66031217df6d240f56c52, 2026)
 - License: Public Domain or Unlicense or MIT-0
 
 Files extracted from upstream source:
@@ -735,7 +732,7 @@ Patches:
 ## meshoptimizer
 
 - Upstream: https://github.com/zeux/meshoptimizer
-- Version: 1.2 (9d9890c73011d75920af614485296d1e03e95448, 2026)
+- Version: 1.3 (9e1f07b159d3cb777f1c67ed31fc11fd117986f4, 2026)
 - License: MIT
 
 Files extracted from upstream repository:
@@ -1039,7 +1036,7 @@ Files extracted from upstream source:
 ## sdl
 
 - Upstream: https://github.com/libsdl-org/SDL
-- Version: 3.4.12 (f87239e71e42da91ca317a12eefb82cfbf3393eb, 2026)
+- Version: 3.4.16 (fa2c02bb6e21974a89ea9824bc53c9932abe5f9c, 2026)
 - License: Zlib
 - Vendored: hidapi 0.14.0, license BSD-3-Clause
 
@@ -1050,14 +1047,12 @@ Files extracted from upstream source:
 Patches:
 
 - `0001-remove-unnecessary-subsystems.patch` ([GH-106218](https://github.com/godotengine/godot/pull/106218))
-- `0003-std-include.patch` ([GH-108144](https://github.com/godotengine/godot/pull/108144))
-- `0004-errno-include.patch` ([GH-108354](https://github.com/godotengine/godot/pull/108354))
-- `0005-fix-libudev-dbus.patch` ([GH-108373](https://github.com/godotengine/godot/pull/108373))
-- `0006-fix-cs-environ.patch` ([GH-109283](https://github.com/godotengine/godot/pull/109283))
-- `0007-ios-accelerometer.patch` ([GH-120373](https://github.com/godotengine/godot/pull/120373))
-- `0008-ios-link.patch` ([GH-123903](https://github.com/godotengine/godot/pull/123903))
-- `0009-ios-iostream-no-prefpath.patch` ([GH-123899](https://github.com/godotengine/godot/pull/123899))
-- `0010-fix-linux-getenv-unsafe.patch` ([GH-124017](https://github.com/godotengine/godot/pull/124017))
+- `0002-fix-libudev-dbus.patch` ([GH-108373](https://github.com/godotengine/godot/pull/108373))
+- `0003-fix-cs-environ.patch` ([GH-109283](https://github.com/godotengine/godot/pull/109283))
+- `0004-ios-accelerometer.patch` ([GH-120373](https://github.com/godotengine/godot/pull/120373))
+- `0005-ios-link.patch` ([GH-123903](https://github.com/godotengine/godot/pull/123903))
+- `0006-ios-iostream-no-prefpath.patch` ([GH-123899](https://github.com/godotengine/godot/pull/123899))
+- `0007-fix-linux-getenv-unsafe.patch` ([GH-124017](https://github.com/godotengine/godot/pull/124017))
 
 
 ## spirv-cross
@@ -1237,6 +1232,7 @@ Patches:
 - `0001-VKEnumStringHelper-godot-vulkan.patch` ([GH-97510](https://github.com/godotengine/godot/pull/97510))
 - `0002-VMA-godot-vulkan.patch` ([GH-97510](https://github.com/godotengine/godot/pull/97510))
 - `0003-VMA-add-vmaCalculateLazilyAllocatedBytes.patch` ([GH-99257](https://github.com/godotengine/godot/pull/99257))
+- `0004-VMA-ignore-maxMemoryAllocationCount.patch` ([GH-125146](https://github.com/godotengine/godot/pull/125146))
 
 
 ## wayland
