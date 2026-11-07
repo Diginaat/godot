@@ -4513,13 +4513,21 @@ bool BindingsGenerator::_arg_default_value_from_variant(const Variant &p_val, Ar
 				r_iarg.default_argument = p_val.operator String();
 			}
 			break;
-		case Variant::FLOAT:
-			r_iarg.default_argument = p_val.operator String();
+		case Variant::FLOAT: {
+			const double value = p_val.operator double();
+			const String cs_type = r_iarg.type.cname == name_cache.type_float ? "float" : "double";
+			if (Math::is_nan(value)) {
+				r_iarg.default_argument = cs_type + ".NaN";
+			} else if (Math::is_inf(value)) {
+				r_iarg.default_argument = cs_type + (value > 0 ? ".PositiveInfinity" : ".NegativeInfinity");
+			} else {
+				r_iarg.default_argument = p_val.operator String();
 
-			if (r_iarg.type.cname == name_cache.type_float) {
-				r_iarg.default_argument += "f";
+				if (r_iarg.type.cname == name_cache.type_float) {
+					r_iarg.default_argument += "f";
+				}
 			}
-			break;
+		} break;
 		case Variant::STRING:
 		case Variant::STRING_NAME:
 		case Variant::NODE_PATH:
