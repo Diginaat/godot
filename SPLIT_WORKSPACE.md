@@ -77,7 +77,10 @@ in its own process; only the place of the `EmbeddedProcess` control changes.
   before. Pressing the button again, picking another main screen, or clicking
   the split dock's title bar entry while the main screen is maximized
   restores both panels.
-- Move the docks back to the main screen to close the split.
+- Move the docks back to the main screen to close the split. **Close** in a
+  split dock's context menu does the same: it closes the panel, not the dock.
+  The dock goes back to the main screen (without becoming the current one), so
+  it stays in the title bar.
 
 **Saved state** (`[docks]` in `editor_layout.cfg`): the split panel's docks
 (`dock_13`), `dock_workspace_split` (divider offset from the middle, unscaled),
@@ -91,7 +94,7 @@ layouts store the same keys.
 | `editor/docks/editor_dock.h/.cpp`, `doc/classes/EditorDock.xml` | New slot `DOCK_SLOT_MAIN_SCREEN_SPLIT` (`DOCK_SLOT_MAX` is now 13) |
 | `editor/editor_main_screen.h/.cpp` | `EditorMainScreenSplit` (tab bar height follows the scene tabs, title bar entries, maximize button); main screen grid cell is now the left half |
 | `editor/editor_node.h/.cpp` | `DockSplitWorkspace` holding both panels, with the scene tabs in the main screen column; edge drops; theme; distraction-free mode maximizes one side |
-| `editor/docks/editor_dock_manager.h/.cpp` | Orientation, swap, save and load; Vertical Split and Swap Panels in the context popup |
+| `editor/docks/editor_dock_manager.h/.cpp` | Orientation, swap, save and load; Vertical Split and Swap Panels in the context popup; closing a split dock returns it to the main screen |
 | `editor/docks/dock_tab_container.cpp` | Dropping on a main screen edge sets the split orientation |
 | `editor/editor_interface.cpp` | `set_main_screen_editor()` also finds editors in the split panel |
 | `editor/run/game_view_plugin.cpp` | Focus fallback uses the Game dock's own panel, not always the main screen |

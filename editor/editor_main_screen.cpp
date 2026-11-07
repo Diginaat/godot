@@ -340,6 +340,10 @@ void EditorMainScreenSplit::update_visibility() {
 	// Unlike side docks, the split stays visible in distraction-free mode: it is part of the workspace.
 	// Only maximizing one side of the workspace hides the other.
 	const bool active = get_tab_count() > 0;
+	if (!active && maximized == MAXIMIZED_SPLIT) {
+		// The maximized panel was closed or emptied: leave the maximized mode with it.
+		callable_mp(EditorNode::get_singleton(), &EditorNode::set_distraction_free_mode).call_deferred(false);
+	}
 	set_visible(active && maximized != MAXIMIZED_MAIN);
 	if (main_side) {
 		main_side->set_visible(!active || maximized != MAXIMIZED_SPLIT);
