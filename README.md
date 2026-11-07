@@ -1,5 +1,12 @@
 # Godot Engine with DDGI, NVIDIA DLSS, path tracing and PhysX 5
 
+![The editor with the Modern Compact theme: the game runs in the split panel and the 3D editor follows it with the Live Runtime view](docs/images/editor/split_live_subway.jpg)
+
+<sub>The editor in this build: the Modern Compact theme, the game running in
+the split workspace, and the 3D editor following it with the Live Runtime
+view. Scene: the Godot 4 Overgrown Subway demo (ivy assets by Jaanus Jaggo,
+CC BY-NC).</sub>
+
 <p align="center">
   <a href="https://godotengine.org">
     <img src="misc/logo/logo_outlined.svg" width="300" alt="Godot Engine logo">
@@ -7,7 +14,7 @@
 </p>
 
 This is a fork of [Godot Engine](https://github.com/godotengine/godot) (`master`,
-4.8-dev) that combines three things in one source tree:
+4.8-beta) that combines three things in one source tree:
 
 | Part | Source | What it adds |
 | --- | --- | --- |
@@ -156,6 +163,40 @@ CPU, rendering without DLSS).
 - Distance limits for reflectors and the mirror pass
   (`rendering/global_illumination/reflections/planar_max_distance`,
   `planar_mirror_max_distance`). Details: [REFLECTIONS.md](REFLECTIONS.md).
+
+### Editor
+
+- **Modern Compact theme** (the default for new editor settings): neutral
+  charcoal surfaces, blue for interactive states, one-pixel outlines, six-pixel
+  corners, and rounded popups. A gray variant, Modern Compact Gray, is in
+  Editor Settings > Interface > Theme. The UI font is
+  [Atkinson Hyperlegible Next](https://www.brailleinstitute.org/freefont/),
+  with Inter as the fallback for other scripts.
+- **Split workspace**: a second main screen panel next to the main screen.
+  Drag a main screen tab (for example Game) into it to see the game and the 3D
+  editor at the same time. Side by side or stacked, swappable, and saved with
+  the editor layout. Details: [SPLIT_WORKSPACE.md](SPLIT_WORKSPACE.md).
+- **Live Runtime view**: the **Live** toggle in the 2D and 3D toolbars makes
+  the editor viewport show the running game (moving, spawned and removed
+  objects) while the editor camera stays free. The edited scene is never
+  changed. Both are also proposed upstream in
+  [godotengine/godot#125218](https://github.com/godotengine/godot/pull/125218).
+- **Project backup**: the first time this build opens a project, the project
+  manager asks you to back up the project folder.
+
+### Large-world geometry (Forward+, opt-in)
+
+Off by default; for open worlds with many meshes and instances.
+
+- **GPU culling for MultiMeshes**: frustum and instance culling, per-instance
+  index LOD, distance thinning and optional HZB occlusion.
+- **Cluster LOD** (`MeshClusterData`): a cluster hierarchy cooked at import,
+  selected on the GPU by projected error, with HZB occlusion and a two-pass
+  depth pre-pass. Import writes `.clodpages` page files that stream within a
+  memory budget.
+- **Far field**: `VoxelProxyBuilder` splat proxies and `VoxelField3D` GPU
+  voxel levels.
+- **`GrassField3D`**: GPU-generated grass with level of detail rings.
 
 ### PhysX 5 (from the godot_physx module)
 
@@ -375,6 +416,10 @@ adds them for your own machines only; don't publish that zip (see
   env.pathtracing_max_bounces = 2
   env.pathtracing_denoiser = 1  # DLSS Ray Reconstruction (needs step 5); 0 = none
   ```
+- **Split workspace:** right-click a main screen tab (for example Game) and,
+  in the Dock Position grid, click the right cell of the top centre. Or drag
+  the tab onto an edge of the main screen. To see the running game in the 3D
+  editor, press **Live** in the 3D toolbar.
 - **PhysX:** Project Settings > Physics > 3D > Physics Engine = PhysX. GPU
   dynamics start automatically on a CUDA-capable GPU; the log shows
   `PhysX ... initialized [GPU]`. For ready-made scenes, open the
