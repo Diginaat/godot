@@ -80,3 +80,19 @@ public:
 
 	EditorMainScreen();
 };
+
+// Second panel of the main screen workspace. Main screen docks (Game, 2D, 3D, Script...)
+// moved here are shown next to the main screen, so two of them are visible at once.
+// It is hidden while it holds no dock.
+class EditorMainScreenSplit : public DockTabContainer {
+	GDCLASS(EditorMainScreenSplit, DockTabContainer);
+
+protected:
+	virtual TabStyle get_tab_style() const override;
+	virtual bool can_switch_dock() const override;
+
+public:
+	virtual void update_visibility() override;
+
+	EditorMainScreenSplit();
+};

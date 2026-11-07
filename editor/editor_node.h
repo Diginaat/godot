@@ -88,6 +88,7 @@ class EditorFolding;
 class EditorLayoutsDialog;
 class EditorLog;
 class EditorMainScreen;
+class EditorMainScreenSplit;
 class EditorNativeShaderSourceVisualizer;
 class EditorPluginList;
 class EditorResourcePreview;
@@ -428,6 +429,8 @@ private:
 	MenuButton *update_spinner = nullptr;
 
 	EditorMainScreen *editor_main_screen = nullptr;
+	EditorMainScreenSplit *editor_main_screen_split = nullptr;
+	DockSplitContainer *workspace_split = nullptr;
 
 	AudioStreamPreviewGenerator *audio_preview_gen = nullptr;
 	ProgressDialog *progress_dialog = nullptr;
@@ -787,6 +790,8 @@ public:
 	static DockSplitContainer *get_center_split() { return singleton->center_split; }
 	static EditorBottomPanel *get_bottom_panel() { return singleton->bottom_panel; }
 	static EditorMainScreen *get_editor_main_screen() { return singleton->editor_main_screen; }
+	static EditorMainScreenSplit *get_editor_main_screen_split() { return singleton->editor_main_screen_split; }
+	static DockSplitContainer *get_workspace_split() { return singleton->workspace_split; }
 
 	static Button *get_distraction_free_button() { return singleton->distraction_free; }
 

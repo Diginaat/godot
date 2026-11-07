@@ -809,6 +809,7 @@ void EditorNode::_update_theme(bool p_skip_creation) {
 		}
 
 		editor_main_screen->add_theme_style_override(SceneStringName(panel), theme->get_stylebox(SNAME("Content"), EditorStringName(EditorStyles)));
+		editor_main_screen_split->add_theme_style_override(SceneStringName(panel), theme->get_stylebox(SNAME("Content"), EditorStringName(EditorStyles)));
 		bottom_panel->_theme_changed();
 		distraction_free->set_button_icon(theme->get_icon(SNAME("DistractionFree"), EditorStringName(EditorIcons)));
 		update_distraction_free_button_theme();
@@ -9104,11 +9105,29 @@ EditorNode::EditorNode() {
 	scene_tabs->add_extra_button(distraction_free);
 	distraction_free->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_toggle_distraction_free_mode));
 
+	// The main screen workspace can be split in two: main screen docks moved to the split panel
+	// (for example the Game view) stay visible next to the main screen.
+	workspace_split = memnew(DockSplitContainer);
+	workspace_split->set_name("DockSplitWorkspace");
+	workspace_split->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	srt->add_child(workspace_split);
+
 	editor_main_screen = memnew(EditorMainScreen);
-	srt->add_child(editor_main_screen);
+	workspace_split->add_child(editor_main_screen);
 	title_bar->set_center_control(editor_main_screen->get_internal_container());
 
+	editor_main_screen_split = memnew(EditorMainScreenSplit);
+	editor_main_screen_split->set_name("DockSlotMainScreenSplit");
+	workspace_split->add_child(editor_main_screen_split);
+
+	editor_main_screen->add_margin_valid_drop(SIDE_LEFT, EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT);
+	editor_main_screen->add_margin_valid_drop(SIDE_RIGHT, EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT);
+	editor_main_screen->add_margin_valid_drop(SIDE_TOP, EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT);
+	editor_main_screen->add_margin_valid_drop(SIDE_BOTTOM, EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT);
+
 	editor_dock_manager->register_dock_slot(editor_main_screen);
+	editor_dock_manager->register_dock_slot(editor_main_screen_split);
+	editor_dock_manager->set_workspace_split(workspace_split);
 
 	scene_root = memnew(SubViewport);
 	scene_root->set_auto_translate_mode(AUTO_TRANSLATE_MODE_ALWAYS);
