@@ -43,6 +43,7 @@
 #include "scene/3d/physics/collision_shape_3d.h"
 #include "scene/resources/3d/box_shape_3d.h"
 #include "scene/resources/3d/world_3d.h"
+#include "scene/resources/curve.h"
 
 struct PhysXVehicle3D::Impl {
 	Vehicle4W vehicle;
@@ -133,11 +134,24 @@ bool PhysXVehicle3D::_build() {
 	cfg.chassis_box_center_local = chassis_shape_node->get_position();
 	cfg.chassis_com_local = center_of_mass_mode == CENTER_OF_MASS_MODE_CUSTOM ? center_of_mass : chassis_shape_node->get_position();
 	cfg.max_engine_torque = max_engine_torque;
+	if (drivetrain == DRIVETRAIN_ENGINE) {
+		Vehicle4WEngineConfig &e = cfg.engine;
+		_engine_config(e);
+		e.limited_slip = differential == DIFFERENTIAL_LIMITED_SLIP;
+		e.front_bias = limited_slip_front_bias;
+		e.front_target = limited_slip_front_target;
+		e.rear_bias = limited_slip_rear_bias;
+		e.rear_target = limited_slip_rear_target;
+		e.center_bias = limited_slip_center_bias;
+		e.center_target = limited_slip_center_target;
+		e.rate = limited_slip_rate;
+	}
 	cfg.max_brake_torque = max_brake_torque;
 	cfg.max_steer_angle = max_steer_angle;
 	cfg.ackermann_strength = ackermann_strength;
 	cfg.front_anti_roll_stiffness = front_anti_roll_stiffness;
 	cfg.rear_anti_roll_stiffness = rear_anti_roll_stiffness;
+	cfg.tire_force_point = tire_force_point;
 	cfg.collision_layer = collision_layer;
 	cfg.collision_mask = collision_mask;
 	{
@@ -198,6 +212,7 @@ bool PhysXVehicle3D::_build() {
 }
 
 PHYSX_VEHICLE_CONTROL_DEFINE(PhysXVehicle3D, 4)
+PHYSX_VEHICLE_ENGINE_DEFINE(PhysXVehicle3D)
 
 void PhysXVehicle3D::_destroy() {
 	if (impl->built) {
@@ -253,6 +268,7 @@ void PhysXVehicle3D::_notification(int p_what) {
 			v.commandState.nbBrakes = 2;
 			v.commandState.steer = (PxReal)steer;
 			v.transmissionCommandState.gear = reverse ? PxVehicleDirectDriveTransmissionCommandState::eREVERSE : PxVehicleDirectDriveTransmissionCommandState::eFORWARD;
+			_engine_controls();
 			v.step((PxReal)get_physics_process_delta_time(), impl->simulationContext);
 			// v.rigidBodyState.pose is CoM-relative, not the actor's real
 			// origin (confirmed directly by comparing it against a raw
@@ -446,13 +462,30 @@ bool PhysXVehicle3D::is_sleeping() const {
 	return impl->built && _chassis_sleeping();
 }
 PHYSX_VEHICLE_SETTER(max_engine_torque, max_engine_torque)
+PHYSX_VEHICLE_SETTER(limited_slip_front_bias, limited_slip_front_bias)
+PHYSX_VEHICLE_SETTER(limited_slip_front_target, limited_slip_front_target)
+PHYSX_VEHICLE_SETTER(limited_slip_rear_bias, limited_slip_rear_bias)
+PHYSX_VEHICLE_SETTER(limited_slip_rear_target, limited_slip_rear_target)
+PHYSX_VEHICLE_SETTER(limited_slip_center_bias, limited_slip_center_bias)
+PHYSX_VEHICLE_SETTER(limited_slip_center_target, limited_slip_center_target)
+PHYSX_VEHICLE_SETTER(limited_slip_rate, limited_slip_rate)
 PHYSX_VEHICLE_SETTER(max_brake_torque, max_brake_torque)
 PHYSX_VEHICLE_SETTER(max_steer_angle, max_steer_angle)
 PHYSX_VEHICLE_SETTER(ackermann_strength, ackermann_strength)
 PHYSX_VEHICLE_SETTER(front_anti_roll_stiffness, front_anti_roll_stiffness)
 PHYSX_VEHICLE_SETTER(rear_anti_roll_stiffness, rear_anti_roll_stiffness)
+PHYSX_VEHICLE_SETTER(tire_force_point, tire_force_point)
 
 #undef PHYSX_VEHICLE_SETTER
+
+void PhysXVehicle3D::set_differential(Differential p_differential) {
+	if (differential == p_differential) {
+		return;
+	}
+	differential = p_differential;
+	notify_property_list_changed();
+	_rebuild_if_live();
+}
 
 void PhysXVehicle3D::set_collision_layer(uint32_t p_layer) {
 	collision_layer = p_layer;
@@ -509,6 +542,13 @@ void PhysXVehicle3D::_validate_property(PropertyInfo &p_property) const {
 	if (center_of_mass_mode != CENTER_OF_MASS_MODE_CUSTOM && p_property.name == "center_of_mass") {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 	}
+	_engine_validate_property(p_property);
+	// The differential is the engine drive's, and limited_slip_* only for the limited slip one.
+	const String name = p_property.name;
+	if ((drivetrain != DRIVETRAIN_ENGINE && name == "differential") ||
+			((drivetrain != DRIVETRAIN_ENGINE || differential != DIFFERENTIAL_LIMITED_SLIP) && name.begins_with("limited_slip_"))) {
+		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
+	}
 }
 
 void PhysXVehicle3D::_bind_methods() {
@@ -532,6 +572,8 @@ void PhysXVehicle3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_sleeping"), &PhysXVehicle3D::is_sleeping);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "can_sleep"), "set_can_sleep", "is_able_to_sleep");
 
+	BIND_ENUM_CONSTANT(DIFFERENTIAL_OPEN);
+	BIND_ENUM_CONSTANT(DIFFERENTIAL_LIMITED_SLIP);
 	ClassDB::bind_method(D_METHOD("set_max_engine_torque", "value"), &PhysXVehicle3D::set_max_engine_torque);
 	ClassDB::bind_method(D_METHOD("get_max_engine_torque"), &PhysXVehicle3D::get_max_engine_torque);
 	ClassDB::bind_method(D_METHOD("set_max_brake_torque", "value"), &PhysXVehicle3D::set_max_brake_torque);
@@ -545,13 +587,40 @@ void PhysXVehicle3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_rear_anti_roll_stiffness", "value"), &PhysXVehicle3D::set_rear_anti_roll_stiffness);
 	ClassDB::bind_method(D_METHOD("get_rear_anti_roll_stiffness"), &PhysXVehicle3D::get_rear_anti_roll_stiffness);
 	ADD_GROUP("Drivetrain", "");
+	PHYSX_VEHICLE_ENGINE_BIND_DRIVETRAIN(PhysXVehicle3D)
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_engine_torque", PROPERTY_HINT_RANGE, "0,5000,10,or_greater"), "set_max_engine_torque", "get_max_engine_torque");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_brake_torque", PROPERTY_HINT_RANGE, "0,20000,10,or_greater"), "set_max_brake_torque", "get_max_brake_torque");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_steer_angle", PROPERTY_HINT_RANGE, "0,1.5708,0.01"), "set_max_steer_angle", "get_max_steer_angle");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ackermann_strength", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_ackermann_strength", "get_ackermann_strength");
+
+#define PHYSX_VEHICLE_BIND_FLOAT(m_name, m_hint) \
+	ClassDB::bind_method(D_METHOD("set_" #m_name, "value"), &PhysXVehicle3D::set_##m_name); \
+	ClassDB::bind_method(D_METHOD("get_" #m_name), &PhysXVehicle3D::get_##m_name); \
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, #m_name, PROPERTY_HINT_RANGE, m_hint), "set_" #m_name, "get_" #m_name);
+
+	PHYSX_VEHICLE_ENGINE_BIND_SETTINGS(PhysXVehicle3D)
+
+	ADD_GROUP("Differential", "");
+	ClassDB::bind_method(D_METHOD("set_differential", "differential"), &PhysXVehicle3D::set_differential);
+	ClassDB::bind_method(D_METHOD("get_differential"), &PhysXVehicle3D::get_differential);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "differential", PROPERTY_HINT_ENUM, "Open,Limited Slip"), "set_differential", "get_differential");
+	PHYSX_VEHICLE_BIND_FLOAT(limited_slip_front_bias, "0,5,0.01,or_greater")
+	PHYSX_VEHICLE_BIND_FLOAT(limited_slip_front_target, "0,5,0.01,or_greater")
+	PHYSX_VEHICLE_BIND_FLOAT(limited_slip_rear_bias, "0,5,0.01,or_greater")
+	PHYSX_VEHICLE_BIND_FLOAT(limited_slip_rear_target, "0,5,0.01,or_greater")
+	PHYSX_VEHICLE_BIND_FLOAT(limited_slip_center_bias, "0,5,0.01,or_greater")
+	PHYSX_VEHICLE_BIND_FLOAT(limited_slip_center_target, "0,5,0.01,or_greater")
+	PHYSX_VEHICLE_BIND_FLOAT(limited_slip_rate, "0,100,0.1,or_greater")
+
+#undef PHYSX_VEHICLE_BIND_FLOAT
+
 	ADD_GROUP("Anti-Roll", "");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "front_anti_roll_stiffness", PROPERTY_HINT_RANGE, "-50000,50000,100,or_less,or_greater"), "set_front_anti_roll_stiffness", "get_front_anti_roll_stiffness");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "rear_anti_roll_stiffness", PROPERTY_HINT_RANGE, "-50000,50000,100,or_less,or_greater"), "set_rear_anti_roll_stiffness", "get_rear_anti_roll_stiffness");
+	ADD_GROUP("Tires", "");
+	ClassDB::bind_method(D_METHOD("set_tire_force_point", "value"), &PhysXVehicle3D::set_tire_force_point);
+	ClassDB::bind_method(D_METHOD("get_tire_force_point"), &PhysXVehicle3D::get_tire_force_point);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tire_force_point", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_tire_force_point", "get_tire_force_point");
 
 	ClassDB::bind_method(D_METHOD("set_throttle", "value"), &PhysXVehicle3D::set_throttle);
 	ClassDB::bind_method(D_METHOD("get_throttle"), &PhysXVehicle3D::get_throttle);
@@ -569,6 +638,7 @@ void PhysXVehicle3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_reverse", "value"), &PhysXVehicle3D::set_reverse);
 	ClassDB::bind_method(D_METHOD("is_reverse"), &PhysXVehicle3D::is_reverse);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "reverse"), "set_reverse", "is_reverse");
+	PHYSX_VEHICLE_ENGINE_BIND_CONTROLS(PhysXVehicle3D)
 
 	ClassDB::bind_method(D_METHOD("set_collision_layer", "layer"), &PhysXVehicle3D::set_collision_layer);
 	ClassDB::bind_method(D_METHOD("get_collision_layer"), &PhysXVehicle3D::get_collision_layer);

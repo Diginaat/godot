@@ -296,7 +296,7 @@ black, at the screen's aspect ratio: it's stretched to fit).
 
 A camera lens flare: every bright part of the frame (sun, fire, headlights,
 Flow flames) is reflected back over the screen as a row of soft, tinted
-ghosts through the screen's centre, plus a faint halo ring. It's image-based,
+ghosts through the screen's center, plus a faint halo ring. It's image-based,
 so no light needs tagging, and a light that's covered or leaves the frame
 stops flaring. Add the node; that's all.
 
@@ -335,7 +335,7 @@ multiple bounces.
   `StandardMaterial3D`, its glow from its brightest surface. PXTGI can't
   read a `ShaderMaterial`; give one a `pxtgi_albedo` and/or
   `pxtgi_emission` Color in its metadata (or put them on the
-  `MeshInstance3D` or the physics body), or it bounces as neutral grey with
+  `MeshInstance3D` or the physics body), or it bounces as neutral gray with
   no glow off screen.
 - Lights: the sun is the brightest visible `DirectionalLight3D` that lights
   surfaces; of omni and spot lights, the 8 of each Godot draws that come
@@ -365,6 +365,10 @@ multiple bounces.
   physics playground (2,000 boxes being blown apart) about 2 ms with
   `rays_per_texel` `2`. `rays_per_texel` and `world_ray_distance` trade
   quality for speed.
+- `emissive_candidates` (default `6`) steadies the light from emissives: each
+  point weighs that many and traces one, so light beside a strip doesn't crawl
+  in a scene with many of them. More is steadier and costs a little more of the
+  trace pass; a scene with no emissives pays nothing.
 - Demos: `demo/editor/rendering/gi_courtyard.tscn`, `gi_courtyard_night.tscn`,
   `gi_cornell_box.tscn`, `demo/cpu/physx_playground_gi.tscn` (key `G`).
 
@@ -377,9 +381,8 @@ shifts or tips underfoot. Put the debris on its own collision layer, include
 that layer in the character's `collision_mask` and leave it out of its
 `platform_floor_layers`: the character stands on, walks over and kicks the
 debris, but doesn't ride its motion. Props and platforms on other layers
-still carry it. (Resting bodies' leftover solver spin, below ~3°/s, is never
-carried, on any layer.) The playground demo (`demo/cpu/physx_playground.tscn`)
-does this with a `debris` layer.
+still carry it. The playground demo (`demo/cpu/physx_playground.tscn`) does
+this with a `debris` layer.
 
 ## Area3D overrides
 
@@ -442,6 +445,32 @@ Fluid runs off ledges and spreads freely; add a `WorldBoundaryShape3D` to
 `mpm_colliders` or lower the domain for a true drop. The grid cell size is
 `2 × particle_size` (`mpm_grid_resolution` is `PhysXGranular3D`-only — its dense
 box grid still uses it). Cost is at parity with the old fixed-box grid.
+
+`mpm_colliders` takes sphere, box, capsule, cylinder and world boundary shapes, from a
+body's first shape; anything else collides as a rough sphere, and the node warns
+about it. For a mesh, like a statue, add a `GPUParticlesCollisionSDF3D` around it
+(the stock node for GPU particles), press **Bake SDF** in the 3D editor's toolbar,
+and list that node in `mpm_colliders`:
+
+- It's about as cheap as a box: with a 100,000-particle pool on an RTX 5070, a solve
+  took 1.66 ms on one field against 1.63 ms on a box, and 1.77 ms on four. A field
+  outside its box costs almost nothing, and fields share their memory (4 bytes a
+  voxel) when they share a texture.
+- It bakes the meshes visible inside its box, so keep the floor out with `bake_mask`.
+- It bakes a mesh's stored vertices and ignores its skeleton, so a skinned mesh is
+  baked in its bind pose, which can differ from the pose you see (by 10 cm on average
+  on the demo's retargeted mannequin). For a skinned statue, freeze the pose first:
+  save what `MeshInstance3D.bake_mesh_from_current_skeleton_pose()` returns, draw that
+  instead, and bake it.
+- A closed mesh is solid, and so is one whose openings are under about two voxels
+  wide. A mesh with a wider opening, like a bell, stays hollow, and only its walls
+  hold the fluid: bake them at least as thick as the fluid's grid cell
+  (`2 × particle_size`). A wall's thickness is the voxel size times `thickness`, so
+  a higher `resolution` makes walls *thinner*. A fast stream still leaks a little
+  (1-2% at 15 m/s through 5 cm walls). A warning is printed if a hollow mesh's walls
+  are too thin.
+- The node can move and turn, and takes a uniform scale. Detail thinner than a grid
+  cell is lost, and a mesh that deforms isn't followed.
 
 Static and kinematic colliders couple cleanly; a **dynamic `RigidBody3D` in MPM
 fluid has soft buoyancy** and may sink slowly or over-bounce — feed it through
@@ -671,20 +700,43 @@ vertex colors (`use_vertex_color`, painted in a modeling tool), or let
 `pin_height` / `max_distance` ramp them automatically from the waist down.
 
 It collides with the character's physical bones: run **Skeleton3D > Create
-Physical Skeleton** and every enabled capsule or sphere shape on the
+Physical Skeleton** and every enabled capsule, sphere or box shape on the
 `PhysicalBone3D`s is a collider (the bones don't need to simulate). Without a
 physical skeleton, capsules are placed automatically between the hips, spine,
-legs and arms, fitted to `body_mesh_path` if set. Collisions are swept across
-substeps so fast limbs don't jump through, and they win over the max
-distances; `backstop` keeps the cloth from sinking into the body, and free
-vertices are tethered to their nearest pinned one so long garments don't
-stretch. `animation_drive` pulls the cloth back toward its authored shape
-(useful for long robes), and `self_collision` is available, off by default.
+legs and arms, fitted to `body_mesh_path` if set. `use_physical_bones` off
+uses the automatic capsules even with a physical skeleton,
+`physical_bone_skip` leaves bones out, and `set_body_capsules()` adds your own
+capsules (world space, read every step: a held shield, a body proxy; they
+collide even with `collide_with_body` off); changing them takes effect live,
+without a rebuild. Collisions are swept across substeps so fast limbs don't
+jump through, and they win over the max distances; `backstop` keeps the cloth
+from sinking into the body, and free vertices are tethered to their nearest
+pinned one so long garments don't stretch. `animation_drive` pulls the cloth
+back toward its authored shape (useful for long robes), and `self_collision`
+is available, off by default.
 
 It runs on compute shaders (no CUDA, any GPU the renderer supports), only in a
 running game, and after the animation each frame (`process_priority` 100).
-Only the source material's albedo texture, albedo colour and roughness carry
-over for now.
+
+By default the cloth is drawn with a built-in material that takes the source
+material's albedo texture, albedo colour and roughness. To draw it your own
+way (your character shader, normal maps, vertex colors), set
+`render_material` to a `ShaderMaterial` whose shader places the vertices from
+the simulation: `CUSTOM0.x` is the vertex's particle, and the cloth sets
+`cloth_positions` / `cloth_normals` (one texel per particle, source mesh
+space), `texture_width` and `normal_sign` on it. The class reference has a
+`vertex()` to start from. The source surface's UV, UV2, COLOR, TANGENT and
+CUSTOM1-3 come along (CUSTOM0 is the particle index). Each build draws with its
+own copy of the material, so one can be shared by several garments; setting
+it on a built cloth swaps the look without a rebuild.
+
+A build (on entering the tree, `rebuild()`, or a new `mesh_instance_path` /
+`body_mesh_path`) prepares the garment on the CPU and gives it a new render
+copy: about 9 ms for the demo's 2048-particle skirt. The shaders are compiled
+once per run and shared by every cloth, so only the first build pays for that.
+A script that draws the garment itself finds the render copy with
+`get_render_instance()`, and the particle each of its vertices is drawn from
+with `get_vertex_particles()`.
 
 ## Soft bodies — stock `SoftBody3D`
 
@@ -805,10 +857,46 @@ sits at the right height in the editor. Wheels carry the suspension
 - **`PhysXVehicle3D`** — 4 wheels, exactly 2 with `use_as_steering` (the front
   axle). Drive with `throttle` / `brake` (0..1), `steer` (−1..1) and `reverse`.
   Front/rear anti-roll bars, `ackermann_strength`, custom `center_of_mass`.
+  `drivetrain` picks how throttle reaches the wheels:
+  - **Direct** (the default): throttle is wheel torque up to `max_engine_torque`,
+    forward or in reverse.
+  - **Engine**: PhysX's engine drive. An engine (`engine_peak_torque`,
+    `engine_max_rpm`, `engine_idle_rpm`, an optional `engine_torque_curve`)
+    drives the traction wheels through a clutch and a gearbox (`gear_ratios`
+    first to top, `reverse_gear_ratio`, `final_drive_ratio`, `gear_switch_time`).
+    With `automatic_transmission` on, the autobox shifts up and down
+    (`autobox_up_ratio` / `_down_ratio` of max RPM, `autobox_latency`), and
+    holds its gear while the clutch is pressed past halfway, so revving
+    against the clutch for a launch doesn't climb the gears standing still.
+    Otherwise the gearbox goes to `gear` (−1 reverse, 0 neutral, 1..). `reverse`
+    selects the reverse gear either way, and `clutch` (0 engaged .. 1 pressed)
+    is read every tick. With `clutch_assist` off, a manual gearbox only changes
+    gear while the clutch is pressed past halfway. `differential` is **Open** (the torque is split evenly)
+    or **Limited Slip** (torque moves off a wheel spinning faster than its
+    partner; `limited_slip_*` biases per axle and between axles).
+    `get_current_gear()`, `get_target_gear()` and `get_engine_rpm()` report the
+    state. Every setting defaults to PhysX's own vehicle samples, which make a
+    quick car; `engine_peak_torque` and the gear ratios tame it.
+
+  `tire_force_point` (0..1) sets the height where the tires push on the
+  chassis. At 0 (the default, PhysX's own) that's the suspension mount, usually
+  above the center of mass, so the body barely pitches or rolls under the tire
+  forces. At 1 it's the contact patch on the ground, like `VehicleBody3D`'s
+  wheels: hard acceleration squats the rear and can lift the front (a wheelie
+  with a high, rear-set center of mass and rear grip), and braking dives the
+  nose. Cornering gets the same lever, so a grippy car with a high center of
+  mass can roll over in a hard turn. Less front grip than rear, a lower center
+  of mass, or anti-roll bars keep it on its wheels.
 - **`PhysXMotorcycle3D`** — 2 wheels, front steering, rear traction. `PxVehicle2`
   has no balance mechanism, so staying upright is the script's job: read
   `get_roll_angle()` / `get_angular_velocity()` each tick and correct with
-  `apply_torque_impulse()`, like a rider would.
+  `apply_torque_impulse()`, like a rider would. `drivetrain` works as on
+  `PhysXVehicle3D` (Direct, or Engine with the same engine, gearbox, clutch and
+  `clutch_assist` settings, and no differential: one wheel is driven). The
+  engine settings default to a sport bike's: 110 N·m to 12000 RPM, six close
+  gears, about 115 km/h in first. A bike without a rider carries little load on
+  its rear tire, so it needs more `tire_friction` there than a road tire's, or
+  the engine just spins it.
 - **`PhysXTank3D`** — 2–16 wheels, skid-steer. Each wheel is assigned to the left
   or right track from the sign of its local X (+X is the left side). Drive with signed `left_ratio` /
   `right_ratio` (−1..1): the sign is the direction, so opposite signs pivot in
@@ -904,7 +992,7 @@ cleared (a surface with a `surface_mesh` footprint or a measured seabed still
 rebuilds, since its depths depend on where the square is). Together with
 `render_extent` that's an endless ocean out to the horizon. The one limit is
 ordinary floating-point precision far from the world origin — at hundreds of
-kilometres rendering and physics start to jitter, as for any Godot scene; large
+kilometers rendering and physics start to jitter, as for any Godot scene; large
 worlds shift their origin or use a double-precision build. Over a coastline,
 turn on `open_sea_beyond` so the sea past a moving square stays open deep water
 instead of carrying the square's edge — its seabed, shore foam and wet sand —
@@ -983,6 +1071,64 @@ so they work with whichever physics engine is selected, Jolt included.
 
 The demo boat is `demo/common/boat/boat.tscn`, on the beach.
 
+## Active ragdolls — joint drives
+
+Godot's joint API has no room for the drives an active ragdoll needs, so the
+`PhysX` singleton adds them. Each call takes a joint's RID
+(`Joint3D.get_rid()`, or `PhysX.physical_bone_get_joint(bone)` for a
+`PhysicalBone3D`) and works on pin, hinge, cone twist and Generic6DOF joints:
+
+| Call | What it does |
+| --- | --- |
+| `joint_set_slerp_drive(joint, enabled, stiffness, damping, torque_limit = INF)` | One spring that turns body B toward the drive target's rotation along the shortest path, all three angles at once, in place of the 6DOF's per-axis angular springs and motors. It works through the joint's angular limits (a 6DOF axis without a valid limit range is freed, as for its springs). On a hinge it drives the hinge angle; the hinge is rebuilt as a PhysX D6 joint the first time, with the same limits and motor. |
+| `joint_set_drive_acceleration(joint, enabled)` | The joint's spring stiffness and damping are accelerations, not forces: the same gains drive a light and a heavy bone alike. Motors keep their force units. |
+| `joint_set_linear_spring_force_limit(joint, axis, limit)`, `joint_set_angular_spring_torque_limit(joint, axis, limit)` | The most force or torque a 6DOF spring may use (infinite by default), so a stiff spring can't snap a body around. |
+| `joint_set_drive_target(joint, target, delta = 0)` | The pose the drives pull toward: body B's joint frame relative to body A's. One call that only moves the target, cheap enough for every bone every frame. With `delta` (the time since the last target, e.g. the physics frame's) the drives also move at the target's own velocity; without it they damp toward standing still and trail a moving target. A 6DOF joint's springs pull toward their equilibrium points until it's set; setting a new equilibrium point takes over again. |
+| `joint_set_drive_target_from_poses(joint, pose_a, pose_b, delta = 0)` | The target that puts body A at global transform `pose_a` and body B at `pose_b`; no need to know the joint's frames. |
+| `physical_bone_get_joint(bone)` | The RID of the joint between a `PhysicalBone3D` and its parent bone (empty for the root bone or `JOINT_TYPE_NONE`). |
+
+The settings read back with matching getters (`joint_is_slerp_drive_enabled`,
+`joint_get_drive_target`, …). To make a simulated skeleton follow an animation,
+drive each bone toward the pose an animated copy of the skeleton is in (a
+`PhysicalBone3D`'s body sits at `bone pose * body_offset`):
+
+```gdscript
+func _physics_process(delta: float) -> void:
+	for bone: PhysicalBone3D in bones:
+		var joint := PhysX.physical_bone_get_joint(bone)
+		if joint.is_valid():
+			var parent: PhysicalBone3D = parent_of[bone]
+			PhysX.joint_set_drive_target_from_poses(joint,
+					animated.get_bone_global_pose(parent.get_bone_id()) * parent.body_offset,
+					animated.get_bone_global_pose(bone.get_bone_id()) * bone.body_offset, delta)
+```
+
+with `PhysX.joint_set_slerp_drive(joint, true, 2000.0, 80.0)` and
+`PhysX.joint_set_drive_acceleration(joint, true)` once at the start. Only the
+two poses relative to each other matter, so skeleton-space poses do. An
+acceleration drive only counts the two bones at its joint, so a joint that
+carries more of the body (the spine holds up the torso, arms and head) needs
+its stiffness scaled up by about the mass it carries over its own bone's mass,
+or it sags to its limit. The drives act at the joints only: they hold the
+limbs' shape, while keeping the whole body upright (balance) stays up to the
+game, as in other engines. A pose a joint can't reach (past its limits, or a
+knee bent about another axis than its hinge's) is held as close as it goes, and
+every bone beyond it inherits the miss: a physical skeleton made for a limp
+ragdoll often has tighter limits than the animations need.
+
+A bone between two physical bones that has no `PhysicalBone3D` of its own (a
+clavicle between the chest and the upper arm, if Create Physical Skeleton
+skipped it) is still posed by the animation, while the arm hangs from the
+socket of the pose the joints were made in (the skeleton's rest pose). If those
+differ -- a retargeted rig's rest is usually a T-pose -- the mesh tears open at
+that bone. Give such a bone a physical bone too, so it's driven like the rest.
+Bones past the last physical bone (head, fingers) can keep their animation:
+play the same clip on the ragdoll's skeleton in step with the source.
+
+The example project's `demo/editor/joints/active_ragdoll.tscn` does this with
+the demo mannequin, its hips held where the animation has them by a
+`Generic6DOFJoint3D` to a static anchor (whose target is set the same way).
+
 ## Determinism and multiplayer
 
 - **GPU dynamics is never deterministic** — GPU solver scheduling varies run to
@@ -1004,14 +1150,16 @@ For deterministic lockstep multiplayer, use the Jolt backend.
 - **Not yet implemented:** joint softness / bias / restitution parameters.
   (6DOF linear and angular springs and motors are supported, mapped onto PhysX
   joint drives; a motor's force limit is a force or torque, as in Jolt, and a
-  running motor keeps its bodies awake.)
+  running motor keeps its bodies awake. SLERP and acceleration drives, spring
+  force limits and drive targets are on the `PhysX` singleton, see
+  [Active ragdolls](#active-ragdolls--joint-drives).)
   Unsupported shapes are treated as having no collision and log a warning once.
 - **Bounce between two bouncy bodies.** Godot Physics and Jolt combine two
   bodies' `bounce` as their sum, clamped to 0..1. PhysX can only pick one
   side's value, so this backend uses the larger one: exact whenever one side's
   bounce is 0 (a bouncy ball on an ordinary floor), but two bouncy bodies bounce
   less than the sum, and an `absorbent` material counts as 0 instead of
-  cancelling the other side's bounce. Friction matches Godot's rule (`rough`
+  canceling the other side's bounce. Friction matches Godot's rule (`rough`
   wins), except that a `rough` material against a higher-friction one gets the
   higher friction.
 - **`SeparationRayShape3D`** has no PhysX geometry: it's cast as a ray. In
@@ -1050,7 +1198,8 @@ For deterministic lockstep multiplayer, use the Jolt backend.
   ragdolls) and the per-step transform sync all work. The Bullet-era joint
   softness / bias / relaxation / ERP parameters are ignored (as they are on
   Jolt), so joint stiffness itself can't be dialed in; PhysX's `PxD6` cone
-  defaults sit a little softer than Jolt's. `SkeletonModifier3D` spring bones
+  defaults sit a little softer than Jolt's. For bones driven toward a pose
+  (active ragdolls), see [Active ragdolls](#active-ragdolls--joint-drives). `SkeletonModifier3D` spring bones
   (`SpringBoneSimulator3D`,
   for hair and clothing) are engine-side and unaffected — they work identically
   on any backend.

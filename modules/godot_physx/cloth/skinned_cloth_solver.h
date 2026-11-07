@@ -57,7 +57,11 @@ public:
 	// three half-axes, each scaled to its half extent), then this frame's.
 	static constexpr int MAX_BOXES = 32;
 
+	// The compute shader is made once, not per solver (= per cloth build): glslang's compile and the driver's shader
+	// creation took ~25 ms a build. The SPIR-V is shared; on the main device so are the shader and pipeline, freed by
+	// free_shared(). A solver on a local device makes its own from the shared SPIR-V (owns_shader).
 	RID shader, pipeline;
+	bool owns_shader = false;
 	RID buf_params, buf_rest, buf_skin_idx, buf_skin_w, buf_bones, buf_target, buf_target_prev;
 	RID buf_pos, buf_prev, buf_constraints, buf_tethers, buf_capsules, buf_adj_offsets, buf_adj_pairs;
 	RID tex_pos, tex_nrm;
@@ -82,6 +86,8 @@ public:
 	void rt_free_buffers();
 	void rt_free(Ref<SkinnedClothSolverGPU> p_self);
 
+	static void free_shared();
+
 	~SkinnedClothSolverGPU();
 };
 
@@ -94,6 +100,9 @@ public:
 		float stiffness = 0.9f; // 0..1, applied per constraint pass on top of each constraint's own stiffness
 		float damping = 0.02f; // fraction of velocity lost per second
 		Vector3 gravity = Vector3(0, -9.8f, 0);
+		Vector3 wind; // world-space air velocity (m/s); zero = no air pass
+		float drag = 1.0f;
+		float lift = 0.2f;
 		float thickness = 0.01f;
 		float tether_slack = 1.03f; // a particle may drift this far beyond its rest distance to its anchor
 		float tether_stiffness = 1.0f;

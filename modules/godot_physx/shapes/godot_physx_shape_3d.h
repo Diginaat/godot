@@ -106,7 +106,8 @@ public:
 	void set_type(PS3DE::ShapeType p_type) { type = p_type; }
 	PS3DE::ShapeType get_type() const { return type; }
 
-	void set_data(const Variant &p_data);
+	// False when p_data is what the shape already holds (nothing to cook, nothing for its owners to pick up).
+	bool set_data(const Variant &p_data);
 	Variant get_data() const { return data; }
 
 	void set_margin(real_t p_margin) { margin = p_margin; }

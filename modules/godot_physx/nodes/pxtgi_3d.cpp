@@ -39,6 +39,7 @@
 #include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "core/math/convex_hull.h"
+#include "core/math/geometry_3d.h"
 #include "core/object/callable_mp.h"
 #include "core/templates/hashfuncs.h"
 #include "scene/3d/camera_3d.h"
@@ -63,6 +64,8 @@
 #include "scene/resources/material.h"
 
 #ifdef TOOLS_ENABLED
+#include "editor/scene/3d/node_3d_editor_plugin.h"
+#include "editor/scene/3d/node_3d_editor_viewport.h"
 #include "main/main.h"
 #endif
 #include "servers/rendering/renderer_rd/environment/gi.h"
@@ -454,6 +457,19 @@ Color light_strength(const Light3D *p_light) {
 	return p_light->get_color().srgb_to_linear() * strength;
 }
 
+// The material a mesh's surface is drawn with, as MeshInstance3D::get_active_material() gives it but without its error
+// when the mesh has gained surfaces the MeshInstance3D hasn't caught up with yet (a mesh being reloaded in the editor).
+Ref<Material> surface_material(const MeshInstance3D *p_mesh, int p_surface) {
+	if (p_mesh->get_material_override().is_valid()) {
+		return p_mesh->get_material_override();
+	}
+	if (p_surface < p_mesh->get_surface_override_material_count() && p_mesh->get_surface_override_material(p_surface).is_valid()) {
+		return p_mesh->get_surface_override_material(p_surface);
+	}
+	const Ref<Mesh> mesh = p_mesh->get_mesh();
+	return mesh.is_valid() && p_surface < mesh->get_surface_count() ? mesh->surface_get_material(p_surface) : Ref<Material>();
+}
+
 // A mesh's albedo (its first surface Godot can read the colour of, or that says it with a "pxtgi_albedo" Color in its
 // metadata) and the light it gives off (its brightest surface: a lamp's housing and bulb are often one mesh). A
 // "pxtgi_emission" Color in the MeshInstance3D's own metadata stands for the whole mesh.
@@ -463,7 +479,7 @@ void mesh_look(MeshInstance3D *p_mesh, Color &r_albedo, Color &r_emission) {
 	bool have_albedo = false;
 	const int surfaces = p_mesh->get_mesh().is_valid() ? p_mesh->get_mesh()->get_surface_count() : 0;
 	for (int i = 0; i < MAX(surfaces, 1); i++) {
-		const Ref<Material> material = p_mesh->get_active_material(i);
+		const Ref<Material> material = surface_material(p_mesh, i);
 		const Ref<BaseMaterial3D> base = material;
 		if (!have_albedo && material.is_valid() && material->has_meta(meta_albedo())) {
 			r_albedo = Color(material->get_meta(meta_albedo())).srgb_to_linear();
@@ -493,12 +509,9 @@ MeshInstance3D *first_mesh_child(const Node *p_node) {
 	return nullptr;
 }
 
-// The look of the mesh a body belongs to: the first mesh under it, else the mesh it sits under (a model with its
-// collision body as a child), else the first mesh beside it (in a group of up to 8), else a neutral grey. A
-// "pxtgi_albedo" or "pxtgi_emission" Color in the body's own metadata says it outright.
-void body_look(Node *p_body, Color &r_albedo, Color &r_emission) {
-	r_albedo = Color(0.5, 0.5, 0.5);
-	r_emission = Color(0, 0, 0);
+// The mesh a body belongs to: the first mesh under it, else the mesh it sits under (a model with its collision body as
+// a child), else the first mesh beside it (in a group of up to 8), else none.
+MeshInstance3D *body_mesh(Node *p_body) {
 	MeshInstance3D *mesh = first_mesh_child(p_body);
 	if (mesh == nullptr) {
 		mesh = Object::cast_to<MeshInstance3D>(p_body->get_parent());
@@ -508,6 +521,49 @@ void body_look(Node *p_body, Color &r_albedo, Color &r_emission) {
 	if (mesh == nullptr && p_body->get_parent() && p_body->get_parent()->get_child_count() <= 8) {
 		mesh = first_mesh_child(p_body->get_parent());
 	}
+	return mesh;
+}
+
+// Whether body p_node has a collision shape that is traced (not a trigger volume, not hidden or disabled).
+bool body_has_traced_shape(const Node *p_node) {
+	if (!Object::cast_to<CollisionObject3D>(p_node) || Object::cast_to<Area3D>(p_node)) {
+		return false;
+	}
+	for (int i = 0; i < p_node->get_child_count(); i++) {
+		const CollisionShape3D *cs = Object::cast_to<CollisionShape3D>(p_node->get_child(i));
+		if (cs != nullptr && !cs->is_disabled() && cs->is_visible_in_tree() && cs->get_shape().is_valid()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// Whether a mesh has its own collision: a body under it, or one beside it that takes it as its mesh (body_mesh). Its
+// shapes then block the light and carry its glow, so it needs no box of its own, which would shadow by its bounds.
+bool mesh_has_collision(MeshInstance3D *p_mesh) {
+	for (int i = 0; i < p_mesh->get_child_count(); i++) {
+		if (body_has_traced_shape(p_mesh->get_child(i))) {
+			return true;
+		}
+	}
+	Node *parent = p_mesh->get_parent();
+	if (parent != nullptr && parent->get_child_count() <= 8) {
+		for (int i = 0; i < parent->get_child_count(); i++) {
+			Node *sibling = parent->get_child(i);
+			if (sibling != p_mesh && body_has_traced_shape(sibling) && body_mesh(sibling) == p_mesh) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// The look of the mesh a body belongs to (body_mesh), else a neutral grey. A "pxtgi_albedo" or "pxtgi_emission" Color
+// in the body's own metadata says it outright.
+void body_look(Node *p_body, Color &r_albedo, Color &r_emission) {
+	r_albedo = Color(0.5, 0.5, 0.5);
+	r_emission = Color(0, 0, 0);
+	MeshInstance3D *mesh = body_mesh(p_body);
 	if (mesh) {
 		mesh_look(mesh, r_albedo, r_emission);
 	}
@@ -543,10 +599,11 @@ void collect(Node *p_node, HashSet<ObjectID> &r_tracked) {
 	}
 }
 
-// How much of a light Godot draws for a camera at p_eye: none when hidden or off, and with distance fade on, fading
-// out past its begin distance as Godot's renderer does.
+// How much of a light Godot draws for a camera at p_eye: none when hidden, off or out of the tree (one deleted in the
+// editor lives on for undo, and still counts as visible), and with distance fade on, fading out past its begin
+// distance as Godot's renderer does.
 float light_presence(const Light3D *p_light, const Vector3 &p_eye) {
-	if (p_light == nullptr || !p_light->is_visible_in_tree() || p_light->get_param(Light3D::PARAM_ENERGY) <= 0.0f) {
+	if (p_light == nullptr || !p_light->is_inside_tree() || !p_light->is_visible_in_tree() || p_light->get_param(Light3D::PARAM_ENERGY) <= 0.0f) {
 		return 0.0f;
 	}
 	if (!p_light->is_distance_fade_enabled()) {
@@ -844,16 +901,19 @@ const PXTGI3D::GeometryBlock *PXTGI3D::_geometry_for(const Ref<Shape3D> &p_shape
 			auto corner = [&](int x, int z) {
 				return Vector3(x - (w - 1) * 0.5f, heights[z * w + x], z - (d - 1) * 0.5f);
 			};
-			corners.resize((w - 1) * (d - 1) * 6);
-			Vector3 *c = corners.ptrw();
+			// A triangle with a NaN corner is a hole in the collision too.
+			corners.reserve((w - 1) * (d - 1) * 6);
+			auto triangle = [&](const Vector3 &p_a, const Vector3 &p_b, const Vector3 &p_c) {
+				if (!Math::is_nan(p_a.y) && !Math::is_nan(p_b.y) && !Math::is_nan(p_c.y)) {
+					corners.push_back(p_a);
+					corners.push_back(p_b);
+					corners.push_back(p_c);
+				}
+			};
 			for (int z = 0; z < d - 1; z++) {
 				for (int x = 0; x < w - 1; x++) {
-					*c++ = corner(x, z);
-					*c++ = corner(x + 1, z);
-					*c++ = corner(x, z + 1);
-					*c++ = corner(x + 1, z);
-					*c++ = corner(x + 1, z + 1);
-					*c++ = corner(x, z + 1);
+					triangle(corner(x, z), corner(x + 1, z), corner(x, z + 1));
+					triangle(corner(x + 1, z), corner(x + 1, z + 1), corner(x, z + 1));
 				}
 			}
 		}
@@ -961,6 +1021,127 @@ void PXTGI3D::_restyle_slice(LocalVector<int> &r_changed) {
 	}
 }
 
+// The mesh drawing an emissive shape and its glowing surface (the brightest, as its look takes); null when the glow
+// isn't a surface's (given in metadata on the node, or no mesh).
+MeshInstance3D *PXTGI3D::_emissive_mesh(int p_index, int &r_surface) const {
+	const ShapeEntry &entry = shapes[p_index];
+	Node *node = ObjectDB::get_instance<Node>(entry.shape_node);
+	if (node == nullptr) {
+		return nullptr;
+	}
+	MeshInstance3D *mesh = nullptr;
+	if (entry.mesh_proxy) {
+		mesh = Object::cast_to<MeshInstance3D>(node);
+	} else if (node->get_parent() != nullptr && !node->get_parent()->has_meta(meta_emission())) {
+		mesh = body_mesh(node->get_parent());
+	}
+	if (mesh == nullptr || mesh->get_mesh().is_null() || mesh->has_meta(meta_emission())) {
+		return nullptr;
+	}
+	const Ref<Mesh> source = mesh->get_mesh();
+	r_surface = -1;
+	float brightest = 0.0f;
+	for (int i = 0; i < source->get_surface_count(); i++) {
+		const float glow = material_glow(surface_material(mesh, i)).get_luminance();
+		if (glow > brightest) {
+			brightest = glow;
+			r_surface = i;
+		}
+	}
+	return r_surface < 0 ? nullptr : mesh;
+}
+
+// Where an emissive gives off light: the box of its mesh's glowing surface, not of the whole shape. A door frame with a
+// thin strip of light otherwise shines from a slab the size of the door, around whatever stands by it, which can't
+// shadow it from inside that slab. Falls back on the shape's own box when the glow isn't a surface's.
+bool PXTGI3D::_emissive_frame(int p_index, Transform3D &r_to_world, AABB &r_local) {
+	if (!_entry_frame(p_index, r_to_world, r_local)) {
+		return false;
+	}
+	const EmissiveSurface *known = emissive_surfaces.getptr(p_index);
+	if (known == nullptr) {
+		EmissiveSurface found;
+		int surface = -1;
+		MeshInstance3D *mesh = _emissive_mesh(p_index, surface);
+		if (mesh != nullptr) {
+			const Array arrays = mesh->get_mesh()->surface_get_arrays(surface);
+			const PackedVector3Array vertices = arrays[Mesh::ARRAY_VERTEX];
+			if (!vertices.is_empty()) {
+				found.bounds.position = vertices[0];
+				for (const Vector3 &vertex : vertices) {
+					found.bounds.expand_to(vertex);
+				}
+				found.mesh = mesh->get_instance_id();
+			}
+		}
+		known = &emissive_surfaces.insert(p_index, found)->value;
+	}
+	const MeshInstance3D *mesh = ObjectDB::get_instance<MeshInstance3D>(known->mesh);
+	if (mesh != nullptr && mesh->is_inside_tree()) {
+		r_to_world = mesh->get_global_transform();
+		r_local = known->bounds;
+	}
+	return true;
+}
+
+// Which way an emissive shape's glow faces, in the world: along its mesh's glowing surface (the brightest, as its look
+// takes) when that surface mostly faces one way and is drawn one-sided; zero when it glows all round (a bulb, a
+// double-sided material, a glow given in metadata).
+Vector3 PXTGI3D::_emissive_facing(int p_index) {
+	int surface = -1;
+	MeshInstance3D *mesh = _emissive_mesh(p_index, surface);
+	if (mesh == nullptr) {
+		return Vector3();
+	}
+	const Ref<Mesh> source = mesh->get_mesh();
+	const Ref<Material> material = surface_material(mesh, surface);
+	const Ref<BaseMaterial3D> base = material;
+	if (base.is_valid() && base->get_cull_mode() == BaseMaterial3D::CULL_DISABLED) {
+		return Vector3();
+	}
+	const Ref<ShaderMaterial> shader_material = material;
+	if (shader_material.is_valid() && shader_material->get_shader().is_valid() && shader_material->get_shader()->get_code().contains("cull_disabled")) {
+		return Vector3();
+	}
+	const Vector<Vector3> *normals = surface_normals.getptr(source->get_instance_id());
+	if (normals == nullptr) {
+		// Each triangle's normal weighted by its area: a panel's front outweighs its rim, and opposite sides cancel
+		// (a closed shape, a bulb, comes to about zero).
+		Vector<Vector3> means;
+		for (int i = 0; i < source->get_surface_count(); i++) {
+			const Array arrays = source->surface_get_arrays(i);
+			const PackedVector3Array vertices = arrays[Mesh::ARRAY_VERTEX];
+			const PackedVector3Array vertex_normals = arrays[Mesh::ARRAY_NORMAL];
+			PackedInt32Array indices = arrays[Mesh::ARRAY_INDEX];
+			if (indices.is_empty()) {
+				for (int k = 0; k < vertices.size(); k++) {
+					indices.push_back(k);
+				}
+			}
+			Vector3 sum;
+			float area = 0.0f;
+			if (vertex_normals.size() == vertices.size()) {
+				for (int t = 0; t + 2 < indices.size(); t += 3) {
+					const int a = indices[t];
+					const int b = indices[t + 1];
+					const int c = indices[t + 2];
+					const float triangle = (vertices[b] - vertices[a]).cross(vertices[c] - vertices[a]).length() * 0.5f;
+					sum += (vertex_normals[a] + vertex_normals[b] + vertex_normals[c]).normalized() * triangle;
+					area += triangle;
+				}
+			}
+			means.push_back(area > 0.0f ? sum / area : Vector3());
+		}
+		normals = &surface_normals.insert(source->get_instance_id(), means)->value;
+	}
+	// One-sided when its front is at least half of it (a panel with its rim: about 0.8; a bulb: 0.1).
+	const Vector3 mean = surface < normals->size() ? (*normals)[surface] : Vector3();
+	if (mean.length() < 0.5f) {
+		return Vector3();
+	}
+	return mesh->get_global_basis().inverse().transposed().xform(mean).normalized();
+}
+
 void PXTGI3D::_rescan() {
 	Node *root = _scan_root();
 	if (root->get_instance_id() != tracked_root) {
@@ -968,6 +1149,9 @@ void PXTGI3D::_rescan() {
 	}
 	tracked_changed = false;
 	frames_since_rescan = 0;
+	surface_normals.clear();
+	emissive_surfaces.clear();
+	chosen_emissives.clear();
 	shapes.clear();
 	suns.clear();
 	omnis.clear();
@@ -1007,7 +1191,7 @@ void PXTGI3D::_rescan() {
 		if (MeshInstance3D *mesh = Object::cast_to<MeshInstance3D>(n)) {
 			// A mesh outside any body only counts while it gives off light (and not when it's kept out of GI, as
 			// Godot's own GI leaves it out).
-			if (mesh->get_mesh().is_null() || entry.emission.get_luminance() <= 0.0f || mesh->get_gi_mode() == GeometryInstance3D::GI_MODE_DISABLED) {
+			if (mesh->get_mesh().is_null() || entry.emission.get_luminance() <= 0.0f || mesh->get_gi_mode() == GeometryInstance3D::GI_MODE_DISABLED || mesh_has_collision(mesh)) {
 				continue;
 			}
 			entry.mesh_proxy = true;
@@ -1136,7 +1320,7 @@ bool PXTGI3D::_shape_frame(int p_index, Transform3D &r_to_world, float &r_type, 
 	Transform3D to_world;
 	if (entry.mesh_proxy) {
 		MeshInstance3D *mesh = ObjectDB::get_instance<MeshInstance3D>(entry.shape_node);
-		if (mesh == nullptr || !mesh->is_visible_in_tree() || mesh->get_mesh().is_null()) {
+		if (mesh == nullptr || !mesh->is_inside_tree() || !mesh->is_visible_in_tree() || mesh->get_mesh().is_null()) {
 			return false;
 		}
 		const AABB bounds = mesh->get_aabb();
@@ -1144,7 +1328,7 @@ bool PXTGI3D::_shape_frame(int p_index, Transform3D &r_to_world, float &r_type, 
 		to_world = mesh->get_global_transform() * Transform3D(Basis(), bounds.get_center());
 	} else {
 		CollisionShape3D *cs = ObjectDB::get_instance<CollisionShape3D>(entry.shape_node);
-		if (cs == nullptr || cs->is_disabled() || !cs->is_inside_tree() || cs->get_shape().is_null()) {
+		if (cs == nullptr || cs->is_disabled() || !cs->is_inside_tree() || !cs->is_visible_in_tree() || cs->get_shape().is_null()) {
 			return false;
 		}
 		to_world = cs->get_global_transform();
@@ -1428,31 +1612,66 @@ void PXTGI3D::_publish() {
 	s.debug = debug;
 	s.multi_bounce = multi_bounce;
 	s.rays_per_texel = rays_per_texel;
+	s.emissive_candidates = emissive_candidates;
 	s.reflection_mode = reflection_mode;
 	s.reflection_cutoff = reflection_cutoff;
 
 	_update_primitives(s);
 	const Camera3D *camera = get_viewport() ? get_viewport()->get_camera_3d() : nullptr;
-	const Vector3 eye = camera ? camera->get_global_position() : get_global_position();
+	// Where the lights and emissives are chosen around (and lights faded from, as Godot fades them with distance): the
+	// camera drawing the scene; in the editor, the 3D view last looked through, not a camera in the edited scene.
+	Vector3 eye = camera ? camera->get_global_position() : get_global_position();
+	Vector3 eye_forward = camera ? -camera->get_global_basis().get_column(2).normalized() : Vector3(0, 0, -1);
+#ifdef TOOLS_ENABLED
+	if (Engine::get_singleton()->is_editor_hint() && Node3DEditor::get_singleton() != nullptr) {
+		Node3DEditorViewport *view = Node3DEditor::get_singleton()->get_last_used_viewport();
+		if (view != nullptr && view->get_camera_3d() != nullptr) {
+			eye = view->get_camera_3d()->get_global_position();
+			eye_forward = -view->get_camera_3d()->get_global_basis().get_column(2).normalized();
+		}
+	}
+#endif
 	{
-		LocalVector<Pair<float, int>> near;
+		// The emissives sampled directly (up to MAX_EMISSIVES), and how often each is picked: by the light each could give
+		// what the camera sees -- its glow times its largest face over the squared distance to the view (the first
+		// metres straight ahead of the camera) -- so a big bright panel a room away beats a dim strip at the camera's
+		// feet. Those chosen last frame get a head start, so the set changes gradually as the camera moves.
+		const Vector3 view_end = eye + eye_forward * 3.0f;
+		LocalVector<Pair<float, int>> scored;
 		for (int i : emissive_entries) {
 			Transform3D frame;
 			AABB local;
-			if (_entry_frame(i, frame, local)) {
-				near.push_back(Pair<float, int>(frame.xform(local.get_center()).distance_squared_to(eye), i));
+			if (!_emissive_frame(i, frame, local)) {
+				continue;
+			}
+			const Vector3 center = frame.xform(local.get_center());
+			const float sx = (frame.basis.get_column(0) * local.size.x).length();
+			const float sy = (frame.basis.get_column(1) * local.size.y).length();
+			const float sz = (frame.basis.get_column(2) * local.size.z).length();
+			const float face = MAX(MAX(sx * sy, sy * sz), sx * sz);
+			const Vector3 nearest = Geometry3D::get_closest_point_to_segment(center, eye, view_end);
+			float score = shapes[i].emission.get_luminance() * face / MAX(center.distance_squared_to(nearest), 1.0f);
+			if (chosen_emissives.has(i)) {
+				score *= 2.0f;
+			}
+			if (score > 0.0f) {
+				scored.push_back(Pair<float, int>(-score, i));
 			}
 		}
-		near.sort_custom<PairSort<float, int>>();
+		scored.sort_custom<PairSort<float, int>>();
+		const int count = MIN((int)scored.size(), PhysXGIEffect::Snapshot::MAX_EMISSIVES);
+		float total = 0.0f;
+		for (int k = 0; k < count; k++) {
+			total += -scored[k].first;
+		}
+		chosen_emissives.clear();
 		s.emissive_count = 0;
-		for (const Pair<float, int> &e : near) {
-			if (s.emissive_count == PhysXGIEffect::Snapshot::MAX_EMISSIVES) {
-				break;
-			}
+		for (int k = 0; k < count; k++) {
+			const int e = scored[k].second;
 			Transform3D frame;
 			AABB local;
-			_entry_frame(e.second, frame, local);
-			const int k = s.emissive_count++;
+			_emissive_frame(e, frame, local);
+			s.emissive_count++;
 			const Vector3 half = local.size * 0.5f;
 			s.emissive_center[k] = frame.xform(local.get_center());
 			for (int a = 0; a < 3; a++) {
@@ -1460,7 +1679,12 @@ void PXTGI3D::_publish() {
 				axis[a] = half[a];
 				s.emissive_axis[k][a] = frame.basis.xform(axis);
 			}
-			s.emissive_color[k] = shapes[e.second].emission;
+			s.emissive_color[k] = shapes[e].emission;
+			s.emissive_facing[k] = _emissive_facing(e);
+			// Three quarters by the light it gives, a quarter evenly: none goes unpicked for long.
+			s.emissive_pick[k] = 0.75f * (-scored[k].first) / MAX(total, 1e-12f) + 0.25f / count;
+			s.emissive_slot[k] = e < (int)entry_slot.size() ? entry_slot[e] : -1;
+			chosen_emissives.insert(e);
 		}
 	}
 	s.geometry = geometry;
@@ -1508,7 +1732,7 @@ void PXTGI3D::_publish() {
 	s.probe_count = 0;
 	for (const ObjectID &id : probes) {
 		ReflectionProbe *probe = ObjectDB::get_instance<ReflectionProbe>(id);
-		if (probe == nullptr || !probe->is_visible_in_tree() || (probe->get_reflection_mask() & 0xFFFFF) != 0xFFFFF) {
+		if (probe == nullptr || !probe->is_inside_tree() || !probe->is_visible_in_tree() || (probe->get_reflection_mask() & 0xFFFFF) != 0xFFFFF) {
 			continue;
 		}
 		const int overrides = (probe->get_ambient_mode() != ReflectionProbe::AMBIENT_DISABLED ? 1 : 0) | (probe->get_intensity() > 0.0f ? 2 : 0);
@@ -1555,16 +1779,20 @@ void PXTGI3D::_publish() {
 	}
 	// The light sources themselves (which and how bright): a lamp switched off or an emitter gone shouldn't glow on in
 	// the radiance cache for seconds. Published from the next frame, for 60 frames.
-	uint32_t sources = hash_murmur3_one_32(s.omni_count | (s.spot_count << 8) | (s.emissive_count << 16));
+	// Every light and emissive of the scene, not the ones chosen for the camera: walking about changes which are
+	// chosen, not the light.
+	uint32_t sources = hash_murmur3_one_32(omnis.size() | (spots.size() << 10) | (emissive_entries.size() << 20));
 	sources = hash_murmur3_one_float(s.sun_color.r + s.sun_color.g * 3.1f + s.sun_color.b * 7.3f, sources);
-	for (int i = 0; i < s.omni_count; i++) {
-		sources = hash_murmur3_one_float(s.omni_color[i].r + s.omni_color[i].g * 3.1f + s.omni_color[i].b * 7.3f, sources);
+	for (const LocalVector<ObjectID> *list : { &omnis, &spots }) {
+		for (const ObjectID &id : *list) {
+			const Light3D *light = ObjectDB::get_instance<Light3D>(id);
+			const Color c = light != nullptr && light->is_inside_tree() && light->is_visible_in_tree() ? light_strength(light) : Color(0, 0, 0);
+			sources = hash_murmur3_one_float(c.r + c.g * 3.1f + c.b * 7.3f, sources);
+		}
 	}
-	for (int i = 0; i < s.spot_count; i++) {
-		sources = hash_murmur3_one_float(s.spot_color[i].r + s.spot_color[i].g * 3.1f + s.spot_color[i].b * 7.3f, sources);
-	}
-	for (int i = 0; i < s.emissive_count; i++) {
-		sources = hash_murmur3_one_float(s.emissive_color[i].r + s.emissive_color[i].g * 3.1f + s.emissive_color[i].b * 7.3f, sources);
+	for (int i : emissive_entries) {
+		const Color &c = shapes[i].emission;
+		sources = hash_murmur3_one_float(c.r + c.g * 3.1f + c.b * 7.3f, sources);
 	}
 	if (sources != last_sources_hash) {
 		last_sources_hash = sources;
@@ -1676,6 +1904,8 @@ void PXTGI3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_world_ray_distance"), &PXTGI3D::get_world_ray_distance);
 	ClassDB::bind_method(D_METHOD("set_rays_per_texel", "rays"), &PXTGI3D::set_rays_per_texel);
 	ClassDB::bind_method(D_METHOD("get_rays_per_texel"), &PXTGI3D::get_rays_per_texel);
+	ClassDB::bind_method(D_METHOD("set_emissive_candidates", "candidates"), &PXTGI3D::set_emissive_candidates);
+	ClassDB::bind_method(D_METHOD("get_emissive_candidates"), &PXTGI3D::get_emissive_candidates);
 	ClassDB::bind_method(D_METHOD("set_multi_bounce", "enabled"), &PXTGI3D::set_multi_bounce);
 	ClassDB::bind_method(D_METHOD("get_multi_bounce"), &PXTGI3D::get_multi_bounce);
 	ClassDB::bind_method(D_METHOD("set_reflection_mode", "mode"), &PXTGI3D::set_reflection_mode);
@@ -1688,6 +1918,7 @@ void PXTGI3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_distance", PROPERTY_HINT_RANGE, "0.1,20,0.1,or_greater"), "set_max_distance", "get_max_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "world_ray_distance", PROPERTY_HINT_RANGE, "1,100,0.5,or_greater,suffix:m"), "set_world_ray_distance", "get_world_ray_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "rays_per_texel", PROPERTY_HINT_RANGE, "1,4,1"), "set_rays_per_texel", "get_rays_per_texel");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "emissive_candidates", PROPERTY_HINT_RANGE, "1,16,1"), "set_emissive_candidates", "get_emissive_candidates");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "multi_bounce"), "set_multi_bounce", "get_multi_bounce");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "reflection_mode", PROPERTY_HINT_ENUM, "Godot,Screen Space,Traced,Traced + Probes"), "set_reflection_mode", "get_reflection_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "reflection_roughness_cutoff", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_reflection_roughness_cutoff", "get_reflection_roughness_cutoff");

@@ -175,7 +175,18 @@ public:
 	Vector<float> ocean_imag_cache; // x displacement (see water_spectrum_evolve.glsl)
 	Vector<float> ocean_dz_cache; // z displacement
 	Vector<float> ocean_slope_x_cache; // dh/dx (for tests)
+	double ripple_cache_time = 0.0; // the simulation clock at the step each cache was read from
+	double ocean_cache_time = 0.0;
 	SafeFlag height_ready;
+
+	// Ripple rest (WaterSolver::set_rest_threshold): consecutive ripple readbacks, all taken after the last step that
+	// had a body or an impulse, whose peak |height - water_level| stayed below the threshold. Written on the render
+	// thread (readback callbacks / rt_step), read by WaterSolver on the calling thread.
+	SafeNumeric<uint32_t> ripple_quiet;
+	int64_t ripple_disturbed_serial = 0; // render thread only
+	float ripple_rest_threshold = 0.0f; // render thread only (copied from each rt_step)
+	float ripple_water_level = 0.0f; // render thread only
+	void _rt_note_ripple_peak(const float *p_heights, int p_count, int64_t p_serial);
 
 	// All posted to the render thread via RenderingServer::call_on_render_thread
 	// (or run synchronously now, on the calling thread, for the local/headless
@@ -198,7 +209,16 @@ public:
 	// rt_step()'s own precedent -- no separate throttle needed, the async
 	// callback landing "a few frames later" already provides natural,
 	// implicit throttling).
-	void rt_step(Ref<WaterSolverGPU> p_self, double p_delta, float p_depth, float p_damping, float p_gravity, float p_water_level, float p_ripple_amplitude, PackedFloat32Array p_spheres, PackedFloat32Array p_impulses);
+	//
+	// One call can carry SEVERAL physics ticks (WaterSolver::queue_tick() + flush_ticks(), the per-frame step mode):
+	// p_deltas holds each tick's dt, p_sphere_counts / p_impulse_counts how many of the flat p_spheres / p_impulses
+	// entries belong to each tick, in order. The ripple layer (an explicit wave equation whose coefficient is clamped
+	// per step) takes one sub-step per tick with that tick's own dt and bodies -- the same result as one call per tick.
+	// Everything that is a function of time (the FFT ocean is evaluated at ocean_time_accum) or a decay / rate-limited
+	// pass (whitecap + shore foam, swash) runs ONCE with the summed dt, plus one blit and one readback.
+	// p_rest: skip the ripple layer (solve, blit, readback) -- it's flat and nothing disturbs it (see ripple_quiet).
+	// p_serial / p_disturbed: this call's number, and whether any of its ticks had a body or an impulse.
+	void rt_step(Ref<WaterSolverGPU> p_self, PackedFloat64Array p_deltas, float p_depth, float p_damping, float p_gravity, float p_water_level, float p_ripple_amplitude, PackedFloat32Array p_spheres, PackedInt32Array p_sphere_counts, PackedFloat32Array p_impulses, PackedInt32Array p_impulse_counts, bool p_rest, int64_t p_serial, bool p_disturbed, float p_rest_threshold);
 	// Light-space caustic map render -- a real RD draw pass (see this class's
 	// own field comments for why not a SubViewport). p_sun_direction need not
 	// be normalized (normalized on upload); p_light_right/p_light_up are the
@@ -217,6 +237,9 @@ public:
 	// The ripple layer moved (a re-centre): its state + composed height zeroed in place -- the ocean, its textures and
 	// every other buffer stay (see WaterSolver::recenter).
 	void rt_clear_ripples(Ref<WaterSolverGPU> p_self);
+	// New per-cell depths for the same grid, written into the depth textures in place: nothing is freed, and the
+	// ripples, foam and swash carry on.
+	void rt_update_depth(Ref<WaterSolverGPU> p_self, PackedFloat32Array p_cell_depth);
 
 	// Async readback callbacks: RenderingDevice invokes them with the data as
 	// the runtime arg; Callable::bind APPENDS the bound args, so the data
@@ -224,8 +247,8 @@ public:
 	// pattern as MPMFluidSolverGPU's rt_on_mm/rt_on_impulses/rt_on_surf_* --
 	// no ordering dependency between them, whichever lands first updates the
 	// cache immediately.
-	void rt_on_ripple_height(const PackedByteArray &p_data, Ref<WaterSolverGPU> p_self);
-	void rt_on_ocean_height(const PackedByteArray &p_data, Ref<WaterSolverGPU> p_self);
+	void rt_on_ripple_height(const PackedByteArray &p_data, double p_time, Ref<WaterSolverGPU> p_self, int64_t p_serial);
+	void rt_on_ocean_height(const PackedByteArray &p_data, double p_time, Ref<WaterSolverGPU> p_self);
 	void rt_on_ocean_dz(const PackedByteArray &p_data, Ref<WaterSolverGPU> p_self);
 
 	~WaterSolverGPU();
@@ -250,6 +273,7 @@ private:
 
 	void _rt_free_buffers();
 	void _rt_build_buffers();
+	void _rt_depth_bytes(const PackedFloat32Array &p_cell_depth, Vector<uint8_t> &r_depth, Vector<uint8_t> &r_fade, Vector<uint8_t> &r_shore) const;
 	void _rt_spectrum_init();
 	void _rt_build_caustics_grid();
 };
@@ -336,7 +360,24 @@ public:
 	// The ripple grid's centre moved (a constant-depth square only): no rebuild -- the ripples are cleared, the ocean
 	// (world-anchored) carries on; bodies' spheres / pending impulses are dropped (they were relative to the old centre).
 	void recenter(Vector2 p_grid_center);
+	// The seabed was measured again: new per-cell depths for the same grid, no rebuild.
+	void update_seabed(const PackedFloat32Array &p_cell_depth);
+	// One physics tick: the whole surface steps now (= queue_tick() + flush_ticks()).
 	void step(double p_delta);
+	// Per-frame stepping: record one physics tick (its dt and a snapshot of the bodies / impulses submitted so far)
+	// without touching the GPU; flush_ticks() then runs every recorded tick in ONE render-thread step (see
+	// WaterSolverGPU::rt_step) -- the expensive passes once per frame instead of once per tick.
+	void queue_tick(double p_delta);
+	void flush_ticks();
+	bool has_queued_ticks() const { return !queued_deltas.is_empty(); }
+	// Ripple rest: with a threshold > 0, once the ripple layer has stayed below it (peak |height| in m) for a few
+	// readbacks with no body sphere (strength != 0) or impulse submitted, its solve is skipped until the next
+	// disturbance. 0 = always solve (the default).
+	void set_rest_threshold(float p_threshold) { rest_threshold = MAX(p_threshold, 0.0f); }
+	float get_rest_threshold() const { return rest_threshold; }
+	bool is_ripple_resting() const { return ripple_resting; }
+	static constexpr uint32_t REST_QUIET_READBACKS = 4;
+	static constexpr int MAX_QUEUED_TICKS = 32; // a frame that long flushes early (keeps the payload bounded)
 
 	// Persistent body proxy, world space, keyed by an arbitrary caller-chosen
 	// id (ObjectID in practice) -- call every physics tick while the body is
@@ -426,10 +467,11 @@ public:
 	// MPM's own mm_cache/pos_cache accept) -- cheap (a mutex lock + copy),
 	// no dispatch, no sync, safe to call every physics tick from any number
 	// of callers.
-	void get_height_grid(Vector<float> &r_height, int &r_n, Vector2 &r_domain_size) const;
+	// r_time, if given: the simulation clock when the grid was read (two grids apart, their rate of change).
+	void get_height_grid(Vector<float> &r_height, int &r_n, Vector2 &r_domain_size, double *r_time = nullptr) const;
 	// r_imag carries the ocean's choppy x displacement (see
 	// water_spectrum_evolve.glsl); get_ocean_dz_grid() the z displacement.
-	void get_ocean_height_grid(Vector<float> &r_height, Vector<float> &r_imag, int &r_n, Vector2 &r_domain_size) const;
+	void get_ocean_height_grid(Vector<float> &r_height, Vector<float> &r_imag, int &r_n, Vector2 &r_domain_size, double *r_time = nullptr) const;
 	void get_ocean_dz_grid(Vector<float> &r_dz) const;
 	// dh/dx of the ocean layer from the FFT (readback, for tests).
 	void get_ocean_slope_x_grid(Vector<float> &r_slope_x) const;
@@ -469,6 +511,18 @@ private:
 		float strength = 0.0f;
 	};
 	Vector<ImpulseSlot> pending_impulses;
+
+	// Ticks recorded by queue_tick(), not yet sent (see flush_ticks()).
+	PackedFloat64Array queued_deltas;
+	PackedFloat32Array queued_spheres;
+	PackedInt32Array queued_sphere_counts;
+	PackedFloat32Array queued_impulses;
+	PackedInt32Array queued_impulse_counts;
+	bool queued_disturbed = false;
+	int64_t step_serial = 0;
+	float rest_threshold = 0.0f;
+	bool ripple_resting = false;
+	void _clear_queue();
 
 	PackedFloat32Array _pack_spheres() const;
 	PackedFloat32Array _pack_impulses() const;

@@ -167,7 +167,8 @@ public:
 					c.collider = b1 ? b1->get_self() : RID();
 					c.collider_id = b1 ? b1->get_instance_id() : ObjectID();
 					c.collider_shape = s1;
-					c.collider_velocity = b1 ? b1->get_linear_velocity() : Vector3();
+					c.local_velocity = b0->get_velocity_at_position(pos);
+					c.collider_velocity = b1 ? b1->get_velocity_at_position(pos) : Vector3();
 					b0->add_contact(c);
 				}
 				if (r1) {
@@ -179,7 +180,8 @@ public:
 					c.collider = b0 ? b0->get_self() : RID();
 					c.collider_id = b0 ? b0->get_instance_id() : ObjectID();
 					c.collider_shape = s0;
-					c.collider_velocity = b0 ? b0->get_linear_velocity() : Vector3();
+					c.local_velocity = b1->get_velocity_at_position(pos);
+					c.collider_velocity = b0 ? b0->get_velocity_at_position(pos) : Vector3();
 					b1->add_contact(c);
 				}
 			}
@@ -679,7 +681,6 @@ public:
 	const GodotPhysXBody3D *self_body = nullptr;
 	const HashSet<RID> *exclude_bodies = nullptr;
 	const HashSet<ObjectID> *exclude_objects = nullptr;
-	uint32_t self_layer = 0;
 	uint32_t self_mask = 0;
 
 	virtual PxQueryHitType::Enum preFilter(const PxFilterData &, const PxShape *p_shape, const PxRigidActor *p_actor, PxHitFlags &) override {
@@ -703,10 +704,9 @@ public:
 		if (exclude_objects && exclude_objects->has(b->get_instance_id())) {
 			return PxQueryHitType::eNONE;
 		}
-		// Same collision-layer/mask rule as regular contacts: hit only if
-		// either side's mask matches the other's layer.
-		const bool collide = (self_layer & b->get_collision_mask()) || (b->get_collision_layer() & self_mask);
-		if (!collide) {
+		// The moving body's own mask only (as Godot Physics' motion test), unlike contacts: what masks this body but
+		// isn't masked by it bounces off it, and is no obstacle or floor to it.
+		if (!(b->get_collision_layer() & self_mask)) {
 			return PxQueryHitType::eNONE;
 		}
 		return PxQueryHitType::eBLOCK;
@@ -919,7 +919,6 @@ bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const PS3DT::
 	filter.self_body = p_body;
 	filter.exclude_bodies = &p_params.exclude_bodies;
 	filter.exclude_objects = &p_params.exclude_objects;
-	filter.self_layer = p_body->get_collision_layer();
 	filter.self_mask = p_body->get_collision_mask();
 	PxQueryFilterData fd(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER);
 	const PxVec3 motion_dir = p_params.motion.length() > CMP_EPSILON ? to_px(p_params.motion.normalized()) : PxVec3(0.0f);
@@ -1191,10 +1190,16 @@ bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const PS3DT::
 					// Ignore contacts that don't actually oppose the motion: a hit
 					// whose normal faces along (rather than against) the sweep is a
 					// grazing/edge contact from sliding on a surface.
-					if (hit.block.normal.dot(-unit_dir) < 0.001f) {
+					const PxReal approach = hit.block.normal.dot(-unit_dir);
+					if (approach < 0.001f) {
 						continue;
 					}
-					const real_t frac = CLAMP((real_t)hit.block.distance / motion_len, (real_t)0.0, (real_t)1.0);
+					// Stop the margin short of the surface, as Godot Physics and Jolt leave it. A character
+					// resting in true contact rubs what it stands on through the kinematic capsule's friction,
+					// and riding that body's motion feeds it back: a loose box spins up and throws it off.
+					// (Limited for a glancing hit, where the same gap would cost a long way back along the motion.)
+					const PxReal backoff = margin / PxMax(approach, 0.25f);
+					const real_t frac = CLAMP((real_t)(hit.block.distance - backoff) / motion_len, (real_t)0.0, (real_t)1.0);
 					if (frac < safe_fraction) {
 						safe_fraction = frac;
 						best_hit = hit.block;
@@ -1226,7 +1231,7 @@ bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const PS3DT::
 			c.normal = to_godot(best_hit.normal);
 			c.collider = other ? other->get_self() : RID();
 			c.collider_id = other ? other->get_instance_id() : ObjectID();
-			c.collider_velocity = other ? other->get_linear_velocity() : Vector3();
+			c.collider_velocity = other ? other->get_velocity_at_position(c.position) : Vector3();
 			c.local_shape = 0;
 			c.collider_shape = best_hit.shape ? (int)reinterpret_cast<uintptr_t>(best_hit.shape->userData) : 0;
 			c.depth = margin;
@@ -1239,7 +1244,7 @@ bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const PS3DT::
 			c.normal = to_godot(rec_normal);
 			c.collider = other ? other->get_self() : RID();
 			c.collider_id = other ? other->get_instance_id() : ObjectID();
-			c.collider_velocity = other ? other->get_linear_velocity() : Vector3();
+			c.collider_velocity = other ? other->get_velocity_at_position(c.position) : Vector3();
 			c.local_shape = 0;
 			c.collider_shape = rec_shape ? (int)reinterpret_cast<uintptr_t>(rec_shape->userData) : 0;
 			c.depth = rec_depth;
@@ -1278,7 +1283,6 @@ void GodotPhysXSpace3D::_apply_separation_rays(real_t p_step) {
 		MotionFilter filter;
 		filter.self_actor = dyn;
 		filter.self_body = body;
-		filter.self_layer = body->get_collision_layer();
 		filter.self_mask = body->get_collision_mask();
 		const PxQueryFilterData fd(PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER);
 

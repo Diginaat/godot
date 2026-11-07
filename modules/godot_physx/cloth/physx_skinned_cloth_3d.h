@@ -53,6 +53,8 @@ class PhysXSkinnedCloth3D : public Node3D {
 	NodePath mesh_instance_path;
 	NodePath body_mesh_path; // optional: fit the body capsules to this skinned mesh
 	int surface = 0;
+	// Drawn with this instead of the built-in look: each build draws with its own copy, with the cloth inputs set.
+	Ref<ShaderMaterial> render_material;
 	PackedFloat32Array max_distances; // per vertex of the surface; empty = auto from height
 	float pin_height = 1.3f; // auto paint: at/above this bind-space height the cloth follows the animation
 	float max_distance = 0.4f; // auto paint: max distance at the lowest point, ramping up from pin_height
@@ -69,16 +71,35 @@ class PhysXSkinnedCloth3D : public Node3D {
 	bool use_world_gravity = true;
 	Vector3 fixed_gravity = Vector3(0, -9.8f, 0);
 	Vector3 extra_acceleration;
+	bool wind_enabled = true;
+	NodePath wind_area; // optional Area3D whose wind settings drive the cloth
+	Vector3 wind; // constant base breeze, on top of the area
+	float wind_turbulence = 0.4f;
+	float drag = 1.0f;
+	float lift = 0.2f;
+	double wind_time = 0.0;
+	Vector3 effective_wind;
 	bool self_collision = false;
 	float self_collision_thickness = 0.02f;
 	float collision_radius_scale = 1.0f;
-	bool collide_with_body = true;
+	bool collide_with_body = true; // the body's colliders; the script's capsules collide regardless
+	bool use_physical_bones = true; // the physical bones' shapes if there are any, else the automatic capsules
+	PackedStringArray physical_bone_skip; // bone names whose physical-bone shapes are left out
+	// The script's own capsules (set_body_capsules), world space, read every step.
+	struct ScriptCapsule {
+		Vector3 a;
+		Vector3 b;
+		float radius_a = 0.0f;
+		float radius_b = 0.0f;
+	};
+	Vector<ScriptCapsule> script_capsules;
 	bool simulating = true;
 
 	SkinnedClothSolver *solver = nullptr;
 	MeshInstance3D *render_instance = nullptr;
 	ObjectID render_instance_id;
-	Ref<ShaderMaterial> render_material;
+	Ref<ShaderMaterial> copy_material; // what the render copy draws with: the built-in look, or render_material's copy
+	float normal_sign = 1.0f;
 	Ref<Texture2DRD> pos_texture;
 	Ref<Texture2DRD> nrm_texture;
 	ObjectID source_id;
@@ -89,11 +110,15 @@ class PhysXSkinnedCloth3D : public Node3D {
 	int hidden_surface = -1;
 	Ref<Material> saved_surface_override;
 	static Ref<ShaderMaterial> hide_material;
+	// The render copy's shader, shared by every cloth: a new one each build was compiled again (~17 ms a build).
+	static Ref<Shader> render_shader;
+	PackedInt32Array vertex_particles; // render copy vertex -> particle (its CUSTOM0.x), as built
 	void _hide_source(MeshInstance3D *p_source);
 	void _unhide_source(MeshInstance3D *p_source);
+	void _make_copy_material(MeshInstance3D *p_source);
 
 public:
-	static void free_shared() { hide_material.unref(); }
+	static void free_shared();
 
 private:
 	ObjectID skeleton_id;
@@ -130,6 +155,7 @@ private:
 	void _try_build();
 	void _clear();
 	void _find_capsules(Skeleton3D *p_skeleton);
+	void _refresh_colliders();
 	bool _find_physical_bone_shapes(Skeleton3D *p_skeleton);
 	static bool _read_shape(Capsule &r_c);
 	void _pack_colliders();
@@ -168,6 +194,8 @@ public:
 	NodePath get_body_mesh_path() const { return body_mesh_path; }
 	void set_surface(int p_surface);
 	int get_surface() const { return surface; }
+	void set_render_material(const Ref<ShaderMaterial> &p_material);
+	Ref<ShaderMaterial> get_render_material() const { return render_material; }
 	void set_max_distances(const PackedFloat32Array &p_distances);
 	PackedFloat32Array get_max_distances() const { return max_distances; }
 	void set_pin_height(float p_height);
@@ -208,18 +236,39 @@ public:
 	Vector3 get_fixed_gravity() const { return fixed_gravity; }
 	void set_extra_acceleration(const Vector3 &p_a) { extra_acceleration = p_a; }
 	Vector3 get_extra_acceleration() const { return extra_acceleration; }
+	void set_wind_enabled(bool p_enabled) { wind_enabled = p_enabled; }
+	bool is_wind_enabled() const { return wind_enabled; }
+	void set_wind_area(const NodePath &p_path) { wind_area = p_path; }
+	NodePath get_wind_area() const { return wind_area; }
+	void set_wind(const Vector3 &p_wind) { wind = p_wind; }
+	Vector3 get_wind() const { return wind; }
+	void set_wind_turbulence(float p_turbulence) { wind_turbulence = MAX(p_turbulence, 0.0f); }
+	float get_wind_turbulence() const { return wind_turbulence; }
+	void set_drag(float p_drag) { drag = MAX(p_drag, 0.0f); }
+	float get_drag() const { return drag; }
+	void set_lift(float p_lift) { lift = MAX(p_lift, 0.0f); }
+	float get_lift() const { return lift; }
+	// The air velocity of the last step (m/s): the breeze, the area and the gusts together.
+	Vector3 get_effective_wind() const { return effective_wind; }
 	// The gravity the cloth steps with right now (world or fixed, + extra_acceleration), m/s^2.
 	Vector3 get_effective_gravity() const;
 	void set_collide_with_body(bool p_enabled);
 	bool get_collide_with_body() const { return collide_with_body; }
 	void set_collision_radius_scale(float p_scale);
 	float get_collision_radius_scale() const { return collision_radius_scale; }
+	void set_use_physical_bones(bool p_enabled);
+	bool get_use_physical_bones() const { return use_physical_bones; }
+	void set_physical_bone_skip(const PackedStringArray &p_bones);
+	PackedStringArray get_physical_bone_skip() const { return physical_bone_skip; }
+	void set_body_capsules(const Array &p_capsules);
 	void set_simulating(bool p_simulating);
 	bool is_simulating() const { return simulating; }
 
 	void rebuild();
 	void reset();
 	int get_particle_count() const { return particle_count; }
+	MeshInstance3D *get_render_instance() const;
+	PackedInt32Array get_vertex_particles() const { return vertex_particles; }
 	Array get_body_capsules() const;
 
 	PhysXSkinnedCloth3D();

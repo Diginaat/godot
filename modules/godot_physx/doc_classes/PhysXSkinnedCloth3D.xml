@@ -6,8 +6,8 @@
 	<description>
 		Simulates a surface of a skinned [MeshInstance3D] (set [member mesh_instance_path]) as cloth driven by the character's animation. Every vertex has a max distance it may stray from where the animation puts it: [code]0[/code] follows the animation exactly (shoulders, a waistband), larger values swing freely (a hem, the tail of a cape). The distances are painted per vertex with [member max_distances], read from the mesh's vertex colors ([member use_vertex_color]), or ramped automatically from [member pin_height] down to [member max_distance] at the lowest point of the mesh.
 		To paint them in the editor, select the node and press [b]Paint Cloth[/b] in the 3D viewport toolbar. The garment turns into a heat map of its max distances (blue follows the animation, red swings furthest). Drag with the left mouse button to paint toward [b]Value[/b], hold [kbd]Shift[/kbd] to paint toward [code]0[/code], or hold [kbd]Ctrl[/kbd] to smooth. [b]Fill[/b] sets every vertex to [b]Value[/b], and [b]Ramp[/b] starts over from the automatic ramp. Each stroke can be undone.
-		The cloth runs on the GPU with compute shaders, so it works on any GPU the renderer supports (no CUDA needed). It collides with the character's physical bones: give the skeleton a [PhysicalBoneSimulator3D] with [PhysicalBone3D]s (select the [Skeleton3D] and use [b]Skeleton3D > Create Physical Skeleton[/b] in the 3D toolbar), and every enabled capsule, sphere or box [CollisionShape3D] on them is a collider, exactly where the editor shows it as the animation moves the bones. Edit, add or remove those shapes to fit the body; the physical bones don't need to simulate. Their sizes, placement and [member CollisionShape3D.disabled] apply live while the game runs (adding or removing a shape needs [method rebuild]). Up to 64 capsules / spheres and 32 boxes. Without a physical skeleton, capsules are placed automatically between the hips, spine, legs and arms (humanoid-profile or common Unreal-style bone names), fitted to [member body_mesh_path] if set. Collisions are swept across the solver's substeps, so fast limbs don't jump through the cloth, and they win over the max distances: where a limb moves further than the cloth may stray, the cloth moves past its limit rather than letting the limb show through. A [member backstop] keeps the cloth from sinking into the body. Free vertices are also tethered to their nearest pinned vertex, so long garments don't stretch.
-		The source mesh is hidden while the cloth runs and drawn instead from the simulated positions, read straight from GPU textures (no CPU readback). Only the source material's albedo texture, albedo colour and roughness carry over for now.
+		The cloth runs on the GPU with compute shaders, so it works on any GPU the renderer supports (no CUDA needed). It collides with the character's physical bones: give the skeleton a [PhysicalBoneSimulator3D] with [PhysicalBone3D]s (select the [Skeleton3D] and use [b]Skeleton3D > Create Physical Skeleton[/b] in the 3D toolbar), and every enabled capsule, sphere or box [CollisionShape3D] on them is a collider, exactly where the editor shows it as the animation moves the bones. Edit, add or remove those shapes to fit the body; the physical bones don't need to simulate. Their sizes, placement and [member CollisionShape3D.disabled] apply live while the game runs (adding or removing a shape needs [method rebuild]). Up to 64 capsules / spheres and 32 boxes. Without a physical skeleton, capsules are placed automatically between the hips, spine, legs and arms (humanoid-profile or common Unreal-style bone names), fitted to [member body_mesh_path] if set. [member use_physical_bones] off uses the automatic capsules even with physical bones, [member physical_bone_skip] leaves bones out, and [method set_body_capsules] adds capsules of your own, all live. Collisions are swept across the solver's substeps, so fast limbs don't jump through the cloth, and they win over the max distances: where a limb moves further than the cloth may stray, the cloth moves past its limit rather than letting the limb show through. A [member backstop] keeps the cloth from sinking into the body. Free vertices are also tethered to their nearest pinned vertex, so long garments don't stretch.
+		The source mesh is hidden while the cloth runs and drawn instead from the simulated positions, read straight from GPU textures (no CPU readback). By default it's drawn with a built-in material that takes the source material's albedo texture, albedo colour and roughness; to draw it your own way, set [member render_material].
 		Runs only in a running game, not in the editor. The node should process after whatever poses the skeleton (an [AnimationPlayer] or [AnimationTree]); its default [member Node.process_priority] of [code]100[/code] does that.
 	</description>
 	<tutorials>
@@ -22,7 +22,7 @@
 		<method name="get_body_capsules" qualifiers="const">
 			<return type="Array" />
 			<description>
-				The colliders the cloth uses, for debugging: one [Dictionary] per collider with [code]bone_a[/code], [code]bone_b[/code], [code]radius_a[/code], [code]radius_b[/code], [code]from_physical_bone[/code] and [code]box[/code] (a box also has [code]size[/code]; its radii are unused). Filled once the cloth is built (in a running game).
+				The colliders the cloth uses, for debugging: one [Dictionary] per collider with [code]bone_a[/code], [code]bone_b[/code], [code]radius_a[/code], [code]radius_b[/code] (with [member collision_radius_scale] applied), [code]from_physical_bone[/code], [code]from_script[/code] and [code]box[/code] (a box also has [code]size[/code]; its radii are unused). The capsules from [method set_body_capsules] come last, with their ends [code]a[/code] and [code]b[/code] instead of bones. With [member collide_with_body] off, only those. Filled once the cloth is built (in a running game).
 			</description>
 		</method>
 		<method name="get_effective_gravity" qualifiers="const">
@@ -37,10 +37,28 @@
 				The max distances the cloth will be built with, one per vertex of [member surface]: [member max_distances] if it has one value per vertex, otherwise the vertex colors if [member use_vertex_color] is on and the mesh has them, otherwise [method compute_height_ramp]. Empty if the source mesh can't be found.
 			</description>
 		</method>
+		<method name="get_effective_wind" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				The air velocity the cloth last stepped with, in m/s: [member wind], [member wind_area] and [member wind_turbulence] together.
+			</description>
+		</method>
 		<method name="get_particle_count" qualifiers="const">
 			<return type="int" />
 			<description>
 				The number of simulated particles: the surface's vertices with seams (split UV/normal vertices at the same position) welded together.
+			</description>
+		</method>
+		<method name="get_render_instance" qualifiers="const">
+			<return type="MeshInstance3D" />
+			<description>
+				The internal [MeshInstance3D] the simulated surface is drawn through (a sibling of the source mesh), or [code]null[/code] while the cloth isn't built. It's remade by every build.
+			</description>
+		</method>
+		<method name="get_vertex_particles" qualifiers="const">
+			<return type="PackedInt32Array" />
+			<description>
+				For each vertex of the render copy (the source surface's vertices, in order), the particle it's drawn from, as built; empty while the cloth isn't built. With [method get_render_instance], a script that draws the garment itself can find both without reading the mesh back from the GPU.
 			</description>
 		</method>
 		<method name="rebuild">
@@ -53,6 +71,21 @@
 			<return type="void" />
 			<description>
 				Puts the cloth back on the animated pose at rest, e.g. after teleporting the character.
+			</description>
+		</method>
+		<method name="set_body_capsules">
+			<return type="void" />
+			<param index="0" name="capsules" type="Array" />
+			<description>
+				Your own capsules for the cloth to collide with, on top of the body's colliders (they collide even with [member collide_with_body] off): one [Dictionary] each, with its ends [code]a[/code] and [code]b[/code] ([Vector3], world space) and a [code]radius[/code] (or [code]radius_a[/code] and [code]radius_b[/code], one per end); [code]a[/code] = [code]b[/code] is a sphere. They're read every step, so set them every frame to move them (a held shield, a bag, a body proxy of your own); they're swept across the substeps like the body's. [member collision_radius_scale] doesn't apply to them. An empty array removes them. With the body's colliders they share the limit of 64 capsules / spheres.
+				[codeblock]
+				func _process(_delta):
+				    cloth.set_body_capsules([{
+				        "a": $Shield.global_position + Vector3(0, -0.3, 0),
+				        "b": $Shield.global_position + Vector3(0, 0.3, 0),
+				        "radius": 0.25,
+				    }])
+				[/codeblock]
 			</description>
 		</method>
 	</methods>
@@ -70,19 +103,25 @@
 			Optional skinned [MeshInstance3D] of the character's body. For the automatic capsules (no physical skeleton), each radius is measured from the body vertices skinned to its bone, so the cloth wraps the actual limbs instead of generic ones.
 		</member>
 		<member name="collide_with_body" type="bool" setter="set_collide_with_body" getter="get_collide_with_body" default="true">
-			Collide the cloth with the character's physical bones (or the automatic capsules).
+			Collide the cloth with the body: the physical bones' shapes or the automatic capsules (see [member use_physical_bones]). The capsules from [method set_body_capsules] collide either way, so with this off they're the only colliders.
 		</member>
 		<member name="collision_radius_scale" type="float" setter="set_collision_radius_scale" getter="get_collision_radius_scale" default="1.0">
-			Scales the automatic capsules' radii (not the physical bones' shapes, which are used as they are). Raise it if limbs poke through the cloth.
+			Scales the body's colliders: the automatic capsules' radii, and the physical bones' shapes (capsule and sphere radii, box sizes). Raise it if limbs poke through the cloth. Not the capsules from [method set_body_capsules].
 		</member>
 		<member name="damping" type="float" setter="set_damping" getter="get_damping" default="0.05">
 			Fraction of the cloth's motion relative to the animated garment lost per second: settles swinging and jiggle. Moving the character doesn't count, so running doesn't push the cloth back like a headwind.
 		</member>
+		<member name="drag" type="float" setter="set_drag" getter="get_drag" default="1.0">
+			How hard air pushes on the cloth face-on, which makes it billow. It's per unit of cloth area, so a denser mesh blows the same. Only applies with wind.
+		</member>
 		<member name="extra_acceleration" type="Vector3" setter="set_extra_acceleration" getter="get_extra_acceleration" default="Vector3(0, 0, 0)">
-			A world-space acceleration added to the gravity, in m/s²: a game's own force field or a gust of wind, set every frame from script.
+			A world-space acceleration added to the gravity, in m/s²: a game's own force field, set every frame from script. It pushes all of the cloth equally: for wind, which depends on how the cloth faces, use [member wind].
 		</member>
 		<member name="fixed_gravity" type="Vector3" setter="set_fixed_gravity" getter="get_fixed_gravity" default="Vector3(0, -9.8, 0)">
 			The gravity the cloth uses when [member use_world_gravity] is off, in m/s².
+		</member>
+		<member name="lift" type="float" setter="set_lift" getter="get_lift" default="0.2">
+			Sideways push from air flowing across the cloth, which makes slack cloth ripple. Only applies with wind.
 		</member>
 		<member name="max_distance" type="float" setter="set_max_distance" getter="get_max_distance" default="0.4">
 			The largest max distance (meters) of the automatic painting: the ramp's value at the mesh's lowest point (it rises linearly from [code]0[/code] at [member pin_height]), and the value a vertex colour of [code]1[/code] maps to with [member use_vertex_color].
@@ -93,8 +132,42 @@
 		<member name="mesh_instance_path" type="NodePath" setter="set_mesh_instance_path" getter="get_mesh_instance_path" default="NodePath(&quot;&quot;)">
 			The skinned [MeshInstance3D] whose [member surface] is simulated. It must have a [Skin] and a [Skeleton3D].
 		</member>
+		<member name="physical_bone_skip" type="PackedStringArray" setter="set_physical_bone_skip" getter="get_physical_bone_skip" default="PackedStringArray()">
+			Bone names whose physical bones' shapes the cloth doesn't collide with (a hand that would snag the skirt, a ragdoll-only bone). Changing it on a built cloth gathers the colliders again, without a rebuild.
+		</member>
 		<member name="pin_height" type="float" setter="set_pin_height" getter="get_pin_height" default="1.3">
 			Automatic painting: vertices at or above this height in the mesh's bind pose (meters) follow the animation exactly.
+		</member>
+		<member name="render_material" type="ShaderMaterial" setter="set_render_material" getter="get_render_material">
+			Draws the cloth with your own [ShaderMaterial] instead of the built-in look. Its shader must place the vertices from the simulation itself, from these inputs, which the cloth sets on the material:
+			- [code]CUSTOM0.x[/code]: the particle the vertex is drawn from;
+			- [code]uniform sampler2D cloth_positions[/code] and [code]uniform sampler2D cloth_normals[/code]: the particles' simulated positions and normals, in the source mesh's local space, one texel per particle (read them with [code]texelFetch[/code] and [code]filter_nearest[/code]);
+			- [code]uniform int texture_width[/code]: particle [code]i[/code] is texel [code](i % texture_width, i / texture_width)[/code];
+			- [code]uniform float normal_sign[/code]: multiply the normal by it (it matches the simulated normals to the mesh's own winding).
+			[codeblock lang=text]
+			shader_type spatial;
+			render_mode cull_disabled;
+			uniform sampler2D cloth_positions : filter_nearest, repeat_disable;
+			uniform sampler2D cloth_normals : filter_nearest, repeat_disable;
+			uniform int texture_width = 1;
+			uniform float normal_sign = 1.0;
+
+			void vertex() {
+			    int i = int(CUSTOM0.x + 0.5);
+			    ivec2 px = ivec2(i % texture_width, i / texture_width);
+			    float handedness = dot(cross(NORMAL, TANGENT), BINORMAL) &lt; 0.0 ? -1.0 : 1.0;
+			    VERTEX = texelFetch(cloth_positions, px, 0).xyz;
+			    NORMAL = normalize(texelFetch(cloth_normals, px, 0).xyz * normal_sign);
+			    // Keep the tangent frame with the new normal, for a normal map.
+			    vec3 tangent = TANGENT - NORMAL * dot(NORMAL, TANGENT);
+			    if (dot(tangent, tangent) &gt; 1e-8) {
+			        TANGENT = normalize(tangent);
+			        BINORMAL = cross(NORMAL, TANGENT) * handedness;
+			    }
+			}
+			[/codeblock]
+			The rest of the shader is yours ([code]fragment()[/code], your own uniforms). The source surface's [code]UV[/code], [code]UV2[/code], [code]COLOR[/code], [code]TANGENT[/code] and [code]CUSTOM1[/code]-[code]CUSTOM3[/code] come along on the cloth's mesh; its own [code]CUSTOM0[/code] can't, the particle index takes its place. There's no skinning to do: the positions are already where the cloth is.
+			Each build draws with its own copy of the material, with the inputs set on the copy, so one material can be shared by several garments and isn't changed. Changes to the material after the build don't reach the copy; change [code]get_render_instance().get_surface_override_material(0)[/code], or set [member render_material] again. Setting it on a built cloth changes the look without a rebuild; [code]null[/code] goes back to the built-in look.
 		</member>
 		<member name="self_collision" type="bool" setter="set_self_collision" getter="get_self_collision" default="false">
 			Keep the cloth from passing through itself where it folds and gathers: particles closer than [member self_collision_thickness] are pushed apart, unless they're that close in the garment itself. Off by default -- it adds four compute passes per substep.
@@ -117,11 +190,26 @@
 		<member name="thickness" type="float" setter="set_thickness" getter="get_thickness" default="0.012">
 			Extra distance (meters) the cloth keeps from the body capsules.
 		</member>
+		<member name="use_physical_bones" type="bool" setter="set_use_physical_bones" getter="get_use_physical_bones" default="true">
+			If [code]true[/code], the cloth collides with the physical bones' shapes when the skeleton has any (else with the automatic capsules). If [code]false[/code], always with the automatic capsules, for a skeleton whose physical bones are there for something else (a ragdoll). Changing it on a built cloth gathers the colliders again, without a rebuild.
+		</member>
 		<member name="use_vertex_color" type="bool" setter="set_use_vertex_color" getter="get_use_vertex_color" default="false">
 			When [member max_distances] isn't painted, take each vertex's max distance from the red channel of the mesh's vertex colour times [member max_distance], so distances painted in a modeling tool carry over. Ignored if the mesh has no vertex colors.
 		</member>
 		<member name="use_world_gravity" type="bool" setter="set_use_world_gravity" getter="get_use_world_gravity" default="true">
 			If [code]true[/code], the cloth falls with its world's gravity: the physics space's default (the [code]physics/3d/default_gravity[/code] project settings, or a change made to the space at run time). If [code]false[/code], it uses [member fixed_gravity].
+		</member>
+		<member name="wind" type="Vector3" setter="set_wind" getter="get_wind" default="Vector3(0, 0, 0)">
+			A constant world-space air velocity in m/s, added on top of any [member wind_area]. Cloth facing into it billows and cloth edge-on barely moves. Only the wind counts, not the cloth's own motion, so a running character doesn't get a headwind from its speed: for that, add it to [member wind] from script. [member backstop] still applies, so wind can't blow the cloth inward through the body. With no wind at all, the air pass doesn't run and costs nothing.
+		</member>
+		<member name="wind_area" type="NodePath" setter="set_wind_area" getter="get_wind_area" default="NodePath(&quot;&quot;)">
+			An [Area3D] whose wind settings (force, source, attenuation) drive the cloth, read wherever the cloth is: the cloth doesn't have to be inside the area.
+		</member>
+		<member name="wind_enabled" type="bool" setter="set_wind_enabled" getter="is_wind_enabled" default="true">
+			Master switch for [member wind], [member wind_area] and [member wind_turbulence].
+		</member>
+		<member name="wind_turbulence" type="float" setter="set_wind_turbulence" getter="get_wind_turbulence" default="0.4">
+			Adds a swirling gust on top of the steady wind, as a fraction of its speed. The whole cloth feels the same gust at once.
 		</member>
 	</members>
 </class>

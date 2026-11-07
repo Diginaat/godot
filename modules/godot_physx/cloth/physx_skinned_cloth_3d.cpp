@@ -30,6 +30,8 @@
 
 #include "physx_skinned_cloth_3d.h"
 
+#include "cloth_wind.h"
+
 #include "core/config/engine.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
@@ -69,8 +71,16 @@ uniform float roughness : hint_range(0.0, 1.0) = 0.9;
 void vertex() {
 	int i = int(CUSTOM0.x + 0.5);
 	ivec2 px = ivec2(i % texture_width, i / texture_width);
+	// The rest pose's tangent frame, turned with the simulated normal (for a normal map; a mesh without tangents has
+	// none to turn).
+	float handedness = dot(cross(NORMAL, TANGENT), BINORMAL) < 0.0 ? -1.0 : 1.0;
 	VERTEX = texelFetch(cloth_positions, px, 0).xyz;
 	NORMAL = normalize(texelFetch(cloth_normals, px, 0).xyz * normal_sign);
+	vec3 tangent = TANGENT - NORMAL * dot(NORMAL, TANGENT);
+	if (dot(tangent, tangent) > 1e-8) {
+		TANGENT = normalize(tangent);
+		BINORMAL = cross(NORMAL, TANGENT) * handedness;
+	}
 }
 
 void fragment() {
@@ -147,6 +157,8 @@ void PhysXSkinnedCloth3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_body_mesh_path"), &PhysXSkinnedCloth3D::get_body_mesh_path);
 	ClassDB::bind_method(D_METHOD("set_surface", "surface"), &PhysXSkinnedCloth3D::set_surface);
 	ClassDB::bind_method(D_METHOD("get_surface"), &PhysXSkinnedCloth3D::get_surface);
+	ClassDB::bind_method(D_METHOD("set_render_material", "material"), &PhysXSkinnedCloth3D::set_render_material);
+	ClassDB::bind_method(D_METHOD("get_render_material"), &PhysXSkinnedCloth3D::get_render_material);
 	ClassDB::bind_method(D_METHOD("set_max_distances", "distances"), &PhysXSkinnedCloth3D::set_max_distances);
 	ClassDB::bind_method(D_METHOD("get_max_distances"), &PhysXSkinnedCloth3D::get_max_distances);
 	ClassDB::bind_method(D_METHOD("set_pin_height", "height"), &PhysXSkinnedCloth3D::set_pin_height);
@@ -181,9 +193,27 @@ void PhysXSkinnedCloth3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_extra_acceleration", "acceleration"), &PhysXSkinnedCloth3D::set_extra_acceleration);
 	ClassDB::bind_method(D_METHOD("get_extra_acceleration"), &PhysXSkinnedCloth3D::get_extra_acceleration);
 	ClassDB::bind_method(D_METHOD("get_effective_gravity"), &PhysXSkinnedCloth3D::get_effective_gravity);
+	ClassDB::bind_method(D_METHOD("set_wind_enabled", "enabled"), &PhysXSkinnedCloth3D::set_wind_enabled);
+	ClassDB::bind_method(D_METHOD("is_wind_enabled"), &PhysXSkinnedCloth3D::is_wind_enabled);
+	ClassDB::bind_method(D_METHOD("set_wind_area", "path"), &PhysXSkinnedCloth3D::set_wind_area);
+	ClassDB::bind_method(D_METHOD("get_wind_area"), &PhysXSkinnedCloth3D::get_wind_area);
+	ClassDB::bind_method(D_METHOD("set_wind", "wind"), &PhysXSkinnedCloth3D::set_wind);
+	ClassDB::bind_method(D_METHOD("get_wind"), &PhysXSkinnedCloth3D::get_wind);
+	ClassDB::bind_method(D_METHOD("set_wind_turbulence", "turbulence"), &PhysXSkinnedCloth3D::set_wind_turbulence);
+	ClassDB::bind_method(D_METHOD("get_wind_turbulence"), &PhysXSkinnedCloth3D::get_wind_turbulence);
+	ClassDB::bind_method(D_METHOD("set_drag", "drag"), &PhysXSkinnedCloth3D::set_drag);
+	ClassDB::bind_method(D_METHOD("get_drag"), &PhysXSkinnedCloth3D::get_drag);
+	ClassDB::bind_method(D_METHOD("set_lift", "lift"), &PhysXSkinnedCloth3D::set_lift);
+	ClassDB::bind_method(D_METHOD("get_lift"), &PhysXSkinnedCloth3D::get_lift);
+	ClassDB::bind_method(D_METHOD("get_effective_wind"), &PhysXSkinnedCloth3D::get_effective_wind);
 	ClassDB::bind_method(D_METHOD("get_animation_drive"), &PhysXSkinnedCloth3D::get_animation_drive);
 	ClassDB::bind_method(D_METHOD("set_collide_with_body", "enabled"), &PhysXSkinnedCloth3D::set_collide_with_body);
 	ClassDB::bind_method(D_METHOD("get_collide_with_body"), &PhysXSkinnedCloth3D::get_collide_with_body);
+	ClassDB::bind_method(D_METHOD("set_use_physical_bones", "enabled"), &PhysXSkinnedCloth3D::set_use_physical_bones);
+	ClassDB::bind_method(D_METHOD("get_use_physical_bones"), &PhysXSkinnedCloth3D::get_use_physical_bones);
+	ClassDB::bind_method(D_METHOD("set_physical_bone_skip", "bones"), &PhysXSkinnedCloth3D::set_physical_bone_skip);
+	ClassDB::bind_method(D_METHOD("get_physical_bone_skip"), &PhysXSkinnedCloth3D::get_physical_bone_skip);
+	ClassDB::bind_method(D_METHOD("set_body_capsules", "capsules"), &PhysXSkinnedCloth3D::set_body_capsules);
 	ClassDB::bind_method(D_METHOD("set_collision_radius_scale", "scale"), &PhysXSkinnedCloth3D::set_collision_radius_scale);
 	ClassDB::bind_method(D_METHOD("get_collision_radius_scale"), &PhysXSkinnedCloth3D::get_collision_radius_scale);
 	ClassDB::bind_method(D_METHOD("set_simulating", "simulating"), &PhysXSkinnedCloth3D::set_simulating);
@@ -191,10 +221,13 @@ void PhysXSkinnedCloth3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("rebuild"), &PhysXSkinnedCloth3D::rebuild);
 	ClassDB::bind_method(D_METHOD("reset"), &PhysXSkinnedCloth3D::reset);
 	ClassDB::bind_method(D_METHOD("get_particle_count"), &PhysXSkinnedCloth3D::get_particle_count);
+	ClassDB::bind_method(D_METHOD("get_render_instance"), &PhysXSkinnedCloth3D::get_render_instance);
+	ClassDB::bind_method(D_METHOD("get_vertex_particles"), &PhysXSkinnedCloth3D::get_vertex_particles);
 	ClassDB::bind_method(D_METHOD("get_body_capsules"), &PhysXSkinnedCloth3D::get_body_capsules);
 
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "mesh_instance_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "MeshInstance3D"), "set_mesh_instance_path", "get_mesh_instance_path");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "surface", PROPERTY_HINT_RANGE, "0,16,1"), "set_surface", "get_surface");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "render_material", PROPERTY_HINT_RESOURCE_TYPE, "ShaderMaterial"), "set_render_material", "get_render_material");
 	ADD_GROUP("Painting", "");
 	ADD_PROPERTY(PropertyInfo(Variant::PACKED_FLOAT32_ARRAY, "max_distances"), "set_max_distances", "get_max_distances");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "pin_height", PROPERTY_HINT_RANGE, "-5,5,0.01,or_greater,or_less,suffix:m"), "set_pin_height", "get_pin_height");
@@ -209,10 +242,20 @@ void PhysXSkinnedCloth3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "simulating"), "set_simulating", "is_simulating");
 	ADD_GROUP("Collision", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "collide_with_body"), "set_collide_with_body", "get_collide_with_body");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_physical_bones"), "set_use_physical_bones", "get_use_physical_bones");
+	ADD_PROPERTY(PropertyInfo(Variant::PACKED_STRING_ARRAY, "physical_bone_skip"), "set_physical_bone_skip", "get_physical_bone_skip");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "body_mesh_path", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "MeshInstance3D"), "set_body_mesh_path", "get_body_mesh_path");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_radius_scale", PROPERTY_HINT_RANGE, "0.1,3,0.01"), "set_collision_radius_scale", "get_collision_radius_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "backstop", PROPERTY_HINT_RANGE, "-0.01,0.2,0.001,suffix:m"), "set_backstop", "get_backstop");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "animation_drive", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_animation_drive", "get_animation_drive");
+	ADD_GROUP("Wind", "wind_");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "wind_enabled"), "set_wind_enabled", "is_wind_enabled");
+	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "wind_area", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Area3D"), "set_wind_area", "get_wind_area");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "wind", PROPERTY_HINT_NONE, "suffix:m/s"), "set_wind", "get_wind");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wind_turbulence", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_wind_turbulence", "get_wind_turbulence");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "drag", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater"), "set_drag", "get_drag");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lift", PROPERTY_HINT_RANGE, "0,2,0.01,or_greater"), "set_lift", "get_lift");
+	ADD_GROUP("", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_world_gravity"), "set_use_world_gravity", "get_use_world_gravity");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "fixed_gravity", PROPERTY_HINT_NONE, "suffix:m/s\u00b2"), "set_fixed_gravity", "get_fixed_gravity");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "extra_acceleration", PROPERTY_HINT_NONE, "suffix:m/s\u00b2"), "set_extra_acceleration", "get_extra_acceleration");
@@ -257,6 +300,57 @@ void PhysXSkinnedCloth3D::_notification(int p_what) {
 }
 
 Ref<ShaderMaterial> PhysXSkinnedCloth3D::hide_material;
+Ref<Shader> PhysXSkinnedCloth3D::render_shader;
+
+void PhysXSkinnedCloth3D::free_shared() {
+	hide_material.unref();
+	render_shader.unref();
+	SkinnedClothSolverGPU::free_shared();
+}
+
+// What the render copy draws with: a copy of render_material (the user's own is shared by other cloths and never
+// written to), or the built-in look with the source material's albedo and roughness; with the cloth inputs set.
+void PhysXSkinnedCloth3D::_make_copy_material(MeshInstance3D *p_source) {
+	if (copy_material.is_valid()) {
+		copy_material->set_shader_parameter("cloth_positions", Variant());
+		copy_material->set_shader_parameter("cloth_normals", Variant());
+	}
+	if (render_material.is_valid() && render_material->get_shader().is_valid()) {
+		copy_material = render_material->duplicate();
+	} else {
+		if (render_shader.is_null()) {
+			render_shader.instantiate();
+			render_shader->set_code(CLOTH_RENDER_SHADER);
+		}
+		copy_material.instantiate();
+		copy_material->set_shader(render_shader);
+		Ref<BaseMaterial3D> src_mat = p_source ? p_source->get_active_material(surface) : Ref<Material>();
+		if (src_mat.is_valid()) {
+			copy_material->set_shader_parameter("albedo_texture", src_mat->get_texture(BaseMaterial3D::TEXTURE_ALBEDO));
+			copy_material->set_shader_parameter("albedo_color", src_mat->get_albedo());
+			copy_material->set_shader_parameter("roughness", src_mat->get_roughness());
+		}
+	}
+	copy_material->set_shader_parameter("cloth_positions", pos_texture);
+	copy_material->set_shader_parameter("cloth_normals", nrm_texture);
+	copy_material->set_shader_parameter("texture_width", solver ? solver->get_texture_width() : 1);
+	copy_material->set_shader_parameter("normal_sign", normal_sign);
+	if (render_instance) {
+		render_instance->set_surface_override_material(0, copy_material);
+	}
+}
+
+void PhysXSkinnedCloth3D::set_render_material(const Ref<ShaderMaterial> &p_material) {
+	render_material = p_material;
+	// A built cloth swaps its look in place; the rest of the build doesn't depend on it.
+	if (built) {
+		_make_copy_material(ObjectDB::get_instance<MeshInstance3D>(source_id));
+	}
+}
+
+MeshInstance3D *PhysXSkinnedCloth3D::get_render_instance() const {
+	return built ? ObjectDB::get_instance<MeshInstance3D>(render_instance_id) : nullptr;
+}
 
 // The simulated surface is drawn by the render copy; the source's own copy of
 // it is hidden. With other surfaces on the mesh (a body and its skirt in one
@@ -312,10 +406,10 @@ void PhysXSkinnedCloth3D::_clear() {
 	}
 	// Let go of the solver's textures before it frees them, or the material
 	// still binds them on its next update.
-	if (render_material.is_valid()) {
-		render_material->set_shader_parameter("cloth_positions", Variant());
-		render_material->set_shader_parameter("cloth_normals", Variant());
-		render_material.unref();
+	if (copy_material.is_valid()) {
+		copy_material->set_shader_parameter("cloth_positions", Variant());
+		copy_material->set_shader_parameter("cloth_normals", Variant());
+		copy_material.unref();
 	}
 	for (Ref<Texture2DRD> *tex : { &pos_texture, &nrm_texture }) {
 		if (tex->is_valid()) {
@@ -329,6 +423,7 @@ void PhysXSkinnedCloth3D::_clear() {
 	}
 	built = false;
 	particle_count = 0;
+	vertex_particles.clear();
 }
 
 bool PhysXSkinnedCloth3D::_find_physical_bone_shapes(Skeleton3D *p_skeleton) {
@@ -351,7 +446,7 @@ bool PhysXSkinnedCloth3D::_find_physical_bone_shapes(Skeleton3D *p_skeleton) {
 			if (bone < 0) {
 				bone = p_skeleton->find_bone(pb->get_bone_name());
 			}
-			if (bone < 0) {
+			if (bone < 0 || physical_bone_skip.has(p_skeleton->get_bone_name(bone))) {
 				continue;
 			}
 			for (int k = 0; k < pb->get_child_count(); k++) {
@@ -430,7 +525,7 @@ bool PhysXSkinnedCloth3D::_read_shape(Capsule &r_c) {
 
 void PhysXSkinnedCloth3D::_find_capsules(Skeleton3D *p_skeleton) {
 	capsules.clear();
-	using_physical_bones = _find_physical_bone_shapes(p_skeleton);
+	using_physical_bones = use_physical_bones && _find_physical_bone_shapes(p_skeleton);
 	if (using_physical_bones) {
 		return;
 	}
@@ -921,44 +1016,43 @@ void PhysXSkinnedCloth3D::_try_build() {
 	render_arrays[Mesh::ARRAY_NORMAL] = normals;
 	render_arrays[Mesh::ARRAY_TEX_UV] = arrays[Mesh::ARRAY_TEX_UV];
 	render_arrays[Mesh::ARRAY_INDEX] = indices;
+	// The source's other attributes, for render_material (CUSTOM0 is the particle index, so its own can't come along).
+	render_arrays[Mesh::ARRAY_TANGENT] = arrays[Mesh::ARRAY_TANGENT];
+	render_arrays[Mesh::ARRAY_TEX_UV2] = arrays[Mesh::ARRAY_TEX_UV2];
+	render_arrays[Mesh::ARRAY_COLOR] = arrays[Mesh::ARRAY_COLOR];
+	uint64_t render_format = (uint64_t)Mesh::ARRAY_CUSTOM_R_FLOAT << Mesh::ARRAY_FORMAT_CUSTOM0_SHIFT;
+	const uint64_t source_format = mesh->surface_get_format(surface);
+	for (int c = 1; c < 4; c++) {
+		if (arrays[Mesh::ARRAY_CUSTOM0 + c].get_type() != Variant::NIL) {
+			render_arrays[Mesh::ARRAY_CUSTOM0 + c] = arrays[Mesh::ARRAY_CUSTOM0 + c];
+			const int shift = Mesh::ARRAY_FORMAT_CUSTOM0_SHIFT + c * Mesh::ARRAY_FORMAT_CUSTOM_BITS;
+			render_format |= source_format & ((uint64_t)RSE::ARRAY_FORMAT_CUSTOM_MASK << shift);
+		}
+	}
 	PackedFloat32Array custom0;
 	custom0.resize(vcount);
+	vertex_particles.resize(vcount);
 	for (int i = 0; i < vcount; i++) {
 		custom0.set(i, (float)vertex_particle[i]);
+		vertex_particles.set(i, vertex_particle[i]);
 	}
 	render_arrays[Mesh::ARRAY_CUSTOM0] = custom0;
 	Ref<ArrayMesh> render_mesh;
 	render_mesh.instantiate();
-	render_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, render_arrays, Array(), Dictionary(),
-			Mesh::ARRAY_CUSTOM_R_FLOAT << Mesh::ARRAY_FORMAT_CUSTOM0_SHIFT);
+	render_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, render_arrays, Array(), Dictionary(), render_format);
 
 	// Our normals come from the triangle winding; match the source's sense.
-	float normal_sign = 1.0f;
+	normal_sign = 1.0f;
 	if (!tris.is_empty() && !normals.is_empty()) {
 		const int i0 = indices[0], i1 = indices[1], i2 = indices[2];
 		const Vector3 fn = (verts[i1] - verts[i0]).cross(verts[i2] - verts[i0]);
 		normal_sign = fn.dot(normals[i0] + normals[i1] + normals[i2]) >= 0.0f ? 1.0f : -1.0f;
 	}
 
-	Ref<Shader> shader;
-	shader.instantiate();
-	shader->set_code(CLOTH_RENDER_SHADER);
-	render_material.instantiate();
-	render_material->set_shader(shader);
 	pos_texture.instantiate();
 	pos_texture->set_texture_rd_rid(solver->get_position_texture_rd_rid());
 	nrm_texture.instantiate();
 	nrm_texture->set_texture_rd_rid(solver->get_normal_texture_rd_rid());
-	render_material->set_shader_parameter("cloth_positions", pos_texture);
-	render_material->set_shader_parameter("cloth_normals", nrm_texture);
-	render_material->set_shader_parameter("texture_width", solver->get_texture_width());
-	render_material->set_shader_parameter("normal_sign", normal_sign);
-	Ref<BaseMaterial3D> src_mat = source->get_active_material(surface);
-	if (src_mat.is_valid()) {
-		render_material->set_shader_parameter("albedo_texture", src_mat->get_texture(BaseMaterial3D::TEXTURE_ALBEDO));
-		render_material->set_shader_parameter("albedo_color", src_mat->get_albedo());
-		render_material->set_shader_parameter("roughness", src_mat->get_roughness());
-	}
 
 	// Drawn as an internal sibling of the source mesh with the same local
 	// transform, in the source's space: it then moves exactly like the mesh it
@@ -966,7 +1060,7 @@ void PhysXSkinnedCloth3D::_try_build() {
 	// space would lead the interpolated character by up to a tick).
 	render_instance = memnew(MeshInstance3D);
 	render_instance->set_mesh(render_mesh);
-	render_instance->set_surface_override_material(0, render_material);
+	_make_copy_material(source);
 	render_instance->set_cast_shadows_setting(source->get_cast_shadows_setting());
 	source->get_parent()->add_child(render_instance, false, INTERNAL_MODE_BACK);
 	render_instance->set_transform(source->get_transform());
@@ -981,13 +1075,30 @@ void PhysXSkinnedCloth3D::_try_build() {
 	source_id = source->get_instance_id();
 	skeleton_id = skeleton->get_instance_id();
 	_connect_skeleton(skeleton);
+	_refresh_colliders();
+	built = true;
+}
+
+// The body's colliders gathered again (on a build, or when what they're gathered from changes): nothing else of the
+// build depends on them.
+void PhysXSkinnedCloth3D::_refresh_colliders() {
+	Skeleton3D *skeleton = ObjectDB::get_instance<Skeleton3D>(skeleton_id);
+	if (skeleton == nullptr) {
+		return;
+	}
 	prev_capsules.clear();
 	prev_boxes.clear();
 	_find_capsules(skeleton);
 	if (!using_physical_bones) {
 		_fit_capsules(skeleton, Object::cast_to<MeshInstance3D>(get_node_or_null(body_mesh_path)));
 	}
-	built = true;
+	// The poses the colliders are placed from: captured every frame, here too so they're right before the next.
+	for (Capsule &c : capsules) {
+		c.bone_pose = skeleton->get_bone_global_pose(c.bone_a);
+		if (!c.from_shape) {
+			c.end_pose = skeleton->get_bone_global_pose(c.bone_b).origin;
+		}
+	}
 }
 
 void PhysXSkinnedCloth3D::_capture_pose(Skeleton3D *p_skeleton) {
@@ -1030,13 +1141,22 @@ void PhysXSkinnedCloth3D::_pack_colliders() {
 	int n_caps = 0;
 	int n_boxes = 0;
 	for (const Capsule &c : capsules) {
-		(c.is_box ? n_boxes : n_caps)++;
+		if (collide_with_body) {
+			(c.is_box ? n_boxes : n_caps)++;
+		}
 	}
-	captured_capsules.resize(n_caps * 8);
+	const int n_script = MIN(script_capsules.size(), MAX(SkinnedClothSolverGPU::MAX_CAPSULES - n_caps, 0));
+	if (n_script < script_capsules.size()) {
+		WARN_PRINT_ONCE(vformat("PhysXSkinnedCloth3D: more than %d capsules / spheres with the script's; the rest are ignored.", SkinnedClothSolverGPU::MAX_CAPSULES));
+	}
+	captured_capsules.resize((n_caps + n_script) * 8);
 	captured_boxes.resize(n_boxes * 16);
 	float *cw = captured_capsules.ptrw();
 	float *xw = captured_boxes.ptrw();
 	for (Capsule &c : capsules) {
+		if (!collide_with_body) {
+			break;
+		}
 		if (c.from_shape) {
 			_read_shape(c);
 		}
@@ -1050,7 +1170,7 @@ void PhysXSkinnedCloth3D::_pack_colliders() {
 			xw[2] = o.z;
 			xw[3] = c.active ? 1.0f : 0.0f;
 			for (int j = 0; j < 3; j++) {
-				const Vector3 axis = x.basis.get_column(j) * c.half_extents[j];
+				const Vector3 axis = x.basis.get_column(j) * (c.half_extents[j] * collision_radius_scale);
 				xw[4 + j * 4 + 0] = axis.x;
 				xw[4 + j * 4 + 1] = axis.y;
 				xw[4 + j * 4 + 2] = axis.z;
@@ -1061,11 +1181,10 @@ void PhysXSkinnedCloth3D::_pack_colliders() {
 		}
 		Vector3 a;
 		Vector3 b;
-		float scale = collision_radius_scale;
+		const float scale = collision_radius_scale;
 		if (c.from_shape) {
 			a = x.xform(Vector3(0, -c.half_length, 0));
 			b = x.xform(Vector3(0, c.half_length, 0));
-			scale = 1.0f; // authored shapes are used as they are
 		} else {
 			a = bone_world.origin;
 			b = skeleton_xform.xform(c.end_pose);
@@ -1082,6 +1201,18 @@ void PhysXSkinnedCloth3D::_pack_colliders() {
 		cw[7] = c.radius_b * scale + off;
 		cw += 8;
 	}
+	for (int i = 0; i < n_script; i++) {
+		const ScriptCapsule &s = script_capsules[i];
+		cw[0] = s.a.x;
+		cw[1] = s.a.y;
+		cw[2] = s.a.z;
+		cw[3] = s.radius_a;
+		cw[4] = s.b.x;
+		cw[5] = s.b.y;
+		cw[6] = s.b.z;
+		cw[7] = s.radius_b;
+		cw += 8;
+	}
 }
 
 void PhysXSkinnedCloth3D::_advance(double p_delta) {
@@ -1091,33 +1222,32 @@ void PhysXSkinnedCloth3D::_advance(double p_delta) {
 	}
 	PackedFloat32Array capsule_data;
 	PackedFloat32Array box_data;
-	if (collide_with_body) {
-		// This frame's capsule ends, after last frame's: the solver blends
-		// between them across the substeps, so a fast leg sweeps through the
-		// substeps instead of jumping through the cloth once per frame.
-		if (prev_capsules.size() != captured_capsules.size()) {
-			prev_capsules = captured_capsules;
-		}
-		const int n_caps = captured_capsules.size() / 8;
-		capsule_data.resize(n_caps * 16);
-		float *dw = capsule_data.ptrw();
-		for (int c = 0; c < n_caps; c++) {
-			memcpy(dw + c * 16, prev_capsules.ptr() + c * 8, 8 * sizeof(float));
-			memcpy(dw + c * 16 + 8, captured_capsules.ptr() + c * 8, 8 * sizeof(float));
-		}
+	// The body's colliders only with collide_with_body (see _pack_colliders); the script's capsules always.
+	// This frame's capsule ends, after last frame's: the solver blends
+	// between them across the substeps, so a fast leg sweeps through the
+	// substeps instead of jumping through the cloth once per frame.
+	if (prev_capsules.size() != captured_capsules.size()) {
 		prev_capsules = captured_capsules;
-		if (prev_boxes.size() != captured_boxes.size()) {
-			prev_boxes = captured_boxes;
-		}
-		const int n_boxes = captured_boxes.size() / 16;
-		box_data.resize(n_boxes * 32);
-		float *bw = box_data.ptrw();
-		for (int c = 0; c < n_boxes; c++) {
-			memcpy(bw + c * 32, prev_boxes.ptr() + c * 16, 16 * sizeof(float));
-			memcpy(bw + c * 32 + 16, captured_boxes.ptr() + c * 16, 16 * sizeof(float));
-		}
+	}
+	const int n_caps = captured_capsules.size() / 8;
+	capsule_data.resize(n_caps * 16);
+	float *dw = capsule_data.ptrw();
+	for (int c = 0; c < n_caps; c++) {
+		memcpy(dw + c * 16, prev_capsules.ptr() + c * 8, 8 * sizeof(float));
+		memcpy(dw + c * 16 + 8, captured_capsules.ptr() + c * 8, 8 * sizeof(float));
+	}
+	prev_capsules = captured_capsules;
+	if (prev_boxes.size() != captured_boxes.size()) {
 		prev_boxes = captured_boxes;
 	}
+	const int n_boxes = captured_boxes.size() / 16;
+	box_data.resize(n_boxes * 32);
+	float *bw = box_data.ptrw();
+	for (int c = 0; c < n_boxes; c++) {
+		memcpy(bw + c * 32, prev_boxes.ptr() + c * 16, 16 * sizeof(float));
+		memcpy(bw + c * 32 + 16, captured_boxes.ptr() + c * 16, 16 * sizeof(float));
+	}
+	prev_boxes = captured_boxes;
 
 	SkinnedClothSolver::Settings s;
 	s.stiffness = stiffness;
@@ -1126,8 +1256,16 @@ void PhysXSkinnedCloth3D::_advance(double p_delta) {
 	s.backstop = backstop;
 	s.animation_drive = animation_drive;
 	s.gravity = get_effective_gravity();
+	effective_wind = Vector3();
+	if (wind_enabled) {
+		wind_time += p_delta;
+		effective_wind = physx_cloth_sample_wind(wind, Object::cast_to<Area3D>(get_node_or_null(wind_area)), wind_turbulence, wind_time, get_global_position());
+	}
+	s.wind = effective_wind;
+	s.drag = drag;
+	s.lift = lift;
 	s.self_collision_thickness = self_collision ? self_collision_thickness : 0.0f;
-	s.output_xform = source->get_global_transform_interpolated().affine_inverse();   // (as drawn — matches the capture)
+	s.output_xform = source->get_global_transform_interpolated().affine_inverse(); // (as drawn — matches the capture)
 	solver->step(captured_bones, capsule_data, box_data, p_delta, substeps, s);
 
 	MeshInstance3D *ri = ObjectDB::get_instance<MeshInstance3D>(render_instance_id);
@@ -1201,17 +1339,31 @@ Array PhysXSkinnedCloth3D::get_body_capsules() const {
 	Array out;
 	Skeleton3D *skeleton = ObjectDB::get_instance<Skeleton3D>(skeleton_id);
 	for (const Capsule &c : capsules) {
+		if (!collide_with_body) {
+			break;
+		}
 		Dictionary d;
 		d["bone_a"] = skeleton != nullptr ? skeleton->get_bone_name(c.bone_a) : String();
 		d["bone_b"] = skeleton != nullptr ? skeleton->get_bone_name(c.bone_b) : String();
-		const float scale = c.from_shape ? 1.0f : collision_radius_scale;
-		d["radius_a"] = c.radius_a * scale;
-		d["radius_b"] = c.radius_b * scale;
+		d["radius_a"] = c.radius_a * collision_radius_scale;
+		d["radius_b"] = c.radius_b * collision_radius_scale;
 		d["from_physical_bone"] = c.from_shape;
+		d["from_script"] = false;
 		d["box"] = c.is_box;
 		if (c.is_box) {
-			d["size"] = c.half_extents * 2.0f;
+			d["size"] = c.half_extents * 2.0f * collision_radius_scale;
 		}
+		out.push_back(d);
+	}
+	for (const ScriptCapsule &s : script_capsules) {
+		Dictionary d;
+		d["a"] = s.a;
+		d["b"] = s.b;
+		d["radius_a"] = s.radius_a;
+		d["radius_b"] = s.radius_b;
+		d["from_physical_bone"] = false;
+		d["from_script"] = true;
+		d["box"] = false;
 		out.push_back(d);
 	}
 	return out;
@@ -1322,6 +1474,35 @@ void PhysXSkinnedCloth3D::set_collide_with_body(bool p_enabled) {
 
 void PhysXSkinnedCloth3D::set_collision_radius_scale(float p_scale) {
 	collision_radius_scale = MAX(p_scale, 0.01f);
+}
+
+void PhysXSkinnedCloth3D::set_use_physical_bones(bool p_enabled) {
+	use_physical_bones = p_enabled;
+	if (built) {
+		_refresh_colliders();
+	}
+}
+
+void PhysXSkinnedCloth3D::set_physical_bone_skip(const PackedStringArray &p_bones) {
+	physical_bone_skip = p_bones;
+	if (built) {
+		_refresh_colliders();
+	}
+}
+
+void PhysXSkinnedCloth3D::set_body_capsules(const Array &p_capsules) {
+	script_capsules.clear();
+	for (int i = 0; i < p_capsules.size(); i++) {
+		const Dictionary d = p_capsules[i];
+		ERR_CONTINUE_MSG(!d.has("a") || !d.has("b"), "PhysXSkinnedCloth3D: a body capsule needs \"a\" and \"b\" (its ends, world space).");
+		ScriptCapsule s;
+		s.a = d["a"];
+		s.b = d["b"];
+		const float r = d.get("radius", 0.0f);
+		s.radius_a = d.get("radius_a", r);
+		s.radius_b = d.get("radius_b", r);
+		script_capsules.push_back(s);
+	}
 }
 
 void PhysXSkinnedCloth3D::set_simulating(bool p_simulating) {
