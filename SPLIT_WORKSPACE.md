@@ -42,6 +42,13 @@ Script, Asset Store, plugin main screens) can be moved there. The panel is
 hidden while it holds no dock, so the editor looks and behaves as before until
 someone uses it.
 
+The scene tabs sit above the main screen only (in the same column), and the
+split panel's tab bar is kept exactly as tall as them
+(`EditorMainScreenSplit::set_header_reference()`). So the two panels line up
+row by row: scene tabs and the panel's tab, the main screen toolbar (for
+example the 3D toolbar) and the docked view's toolbar (for example the Game
+toolbar), and both viewports.
+
 Because it is a normal dock slot, everything the dock system does works for it
 without new code: drag and drop of tabs, the Dock Position grid, the docks menu,
 shortcuts, closing and reopening, and saving the layout. The game keeps running
@@ -72,8 +79,8 @@ layouts store the same keys.
 | File | Change |
 | --- | --- |
 | `editor/docks/editor_dock.h/.cpp`, `doc/classes/EditorDock.xml` | New slot `DOCK_SLOT_MAIN_SCREEN_SPLIT` (`DOCK_SLOT_MAX` is now 13) |
-| `editor/editor_main_screen.h/.cpp` | `EditorMainScreenSplit`; main screen grid cell is now the left half |
-| `editor/editor_node.h/.cpp` | `DockSplitWorkspace` holding both panels; edge drops; theme |
+| `editor/editor_main_screen.h/.cpp` | `EditorMainScreenSplit` (tab bar height follows the scene tabs); main screen grid cell is now the left half |
+| `editor/editor_node.h/.cpp` | `DockSplitWorkspace` holding both panels, with the scene tabs in the main screen column; edge drops; theme |
 | `editor/docks/editor_dock_manager.h/.cpp` | Orientation, swap, save and load; Vertical Split and Swap Panels in the context popup |
 | `editor/docks/dock_tab_container.cpp` | Dropping on a main screen edge sets the split orientation |
 | `editor/editor_interface.cpp` | `set_main_screen_editor()` also finds editors in the split panel |

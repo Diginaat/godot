@@ -87,12 +87,22 @@ public:
 class EditorMainScreenSplit : public DockTabContainer {
 	GDCLASS(EditorMainScreenSplit, DockTabContainer);
 
+	Control *header_reference = nullptr;
+
+	void _update_header_height();
+
 protected:
+	void _notification(int p_what);
+
 	virtual TabStyle get_tab_style() const override;
 	virtual bool can_switch_dock() const override;
 
 public:
 	virtual void update_visibility() override;
+
+	// Keeps the tab bar as tall as p_control (the scene tabs above the main screen), so the
+	// panel's toolbar and viewport line up with the main screen's.
+	void set_header_reference(Control *p_control);
 
 	EditorMainScreenSplit();
 };

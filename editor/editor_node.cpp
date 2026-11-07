@@ -9090,8 +9090,22 @@ EditorNode::EditorNode() {
 	srt->add_theme_constant_override("separation", 0);
 	top_split->add_child(srt);
 
+	// The main screen workspace can be split in two: main screen docks moved to the split panel
+	// (for example the Game view) stay visible next to the main screen. The scene tabs belong to
+	// the main screen side, so the split panel's tab bar lines up with them.
+	workspace_split = memnew(DockSplitContainer);
+	workspace_split->set_name("DockSplitWorkspace");
+	workspace_split->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	srt->add_child(workspace_split);
+
+	VBoxContainer *main_screen_vb = memnew(VBoxContainer);
+	main_screen_vb->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	main_screen_vb->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+	main_screen_vb->add_theme_constant_override("separation", 0);
+	workspace_split->add_child(main_screen_vb);
+
 	scene_tabs = memnew(EditorSceneTabs);
-	srt->add_child(scene_tabs);
+	main_screen_vb->add_child(scene_tabs);
 	scene_tabs->connect("tab_changed", callable_mp(this, &EditorNode::_set_current_scene));
 	scene_tabs->connect("tab_closed", callable_mp(this, &EditorNode::_scene_tab_closed));
 
@@ -9106,20 +9120,14 @@ EditorNode::EditorNode() {
 	scene_tabs->add_extra_button(distraction_free);
 	distraction_free->connect(SceneStringName(pressed), callable_mp(this, &EditorNode::_toggle_distraction_free_mode));
 
-	// The main screen workspace can be split in two: main screen docks moved to the split panel
-	// (for example the Game view) stay visible next to the main screen.
-	workspace_split = memnew(DockSplitContainer);
-	workspace_split->set_name("DockSplitWorkspace");
-	workspace_split->set_v_size_flags(Control::SIZE_EXPAND_FILL);
-	srt->add_child(workspace_split);
-
 	editor_main_screen = memnew(EditorMainScreen);
-	workspace_split->add_child(editor_main_screen);
+	main_screen_vb->add_child(editor_main_screen);
 	title_bar->set_center_control(editor_main_screen->get_internal_container());
 
 	editor_main_screen_split = memnew(EditorMainScreenSplit);
 	editor_main_screen_split->set_name("DockSlotMainScreenSplit");
 	workspace_split->add_child(editor_main_screen_split);
+	editor_main_screen_split->set_header_reference(scene_tabs);
 
 	editor_main_screen->add_margin_valid_drop(SIDE_LEFT, EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT);
 	editor_main_screen->add_margin_valid_drop(SIDE_RIGHT, EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT);
