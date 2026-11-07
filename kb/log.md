@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-07 (weather step 7: sound)
+
+* **Implemented**: `WeatherSoundEffect` and `WeatherSoundSynth`: rain,
+  wind and thunder synthesized in C++ on worker threads (no audio files),
+  crossfaded rain, wind by speed, thunder delayed by distance through a
+  low-pass and reverb bus. 22 checks. See
+  [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-07 (weather step 6: lightning)
 
 * **Implemented**: `WeatherLightningEffect` (return-stroke flashes lighting

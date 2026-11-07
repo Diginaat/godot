@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherSoundEffect" inherits="WeatherEffect" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Rain, wind and thunder sound for a [Weather] node, synthesized in the engine.
+	</brief_description>
+	<description>
+		Plays the weather's sound in game (not in the editor's preview). The sounds are synthesized from noise once per run, on worker threads, so the engine ships no audio files: light and heavy rain on open ground, wind with gusts, and five thunder claps (far rumbles and near cracks). Put your own recordings in the [b]Own Sounds[/b] slots to replace them; clearing a slot brings the synthesized sound back. Rain and wind sounds are made to loop (on a copy; your resource stays as it is).
+		Light and heavy rain crossfade as the rain gets heavier. The wind sound follows the wind speed at the camera, gusts included, up to full loudness at [member wind_full_speed]. Thunder answers every [signal Weather.lightning_struck] after the time sound takes to travel the distance (343 m/s): near strikes crack, far ones only rumble, through a low-pass filter and a reverb on the [code]WeatherThunder[/code] audio bus, which the effect creates while it runs and sends to [member audio_bus].
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_pending_thunder_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Thunder claps still on their way (lightning seen, sound not yet arrived).
+			</description>
+		</method>
+		<method name="get_rain_amount" qualifiers="const">
+			<return type="float" />
+			<description>
+				The rain loudness this frame, from [code]0.0[/code] to [code]1.0[/code]: the weather's rain amount.
+			</description>
+		</method>
+		<method name="get_wind_amount" qualifiers="const">
+			<return type="float" />
+			<description>
+				The wind loudness this frame, from [code]0.0[/code] to [code]1.0[/code]: the wind speed at the camera over [member wind_full_speed].
+			</description>
+		</method>
+		<method name="is_ready" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] once the synthesized sounds are in the players. They take a second or two after the first start in a run.
+			</description>
+		</method>
+		<method name="synthesize" qualifiers="static">
+			<return type="AudioStreamWAV" />
+			<param index="0" name="sound" type="int" enum="WeatherSoundEffect.Sound" />
+			<description>
+				Synthesizes one of the built-in weather sounds and returns it as a new [AudioStreamWAV] (44.1 kHz, 16-bit mono; rain and wind loop). The same [param sound] is the same every time. Takes a few hundred milliseconds; use it to play the weather's sounds elsewhere, for example from an [AudioStreamPlayer3D].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="audio_bus" type="StringName" setter="set_audio_bus" getter="get_audio_bus" default="&amp;&quot;Master&quot;">
+			The audio bus the weather's sound plays on, for example an ambience bus.
+		</member>
+		<member name="heavy_rain_sound" type="AudioStream" setter="set_heavy_rain_sound" getter="get_heavy_rain_sound">
+			Your own heavy rain loop, faded in over the light rain as the rain gets heavier. Empty: the synthesized heavy rain.
+		</member>
+		<member name="near_thunder_sounds" type="AudioStream[]" setter="set_near_thunder_sounds" getter="get_near_thunder_sounds" default="[]">
+			Your own sharp, cracking thunder for near strikes, one picked at random. Empty: the synthesized near thunder.
+		</member>
+		<member name="rain_sound" type="AudioStream" setter="set_rain_sound" getter="get_rain_sound">
+			Your own light rain loop. Empty: the synthesized light rain.
+		</member>
+		<member name="rain_volume_db" type="float" setter="set_rain_volume_db" getter="get_rain_volume_db" default="0.0">
+			Volume trim of the rain, on top of [member volume_db].
+		</member>
+		<member name="thunder_sounds" type="AudioStream[]" setter="set_thunder_sounds" getter="get_thunder_sounds" default="[]">
+			Your own thunder for far and middle-distance strikes, one picked at random. Empty: the synthesized far thunder.
+		</member>
+		<member name="thunder_volume_db" type="float" setter="set_thunder_volume_db" getter="get_thunder_volume_db" default="0.0">
+			Volume trim of the thunder, on top of [member volume_db].
+		</member>
+		<member name="volume_db" type="float" setter="set_volume_db" getter="get_volume_db" default="-4.0">
+			Volume of all the weather's sound.
+		</member>
+		<member name="wind_full_speed" type="float" setter="set_wind_full_speed" getter="get_wind_full_speed" default="20.0">
+			The wind speed at which the wind sound is at full loudness.
+		</member>
+		<member name="wind_sound" type="AudioStream" setter="set_wind_sound" getter="get_wind_sound">
+			Your own wind loop. Empty: the synthesized wind.
+		</member>
+		<member name="wind_volume_db" type="float" setter="set_wind_volume_db" getter="get_wind_volume_db" default="0.0">
+			Volume trim of the wind, on top of [member volume_db].
+		</member>
+	</members>
+	<constants>
+		<constant name="SOUND_RAIN_LIGHT" value="0" enum="Sound">
+			Light rain on open ground (a loop).
+		</constant>
+		<constant name="SOUND_RAIN_HEAVY" value="1" enum="Sound">
+			Heavy rain with a low roar (a loop).
+		</constant>
+		<constant name="SOUND_WIND" value="2" enum="Sound">
+			Wind with gusts (a loop).
+		</constant>
+		<constant name="SOUND_THUNDER_FAR_1" value="3" enum="Sound">
+			A far thunder rumble, 11 seconds.
+		</constant>
+		<constant name="SOUND_THUNDER_FAR_2" value="4" enum="Sound">
+			A far thunder rumble, 12 seconds.
+		</constant>
+		<constant name="SOUND_THUNDER_MEDIUM" value="5" enum="Sound">
+			Thunder at middle distance, 10 seconds.
+		</constant>
+		<constant name="SOUND_THUNDER_NEAR_1" value="6" enum="Sound">
+			A near thunder crack with a boom and rumble, 9 seconds.
+		</constant>
+		<constant name="SOUND_THUNDER_NEAR_2" value="7" enum="Sound">
+			A near thunder crack with a boom and rumble, 10 seconds.
+		</constant>
+		<constant name="SOUND_MAX" value="8" enum="Sound">
+			The number of built-in sounds.
+		</constant>
+	</constants>
+</class>

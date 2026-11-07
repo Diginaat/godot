@@ -36,6 +36,7 @@
 #include "effects/weather_motes_effect.h"
 #include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
+#include "effects/weather_sound_effect.h"
 #include "weather.h"
 #include "weather_effect.h"
 #include "weather_library.h"
@@ -78,6 +79,7 @@ void initialize_weather_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(WeatherHazeEffect);
 		GDREGISTER_CLASS(WeatherMotesEffect);
 		GDREGISTER_CLASS(WeatherLightningEffect);
+		GDREGISTER_CLASS(WeatherSoundEffect);
 		GDREGISTER_CLASS(Weather);
 
 		// Created at the scene level, after the RenderingServer: it registers
@@ -100,6 +102,7 @@ void uninitialize_weather_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		WeatherLibrary::free_default();
 		Weather::free_builtin_resources();
+		WeatherSoundEffect::free_synthesized_sounds();
 	}
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE && wind_server) {
 		wind_server->finalize();

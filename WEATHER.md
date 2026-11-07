@@ -1,14 +1,15 @@
 # Weather and wind
 
 Native C++ weather for this build: one global wind that grass, trees, cloth
-and physics bodies all follow, and (in later steps) a weather node that blends
+and physics bodies all follow, and a weather node that blends
 between weather types and drives the sky, rain, fog, lightning and sound. The
 design is a port of a GDScript weather system, rebuilt so that new weather
 types and new effects can be added without touching the core.
 
 Code: `modules/weather/` (turn it off with `module_weather_enabled=no`).
-Branch: `dev-weather` (from `dev`), merged into `dev` after each finished step
-passes the build, the smoke tests and the wind tests below.
+Branch: `dev-weather` (from `dev`). Every step passes the build, the smoke
+tests and the weather tests below before it is committed; the branch goes
+into `dev` once the weather is complete.
 
 ## Design
 
@@ -31,7 +32,7 @@ passes the build, the smoke tests and the wind tests below.
 | `WeatherHazeEffect` | Volumetric ground mist that thins out with height, rain shafts that lean with the wind, splash spray; takes over the environment's volumetric fog. | 5 |
 | `WeatherMotesEffect` | Tiny droplets floating around the camera in fog and rain, drifting with the wind. | 5 |
 | `WeatherLightningEffect` | Flashes of one to four return strokes (scene light, sky flash), cloud-to-ground bolts by midpoint displacement, `Weather.lightning_struck` for thunder. | 6 |
-| Sound | Rain, wind and thunder synthesized in C++ at startup; own files override. | 7 |
+| `WeatherSoundEffect` | Rain, wind and thunder synthesized in C++ once per run on worker threads (`WeatherSoundSynth`); own recordings per slot override. Thunder after `distance / 343` s through a low-pass and reverb bus. | 7 |
 
 Native class names differ from the GDScript system's (`WeatherSystem`,
 `WeatherPreset`, `RainEmitter`, ...), so a project using the GDScript version
@@ -47,7 +48,7 @@ keeps working until it switches.
 | 4 | Rain, occlusion, wet surfaces: `WeatherRainEffect`, built-in wetness include and wet surface shader | Done |
 | 5 | Ground haze and mist motes: `WeatherHazeEffect`, `WeatherMotesEffect`, `Weather.get_effect()` | Done |
 | 6 | Lightning: `WeatherLightningEffect`, `WeatherSkyEffect.set_lightning()`, `Weather.lightning_struck` | Done |
-| 7 | Sound synthesis | Next |
+| 7 | Sound: `WeatherSoundEffect`, `WeatherSoundSynth` | Done |
 
 ## Weather core
 
@@ -215,6 +216,37 @@ sun never takes the flash light as one.
 The inspector's **Strike Lightning** button (`PROPERTY_HINT_TOOL_BUTTON`)
 fires a ground strike and holds the bolt lit for `preview_hold_time`.
 
+## Sound
+
+`WeatherSoundSynth` (`effects/weather_sound_synth.cpp`) builds the eight
+sounds from noise, the way an offline generator for the GDScript version
+did: noise shaped in the frequency domain (an in-module radix-2 FFT), drop
+taps scattered with wraparound, envelopes and soft limiting. Loops are 2^19
+samples (11.9 s at 44.1 kHz) so the spectrum covers them exactly and the
+seam doesn't click. Fixed seeds: the same sounds every run.
+
+| Sound | Length | Level | Made of |
+| --- | --- | --- | --- |
+| Light rain | loop | -24 dB RMS | wash 400 to 7000 Hz, 1500 fine ticks/s, 4 soft taps/s |
+| Heavy rain | loop | -17 dB RMS | the same with 6000 ticks/s, 12 taps/s and a 150 to 2500 Hz roar |
+| Wind | loop | -22 dB RMS | low rush, gusting mid band, faint whistle at the strongest gusts |
+| Far thunder (2), medium | 11, 12, 10 s | peak 0.9 | 4 to 7 rolling rumbles, low-passed at 300 (700) Hz |
+| Near thunder (2) | 9, 10 s | peak 0.95 | tearing crack, boom, crackle and rumbles |
+
+`WeatherSoundEffect` runs only in game. On its first start in a run it
+synthesizes all eight on the `WorkerThreadPool` (a group task, one sound
+each; about 2 s on 10 threads, 4.7 s on one) and shares them with every
+sound effect; they are freed when the module unloads. Its players are
+internal children ("RainSound", "HeavyRainSound", "WindSound", "Thunder1",
+"Thunder2"). Loops fade toward `volume_db + trim + linear_to_db(amount)` at
+`1 - exp(-3 dt)`; heavy rain crossfades in with
+`smoothstep(0.35, 0.9, rain)` at equal power. Thunder: strength is the
+closeness within the lightning effect's distance range; above 0.65 a near
+clap, else a far one; pitch `lerp(0.9, 1.05, strength)`, the bus low-pass
+at `lerp(600, 12000, strength²)` Hz. The `WeatherThunder` bus is created
+on start (low-pass, reverb 0.95 room, 0.35 wet; sent to `audio_bus`) and
+removed when the last sound effect stops.
+
 ## Wind
 
 The wind at a point is the mean wind plus gusts. Gusts are two octaves of
@@ -339,6 +371,24 @@ glow through Storm rain and haze; an in-cloud flash lights the ground blue.
 The haze, rain, sky, core and save tests still pass; the editor opens a
 scene with all six effects without errors and leaves it unchanged.
 
+Sound test (2026-11-07, 22 checks, headless): seven default effects ending
+with sound; the loops are 2^19 samples at 44.1 kHz and loop forward;
+thunder lengths 11, 12, 10, 9 and 10 s; light rain -24.0, heavy rain
+-17.0, wind -22.0 dB RMS; the loop seams jump less than four mean sample
+steps; thunder peaks 0.95 (near) and 0.90 (far); near thunder has 70 times
+the high-frequency share of far thunder; thunder ends silent; the same
+sound every time; the players and the thunder bus (low-pass, reverb, to
+Master) are built; the sounds are ready 2.0 s after the start; Clear plays
+wind at 0.09 and no rain; Storm plays heavy rain at -5.9 dB and light at
+-18.6 dB as computed; a strike 686 m away queues thunder, silent at 1.8 s,
+playing at 2.2 s with the low-pass at 8973 Hz and a near clap; a strike at
+2900 m rumbles through 616 Hz; an own rain sound plays as a looping copy
+and clearing it brings the synthesized one back; removing the effect frees
+the players and the bus. Compared with the offline generator's files
+(spectrum in five bands, centroid, RMS), every sound matches within the
+spread between two random takes. The other tests still pass; the editor
+opens a scene with all seven effects without errors.
+
 ## Findings
 
 * `RenderingServer.global_shader_parameter_add()` at the module's scene
@@ -376,3 +426,11 @@ scene with all six effects without errors and leaves it unchanged.
   would have become the sun). Skip the `Weather` node's descendants.
 * `LocalVector`'s copy constructor is explicit: `LocalVector<T> a = b;`
   doesn't compile; take a reference or construct explicitly.
+* An `AudioStreamPlayer` still playing (or stopped within the last frames)
+  when the game quits reports its playback and stream as leaked
+  ObjectDB instances: the audio thread hadn't freed them yet, and
+  `AudioServer::finish()` doesn't free its playback list. It happens with
+  a plain player too, not only with the weather.
+* Noise shaped by drawing the spectrum directly (Gaussian real and
+  imaginary parts per bin, times the gain) is the same as filtering white
+  noise and saves the forward FFT.

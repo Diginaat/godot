@@ -98,3 +98,15 @@ Step 1 of the native weather (see `WEATHER.md` at the repository root):
   distance)` decouples the sound from the flash.
 * **Own nodes are not scene nodes.** `find_children()` returns internal
   children: the sun search skips the weather node's own lights.
+
+# Sound (step 7)
+
+* **No audio files in the engine.** Rain, wind and thunder are
+  synthesized once per run on worker threads from noise shaped in the
+  frequency domain; they match the offline generator's files within the
+  spread of random takes.
+* **Loops by construction.** A loop's length is the FFT length, so the
+  shaped noise is periodic and drops wrap around: no seam to hide.
+* **Thunder is late on purpose.** `Weather.lightning_struck` queues a clap
+  `distance / 343` seconds out; closeness picks crack or rumble and the
+  low-pass cutoff.

@@ -20,6 +20,7 @@ def get_doc_classes():
         "WeatherProfile",
         "WeatherRainEffect",
         "WeatherSkyEffect",
+        "WeatherSoundEffect",
         "WindReceiver3D",
         "WindServer",
     ]

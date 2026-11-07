@@ -36,6 +36,7 @@
 #include "effects/weather_motes_effect.h"
 #include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
+#include "effects/weather_sound_effect.h"
 #include "weather_wetness_shaders.h"
 #include "wind/wind_server.h"
 
@@ -111,6 +112,7 @@ TypedArray<WeatherEffect> Weather::create_default_effects() {
 	list.push_back(memnew(WeatherHazeEffect));
 	list.push_back(memnew(WeatherMotesEffect));
 	list.push_back(memnew(WeatherLightningEffect));
+	list.push_back(memnew(WeatherSoundEffect));
 	return list;
 }
 
