@@ -182,10 +182,12 @@ void EditorMainScreen::remove_main_plugin(EditorPlugin *p_editor) {
 EditorMainScreen::EditorMainScreen() :
 		DockTabContainer(EditorDock::DOCK_SLOT_MAIN_SCREEN) {
 	layout = EditorDock::DOCK_LAYOUT_MAIN_SCREEN;
-	grid_rect = Rect2i(2, 0, 4, 4);
+	// The right half of the center cells is the split panel (EditorMainScreenSplit).
+	grid_rect = Rect2i(2, 0, 2, 4);
 
 	set_theme_type_variation("MainScreenContainer");
-	set_custom_minimum_size(Size2(0, 80) * EDSCALE);
+	set_custom_minimum_size(Size2(80, 80) * EDSCALE);
+	set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	set_v_size_flags(Control::SIZE_EXPAND_FILL);
 	set_draw_behind_parent(true);
 	get_tab_bar()->set_mouse_filter(Control::MOUSE_FILTER_PASS);
@@ -199,4 +201,31 @@ EditorMainScreen::EditorMainScreen() :
 	Ref<StyleBoxEmpty> sb;
 	sb.instantiate();
 	add_theme_style_override(SceneStringName(panel), sb);
+}
+
+DockTabContainer::TabStyle EditorMainScreenSplit::get_tab_style() const {
+	return (TabStyle)EDITOR_GET("interface/editor/docks/main_screen_dock_tab_style").operator int();
+}
+
+bool EditorMainScreenSplit::can_switch_dock() const {
+	if (get_current_tab() == -1) {
+		return true;
+	}
+	EditorDock *dock = get_dock(get_current_tab());
+	return dock && dock->is_allow_switch_screen();
+}
+
+void EditorMainScreenSplit::update_visibility() {
+	// Unlike side docks, the split stays visible in distraction-free mode: it is part of the workspace.
+	set_visible(get_tab_count() > 0);
+}
+
+EditorMainScreenSplit::EditorMainScreenSplit() :
+		DockTabContainer(EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT) {
+	layout = EditorDock::DOCK_LAYOUT_MAIN_SCREEN;
+	grid_rect = Rect2i(4, 0, 2, 4);
+
+	set_custom_minimum_size(Size2(80, 80) * EDSCALE);
+	set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	set_v_size_flags(Control::SIZE_EXPAND_FILL);
 }
