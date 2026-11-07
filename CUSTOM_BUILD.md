@@ -147,6 +147,11 @@ straight.
     project (`_fork_backup_*` in `editor/project_manager/project_manager.cpp`,
     marker `.godot/nvidia_dlss_physx_backup.cfg`).
   - CI `static_checks.yml` runs `prek` via pip instead of the third-party action.
+  - The split workspace (`DOCK_SLOT_MAIN_SCREEN_SPLIT`, `EditorMainScreenSplit`,
+    `DockSplitWorkspace` in `EditorNode`) and the Live Runtime view
+    (`scene/debugger/runtime_state_observer.cpp`,
+    `editor/run/live_runtime_plugin.cpp`). See
+    [SPLIT_WORKSPACE.md](SPLIT_WORKSPACE.md).
 
 ## Build (Windows)
 
