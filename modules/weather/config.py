@@ -15,6 +15,7 @@ def get_doc_classes():
         "WeatherHazeEffect",
         "WeatherLibrary",
         "WeatherLightingEffect",
+        "WeatherLightningEffect",
         "WeatherMotesEffect",
         "WeatherProfile",
         "WeatherRainEffect",

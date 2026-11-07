@@ -32,6 +32,7 @@
 
 #include "effects/weather_haze_effect.h"
 #include "effects/weather_lighting_effect.h"
+#include "effects/weather_lightning_effect.h"
 #include "effects/weather_motes_effect.h"
 #include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
@@ -76,6 +77,7 @@ void initialize_weather_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(WeatherRainEffect);
 		GDREGISTER_CLASS(WeatherHazeEffect);
 		GDREGISTER_CLASS(WeatherMotesEffect);
+		GDREGISTER_CLASS(WeatherLightningEffect);
 		GDREGISTER_CLASS(Weather);
 
 		// Created at the scene level, after the RenderingServer: it registers

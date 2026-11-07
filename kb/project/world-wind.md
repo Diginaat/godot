@@ -87,3 +87,14 @@ Step 1 of the native weather (see `WEATHER.md` at the repository root):
   lean its shafts like the rain without depending on the effect order.
 * **Detail fog can't show.** Floating droplets (`GPUParticles3D`) wrap
   inside a box around the camera and drift at a capped fraction of the wind.
+
+# Lightning (step 6)
+
+* **Flicker is return strokes.** One to four strokes down the same channel
+  within a second, each lighting the scene and the clouds near the strike.
+* **Bolts by midpoint displacement**, drawn as additive camera-facing
+  ribbons with a minimum pixel width, kept inside the far plane.
+* **Thunder through a signal.** `Weather.lightning_struck(position,
+  distance)` decouples the sound from the flash.
+* **Own nodes are not scene nodes.** `find_children()` returns internal
+  children: the sun search skips the weather node's own lights.

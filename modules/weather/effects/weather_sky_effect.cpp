@@ -46,6 +46,7 @@
 // The weather uniforms the effect sets; a sky shader that has the first one
 // is driven instead of replaced.
 static const char *weather_uniforms[] = { "cloud_coverage", "cloud_density", "cloud_darkness", "overcast", "cloud_offset" };
+static const char *lightning_uniforms[] = { "lightning_flash", "lightning_direction", "lightning_color" };
 
 Ref<ShaderMaterial> WeatherSkyEffect::create_default_material() {
 	Ref<Shader> shader;
@@ -110,14 +111,14 @@ Ref<ShaderMaterial> WeatherSkyEffect::create_default_material() {
 	return material;
 }
 
-bool WeatherSkyEffect::_has_weather_uniforms(const Ref<ShaderMaterial> &p_material) {
+bool WeatherSkyEffect::_has_uniform(const Ref<ShaderMaterial> &p_material, const StringName &p_name) {
 	if (p_material.is_null() || p_material->get_shader().is_null()) {
 		return false;
 	}
 	List<PropertyInfo> uniforms;
 	p_material->get_shader()->get_shader_uniform_list(&uniforms);
 	for (const PropertyInfo &uniform : uniforms) {
-		if (uniform.name == weather_uniforms[0]) {
+		if (uniform.name == p_name) {
 			return true;
 		}
 	}
@@ -132,7 +133,7 @@ void WeatherSkyEffect::start(Weather *p_weather) {
 	if (environment.is_valid()) {
 		const Ref<Sky> scene_sky = environment->get_sky();
 		const Ref<Material> scene_material = scene_sky.is_valid() ? scene_sky->get_material() : Ref<Material>();
-		if (environment->get_background() == Environment::BG_SKY && _has_weather_uniforms(scene_material)) {
+		if (environment->get_background() == Environment::BG_SKY && _has_uniform(scene_material, StringName(weather_uniforms[0]))) {
 			material = scene_material;
 		} else {
 			material = create_default_material();
@@ -156,6 +157,7 @@ void WeatherSkyEffect::start(Weather *p_weather) {
 				own_sky->set_process_mode(Sky::PROCESS_MODE_REALTIME);
 			}
 		}
+		has_lightning = _has_uniform(material, StringName(lightning_uniforms[0]));
 		// The textures repeat every 1 / cloud_scale meters: wrap the drift
 		// there, so it never loses precision.
 		const Variant scale = material->get_shader_parameter("cloud_scale");
@@ -174,12 +176,18 @@ void WeatherSkyEffect::stop(Weather *p_weather) {
 			for (const char *uniform : weather_uniforms) {
 				p_weather->release(material.ptr(), StringName(String("shader_parameter/") + uniform));
 			}
+			if (has_lightning) {
+				for (const char *uniform : lightning_uniforms) {
+					p_weather->release(material.ptr(), StringName(String("shader_parameter/") + uniform));
+				}
+			}
 		}
 	}
 	p_weather->set_sky_colors(saved_horizon_color, saved_overcast_color, saved_sky_energy);
 	environment.unref();
 	material.unref();
 	own_sky.unref();
+	has_lightning = false;
 }
 
 void WeatherSkyEffect::_set_parameter(Weather *p_weather, const StringName &p_name, const StringName &p_property, const Variant &p_value) {
@@ -237,6 +245,16 @@ Vector2 WeatherSkyEffect::get_cloud_offset() const {
 	return cloud_offset;
 }
 
+void WeatherSkyEffect::set_lightning(Weather *p_weather, float p_flash, const Vector3 &p_direction, const Color &p_color) {
+	// A scene sky without the uniforms just doesn't flash.
+	if (!has_lightning || !p_weather) {
+		return;
+	}
+	_set_parameter(p_weather, SNAME("lightning_flash"), SNAME("shader_parameter/lightning_flash"), p_flash);
+	_set_parameter(p_weather, SNAME("lightning_direction"), SNAME("shader_parameter/lightning_direction"), p_direction);
+	_set_parameter(p_weather, SNAME("lightning_color"), SNAME("shader_parameter/lightning_color"), p_color);
+}
+
 void WeatherSkyEffect::set_cloud_wind_multiplier(float p_multiplier) {
 	cloud_wind_multiplier = MAX(0.0f, p_multiplier);
 	emit_changed();
@@ -263,6 +281,7 @@ void WeatherSkyEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cloud_wind_veer_degrees"), &WeatherSkyEffect::get_cloud_wind_veer_degrees);
 	ClassDB::bind_method(D_METHOD("get_sky_material"), &WeatherSkyEffect::get_sky_material);
 	ClassDB::bind_method(D_METHOD("get_cloud_offset"), &WeatherSkyEffect::get_cloud_offset);
+	ClassDB::bind_method(D_METHOD("set_lightning", "weather", "flash", "direction", "color"), &WeatherSkyEffect::set_lightning);
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cloud_wind_multiplier", PROPERTY_HINT_RANGE, "0,10,0.01,or_greater"), "set_cloud_wind_multiplier", "get_cloud_wind_multiplier");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cloud_wind_veer_degrees", PROPERTY_HINT_RANGE, "-45,45,0.1,degrees"), "set_cloud_wind_veer_degrees", "get_cloud_wind_veer_degrees");

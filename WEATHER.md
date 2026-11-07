@@ -30,7 +30,7 @@ passes the build, the smoke tests and the wind tests below.
 | `res://.builtin/weather_wetness.gdshaderinc`, `res://.builtin/wet_surface.gdshader` | Wet surfaces: darkening in patches, puddles with ripples, water down walls, dry under cover. Served from memory; exports leave them out (`WeatherExportPlugin`). | 4 |
 | `WeatherHazeEffect` | Volumetric ground mist that thins out with height, rain shafts that lean with the wind, splash spray; takes over the environment's volumetric fog. | 5 |
 | `WeatherMotesEffect` | Tiny droplets floating around the camera in fog and rain, drifting with the wind. | 5 |
-| Lightning | Bolts, flashes, thunder timing. | 6 |
+| `WeatherLightningEffect` | Flashes of one to four return strokes (scene light, sky flash), cloud-to-ground bolts by midpoint displacement, `Weather.lightning_struck` for thunder. | 6 |
 | Sound | Rain, wind and thunder synthesized in C++ at startup; own files override. | 7 |
 
 Native class names differ from the GDScript system's (`WeatherSystem`,
@@ -46,8 +46,8 @@ keeps working until it switches.
 | 3 | Sky and clouds: `WeatherSkyEffect`, built-in weather sky | Done |
 | 4 | Rain, occlusion, wet surfaces: `WeatherRainEffect`, built-in wetness include and wet surface shader | Done |
 | 5 | Ground haze and mist motes: `WeatherHazeEffect`, `WeatherMotesEffect`, `Weather.get_effect()` | Done |
-| 6 | Lightning | Next |
-| 7 | Sound synthesis | |
+| 6 | Lightning: `WeatherLightningEffect`, `WeatherSkyEffect.set_lightning()`, `Weather.lightning_struck` | Done |
+| 7 | Sound synthesis | Next |
 
 ## Weather core
 
@@ -186,6 +186,35 @@ they follow any wind at once. Intensity is
 `Weather.get_effect(class_name)` returns the first running effect of a class
 (or a subclass), so effects can work together without knowing their order.
 
+## Lightning
+
+`WeatherLightningEffect` adds two internal children: a `DirectionalLight3D`
+("LightningLight", no shadows, `SKY_MODE_LIGHT_ONLY` so the sky shader
+draws no second sun) and a `MeshInstance3D` ("LightningBolt"). The
+`Weather` node's sun search skips its own children, so a scene without a
+sun never takes the flash light as one.
+
+* **Timing**: in game, a strike every `60 / lightning_per_minute * [0.4,
+  1.6]` seconds. A flash is one to four return strokes 40 to 120 ms apart,
+  each decaying as `exp(-18 t)`; the first is the brightest. A ground strike
+  starts with a 50 to 100 ms leader growing down from the cloud.
+* **Light**: energy `flash * energy * [0.6, 1.4]` (nearer strikes are
+  brighter), shining from the strike.
+* **Sky**: `WeatherSkyEffect.set_lightning()` sets `lightning_flash`,
+  `lightning_direction` and `lightning_color`, driven (and restored) like
+  the other sky uniforms. A scene sky without them doesn't flash.
+* **Bolt**: midpoint displacement (`bolt_levels` 7, `bolt_roughness` 0.22),
+  three to six branches from the upper 70% of the channel, half of them
+  forking once. Camera-facing ribbons widened in the shader (core at least
+  1.5 px), additive, fog disabled. Pulled inside 0.9 of the camera's far
+  plane, dimmed by distance fog (`clamp(exp(-d * distance_fog * 0.05), 0.35,
+  1)`).
+* **Thunder**: `Weather.lightning_struck(position, distance)` at each
+  flash; the sound effect (step 7) plays thunder after `distance / 343` s.
+
+The inspector's **Strike Lightning** button (`PROPERTY_HINT_TOOL_BUTTON`)
+fires a ground strike and holds the bolt lit for `preview_hold_time`.
+
 ## Wind
 
 The wind at a point is the mean wind plus gusts. Gusts are two octaves of
@@ -293,6 +322,23 @@ mist is dense at the ground and thin at the top of 6 m pillars, Fog hides the
 far pillars, Storm shows leaning rain in grey haze. The sky, rain, core and
 save round trip tests still pass.
 
+Lightning test (2026-11-07, 20 checks, headless and Vulkan): six default
+effects ending with lightning; light and bolt built and hidden; a scene
+without a sun keeps `get_sun()` null; the flash light has no sun disk and
+no shadows; the Strike Lightning button is a valid callable; Clear has no
+strikes; `strike(500, 1)` emits `lightning_struck` with 500 m and a ground
+point 500 m out, 20 m below the camera; the leader shows first (reveal
+0.36 at flash 0.12); the strokes peak at 0.90 with the light at 3.0 and the
+sky's `lightning_flash` equal to the flash, toward the strike; the bolt
+mesh reaches 1182 m; the flash is over within 2 s; an in-cloud flash lights
+without a bolt; with the far plane at 500 m a 2 km bolt stays within 466 m;
+the preview holds the bolt lit; Thunderstorm strikes on its own; pre-save
+restores the scene sky's `lightning_flash`; removing the effect frees its
+nodes. Screenshots on Vulkan: a branched bolt with a white core and blue
+glow through Storm rain and haze; an in-cloud flash lights the ground blue.
+The haze, rain, sky, core and save tests still pass; the editor opens a
+scene with all six effects without errors and leaves it unchanged.
+
 ## Findings
 
 * `RenderingServer.global_shader_parameter_add()` at the module's scene
@@ -325,3 +371,8 @@ save round trip tests still pass.
 * Fog volume emission is stored at very low precision and tints the haze
   green; lighting the haze with `volumetric_fog_ambient_inject` (the sky's
   light) looks right under clouds.
+* `Node::find_children()` includes internal children, so a lookup by type
+  from the scene root finds an effect's own nodes too (the flash light
+  would have become the sun). Skip the `Weather` node's descendants.
+* `LocalVector`'s copy constructor is explicit: `LocalVector<T> a = b;`
+  doesn't compile; take a reference or construct explicitly.

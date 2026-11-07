@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherLightningEffect" inherits="WeatherEffect" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Lightning flashes and cloud-to-ground bolts for a [Weather] node.
+	</brief_description>
+	<description>
+		Fires lightning at the weather's [member WeatherProfile.lightning_per_minute], in game only; [method strike] and the [b]Strike Lightning[/b] button work in the editor too. Each flash is one to four return strokes within about a second, the flicker of real lightning. Every stroke lights the scene through a directional light from the strike (no shadows, no second sun in the sky) and the clouds near it through the [WeatherSkyEffect].
+		A share of the flashes ([member ground_strike_chance]) are visible cloud-to-ground bolts; the rest light the clouds from inside, as most real lightning does. A bolt is built by midpoint displacement, with branches off its upper part, and drawn as glowing camera-facing ribbons. A faint leader grows down from the cloud before the first stroke. Bolts stay inside the camera's far plane, and rain and fog dim distant ones.
+		The [Weather] node emits [signal Weather.lightning_struck] at every flash, for thunder or gameplay.
+		[codeblock]
+		var lightning := weather.get_effect(&amp;"WeatherLightningEffect") as WeatherLightningEffect
+		lightning.strike(400.0, 1)    # A bolt 400 m away.
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_direction" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				The direction from the camera toward the last flash.
+			</description>
+		</method>
+		<method name="get_flash" qualifiers="const">
+			<return type="float" />
+			<description>
+				The brightness of the flash this frame, [code]0.0[/code] between flashes and up to [code]1.0[/code] at the first return stroke.
+			</description>
+		</method>
+		<method name="is_bolt_visible" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] while a bolt is shown.
+			</description>
+		</method>
+		<method name="preview_strike">
+			<return type="void" />
+			<description>
+				Fires a ground strike now and keeps the bolt lit for [member preview_hold_time] seconds, to look at it. The [b]Strike Lightning[/b] button calls it.
+			</description>
+		</method>
+		<method name="strike">
+			<return type="void" />
+			<param index="0" name="distance" type="float" default="-1.0" />
+			<param index="1" name="ground_strike" type="int" default="-1" />
+			<description>
+				Fires a flash now, [param distance] meters away (random between [member distance_min] and [member distance_max] when negative). [param ground_strike] [code]1[/code] makes a bolt to the ground, [code]0[/code] a flash inside the clouds, [code]-1[/code] picks at random with [member ground_strike_chance]. The effect must be running.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="bolt_layers" type="int" setter="set_bolt_layers" getter="get_bolt_layers" default="524288">
+			The render layers of the bolt.
+		</member>
+		<member name="bolt_levels" type="int" setter="set_bolt_levels" getter="get_bolt_levels" default="7">
+			Subdivision levels of a bolt's main channel: it has [code]2^bolt_levels[/code] segments.
+		</member>
+		<member name="bolt_roughness" type="float" setter="set_bolt_roughness" getter="get_bolt_roughness" default="0.22">
+			How far each midpoint of the channel is pushed sideways, relative to the length of its segment.
+		</member>
+		<member name="cloud_base_height" type="float" setter="set_cloud_base_height" getter="get_cloud_base_height" default="1200.0">
+			The height of the cloud base the bolts come down from, above the camera, in meters.
+		</member>
+		<member name="color" type="Color" setter="set_color" getter="get_color" default="Color(0.78, 0.84, 1, 1)">
+			The colour of the flash light and of the lit clouds.
+		</member>
+		<member name="distance_max" type="float" setter="set_distance_max" getter="get_distance_max" default="3000.0">
+			The farthest a random strike lands, in meters.
+		</member>
+		<member name="distance_min" type="float" setter="set_distance_min" getter="get_distance_min" default="300.0">
+			The nearest a random strike lands, in meters. Near strikes light the scene more.
+		</member>
+		<member name="energy" type="float" setter="set_energy" getter="get_energy" default="2.5">
+			The energy of the flash light at the first return stroke of a strike at middle distance.
+		</member>
+		<member name="glow_color" type="Color" setter="set_glow_color" getter="get_glow_color" default="Color(0.55, 0.62, 1, 1)">
+			The colour of the glow around the bolt's white core.
+		</member>
+		<member name="ground_strike_chance" type="float" setter="set_ground_strike_chance" getter="get_ground_strike_chance" default="0.4">
+			The share of flashes that are cloud-to-ground bolts. In reality about a quarter of lightning reaches the ground.
+		</member>
+		<member name="max_branches" type="int" setter="set_max_branches" getter="get_max_branches" default="6">
+			The most branches a bolt has (at least half of this).
+		</member>
+		<member name="preview_hold_time" type="float" setter="set_preview_hold_time" getter="get_preview_hold_time" default="8.0">
+			How long [method preview_strike] keeps the bolt lit. Strikes in the game always use real timing.
+		</member>
+		<member name="strike_lightning" type="Callable" setter="" getter="_get_strike_button" default="Callable()">
+			The [b]Strike Lightning[/b] button in the inspector: calls [method preview_strike].
+		</member>
+	</members>
+</class>

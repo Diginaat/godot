@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-07 (weather step 6: lightning)
+
+* **Implemented**: `WeatherLightningEffect` (return-stroke flashes lighting
+  the scene and the sky, branched bolts, Strike Lightning button) and
+  `Weather.lightning_struck`. Fixed: the sun search took internal lights.
+  20 checks headless and on Vulkan. See
+  [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-07 (weather step 5: haze and motes)
 
 * **Implemented**: `WeatherHazeEffect` (volumetric ground mist, rain shafts

@@ -32,6 +32,7 @@
 
 #include "effects/weather_haze_effect.h"
 #include "effects/weather_lighting_effect.h"
+#include "effects/weather_lightning_effect.h"
 #include "effects/weather_motes_effect.h"
 #include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
@@ -109,6 +110,7 @@ TypedArray<WeatherEffect> Weather::create_default_effects() {
 	list.push_back(memnew(WeatherRainEffect));
 	list.push_back(memnew(WeatherHazeEffect));
 	list.push_back(memnew(WeatherMotesEffect));
+	list.push_back(memnew(WeatherLightningEffect));
 	return list;
 }
 
@@ -516,8 +518,14 @@ void Weather::_find_scene_nodes() {
 		world_environment = found.is_empty() ? nullptr : Object::cast_to<WorldEnvironment>(found[0]);
 	}
 	if (!sun) {
+		// Not the effects' own lights (the lightning flash).
 		TypedArray<Node> found = root->find_children("*", "DirectionalLight3D", true, false);
-		sun = found.is_empty() ? nullptr : Object::cast_to<DirectionalLight3D>(found[0]);
+		for (int i = 0; i < found.size() && !sun; i++) {
+			DirectionalLight3D *light = Object::cast_to<DirectionalLight3D>(found[i]);
+			if (light && !is_ancestor_of(light)) {
+				sun = light;
+			}
+		}
 	}
 }
 
@@ -823,6 +831,7 @@ void Weather::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "preview_in_editor"), "set_preview_in_editor", "is_preview_in_editor");
 
 	ADD_SIGNAL(MethodInfo("weather_changed", PropertyInfo(Variant::OBJECT, "profile", PROPERTY_HINT_RESOURCE_TYPE, "WeatherProfile")));
+	ADD_SIGNAL(MethodInfo("lightning_struck", PropertyInfo(Variant::VECTOR3, "position"), PropertyInfo(Variant::FLOAT, "distance")));
 
 	BIND_ENUM_CONSTANT(QUALITY_AUTO);
 	BIND_ENUM_CONSTANT(QUALITY_LOW);

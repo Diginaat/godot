@@ -34,6 +34,7 @@
 
 #include "core/math/color.h"
 #include "core/math/vector2.h"
+#include "core/math/vector3.h"
 
 class Environment;
 class ShaderMaterial;
@@ -59,8 +60,10 @@ class WeatherSkyEffect : public WeatherEffect {
 	Color saved_horizon_color;
 	Color saved_overcast_color;
 	float saved_sky_energy = 1.0f;
+	// The sky's shader has the lightning uniforms (the built-in one does).
+	bool has_lightning = false;
 
-	static bool _has_weather_uniforms(const Ref<ShaderMaterial> &p_material);
+	static bool _has_uniform(const Ref<ShaderMaterial> &p_material, const StringName &p_name);
 	void _set_parameter(Weather *p_weather, const StringName &p_name, const StringName &p_property, const Variant &p_value);
 
 protected:
@@ -76,6 +79,7 @@ public:
 
 	Ref<ShaderMaterial> get_sky_material() const;
 	Vector2 get_cloud_offset() const;
+	void set_lightning(Weather *p_weather, float p_flash, const Vector3 &p_direction, const Color &p_color);
 
 	virtual void start(Weather *p_weather) override;
 	virtual void stop(Weather *p_weather) override;
