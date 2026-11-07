@@ -2808,6 +2808,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	if (editor || project_manager) {
 		// The editor and project manager always detect and use hiDPI if needed.
 		OS::get_singleton()->_allow_hidpi = true;
+		// Rounded editor popups need native alpha composition, independently of the game's window settings.
+		OS::get_singleton()->_allow_layered = true;
 		load_shell_env = true;
 	}
 #endif

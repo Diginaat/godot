@@ -276,7 +276,7 @@ EditorThemeManager::ThemeConfiguration EditorThemeManager::_create_theme_config(
 		if (config.style == "Classic") {
 			config.draw_relationship_lines = RELATIONSHIP_ALL;
 			config.corner_radius = 3;
-		} else if (config.preset == "Modern Compact") {
+		} else if (config.is_modern_compact()) {
 			config.draw_relationship_lines = RELATIONSHIP_ALL;
 			config.corner_radius = 6;
 			preset_border_size = 1;
@@ -358,11 +358,11 @@ EditorThemeManager::ThemeConfiguration EditorThemeManager::_create_theme_config(
 				preset_base_color = Color(0.9, 0.9, 0.9);
 				preset_contrast = light_contrast;
 				preset_icon_saturation = 1;
-			} else if (config.preset == "Modern Compact") {
+			} else if (config.is_modern_compact()) {
 				// Neutral charcoal surfaces with a restrained blue used only by interactive states.
 				preset_accent_color = Color::html("4d88d8");
-				preset_base_color = Color::html("202328");
-				preset_contrast = 0.22;
+				preset_base_color = Color::html(config.preset == "Modern Compact Gray" ? "232323" : "202328");
+				preset_contrast = 0.26;
 				preset_draw_extra_borders = true;
 				preset_icon_saturation = 1.25;
 			} else if (config.preset == "Solarized (Dark)") {

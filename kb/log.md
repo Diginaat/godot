@@ -1,5 +1,62 @@
 # Update log
 
+## 2026-11-07 (compact header and gray theme)
+
+* **Implemented**: darker compact header, selectable Modern Compact Gray with
+  untinted surfaces, and clearly bounded inactive scene/dock tabs. Shared compact
+  geometry and approved opaque antialiased outlines remain unchanged.
+* **Padding correction**: main-screen switches share identical normal/hover/
+  selected/disabled margins and consistent gaps; selection no longer shifts content.
+  Verified failing margin checks before the patch, then passing equal-margin and
+  live fixed-tab-rectangle checks in both compact presets after rebuilding.
+* **Inactive tabs**: removed outlines from unselected/hovered/disabled tabs,
+  including inner tab variants; selected-tab outlines and fixed spacing remain.
+  Rebuilt and passed live checks for zero inactive borders on all four sides,
+  retained selected borders, and unchanged main-screen switch rectangles.
+* **Active marker**: user requested a neutral 2px top edge on selected tabs;
+  shared treatment covers scene/dock, main-screen and bottom-panel tabs without
+  adding colored toolbar lines or changing content margins.
+  Production build and live checks passed: neutral 2px markers, borderless
+  inactive states, fixed switch rectangles, both compact presets and Default.
+  **Reverted after visual feedback**: user rejected the marker. Restore prior
+  selected-tab styling only; keep borderless inactive tabs and fixed padding.
+* **Floating tabs**: slightly darker inactive fill, four rounded corners and a
+  2px vertical drawing inset with 4px gaps at Compact spacing. Layout/content
+  margins remain unchanged; inactive tabs stay borderless, with no top marker.
+  Production build and live checks passed for both compact presets and Default;
+  verified rounded corners, insets, darker inactive fill, borderless inactive
+  states and stable switch rectangles. Captured editor screenshot inspected.
+* **Rounded popups**: context menus/submenus, popup panels and tooltips share
+  compact themes' smooth 6px corners and opaque 1px outlines. Other presets and
+  native OS window decorations remain unchanged.
+* **Contrast**: brighter text, darker inputs, lighter elevated/button surfaces
+  and slightly stronger opaque neutral outlines; width and density unchanged.
+* **Dock defaults**: Text and Icon for dock and bottom-dock tabs, matching the
+  desktop main-screen default. Saved preferences and Android's main-screen
+  default are preserved.
+* **Tab height**: scene/dock and inner tabs gain 2px padding above/below;
+  floating insets, widths and main-screen switch padding stay unchanged.
+* **Black popup corners**: enable layered windows only for editor/Project Manager
+  startup, independent of the game's transparency setting. Transparent popup
+  image corners alone did not prove native composition was enabled.
+* **Validated**: production build; live compact/gray/Default checks passed on
+  OpenGL, Vulkan and D3D12, including native transparency availability, popup
+  alpha, taller tab padding and stable switch rectangles. Project Manager startup
+  passed; a separate game run confirmed transparency remains disabled by default.
+  User confirmed final desktop appearance, including popup corners.
+* **Validated**: rebuilt production editor; both compact presets and Default
+  passed live checks, including dock revert defaults, increased text contrast,
+  popup corner geometry/transparent outer pixels, inactive tabs and stable main
+  switches. Rendered popup screenshots for both compact presets inspected.
+* **Scope**: native editor theme only; no control or runtime UI changes.
+* **Validated**: Windows production build; live Modern Compact / Gray / Default
+  switching and generated style assertions passed on OpenGL Compatibility at
+  100% scale. Both compact editor screenshots inspected. Other scales and
+  renderer/physics smoke tests were not run for this theme-only refinement.
+* **Test harness correction**: use `EditorInterface.get_editor_theme()` rather
+  than a Control's local (possibly null) theme; record script errors separately
+  from the bounded editor process's exit status.
+
 ## 2026-11-07 (MultiMesh HZB occlusion and the HZB bench)
 
 * **Implemented**: `rendering/geometry/multimesh_gpu_culling/occlusion`

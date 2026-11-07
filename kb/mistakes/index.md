@@ -6,6 +6,8 @@ something goes wrong: a false claim, a wasted rebuild, a test that
 measured the wrong thing, a correction from the user.
 What worked is in [successes](/successes/).
 
+* [Editor theme validation](/mistakes/editor-theme-validation.md) - query the generated editor theme, not a Control's possibly null local theme
+
 * [Build interpreter mismatch](/mistakes/python-build-interpreter.md) - check existing Python installations before installing SCons or rebuilding SDKs
 * [New translation-unit assumptions](/mistakes/new-translation-unit-assumptions.md) - check explicit includes, namespaces and container signatures in this fork
 * [Native doc self-closing section](/mistakes/native-doc-self-closing-section.md) - validate embedded class help in editor startup as well as RST

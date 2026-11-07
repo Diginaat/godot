@@ -199,6 +199,8 @@ public:
 
 		Vector2 widget_margin;
 
+		bool is_modern_compact() const { return preset == "Modern Compact" || preset == "Modern Compact Gray"; }
+
 		uint32_t hash();
 		uint32_t hash_fonts();
 		uint32_t hash_icons();

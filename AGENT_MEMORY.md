@@ -29,6 +29,14 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 
 ## Build
 
+- **Editor theme tests:** keep test binaries uniquely suffixed (`extra_suffix`)
+  and use isolated editor settings when another agent/editor runs concurrently.
+  Compact rounded outlines need opaque border colors and full antialiasing;
+  transparent white strokes caused bright corner pixels in visual checks.
+  Popup image alpha alone does not prove native-window transparency: check
+  `DisplayServer.is_window_transparency_available()` too. Editor startup enables
+  layered windows independently of the game's per-pixel-transparency setting.
+
 - Setup, build, smoke test, DDGI test and release scripts are in `devtools/`
   (see devtools/README.md). `devtools/setup/setup_dev_windows.ps1` writes the
   PhysX/Blast/Flow SDK paths into `custom.py` (untracked), which SCons reads,

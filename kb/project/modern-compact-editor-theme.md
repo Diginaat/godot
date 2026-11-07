@@ -16,6 +16,77 @@ sources:
 
 # Modern compact editor theme
 
+## Header, gray variant and inactive tabs (2026-11-07)
+
+Both compact presets use a darker header (`#121416` in Modern Compact).
+**Modern Compact Gray** is selectable under Editor Settings > Interface > Theme
+> Color Preset. It shares compact geometry, smooth opaque outlines and icon
+saturation, but uses a neutral `#232323` base and grayscale surface tokens.
+Semantic icon colors and blue focus/selection accents remain available.
+
+Inactive dock and scene tabs use a slightly darker base-color surface, brighter
+text/icons and a four-logical-pixel gap with Compact spacing, without an outline (including hover and disabled
+states). Selected tabs keep a lighter surface, smooth one-logical-pixel outline,
+and brighter text. Hover sits between
+inactive and active surfaces; neither variant adds decorative accent lines.
+All four tab corners are rounded. The tab background is inset two logical pixels
+above and below, creating a floating browser-tab appearance without changing
+layout or state-dependent content margins. Inner tab variants share this treatment.
+Scene/dock and inner tabs add 2px vertical content padding on each side (4px
+total height at 100% scale) so floating pills do not look too narrow. All states
+share the increased padding. Main-screen switch padding remains unchanged.
+Context menus (including submenus), popup panels and tooltips also use the shared
+six-logical-pixel corner radius, full antialiasing and opaque 1px outlines in both
+compact presets. Other presets and OS-managed native menus/dialogs are unchanged.
+For native popup corners, editor/Project Manager startup enables layered-window
+composition independently of `display/window/per_pixel_transparency/allowed`.
+Otherwise rounded popup images can contain transparent pixels that the native
+window still displays as black. Game startup and the project-setting default
+remain unchanged; no blur, glass effect or external framework is introduced.
+Validation passed on Windows OpenGL, Vulkan and D3D12: native transparency is
+reported available, popup corner pixels retain alpha, and taller tab padding and
+fixed switch positions pass in both compact presets. Project Manager starts
+cleanly, and a separate game process retains disabled native transparency for a
+project with the default setting. The user confirmed the final desktop appearance,
+including popup corners; image readback alone was not treated as that confirmation.
+Contrast refinement raises compact text opacity to 0.82 (secondary 0.65), deepens
+input fields, lightens elevated surfaces/buttons and strengthens opaque neutral
+outlines without increasing their width. Derived surface contrast is 0.26. The
+gray variant desaturates the same palette, retaining its neutral surfaces.
+Dock tabs and bottom-dock tabs default to **Text and Icon**, matching the existing
+desktop main-screen default. Saved user choices are not overwritten; the existing
+Android main-screen icon-only default remains unchanged.
+The rebuilt Windows editor passed live checks for these defaults, popup style
+geometry, actual transparent popup corners, brighter text, and tab stability in
+both compact presets. Actual PopupMenu screenshots were inspected; native OS
+menus/dialogs and other DPI scales were not visually validated.
+Changes stay in editor settings and shared theme generation, plus an editor-only
+startup allowance for native popup alpha composition. No native control logic
+or project runtime UI changes.
+
+The 2D/3D/Script/Game/Asset Store switches reserve identical content margins in
+normal, hovered, selected and disabled states. With Compact spacing these are
+6px horizontal and 3px vertical, with a consistent 4px gap between switches and
+4px between icon and text, all editor-scale aware. Previously selected/hovered
+styles reserved less padding than the empty normal style, moving content when
+switching state.
+
+Padding regression proof: the previous build failed all four content-margin
+comparisons for selected/hovered/disabled main-screen states. After the fix,
+both compact presets passed equal-margin checks and live selection switching
+through the first three main-screen tabs without changing any tab rectangle.
+The full preset-switching check completed with its explicit PASS marker and no
+script errors on the rebuilt Windows production editor (OpenGL, 100% scale).
+
+Validation: Windows production editor build passed. A temporary editor-plugin
+fixture ran live switching through Modern Compact, Modern Compact Gray, Default
+and back on OpenGL Compatibility at 100% editor scale. It checked header
+brightness, inactive/active tab contrast, scaled tab spacing and outline width,
+opaque antialiased corners, neutral gray surfaces and preserved blue accent.
+All checks passed without script errors; captured editor screenshots for both
+compact presets were inspected. Other DPI scales and native OS title-bar styling
+were not visually validated in this pass. No physics/path-tracer smoke claim.
+
 ## Typography
 
 Update (2026-11-06): the user chose **Atkinson Hyperlegible Next** 2.66
@@ -81,8 +152,9 @@ buttons, muted-blue flat-button/tree selections, and no button shadow. Native
 Godot controls and the approved six-pixel corners remain in use.
 
 Selected tabs use a raised neutral surface, brighter content, and a subtle 1px
-outline. Hovered tabs use a smaller neutral surface shift. Selection never adds
-a decorative top or bottom accent line.
+outline. Inactive and hovered tabs remain borderless. A requested 2px neutral
+top-marker trial was reverted after the user rejected its appearance; do not
+restore that marker without new visual approval. Fixed state padding remains.
 
 The outline treatment follows current native-tool practice: component and
 surface borders use low-contrast neutral tokens, while focus borders remain a
@@ -90,15 +162,17 @@ separate accent state. This matches the separation documented by VS Code's
 `surface.border`, `button.border`, `input.border`, and `focusBorder` tokens and
 JetBrains theme support for centralized control borders and insets.[^vscode-theme][^jetbrains-theme]
 
-The implementation stays inside the shared editor theme generator. It changes
-no `Control` behavior, dock layout, runtime project theme, or editor plugin API.
+The appearance is owned by the shared editor theme generator. An editor-only
+startup flag permits native popup alpha composition. Neither changes `Control`
+behavior, dock layout, runtime project theme, or editor plugin API.
 Godot's Modern, Classic, other color presets, spacing presets, custom themes,
 editor scaling, and touchscreen overrides remain available. Existing editor
 settings may retain their saved preset; select **Modern Compact** and
 **Compact** under Editor Settings > Interface > Theme to opt in.
 
-Decorative accent borders and active-tab lines are intentionally absent. Blue
-remains limited to selection, focus, pressed, and other interactive states.
+Decorative accent borders and active-tab indicator lines are intentionally
+absent. Blue remains limited to selection, focus, pressed, and other interactive
+states.
 
 [^vscode-theme]: [Visual Studio Code Theme Color reference](https://code.visualstudio.com/api/references/theme-color)
 [^jetbrains-theme]: [JetBrains IntelliJ Platform: Getting Started with Themes](https://plugins.jetbrains.com/docs/intellij/themes-getting-started.html)
