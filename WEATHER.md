@@ -25,7 +25,7 @@ passes the build, the smoke tests and the wind tests below.
 | `Weather` (node) | Picks and blends profiles, drives the `WindServer`, wetness globals, runs its effects, editor preview. Scene values go through `drive()`, restored before save and on exit. | 2 |
 | `WeatherEffect` (resource) | Listed in `Weather.effects`, settings edited inline. Virtual `_start`, `_stop`, `_update`, `_apply_quality`. Rain, haze, mist motes, lightning, sky and sound are effects; snow or hail later are new subclasses (GDScript too). | 2 |
 | `WeatherLightingEffect` | Sun, sky light, exposure, volumetric and distance fog. | 2 |
-| Sky and clouds | Sky shader with cloud layer, driven by the profile and the wind aloft. | 3 |
+| `WeatherSkyEffect` | Sky and clouds: drives a weather-ready sky material, or shows the built-in weather sky in place of the scene's. Clouds drift with the wind aloft. | 3 |
 | Rain, rain occlusion, wetness | GPU rain streaks and impacts, top-down occlusion map, wet surfaces. | 4 |
 | Ground haze, mist motes | Volumetric haze and near-camera droplets. | 5 |
 | Lightning | Bolts, flashes, thunder timing. | 6 |
@@ -41,8 +41,8 @@ keeps working until it switches.
 | --- | --- | --- |
 | 1 | Wind core: `WindServer`, shader include, `WindReceiver3D`, grass default material, PhysX cloth | Done |
 | 2 | Weather core: `WeatherProfile`, `WeatherLibrary`, `Weather` node, `WeatherEffect`, `WeatherLightingEffect`, scene driving, wetness | Done |
-| 3 | Sky and clouds | Next |
-| 4 | Rain, occlusion, wet surfaces | |
+| 3 | Sky and clouds: `WeatherSkyEffect`, built-in weather sky | Done |
+| 4 | Rain, occlusion, wet surfaces | Next |
 | 5 | Ground haze, mist motes | |
 | 6 | Lightning | |
 | 7 | Sound synthesis | |
@@ -60,8 +60,9 @@ with the values showing, so script-only values blend from their defaults.
 Each frame: blend, drive the `WindServer` (speed, heading, gustiness,
 swing), sample the gust at the camera for rain bursts, compute the horizon
 light, update wetness and the `weather_wetness` / `weather_rain` globals,
-then run the effects in list order (lighting first, so later effects see
-its horizon light).
+then run the effects in list order: the sky first, so the lighting takes
+its colours, and the lighting before rain and haze, so they see its
+horizon light.
 
 `drive(object, property, value)` remembers the object's own value. A
 value that differs from the last one written (an inspector edit, a
@@ -74,6 +75,36 @@ Effects are resources in `Weather.effects` (local to scene), so their
 settings are edited inline and saved with the scene. The node starts with
 `Weather.create_default_effects()`. An effect added, removed or disabled at
 runtime or in the inspector is started or stopped on the next frame.
+
+## Sky
+
+`WeatherSkyEffect` looks at the environment's sky when it starts:
+
+* a `ShaderMaterial` whose shader has a `cloud_coverage` uniform is
+  driven in place (`cloud_coverage`, `cloud_density`, `cloud_darkness`,
+  `overcast`, `cloud_offset`) through `drive()`, so its saved values never
+  change;
+* anything else is replaced, while the effect runs, by the built-in weather
+  sky (`WeatherSkyEffect.create_default_material()`), in its own `Sky` with
+  the scene sky's radiance size and process mode. A `ProceduralSkyMaterial`
+  passes on its colours. The environment's `sky` and `background_mode` go
+  through `drive()`.
+
+The built-in sky is the GDScript system's sky shader, kept as a C++ string
+(`effects/weather_sky_shader.h`), with its two noise textures built in code.
+Its look is changed by saving `create_default_material()` as a resource and
+using that as the environment's sky. Every frame the effect passes the
+sky's horizon colour, overcast grey and energy to `Weather.set_sky_colors()`,
+which the lighting uses for the horizon light and the distance fog.
+
+Clouds drift with the wind aloft: `cloud_wind_multiplier` (3) times the
+wind's speed, turned by `cloud_wind_veer_degrees` (15). The shader adds the
+offset to its lookup, so the effect subtracts the drift, and wraps it at
+`1 / cloud_scale` meters, where both textures repeat (the detail texture
+repeats there too as long as `detail_scale` is a whole number).
+
+The lightning step adds `lightning_flash`, `lightning_direction` and
+`lightning_color` through `get_sky_material()`.
 
 ## Wind
 
@@ -140,6 +171,18 @@ outside edit becomes the base; a script profile's own value blends (0.5
 halfway); a removed effect is stopped; leaving the tree restores the sun and
 the wind. A saved scene keeps `weather` and the effect's settings and nothing
 else; the editor opens it without errors.
+
+Sky test (headless, 17 checks, 2026-11-07): default effects are sky, then
+lighting; a procedural sky is replaced by the built-in one (background
+switched to the sky, top colour kept); Clear coverage 0.15, Storm 1.0 with
+overcast 0.92; the offset moves exactly against the wind aloft; the weather
+reads the sky's horizon colour; pre-save restores the scene's sky and
+background and the next frame shows the weather sky again; disabling the
+effect gives the scene's sky back; a scene sky made from
+`create_default_material()` is kept and driven, and pre-save and exit
+restore its own values. Screenshots on Vulkan: Clear, Partly Cloudy,
+Overcast and Storm look as in the GDScript system. The weather core test
+still passes (24 checks).
 
 ## Findings
 

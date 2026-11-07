@@ -1,4 +1,6 @@
 def can_build(env, platform):
+    # The built-in sky's cloud textures are NoiseTexture2D.
+    env.module_add_dependencies("weather", ["noise"])
     return True
 
 
@@ -13,6 +15,7 @@ def get_doc_classes():
         "WeatherLibrary",
         "WeatherLightingEffect",
         "WeatherProfile",
+        "WeatherSkyEffect",
         "WindReceiver3D",
         "WindServer",
     ]

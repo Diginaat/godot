@@ -48,3 +48,15 @@ Step 1 of the native weather (see `WEATHER.md` at the repository root):
 * **Scene values are borrowed.** `Weather.drive()` keeps the scene's own
   value (an outside edit becomes the new base) and `restore_scene()` puts it
   back before every editor save and on exit. 24 headless checks pass.
+
+# Sky (step 3)
+
+* **Drive or replace.** A sky shader with a `cloud_coverage` uniform is
+  driven in place; any other sky is swapped for the built-in weather sky
+  while the effect runs, both through `drive()`, so the scene file never
+  changes. A `ProceduralSkyMaterial` passes on its colours.
+* **No assets.** The built-in sky's shader is a C++ string and its two
+  cloud textures are `NoiseTexture2D` resources built in code (the module
+  depends on `noise`).
+* **Clouds and wind.** The drift is subtracted (the shader adds it to its
+  lookup) and wrapped where the textures repeat.

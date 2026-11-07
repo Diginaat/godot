@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-07 (weather step 3: sky)
+
+* **Implemented**: `WeatherSkyEffect`: drives a weather-ready sky material
+  in place, or shows the built-in weather sky (shader kept as a C++ string,
+  noise textures built in code) in place of the scene's while it runs.
+  Clouds drift with the wind aloft. 17 headless checks and Vulkan
+  screenshots. See [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-07 (weather step 2: core)
 
 * **Implemented**: `WeatherProfile`, `WeatherLibrary` (11 built-in types),

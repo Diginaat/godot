@@ -31,6 +31,7 @@
 #include "register_types.h"
 
 #include "effects/weather_lighting_effect.h"
+#include "effects/weather_sky_effect.h"
 #include "weather.h"
 #include "weather_effect.h"
 #include "weather_library.h"
@@ -56,6 +57,7 @@ void initialize_weather_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(WeatherLibrary);
 		GDREGISTER_CLASS(WeatherEffect);
 		GDREGISTER_CLASS(WeatherLightingEffect);
+		GDREGISTER_CLASS(WeatherSkyEffect);
 		GDREGISTER_CLASS(Weather);
 
 		// Created at the scene level, after the RenderingServer: it registers

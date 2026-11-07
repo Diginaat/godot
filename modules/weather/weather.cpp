@@ -31,6 +31,7 @@
 #include "weather.h"
 
 #include "effects/weather_lighting_effect.h"
+#include "effects/weather_sky_effect.h"
 #include "wind/wind_server.h"
 
 #include "core/config/engine.h"
@@ -71,6 +72,8 @@ void Weather::register_shader_globals() {
 
 TypedArray<WeatherEffect> Weather::create_default_effects() {
 	TypedArray<WeatherEffect> list;
+	// The sky first: the lighting takes the sky's colours.
+	list.push_back(memnew(WeatherSkyEffect));
 	list.push_back(memnew(WeatherLightingEffect));
 	return list;
 }

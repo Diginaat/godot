@@ -249,7 +249,7 @@
 		<member name="drying_time" type="float" setter="set_drying_time" getter="get_drying_time" default="90.0">
 			Seconds for surfaces to dry after the rain stops.
 		</member>
-		<member name="effects" type="WeatherEffect[]" setter="set_effects" getter="get_effects" default="[Object(WeatherLightingEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;storm_sky_dimming&quot;:0.5,&quot;storm_fog_color&quot;:Color(0.16, 0.17, 0.19, 1),&quot;overcast_shadow_blur&quot;:6.0,&quot;script&quot;:null) ]">
+		<member name="effects" type="WeatherEffect[]" setter="set_effects" getter="get_effects" default="[Object(WeatherSkyEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;cloud_wind_multiplier&quot;:3.0,&quot;cloud_wind_veer_degrees&quot;:15.0,&quot;script&quot;:null) , Object(WeatherLightingEffect,&quot;resource_local_to_scene&quot;:true,&quot;resource_name&quot;:&quot;&quot;,&quot;enabled&quot;:true,&quot;storm_sky_dimming&quot;:0.5,&quot;storm_fog_color&quot;:Color(0.16, 0.17, 0.19, 1),&quot;overcast_shadow_blur&quot;:6.0,&quot;script&quot;:null) ]">
 			The effects the weather runs every frame, in order. Each is a [WeatherEffect] with its own settings. Remove one to turn it off, or add your own.
 		</member>
 		<member name="gust_direction_swing" type="float" setter="set_gust_direction_swing" getter="get_gust_direction_swing" default="20.0">
