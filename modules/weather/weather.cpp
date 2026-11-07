@@ -30,7 +30,9 @@
 
 #include "weather.h"
 
+#include "effects/weather_haze_effect.h"
 #include "effects/weather_lighting_effect.h"
+#include "effects/weather_motes_effect.h"
 #include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
 #include "weather_wetness_shaders.h"
@@ -100,10 +102,13 @@ void Weather::free_builtin_resources() {
 
 TypedArray<WeatherEffect> Weather::create_default_effects() {
 	TypedArray<WeatherEffect> list;
-	// The sky first: the lighting takes the sky's colours.
+	// The sky first: the lighting takes the sky's colours. The haze after
+	// the lighting: it takes over the volumetric fog the lighting sets.
 	list.push_back(memnew(WeatherSkyEffect));
 	list.push_back(memnew(WeatherLightingEffect));
 	list.push_back(memnew(WeatherRainEffect));
+	list.push_back(memnew(WeatherHazeEffect));
+	list.push_back(memnew(WeatherMotesEffect));
 	return list;
 }
 
@@ -153,6 +158,16 @@ void Weather::set_effects(const TypedArray<WeatherEffect> &p_effects) {
 
 TypedArray<WeatherEffect> Weather::get_effects() const {
 	return effects;
+}
+
+Ref<WeatherEffect> Weather::get_effect(const StringName &p_class) const {
+	// Running effects only: one that is off or not started yet has no state.
+	for (const Ref<WeatherEffect> &effect : running_effects) {
+		if (effect->is_class(p_class)) {
+			return effect;
+		}
+	}
+	return Ref<WeatherEffect>();
 }
 
 void Weather::set_transition_time(float p_time) {
@@ -732,6 +747,7 @@ void Weather::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_custom_profile"), &Weather::get_custom_profile);
 	ClassDB::bind_method(D_METHOD("set_effects", "effects"), &Weather::set_effects);
 	ClassDB::bind_method(D_METHOD("get_effects"), &Weather::get_effects);
+	ClassDB::bind_method(D_METHOD("get_effect", "class_name"), &Weather::get_effect);
 	ClassDB::bind_method(D_METHOD("set_transition_time", "time"), &Weather::set_transition_time);
 	ClassDB::bind_method(D_METHOD("get_transition_time"), &Weather::get_transition_time);
 	ClassDB::bind_method(D_METHOD("set_gust_direction_swing", "degrees"), &Weather::set_gust_direction_swing);

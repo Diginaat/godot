@@ -75,3 +75,15 @@ Step 1 of the native weather (see `WEATHER.md` at the repository root):
 * **Read back what you set.** `global_shader_parameter_get()` is
   editor-only on real renderers; effects keep their own copy.
 
+# Haze and mist motes (step 5)
+
+* **Haze in the lowest air.** A camera-following `FogVolume` holds ground
+  mist that thins with height, rain shafts and spray; the environment's own
+  volumetric fog density moves into it, so the sky stays clear above.
+* **Snap, don't slide.** The volume moves in world-snapped steps and the
+  shader works in world space: a volume moved every frame smears the fog's
+  temporal filter.
+* **Effects find each other.** `Weather.get_effect(class)` lets the haze
+  lean its shafts like the rain without depending on the effect order.
+* **Detail fog can't show.** Floating droplets (`GPUParticles3D`) wrap
+  inside a box around the camera and drift at a capped fraction of the wind.

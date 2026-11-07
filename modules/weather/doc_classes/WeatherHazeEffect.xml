@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherHazeEffect" inherits="WeatherEffect" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Volumetric ground mist, rain shafts and spray for a [Weather] node.
+	</brief_description>
+	<description>
+		Fills the lowest tens of meters of air with volumetric haze: ground mist that thins out with height and drifts in patches, soft rain shafts that lean and drift with the wind, and splash spray at the ground in heavy rain. Hilltops and the sky stay clearer than the ground around the camera, unlike uniform volumetric fog, which reads as a flat grey sheet.
+		The mist follows the weather's fog density ([member WeatherProfile.fog_density]), the shafts and spray follow the rain. While the haze runs, all weather fog goes into it: the environment's own [member Environment.volumetric_fog_density] is moved into the haze too, and turns back into uniform fog when the effect stops.
+		A [FogVolume] box follows the camera in world-snapped steps, and the ground height under the camera is found with a ray (the body carrying the camera is skipped). Density, height and noise are computed in world space, so moving the box never moves the haze.
+		Needs volumetric fog, so [constant Weather.QUALITY_LOW] turns the haze off; the uniform fog of the [WeatherLightingEffect] remains. Medium quality uses a coarser noise texture.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_ground_height" qualifiers="const">
+			<return type="float" />
+			<description>
+				The ground height under the camera the haze is built on, smoothed over [member ground_smoothing]. NaN before the first update.
+			</description>
+		</method>
+		<method name="is_active" qualifiers="const">
+			<return type="bool" />
+			<description>
+				Returns [code]true[/code] when the haze volume exists: the effect runs and the quality level allows it.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="brightness" type="float" setter="set_brightness" getter="get_brightness" default="1.0">
+			How much sky and ambient light the haze takes ([member Environment.volumetric_fog_ambient_inject]). Under clouds there is little direct sun, but the whole sky lights the haze.
+		</member>
+		<member name="camera_height" type="float" setter="set_camera_height" getter="get_camera_height" default="1.7">
+			The camera's height above the ground, used when the ground ray hits nothing.
+		</member>
+		<member name="density" type="float" setter="set_density" getter="get_density" default="0.7">
+			The mist density at the ground for each unit of the weather's fog density. The environment's own volumetric fog density is added to it.
+		</member>
+		<member name="distance" type="float" setter="set_distance" getter="get_distance" default="128.0">
+			How far the volumetric fog reaches ([member Environment.volumetric_fog_length]). The haze volume is four times as wide.
+		</member>
+		<member name="ground_mask" type="int" setter="set_ground_mask" getter="get_ground_mask" default="4294967295">
+			The physics layers the ground ray hits.
+		</member>
+		<member name="ground_smoothing" type="float" setter="set_ground_smoothing" getter="get_ground_smoothing" default="1.0">
+			Seconds the haze takes to follow a new ground height, so steps and slopes under the camera don't make it jump.
+		</member>
+		<member name="height_falloff" type="float" setter="set_height_falloff" getter="get_height_falloff" default="0.15">
+			How fast the mist thins out with height: its density halves every [code]1 / height_falloff[/code] meters above the ground.
+		</member>
+		<member name="patch_size" type="float" setter="set_patch_size" getter="get_patch_size" default="96.0">
+			The size in meters of the mist patches and shaft noise. The noise repeats at this size.
+		</member>
+		<member name="patchiness" type="float" setter="set_patchiness" getter="get_patchiness" default="0.6">
+			How much the mist breaks up into patches: [code]0.0[/code] is an even layer, [code]1.0[/code] thick patches with clear air between them.
+		</member>
+		<member name="rain_density" type="float" setter="set_rain_density" getter="get_rain_density" default="0.012">
+			The density of the rain haze at full rain. It leans with the wind like the drops and is darker in shafts.
+		</member>
+		<member name="rain_height" type="float" setter="set_rain_height" getter="get_rain_height" default="15.0">
+			The rain haze density halves every [member rain_height] meters above the ground.
+		</member>
+		<member name="shaft_evolve_speed" type="float" setter="set_shaft_evolve_speed" getter="get_shaft_evolve_speed" default="0.006">
+			How fast the mist patches and rain shafts change shape, in noise tiles per second.
+		</member>
+		<member name="sky_affect" type="float" setter="set_sky_affect" getter="get_sky_affect" default="0.75">
+			How much the haze covers the sky ([member Environment.volumetric_fog_sky_affect]).
+		</member>
+		<member name="spray_density" type="float" setter="set_spray_density" getter="get_spray_density" default="0.06">
+			The density of the splash spray hugging the ground at full rain. It grows with the square of the rain, so only heavy rain shows it.
+		</member>
+		<member name="wisp_strength" type="float" setter="set_wisp_strength" getter="get_wisp_strength" default="0.45">
+			How much fine wisps break up the haze: [code]0.0[/code] is smooth.
+		</member>
+	</members>
+</class>

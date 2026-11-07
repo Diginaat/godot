@@ -28,7 +28,8 @@ passes the build, the smoke tests and the wind tests below.
 | `WeatherSkyEffect` | Sky and clouds: drives a weather-ready sky material, or shows the built-in weather sky in place of the scene's. Clouds drift with the wind aloft. | 3 |
 | `WeatherRainEffect` | GPU raindrops and impacts around the camera, collision height field, top-down rain occlusion map. | 4 |
 | `res://.builtin/weather_wetness.gdshaderinc`, `res://.builtin/wet_surface.gdshader` | Wet surfaces: darkening in patches, puddles with ripples, water down walls, dry under cover. Served from memory; exports leave them out (`WeatherExportPlugin`). | 4 |
-| Ground haze, mist motes | Volumetric haze and near-camera droplets. | 5 |
+| `WeatherHazeEffect` | Volumetric ground mist that thins out with height, rain shafts that lean with the wind, splash spray; takes over the environment's volumetric fog. | 5 |
+| `WeatherMotesEffect` | Tiny droplets floating around the camera in fog and rain, drifting with the wind. | 5 |
 | Lightning | Bolts, flashes, thunder timing. | 6 |
 | Sound | Rain, wind and thunder synthesized in C++ at startup; own files override. | 7 |
 
@@ -44,8 +45,8 @@ keeps working until it switches.
 | 2 | Weather core: `WeatherProfile`, `WeatherLibrary`, `Weather` node, `WeatherEffect`, `WeatherLightingEffect`, scene driving, wetness | Done |
 | 3 | Sky and clouds: `WeatherSkyEffect`, built-in weather sky | Done |
 | 4 | Rain, occlusion, wet surfaces: `WeatherRainEffect`, built-in wetness include and wet surface shader | Done |
-| 5 | Ground haze, mist motes | Next |
-| 6 | Lightning | |
+| 5 | Ground haze and mist motes: `WeatherHazeEffect`, `WeatherMotesEffect`, `Weather.get_effect()` | Done |
+| 6 | Lightning | Next |
 | 7 | Sound synthesis | |
 
 ## Weather core
@@ -144,6 +145,47 @@ module registers the globals `weather_rain_occlusion` (sampler2D) and
 path; `WeatherExportPlugin` leaves `res://.builtin/` paths out of exports,
 since the game has them in memory.
 
+## Haze and motes
+
+`WeatherHazeEffect` puts a `FogVolume` (internal child "Haze") around the
+camera, four times `distance` wide and 120 m tall, from 20 m below the
+ground to 100 m above it. It moves in world-snapped steps of (8, 4, 8) m: a
+volume moving every frame smears the fog's temporal filter. The shader works
+in world space, so the haze stays put when the box steps. The ground height
+comes from a ray down from the camera that skips the body carrying the
+camera, and is smoothed over `ground_smoothing`.
+
+* **Mist**: `scene fog + WeatherProfile.fog_density * density` at the
+  ground, halving every `1 / height_falloff` m, broken into patches
+  (`patchiness`, `patch_size`) and wisps (`wisp_strength`).
+* **Rain shafts**: `rain_density * rain`, halving every `rain_height` m,
+  leaning with the wind like the drops (the fall speed and wind multiplier
+  come from the rain effect through `Weather.get_effect()`).
+* **Spray**: `spray_density * rain²` in the lowest meter.
+
+While it runs it drives the environment's `volumetric_fog_enabled` (on when
+there is haze), `volumetric_fog_density` (0: all fog goes into the haze),
+`volumetric_fog_length` (`distance`), `volumetric_fog_sky_affect` and
+`volumetric_fog_ambient_inject` (`brightness`). When it stops it releases
+them, and the lighting effect drives the uniform fog again from the scene's
+values.
+
+`WeatherMotesEffect` is a `GPUParticles3D` ("Motes") in a box around the
+camera with slow turbulence. The shader adds the wind drift (a fraction of
+the wind, at most `max_drift_speed`) and wraps the motes inside the box, so
+they follow any wind at once. Intensity is
+`clamp((fog_density * 25 + rain * 0.6) * amount)`.
+
+| Quality | Haze | Noise texels | Motes |
+| --- | --- | --- | --- |
+| Low | off | - | 0 |
+| Medium | on | 48 | 3000 |
+| High | on | 64 | 6000 |
+| Ultra | on | 64 | 12000 |
+
+`Weather.get_effect(class_name)` returns the first running effect of a class
+(or a subclass), so effects can work together without knowing their order.
+
 ## Wind
 
 The wind at a point is the mean wind plus gusts. Gusts are two octaves of
@@ -236,6 +278,21 @@ map. A saved material with the built-in wet shader refers to it by path and
 loads in a new process; the editor opens a scene with the weather without
 errors and leaves the file unchanged.
 
+Haze test (2026-11-07, 16 checks, headless and Vulkan): the default effects
+are sky, lighting, rain, haze and motes; `get_effect()` finds the running
+rain and returns null for an unknown class; High quality builds the volume;
+the ground ray finds the 2.00 m floor under the camera; the scene's own fog
+(0.01) goes into the haze, volumetric fog turns on with density 0, length,
+sky affect and ambient inject from the effect; Clear builds 6000 motes and
+shows none; Fog mist density is scene fog plus fog density times `density`,
+the motes at `fog * 25`; the volume sits around the camera 40 m above the
+ground; Storm rain shafts lean downwind; Low has no haze and no motes and the
+lighting's uniform fog is back with length 64; Medium has 48 noise texels and
+3000 motes; pre-save and exit restore the scene's fog. Screenshots on Vulkan:
+mist is dense at the ground and thin at the top of 6 m pillars, Fog hides the
+far pillars, Storm shows leaning rain in grey haze. The sky, rain, core and
+save round trip tests still pass.
+
 ## Findings
 
 * `RenderingServer.global_shader_parameter_add()` at the module's scene
@@ -262,3 +319,9 @@ errors and leaves the file unchanged.
 * Shader includes are not resource dependencies, so a shader that
   includes a `res://.builtin/` file exports cleanly; a material that uses a
   built-in shader lists it as a dependency, hence the export plugin.
+* A `FogVolume` moved every frame smears volumetric fog's temporal filter;
+  moving it in world-snapped steps and computing the density in world space
+  keeps the haze still.
+* Fog volume emission is stored at very low precision and tints the haze
+  green; lighting the haze with `volumetric_fog_ambient_inject` (the sky's
+  light) looks right under clouds.

@@ -144,6 +144,7 @@ public:
 	Ref<WeatherProfile> get_custom_profile() const;
 	void set_effects(const TypedArray<WeatherEffect> &p_effects);
 	TypedArray<WeatherEffect> get_effects() const;
+	Ref<WeatherEffect> get_effect(const StringName &p_class) const;
 	void set_transition_time(float p_time);
 	float get_transition_time() const;
 	void set_gust_direction_swing(float p_degrees);

@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-07 (weather step 5: haze and motes)
+
+* **Implemented**: `WeatherHazeEffect` (volumetric ground mist, rain shafts
+  and spray in a camera-following `FogVolume`), `WeatherMotesEffect`
+  (floating droplets) and `Weather.get_effect()`. 16 checks headless and on
+  Vulkan. See [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-07 (weather step 4: rain)
 
 * **Implemented**: `WeatherRainEffect` (GPU drops and impacts around the
