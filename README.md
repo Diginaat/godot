@@ -212,8 +212,16 @@ standard 3D physics node keeps working. On top of that:
   **Fracture with Blast...**).
 - `PhysXFlow3D` and `PhysXFlowEmitter3D`: NVIDIA Flow sparse-grid smoke, fire
   and dust.
-- Vehicles (`PhysXVehicle3D`, `PhysXMotorcycle3D`, `PhysXTank3D`), water
-  (`PhysXWaterSurface3D`, FFT ocean, caustics) and boats.
+- `PhysXSkinnedCloth3D`: cloth on animated characters, with wind and
+  collision inputs.
+- Active ragdolls: joint drives (through the `PhysX` singleton) that pull a
+  ragdoll's joints toward an animated pose.
+- Vehicles (`PhysXVehicle3D`, `PhysXMotorcycle3D`, `PhysXTank3D`) with engine
+  drives, water (`PhysXWaterSurface3D`, FFT ocean, caustics) and boats
+  (`PhysXBuoyancy3D`, `PhysXBoat3D`, wakes and spray).
+- `PXTGI3D` (experimental): global illumination from the module, with
+  emissive surfaces as lights. Plus camera effects: `PhysXLensDirt3D`,
+  `PhysXLensFlare3D` and `PhysXLightShafts3D`.
 
 The module's full documentation is in
 [`modules/godot_physx/README.md`](modules/godot_physx/README.md).
@@ -274,15 +282,24 @@ won't run them.
 
 ### Changes in this fork
 
-- Merged with the latest Godot `master`, with every conflict resolved by hand
-  (both sides kept).
-- Shader container format bumped to version 5, so shader caches from older
+- Merged with Godot `master` (currently `b47a795aa5`, 4.8-beta), with every
+  conflict resolved by hand (both sides kept). The PhysX module is at
+  `92da57bda8`. The NVIDIA path tracer and DLSS code stays at NVIDIA's
+  `135dff3887`; NVIDIA's November 2026 rewrite of that branch is not merged
+  yet. The current state of each source is in the sync log in
+  [`CUSTOM_BUILD.md`](CUSTOM_BUILD.md).
+- Shader container format bumped to version 6, so shader caches from older
   builds are rejected instead of crashing D3D12 startup.
 - New projects default to the Vulkan driver on Windows, because the path
   tracer needs it. Requesting path tracing on D3D12 prints an explanatory
   warning.
-- `devtools/package/package_editor_win64.ps1` packages a release editor with all
-  runtime DLLs.
+- Windows export templates (standard and .NET). Exported games get the
+  PhysX, Blast and Flow DLLs, and the DLSS files when the editor has them
+  installed (export options `native_runtime/include_physx_libraries` and
+  `native_runtime/include_nvidia_dlss`).
+- `devtools/package/package_editor_win64.ps1` and
+  `devtools/package/package_templates_win64.ps1` package the release editors
+  and export templates with all runtime DLLs.
 - [`CUSTOM_BUILD.md`](CUSTOM_BUILD.md) is the maintenance runbook for keeping
   the three sources in sync.
 
@@ -400,6 +417,12 @@ DLSS and, for .NET, the `GodotSharp` folder. It does **not** include NVIDIA's
 Streamline/DLSS runtime files, so it's safe to share. `-WithNvidiaRuntime`
 adds them for your own machines only; don't publish that zip (see
 [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md)).
+
+Export templates: build them with `devtools\build\build.ps1 -Target templates`
+(add `-Mono` for .NET), then package them into a `.tpz` with
+`devtools/package/package_templates_win64.ps1` (`-Mono` for .NET). Install
+the `.tpz` in the editor with Editor > Manage Export Templates > Install from
+File.
 
 ## Using the features
 
