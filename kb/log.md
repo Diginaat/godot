@@ -1,5 +1,17 @@
 # Update log
 
+## 2026-11-07 (sync)
+
+* **Updated**: CUSTOM_BUILD.md sync log: upstream `b47a795aa5`, physx module
+  `92da57bda8`. PXTGI needed `node_3d_editor_viewport.h` (master split it out
+  of the 3D editor plugin). Smoke: PhysX GPU, path tracer and DDGI pass.
+* **Decision**: NVIDIA force-pushed `nvidia-pt-dlss` (`49a825dc52`, same base,
+  about 28k changed lines). Not merged: against the old tip it conflicts in
+  53 files (130 hunks, mostly the path tracer and the renderer interface,
+  where this fork added planar reflections and DDGI). The fork keeps NVIDIA
+  `135dff3887`. A later merge should use `135dff3887` as the base
+  (`git merge-tree --merge-base=135dff3887`), not the upstream merge base.
+
 ## 2026-11-07 (split workspace and Live Runtime view)
 
 * **Implemented**: second main screen panel (`DOCK_SLOT_MAIN_SCREEN_SPLIT`) so
