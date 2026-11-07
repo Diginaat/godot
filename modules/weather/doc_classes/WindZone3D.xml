@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WindZone3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Local wind in a sphere or a box, on top of the world's wind or replacing it.
+	</brief_description>
+	<description>
+		Adds wind inside its shape to the [WindServer]'s wind, so foliage using the wind shader include, [WindReceiver3D] bodies, cloth and [method WindServer.sample] all feel it.
+		[b]Directional[/b] blows along the node's -Z axis, like a fan, a wind tunnel or a downdraft (point it down). [b]Radial[/b] blows outward from the center (inward with a negative strength): a rotor's downwash along the ground, or a blast when you animate [member strength]. [b]Vortex[/b] turns around the node's +Y axis: a dust devil or a whirl.
+		With [member replace_global], the zone replaces the world's wind instead of adding to it; with a [member strength] of [code]0[/code] that makes a sheltered spot, such as a courtyard or the inside of a building.
+		The wind is full strength inside and fades to nothing over [member falloff] toward the edge. The node's scale stretches the shape. Up to 64 zones can be active at once; zones are applied in the order they entered the tree. Foliage bends with the horizontal part of the wind, so use a radial zone for downwash on grass.
+		[codeblock]
+		var blast := WindZone3D.new()
+		blast.mode = WindZone3D.MODE_RADIAL
+		blast.radius = 15.0
+		add_child(blast)
+		blast.global_position = explosion_position
+		var tween := create_tween()
+		tween.tween_property(blast, "strength", 0.0, 0.6).from(40.0)
+		tween.tween_callback(blast.queue_free)
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_wind_at" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="position" type="Vector3" />
+			<description>
+				The wind this zone adds at a world [param position] (its own wind times the falloff weight), without the world's wind.
+			</description>
+		</method>
+		<method name="is_inside" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="position" type="Vector3" />
+			<description>
+				Returns [code]true[/code] if the world [param position] is inside the zone's shape.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="true">
+			When off, the zone has no effect.
+		</member>
+		<member name="falloff" type="float" setter="set_falloff" getter="get_falloff" default="0.25">
+			The share of the shape, from the edge in, over which the wind fades out. [code]0.0[/code] is a hard edge.
+		</member>
+		<member name="mode" type="int" setter="set_mode" getter="get_mode" enum="WindZone3D.Mode" default="0">
+			How the air moves in the zone.
+		</member>
+		<member name="radius" type="float" setter="set_radius" getter="get_radius" default="10.0">
+			The radius of the sphere, in meters.
+		</member>
+		<member name="replace_global" type="bool" setter="set_replace_global" getter="is_replacing_global" default="false">
+			If [code]true[/code], the zone replaces the world's wind inside its shape (blending at the falloff) instead of adding to it.
+		</member>
+		<member name="shape" type="int" setter="set_shape" getter="get_shape" enum="WindZone3D.Shape" default="0">
+			The shape of the zone.
+		</member>
+		<member name="size" type="Vector3" setter="set_size" getter="get_size" default="Vector3(10, 10, 10)">
+			The size of the box, in meters.
+		</member>
+		<member name="strength" type="float" setter="set_strength" getter="get_strength" default="10.0">
+			The zone's wind speed, in meters per second. Negative reverses it.
+		</member>
+	</members>
+	<constants>
+		<constant name="MODE_DIRECTIONAL" value="0" enum="Mode">
+			Blows along the node's -Z axis.
+		</constant>
+		<constant name="MODE_RADIAL" value="1" enum="Mode">
+			Blows outward from the center (inward for a negative strength).
+		</constant>
+		<constant name="MODE_VORTEX" value="2" enum="Mode">
+			Turns around the node's +Y axis (counterclockwise seen from above for a positive strength).
+		</constant>
+		<constant name="SHAPE_SPHERE" value="0" enum="Shape">
+			A sphere of [member radius].
+		</constant>
+		<constant name="SHAPE_BOX" value="1" enum="Shape">
+			A box of [member size].
+		</constant>
+	</constants>
+</class>

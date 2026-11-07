@@ -110,3 +110,14 @@ Step 1 of the native weather (see `WEATHER.md` at the repository root):
 * **Thunder is late on purpose.** `Weather.lightning_struck` queues a clap
   `distance / 343` seconds out; closeness picks crack or rumble and the
   low-pass cutoff.
+
+# Local wind zones (step 8)
+
+* **Zones in a texture.** `WindZone3D` nodes register with the
+  `WindServer`, which packs them into a small float texture (5 texels each)
+  for the shaders and applies the same math on the CPU; GPU matched CPU
+  within 0.031 m/s.
+* **Add or replace.** Directional, radial and vortex zones add to the
+  world's wind; replace with strength 0 is a shelter.
+* **Weather stays global.** The weather reads `sample_global()`, so a fan
+  near the camera doesn't slant all the rain.

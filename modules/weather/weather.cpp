@@ -654,7 +654,8 @@ void Weather::_process_weather(double p_delta) {
 		drive(wind_server, SNAME("gustiness"), gustiness);
 		drive(wind_server, SNAME("direction_swing_degrees"), gust_direction_swing);
 		gust = wind_server->get_gust(view_position);
-		wind = wind_server->sample(view_position);
+		// The world's wind, not local zones: a fan by the camera must not slant all the rain.
+		wind = wind_server->sample_global(view_position);
 	}
 	// Rain comes in bursts with the gusts.
 	rain_amount = CLAMP(rain * (1.0f + gust_rain_bursts * gustiness * (gust - 0.5f)), 0.0f, 1.0f);

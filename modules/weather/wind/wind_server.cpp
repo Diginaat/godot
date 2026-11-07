@@ -38,7 +38,9 @@
 #include "core/math/math_funcs.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/io/image.h"
 #include "core/os/os.h"
+#include "scene/resources/image_texture.h"
 #include "scene/resources/shader_include.h"
 #include "servers/rendering/rendering_server.h"
 
@@ -47,6 +49,7 @@ WindServer *WindServer::singleton = nullptr;
 const char *WindServer::GLOBAL_MEAN = "wind_mean";
 const char *WindServer::GLOBAL_GUST = "wind_gust";
 const char *WindServer::GLOBAL_MOTION = "wind_motion";
+const char *WindServer::GLOBAL_ZONES = "wind_zones";
 
 static const char *WIND_INCLUDE_PATH = "res://.builtin/wind.gdshaderinc";
 
@@ -103,6 +106,36 @@ Vector3 WindServer::sample_state(const State &p_state, const Vector3 &p_position
 	return Vector3(d.x, 0.0f, d.y) * MAX(speed, 0.0f);
 }
 
+Vector3 WindServer::apply_zone(const Zone &p_zone, const Vector3 &p_position, const Vector3 &p_wind) {
+	const Vector3 offset = p_position - p_zone.origin;
+	const Vector3 unit = p_zone.to_unit.xform(offset);
+	const float distance = p_zone.shape == ZONE_SPHERE ? unit.length() : MAX(MAX(Math::abs(unit.x), Math::abs(unit.y)), Math::abs(unit.z));
+	if (distance >= 1.0f) {
+		return p_wind;
+	}
+	// Full strength inside, fading out over the falloff toward the edge
+	// (GLSL smoothstep).
+	const float falloff = MAX(p_zone.falloff, 0.001f);
+	const float t = CLAMP((distance - (1.0f - falloff)) / falloff, 0.0f, 1.0f);
+	const float weight = 1.0f - t * t * (3.0f - 2.0f * t);
+	Vector3 zone_wind;
+	switch (p_zone.mode) {
+		case ZONE_DIRECTIONAL: {
+			zone_wind = p_zone.axis * p_zone.strength;
+		} break;
+		case ZONE_RADIAL: {
+			const float length = offset.length();
+			zone_wind = length > 0.001f ? offset * (p_zone.strength / length) : Vector3();
+		} break;
+		case ZONE_VORTEX: {
+			const Vector3 around = p_zone.axis.cross(offset);
+			const float length = around.length();
+			zone_wind = length > 0.001f ? around * (p_zone.strength / length) : Vector3();
+		} break;
+	}
+	return p_zone.replace ? p_wind.lerp(zone_wind, weight) : p_wind + zone_wind * weight;
+}
+
 void WindServer::register_project_settings() {
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "weather/wind/default_speed", PROPERTY_HINT_RANGE, "0,60,0.1,suffix:m/s"), 3.0);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "weather/wind/default_direction_degrees", PROPERTY_HINT_RANGE, "0,360,0.1,degrees"), 30.0);
@@ -136,7 +169,9 @@ void WindServer::initialize() {
 		rs->global_shader_parameter_add(GLOBAL_MEAN, RSE::GLOBAL_VAR_TYPE_VEC4, Vector4());
 		rs->global_shader_parameter_add(GLOBAL_GUST, RSE::GLOBAL_VAR_TYPE_VEC4, Vector4());
 		rs->global_shader_parameter_add(GLOBAL_MOTION, RSE::GLOBAL_VAR_TYPE_VEC4, Vector4());
+		rs->global_shader_parameter_add(GLOBAL_ZONES, RSE::GLOBAL_VAR_TYPE_SAMPLER2D, Variant());
 		globals_registered = true;
+		_update_zone_texture();
 		_push_shader_globals(get_state());
 		rs->connect(SNAME("frame_pre_draw"), callable_mp(this, &WindServer::_frame_pre_draw));
 	}
@@ -149,6 +184,7 @@ void WindServer::finalize() {
 		rs->disconnect(SNAME("frame_pre_draw"), callable_mp(this, &WindServer::_frame_pre_draw));
 	}
 	shader_include.unref();
+	zone_texture.unref();
 }
 
 void WindServer::_frame_pre_draw() {
@@ -159,6 +195,86 @@ void WindServer::_frame_pre_draw() {
 	if (auto_update) {
 		advance(delta * Engine::get_singleton()->get_time_scale());
 	}
+	bool update_zones = false;
+	{
+		MutexLock guard(lock);
+		update_zones = zones_dirty;
+	}
+	if (update_zones) {
+		_update_zone_texture();
+		_push_shader_globals(get_state());
+	}
+}
+
+void WindServer::_update_zone_texture() {
+	// One row of float texels, ZONE_TEXELS per zone:
+	//  0: origin, flags (mode + 4 * shape + 8 * replace)
+	//  1-3: rows of the world-to-unit basis; w: falloff, strength, 0
+	//  4: axis
+	const int width = MAX_ZONES * ZONE_TEXELS;
+	Vector<uint8_t> data;
+	data.resize(width * 4 * sizeof(float));
+	data.fill(0);
+	float *texels = (float *)data.ptrw();
+	{
+		MutexLock guard(lock);
+		zones_dirty = false;
+		for (uint32_t i = 0; i < zones.size(); i++) {
+			const Zone &zone = zones[i].zone;
+			float *t = texels + i * ZONE_TEXELS * 4;
+			const float values[ZONE_TEXELS * 4] = {
+				zone.origin.x, zone.origin.y, zone.origin.z, float(zone.mode + 4 * zone.shape + 8 * (zone.replace ? 1 : 0)),
+				zone.to_unit.rows[0].x, zone.to_unit.rows[0].y, zone.to_unit.rows[0].z, MAX(zone.falloff, 0.001f),
+				zone.to_unit.rows[1].x, zone.to_unit.rows[1].y, zone.to_unit.rows[1].z, zone.strength,
+				zone.to_unit.rows[2].x, zone.to_unit.rows[2].y, zone.to_unit.rows[2].z, 0.0f,
+				zone.axis.x, zone.axis.y, zone.axis.z, 0.0f
+			};
+			memcpy(t, values, sizeof(values));
+		}
+	}
+	const Ref<Image> image = Image::create_from_data(width, 1, false, Image::FORMAT_RGBAF, data);
+	if (zone_texture.is_valid()) {
+		zone_texture->update(image);
+	} else {
+		zone_texture = ImageTexture::create_from_image(image);
+		RenderingServer *rs = RenderingServer::get_singleton();
+		if (globals_registered && rs) {
+			rs->global_shader_parameter_set(GLOBAL_ZONES, zone_texture);
+		}
+	}
+}
+
+void WindServer::set_zone(const void *p_owner, const Zone &p_zone) {
+	MutexLock guard(lock);
+	for (ZoneEntry &entry : zones) {
+		if (entry.owner == p_owner) {
+			entry.zone = p_zone;
+			zones_dirty = true;
+			return;
+		}
+	}
+	ERR_FAIL_COND_MSG(zones.size() >= (uint32_t)MAX_ZONES, vformat("Too many wind zones: at most %d at once.", MAX_ZONES));
+	ZoneEntry entry;
+	entry.owner = p_owner;
+	entry.zone = p_zone;
+	zones.push_back(entry);
+	zones_dirty = true;
+}
+
+void WindServer::remove_zone(const void *p_owner) {
+	MutexLock guard(lock);
+	for (uint32_t i = 0; i < zones.size(); i++) {
+		if (zones[i].owner == p_owner) {
+			zones.remove_at(i);
+			zones_dirty = true;
+			return;
+		}
+	}
+}
+
+int WindServer::get_zone_count() const {
+	MutexLock guard(lock);
+	return zones.size();
 }
 
 void WindServer::advance(double p_delta) {
@@ -185,7 +301,16 @@ void WindServer::_push_shader_globals(const State &p_state) {
 	}
 	rs->global_shader_parameter_set(GLOBAL_MEAN, Vector4(p_state.direction.x, p_state.direction.y, p_state.speed, p_state.gustiness));
 	rs->global_shader_parameter_set(GLOBAL_GUST, Vector4(p_state.offset.x, p_state.offset.y, p_state.inv_gust_scale, p_state.direction_swing));
-	rs->global_shader_parameter_set(GLOBAL_MOTION, Vector4(p_state.drift, p_state.turbulence, 0.0f, 0.0f));
+	int zone_count = 0;
+	{
+		MutexLock guard(lock);
+		// The texture holds the zones from the last update, so count those.
+		zone_count = zones_dirty ? -1 : (int)zones.size();
+	}
+	if (zone_count >= 0) {
+		shader_zone_count = zone_count;
+	}
+	rs->global_shader_parameter_set(GLOBAL_MOTION, Vector4(p_state.drift, p_state.turbulence, (float)shader_zone_count, 0.0f));
 }
 
 void WindServer::_update_direction() {
@@ -201,6 +326,15 @@ WindServer::State WindServer::get_state() const {
 }
 
 Vector3 WindServer::sample(const Vector3 &p_position) const {
+	MutexLock guard(lock);
+	Vector3 wind = sample_state(state, p_position);
+	for (const ZoneEntry &entry : zones) {
+		wind = apply_zone(entry.zone, p_position, wind);
+	}
+	return wind;
+}
+
+Vector3 WindServer::sample_global(const Vector3 &p_position) const {
 	return sample_state(get_state(), p_position);
 }
 
@@ -320,6 +454,8 @@ String WindServer::get_shader_include_code() const {
 
 void WindServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sample", "position"), &WindServer::sample);
+	ClassDB::bind_method(D_METHOD("sample_global", "position"), &WindServer::sample_global);
+	ClassDB::bind_method(D_METHOD("get_zone_count"), &WindServer::get_zone_count);
 	ClassDB::bind_method(D_METHOD("get_mean_wind"), &WindServer::get_mean_wind);
 	ClassDB::bind_method(D_METHOD("get_gust_factor", "position"), &WindServer::get_gust_factor);
 	ClassDB::bind_method(D_METHOD("get_gust", "position"), &WindServer::get_gust);

@@ -7,6 +7,7 @@
 		The one global wind of the world. Everything that reacts to wind reads it here, so grass, trees, cloth and bodies all move with the same gusts.
 		The wind at a point is the mean wind ([member speed] toward [member direction_degrees]) plus gusts: a noise pattern [member gust_scale] meters across that travels with the wind, so gust fronts sweep across grass fields at the wind's speed. Gusts also swing the direction by up to [member direction_swing_degrees].
 		[b]Shaders:[/b] the server sets the global shader parameters [code]wind_mean[/code], [code]wind_gust[/code] and [code]wind_motion[/code] (all [code]vec4[/code]) every frame. Include the built-in shader include at [method get_shader_include_path] to use [code]wind_sample()[/code], [code]wind_grass_offset()[/code] and [code]wind_tree_offset()[/code]; the comment at the top of the include shows how. The noise is the same as in [method sample], so a shader and a script see the same wind at the same point. [GrassField3D]'s default material uses it.
+		[b]Local wind:[/b] [WindZone3D] nodes add wind on top of this one, or replace it, inside a sphere or a box: fans, downwash, blasts, whirlwinds, shelters. [method sample] and [code]wind_sample()[/code] include them; [method sample_global] doesn't. The shaders read them from the global sampler [code]wind_zones[/code], the count is [code]wind_motion.z[/code].
 		[b]Physics:[/b] add a [WindReceiver3D] to a [RigidBody3D]. [PhysXCloth3D] adds this wind when [member PhysXCloth3D.use_global_wind] is on.
 		The startup values come from the [code]weather/wind/*[/code] project settings. The wind moves in the editor too.
 		[codeblock]
@@ -63,11 +64,24 @@
 				The path of the built-in wind shader include, [code]"res://.builtin/wind.gdshaderinc"[/code]. It is served from memory, so [code]#include[/code] finds it in every project and in exported games without a file.
 			</description>
 		</method>
+		<method name="get_zone_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				The number of active [WindZone3D] zones (at most 64 at once).
+			</description>
+		</method>
 		<method name="sample" qualifiers="const">
 			<return type="Vector3" />
 			<param index="0" name="position" type="Vector3" />
 			<description>
-				The wind velocity at a world [param position], in meters per second, gusts included. The wind is horizontal ([code]y[/code] is [code]0[/code]). Thread-safe.
+				The wind velocity at a world [param position], in meters per second, gusts and [WindZone3D] zones included. The world's wind is horizontal; zones can blow in any direction. Thread-safe.
+			</description>
+		</method>
+		<method name="sample_global" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="position" type="Vector3" />
+			<description>
+				The world's wind at [param position] without the [WindZone3D] zones: the mean wind and gusts. The weather uses it for rain and haze, so a local fan doesn't slant all the rain. Thread-safe.
 			</description>
 		</method>
 	</methods>

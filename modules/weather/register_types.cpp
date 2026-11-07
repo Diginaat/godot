@@ -43,6 +43,7 @@
 #include "weather_profile.h"
 #include "wind/wind_receiver_3d.h"
 #include "wind/wind_server.h"
+#include "wind/wind_zone_3d.h"
 
 #include "core/config/engine.h"
 #include "core/object/class_db.h"
@@ -51,6 +52,7 @@
 #include "editor/editor_node.h"
 #include "editor/export/editor_export.h"
 #include "editor/weather_export_plugin.h"
+#include "editor/wind_zone_3d_editor_plugin.h"
 
 static void _weather_editor_init() {
 	Ref<WeatherExportPlugin> export_plugin;
@@ -70,6 +72,7 @@ void initialize_weather_module(ModuleInitializationLevel p_level) {
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {
 		GDREGISTER_CLASS(WindServer);
 		GDREGISTER_CLASS(WindReceiver3D);
+		GDREGISTER_CLASS(WindZone3D);
 		GDREGISTER_CLASS(WeatherProfile);
 		GDREGISTER_CLASS(WeatherLibrary);
 		GDREGISTER_CLASS(WeatherEffect);
@@ -94,6 +97,7 @@ void initialize_weather_module(ModuleInitializationLevel p_level) {
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
 		EditorNode::add_init_callback(_weather_editor_init);
+		EditorPlugins::add_by_type<WindZone3DEditorPlugin>();
 	}
 #endif
 }

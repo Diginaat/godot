@@ -23,8 +23,13 @@ def get_doc_classes():
         "WeatherSoundEffect",
         "WindReceiver3D",
         "WindServer",
+        "WindZone3D",
     ]
 
 
 def get_doc_path():
     return "doc_classes"
+
+
+def get_icons_path():
+    return "icons"

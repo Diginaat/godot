@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-07 (weather step 8: wind zones)
+
+* **Implemented**: `WindZone3D` (directional, radial, vortex; sphere or
+  box; add or replace), zones in `WindServer.sample()` and the wind shader
+  include through a float texture, `WindServer.sample_global()`, an
+  editor gizmo. 22 checks; GPU matched CPU within 0.031 m/s. See
+  [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-07 (weather step 7: sound)
 
 * **Implemented**: `WeatherSoundEffect` and `WeatherSoundSynth`: rain,

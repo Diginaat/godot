@@ -20,7 +20,7 @@ into `dev` once the weather is complete.
 | `WindReceiver3D` | Child of a `RigidBody3D`: aerodynamic drag from the wind, at the node's position (torque when off-centre), area from the collision shapes. | 1 |
 | `GrassField3D` default material | Blades bend with the wind when the module is built. | 1 |
 | `PhysXCloth3D.use_global_wind` | Cloth adds the world's wind. | 1 |
-| `WindZone3D` | Local wind on top of the global one (downwash, blasts, vortices). | later |
+| `WindZone3D` | Local wind in a sphere or box, added to the world's wind or replacing it: directional (fans, downdrafts), radial (downwash, blasts), vortex; a calm shelter with replace and strength 0. CPU and shaders. | 8 |
 | `WeatherProfile` (resource) | One weather state (13 built-in parameters). Blending walks the property list, so a new parameter is one enum entry and one property, and script subclasses blend their own exported values. | 2 |
 | `WeatherLibrary` (resource) | The weather types by name. A new type is a new profile in a library, no code; the built-in 11 come from `WeatherLibrary.get_default()`. | 2 |
 | `Weather` (node) | Picks and blends profiles, drives the `WindServer`, wetness globals, runs its effects, editor preview. Scene values go through `drive()`, restored before save and on exit. | 2 |
@@ -49,6 +49,7 @@ keeps working until it switches.
 | 5 | Ground haze and mist motes: `WeatherHazeEffect`, `WeatherMotesEffect`, `Weather.get_effect()` | Done |
 | 6 | Lightning: `WeatherLightningEffect`, `WeatherSkyEffect.set_lightning()`, `Weather.lightning_struck` | Done |
 | 7 | Sound: `WeatherSoundEffect`, `WeatherSoundSynth` | Done |
+| 8 | Local wind: `WindZone3D`, zones in `WindServer` and the shader include, editor gizmo | Done |
 
 ## Weather core
 
@@ -262,7 +263,8 @@ The noise is written twice, in C++ (`WindServer::noise()`,
 
 Shader globals (`vec4`, registered by the module before any scene loads):
 `wind_mean` (direction x, z, speed, gustiness), `wind_gust` (offset x, z,
-1 / gust size, swing radians), `wind_motion` (drift, turbulence). A project
+1 / gust size, swing radians), `wind_motion` (drift, turbulence, zone
+count), and the `sampler2D` `wind_zones` (see below). A project
 that declares the same names (as `vec4`) just keeps working.
 
 Usage:
@@ -283,6 +285,24 @@ Trees: `wind_tree_offset(world_vertex, root, height, stiffness, branch, leaf,
 world_normal, TIME)`, with branch and leaf weights from vertex colour or a
 height mask. The trunk leans downwind and rocks at a frequency that drops with
 height, branches bob, leaves flutter along their normal.
+
+Local wind: `WindZone3D` nodes register a zone with the `WindServer`
+(origin, a world-to-unit basis that includes the node's scale, the axis,
+strength, falloff, mode, shape, replace). `sample()` applies them in order
+after the world's wind; `sample_global()` skips them, and the `Weather`
+node uses it for the camera's wind, so a fan by the camera doesn't slant
+all the rain. For the shaders the server writes the zones into a 320 x 1
+`RGBAF` texture (5 texels per zone, up to 64 zones), rebuilt in
+`frame_pre_draw` only when a zone changed; `wind_motion.z` holds the count
+of zones in the texture. `wind_zones_apply()` in the include matches
+`WindServer::apply_zone()`. The weight is `1 - smoothstep(1 - falloff, 1,
+d)` with `d` the distance in unit space (sphere: length, box: largest
+axis). Directional zones blow along -Z, vortices turn around +Y
+(`cross(axis, offset)`). Grass and tree bending use the horizontal part of
+the wind, so a downdraft doesn't bend plants; downwash on grass is a radial
+zone. The node updates its zone on the transform notification (the frame
+after a move) and on every property change. In the editor, a gizmo draws
+the shape and arrows for the flow.
 
 Physics: add a `WindReceiver3D` under a `RigidBody3D`. The force is clamped so
 it can at most bring the body to the wind's speed in one physics step (light,
@@ -389,6 +409,24 @@ the players and the bus. Compared with the offline generator's files
 spread between two random takes. The other tests still pass; the editor
 opens a scene with all seven effects without errors.
 
+Zone test (2026-11-07, 21 checks headless, 22 on Vulkan): a directional
+sphere gives (0, 0, -8) at the center and the computed falloff weight
+(-2.816) at 0.9 of the radius, nothing outside, and `sample_global()`
+ignores it; it follows the node's rotation (toward -X, and straight down);
+a freed zone is gone; radial blows outward and inward for a negative
+strength; a vortex turns around +Y and is still on the axis; a box with no
+falloff is full strength to the edge, nothing past it, and stretches with
+the node's scale; `is_inside()`; a zone adds to the world's wind, and
+replace with strength 0 makes a calm shelter while the wind outside stays;
+disabling removes it; a `WindReceiver3D` box in a fan reaches 9.1 m/s in
+one second; the weather's camera wind ignores a 30 m/s zone around the
+camera. GPU against CPU with a rotated box, a radial, a vortex and a
+shelter zone over 64 x 64 points (942 inside zones): worst 0.031 m/s. A
+`GrassField3D` seen from above bends outward in a radial downwash and
+swirls in a vortex. The editor opens a scene with two zones without
+errors and leaves it unchanged; the wind test and the weather tests still
+pass.
+
 ## Findings
 
 * `RenderingServer.global_shader_parameter_add()` at the module's scene
@@ -434,3 +472,7 @@ opens a scene with all seven effects without errors.
 * Noise shaped by drawing the spectrum directly (Gaussian real and
   imaginary parts per bin, times the gain) is the same as filtering white
   noise and saves the forward FFT.
+* `NOTIFICATION_TRANSFORM_CHANGED` comes on the next transform flush, not
+  in the call that moved the node, so a `WindZone3D` follows a move one
+  frame later; scripts that move a zone and sample at once see the old
+  place.
