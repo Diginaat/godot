@@ -64,9 +64,19 @@ in its own process; only the place of the `EmbeddedProcess` control changes.
   left/top puts the split panel first.
 - Each panel has its own tabs, so its role (Game, 2D, 3D, Script) is chosen by
   its selected tab. The main screen buttons in the title bar select the main
-  panel's role.
+  panel's role. The split panel's docks stay listed in the title bar too
+  (after the main screen buttons, highlighted while shown), so Game is always
+  there wherever it is docked.
 - With a dock in the split panel, its context menu shows **Vertical Split** and
   **Swap Panels**. The divider between the panels is draggable.
+- Each panel has a maximize button (the distraction-free icon) at the right of
+  its tab row. The scene tabs' button maximizes the main screen: the docks and
+  the split panel are hidden, so only the viewport is left. The split panel's
+  button does the same for its view (for example only the Game view). Both use
+  distraction-free mode, so the shortcut and the bottom panel behave as
+  before. Pressing the button again, picking another main screen, or clicking
+  the split dock's title bar entry while the main screen is maximized
+  restores both panels.
 - Move the docks back to the main screen to close the split.
 
 **Saved state** (`[docks]` in `editor_layout.cfg`): the split panel's docks
@@ -79,8 +89,8 @@ layouts store the same keys.
 | File | Change |
 | --- | --- |
 | `editor/docks/editor_dock.h/.cpp`, `doc/classes/EditorDock.xml` | New slot `DOCK_SLOT_MAIN_SCREEN_SPLIT` (`DOCK_SLOT_MAX` is now 13) |
-| `editor/editor_main_screen.h/.cpp` | `EditorMainScreenSplit` (tab bar height follows the scene tabs); main screen grid cell is now the left half |
-| `editor/editor_node.h/.cpp` | `DockSplitWorkspace` holding both panels, with the scene tabs in the main screen column; edge drops; theme |
+| `editor/editor_main_screen.h/.cpp` | `EditorMainScreenSplit` (tab bar height follows the scene tabs, title bar entries, maximize button); main screen grid cell is now the left half |
+| `editor/editor_node.h/.cpp` | `DockSplitWorkspace` holding both panels, with the scene tabs in the main screen column; edge drops; theme; distraction-free mode maximizes one side |
 | `editor/docks/editor_dock_manager.h/.cpp` | Orientation, swap, save and load; Vertical Split and Swap Panels in the context popup |
 | `editor/docks/dock_tab_container.cpp` | Dropping on a main screen edge sets the split orientation |
 | `editor/editor_interface.cpp` | `set_main_screen_editor()` also finds editors in the split panel |

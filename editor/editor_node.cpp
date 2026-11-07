@@ -7049,9 +7049,32 @@ void EditorNode::set_distraction_free_mode(bool p_enter) {
 		}
 	} else {
 		editor_dock_manager->set_docks_visible(true);
+		workspace_split_maximized = false;
+	}
+
+	// With the workspace split, distraction-free mode maximizes one side: the main screen
+	// (scene tabs' button) or the split panel (its own button).
+	if (editor_main_screen_split) {
+		EditorMainScreenSplit::Maximized maximized = EditorMainScreenSplit::MAXIMIZED_NONE;
+		if (p_enter) {
+			maximized = workspace_split_maximized ? EditorMainScreenSplit::MAXIMIZED_SPLIT : EditorMainScreenSplit::MAXIMIZED_MAIN;
+		}
+		editor_main_screen_split->set_maximized(maximized);
 	}
 
 	emit_signal(SNAME("distraction_free_mode_changed"), p_enter);
+}
+
+void EditorNode::set_workspace_split_maximized(bool p_maximized) {
+	workspace_split_maximized = p_maximized;
+	set_distraction_free_mode(p_maximized);
+}
+
+void EditorNode::_main_screen_tab_clicked(int p_tab) {
+	// Picking a main screen while the split panel fills the workspace brings the main screen back.
+	if (workspace_split_maximized) {
+		set_distraction_free_mode(false);
+	}
 }
 
 bool EditorNode::is_distraction_free_mode_enabled() const {
@@ -9128,6 +9151,10 @@ EditorNode::EditorNode() {
 	editor_main_screen_split->set_name("DockSlotMainScreenSplit");
 	workspace_split->add_child(editor_main_screen_split);
 	editor_main_screen_split->set_header_reference(scene_tabs);
+	editor_main_screen_split->set_main_side(main_screen_vb);
+	editor_main_screen_split->set_title_container(editor_main_screen->get_internal_container());
+	editor_main_screen->connect("tab_clicked", callable_mp(this, &EditorNode::_main_screen_tab_clicked));
+	editor_main_screen->connect("tab_changed", callable_mp(this, &EditorNode::_main_screen_tab_clicked));
 
 	editor_main_screen->add_margin_valid_drop(SIDE_LEFT, EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT);
 	editor_main_screen->add_margin_valid_drop(SIDE_RIGHT, EditorDock::DOCK_SLOT_MAIN_SCREEN_SPLIT);

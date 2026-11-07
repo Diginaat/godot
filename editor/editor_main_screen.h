@@ -33,9 +33,11 @@
 #include "editor/docks/dock_tab_container.h"
 #include "scene/gui/box_container.h"
 
+class Button;
 class ConfigFile;
 class EditorDock;
 class EditorPlugin;
+class TabBar;
 
 #ifndef DISABLE_DEPRECATED
 class LegacyMainScreenContainer : public VBoxContainer {
@@ -87,9 +89,27 @@ public:
 class EditorMainScreenSplit : public DockTabContainer {
 	GDCLASS(EditorMainScreenSplit, DockTabContainer);
 
+public:
+	enum Maximized {
+		MAXIMIZED_NONE,
+		MAXIMIZED_MAIN, // The main screen fills the workspace; this panel is hidden.
+		MAXIMIZED_SPLIT, // This panel fills the workspace; the main screen side is hidden.
+	};
+
+private:
 	Control *header_reference = nullptr;
+	Control *main_side = nullptr;
+	TabBar *title_tabs = nullptr; // This panel's docks, in the title bar next to the main screen tabs.
+	Button *maximize_button = nullptr;
+	Maximized maximized = MAXIMIZED_NONE;
+	bool title_tabs_queued = false;
 
 	void _update_header_height();
+	void _queue_update_title_tabs();
+	void _update_title_tabs();
+	void _update_title_tabs_theme();
+	void _title_tab_clicked(int p_tab);
+	void _maximize_toggled(bool p_pressed);
 
 protected:
 	void _notification(int p_what);
@@ -103,6 +123,14 @@ public:
 	// Keeps the tab bar as tall as p_control (the scene tabs above the main screen), so the
 	// panel's toolbar and viewport line up with the main screen's.
 	void set_header_reference(Control *p_control);
+	// p_main_side holds the scene tabs and the main screen; it is hidden while this panel is maximized.
+	void set_main_side(Control *p_main_side);
+	// Shows this panel's docks as tabs in p_container (the title bar's main screen tabs), so they
+	// stay listed there when moved out of the main screen.
+	void set_title_container(Control *p_container);
+
+	void set_maximized(Maximized p_maximized);
+	Maximized get_maximized() const { return maximized; }
 
 	EditorMainScreenSplit();
 };
