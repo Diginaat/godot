@@ -215,6 +215,31 @@ bool EditorMainScreenSplit::can_switch_dock() const {
 	return dock && dock->is_allow_switch_screen();
 }
 
+void EditorMainScreenSplit::_update_header_height() {
+	int height = 0;
+	if (header_reference && header_reference->is_visible()) {
+		Ref<StyleBox> tabbar_style = get_theme_stylebox(SNAME("tabbar_background"));
+		height = header_reference->get_size().height;
+		if (tabbar_style.is_valid()) {
+			height -= tabbar_style->get_margin(SIDE_TOP) + tabbar_style->get_margin(SIDE_BOTTOM);
+		}
+	}
+	get_internal_container()->set_custom_minimum_size(Size2(0, MAX(0, height)));
+}
+
+void EditorMainScreenSplit::_notification(int p_what) {
+	if (p_what == NOTIFICATION_THEME_CHANGED) {
+		_update_header_height();
+	}
+}
+
+void EditorMainScreenSplit::set_header_reference(Control *p_control) {
+	header_reference = p_control;
+	header_reference->connect(SceneStringName(resized), callable_mp(this, &EditorMainScreenSplit::_update_header_height));
+	header_reference->connect(SceneStringName(visibility_changed), callable_mp(this, &EditorMainScreenSplit::_update_header_height));
+	_update_header_height();
+}
+
 void EditorMainScreenSplit::update_visibility() {
 	// Unlike side docks, the split stays visible in distraction-free mode: it is part of the workspace.
 	set_visible(get_tab_count() > 0);
