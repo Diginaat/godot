@@ -96,6 +96,9 @@
 		<member name="substeps" type="int" setter="set_substeps" getter="get_substeps" default="12">
 			Solver substeps per physics tick. More substeps make stiff cloth more stable at some CPU cost.
 		</member>
+		<member name="use_global_wind" type="bool" setter="set_use_global_wind" getter="is_using_global_wind" default="true">
+			If [code]true[/code] and the weather module is built, the world's wind from [WindServer] is added to [member wind] and [member wind_area], sampled at the cloth's position.
+		</member>
 		<member name="wind" type="Vector3" setter="set_wind" getter="get_wind" default="Vector3(0, 0, 0)">
 			A constant world-space air velocity, added on top of any [member wind_area].
 		</member>

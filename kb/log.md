@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-07 (weather step 1: wind)
+
+* **Implemented**: `modules/weather/` with the `WindServer` singleton (gusts
+  that travel with the wind, same noise in C++ and in the built-in shader
+  include `res://.builtin/wind.gdshaderinc`), `WindReceiver3D` (drag on rigid
+  bodies), wind in `GrassField3D`'s default material and
+  `PhysXCloth3D.use_global_wind`. GPU matched CPU within 0.043 m/s. See
+  [World wind](/project/world-wind.md) and `WEATHER.md`.
+
 ## 2026-11-07 (sync)
 
 * **Updated**: CUSTOM_BUILD.md sync log: upstream `b47a795aa5`, physx module

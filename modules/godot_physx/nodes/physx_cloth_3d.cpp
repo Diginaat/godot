@@ -263,7 +263,16 @@ Vector3 PhysXCloth3D::_sample_wind(double p_delta) {
 		}
 		center /= (float)sp.size();
 	}
-	return physx_cloth_sample_wind(wind, area, wind_turbulence, wind_time, center);
+	Vector3 result = physx_cloth_sample_wind(wind, area, wind_turbulence, wind_time, center);
+	if (use_global_wind) {
+		// The world's wind from the weather module, looked up by name so the
+		// module stays optional.
+		Object *wind_server = Engine::get_singleton()->has_singleton("WindServer") ? Engine::get_singleton()->get_singleton_object("WindServer") : nullptr;
+		if (wind_server) {
+			result += Vector3(wind_server->call(SNAME("sample"), center));
+		}
+	}
+	return result;
 }
 
 void PhysXCloth3D::_step(double p_delta) {
@@ -764,6 +773,8 @@ void PhysXCloth3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_wind"), &PhysXCloth3D::get_wind);
 	ClassDB::bind_method(D_METHOD("set_wind_turbulence", "turbulence"), &PhysXCloth3D::set_wind_turbulence);
 	ClassDB::bind_method(D_METHOD("get_wind_turbulence"), &PhysXCloth3D::get_wind_turbulence);
+	ClassDB::bind_method(D_METHOD("set_use_global_wind", "enabled"), &PhysXCloth3D::set_use_global_wind);
+	ClassDB::bind_method(D_METHOD("is_using_global_wind"), &PhysXCloth3D::is_using_global_wind);
 	ClassDB::bind_method(D_METHOD("set_drag", "drag"), &PhysXCloth3D::set_drag);
 	ClassDB::bind_method(D_METHOD("get_drag"), &PhysXCloth3D::get_drag);
 	ClassDB::bind_method(D_METHOD("set_lift", "lift"), &PhysXCloth3D::set_lift);
@@ -805,6 +816,7 @@ void PhysXCloth3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "wind_area", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Area3D"), "set_wind_area", "get_wind_area");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "wind", PROPERTY_HINT_NONE, "suffix:m/s"), "set_wind", "get_wind");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "wind_turbulence", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_wind_turbulence", "get_wind_turbulence");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_global_wind"), "set_use_global_wind", "is_using_global_wind");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "drag", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_drag", "get_drag");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "lift", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_lift", "get_lift");
 	ADD_GROUP("Pinning", "");

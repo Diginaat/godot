@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WindServer" inherits="Object" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		The world's wind, shared by foliage shaders, physics bodies, cloth and scripts.
+	</brief_description>
+	<description>
+		The one global wind of the world. Everything that reacts to wind reads it here, so grass, trees, cloth and bodies all move with the same gusts.
+		The wind at a point is the mean wind ([member speed] toward [member direction_degrees]) plus gusts: a noise pattern [member gust_scale] meters across that travels with the wind, so gust fronts sweep across grass fields at the wind's speed. Gusts also swing the direction by up to [member direction_swing_degrees].
+		[b]Shaders:[/b] the server sets the global shader parameters [code]wind_mean[/code], [code]wind_gust[/code] and [code]wind_motion[/code] (all [code]vec4[/code]) every frame. Include the built-in shader include at [method get_shader_include_path] to use [code]wind_sample()[/code], [code]wind_grass_offset()[/code] and [code]wind_tree_offset()[/code]; the comment at the top of the include shows how. The noise is the same as in [method sample], so a shader and a script see the same wind at the same point. [GrassField3D]'s default material uses it.
+		[b]Physics:[/b] add a [WindReceiver3D] to a [RigidBody3D]. [PhysXCloth3D] adds this wind when [member PhysXCloth3D.use_global_wind] is on.
+		The startup values come from the [code]weather/wind/*[/code] project settings. The wind moves in the editor too.
+		[codeblock]
+		WindServer.speed = 12.0
+		WindServer.direction_degrees = 90.0 # Toward +X.
+		var wind := WindServer.sample(global_position) # m/s at this point, gusts included.
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="advance">
+			<return type="void" />
+			<param index="0" name="delta" type="float" />
+			<description>
+				Moves the gust pattern on by [param delta] seconds (times [member time_scale]). Called every frame while [member auto_update] is on.
+			</description>
+		</method>
+		<method name="get_direction" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				The direction the mean wind blows toward, horizontal and of unit length.
+			</description>
+		</method>
+		<method name="get_gust_factor" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="position" type="Vector3" />
+			<description>
+				The wind's speed at [param position] relative to the mean [member speed]: above [code]1.0[/code] in a gust, below in a lull.
+			</description>
+		</method>
+		<method name="get_mean_wind" qualifiers="const">
+			<return type="Vector3" />
+			<description>
+				The mean wind velocity in meters per second, without gusts.
+			</description>
+		</method>
+		<method name="get_shader_include_code" qualifiers="const">
+			<return type="String" />
+			<description>
+				The source of the wind shader include, for example to copy it into a project file and change it.
+			</description>
+		</method>
+		<method name="get_shader_include_path" qualifiers="const">
+			<return type="String" />
+			<description>
+				The path of the built-in wind shader include, [code]"res://.builtin/wind.gdshaderinc"[/code]. It is served from memory, so [code]#include[/code] finds it in every project and in exported games without a file.
+			</description>
+		</method>
+		<method name="sample" qualifiers="const">
+			<return type="Vector3" />
+			<param index="0" name="position" type="Vector3" />
+			<description>
+				The wind velocity at a world [param position], in meters per second, gusts included. The wind is horizontal ([code]y[/code] is [code]0[/code]). Thread-safe.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="air_density" type="float" setter="set_air_density" getter="get_air_density" default="1.225">
+			Air density in kg/m³, used by [WindReceiver3D] for the drag force. [code]1.225[/code] is air at sea level.
+		</member>
+		<member name="auto_update" type="bool" setter="set_auto_update" getter="is_auto_update" default="true">
+			If [code]true[/code], the gust pattern moves on every frame by itself. Turn it off to drive it with [method advance], for example in deterministic tests.
+		</member>
+		<member name="direction_degrees" type="float" setter="set_direction_degrees" getter="get_direction_degrees" default="30.0">
+			Heading of the wind in degrees: [code]0[/code] blows toward -Z, increasing clockwise seen from above ([code]90[/code] blows toward +X).
+		</member>
+		<member name="direction_swing_degrees" type="float" setter="set_direction_swing_degrees" getter="get_direction_swing_degrees" default="20.0">
+			How far gusts swing the wind's direction at [member gustiness] [code]1.0[/code], in degrees.
+		</member>
+		<member name="gust_scale" type="float" setter="set_gust_scale" getter="get_gust_scale" default="40.0">
+			Size of the gusts in meters.
+		</member>
+		<member name="gustiness" type="float" setter="set_gustiness" getter="get_gustiness" default="0.3">
+			How much the wind varies in gusts, from [code]0.0[/code] (steady) to [code]1.0[/code]. At [code]1.0[/code] the speed ranges from about 0.6 to 2 times [member speed].
+		</member>
+		<member name="speed" type="float" setter="set_speed" getter="get_speed" default="3.0">
+			Mean wind speed in meters per second.
+		</member>
+		<member name="time_scale" type="float" setter="set_time_scale" getter="get_time_scale" default="1.0">
+			Speed of the gust pattern's motion. [code]0.0[/code] freezes the gusts in place; the mean wind still blows.
+		</member>
+		<member name="turbulence" type="float" setter="set_turbulence" getter="get_turbulence" default="0.3">
+			Small-scale unsteadiness, from [code]0.0[/code] to [code]1.0[/code]: how much grass blades and leaves flutter.
+		</member>
+	</members>
+</class>

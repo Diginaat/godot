@@ -1,0 +1,114 @@
+# Weather and wind
+
+Native C++ weather for this build: one global wind that grass, trees, cloth
+and physics bodies all follow, and (in later steps) a weather node that blends
+between weather types and drives the sky, rain, fog, lightning and sound. The
+design is a port of a GDScript weather system, rebuilt so that new weather
+types and new effects can be added without touching the core.
+
+Code: `modules/weather/` (turn it off with `module_weather_enabled=no`).
+Branch: `dev-weather` (from `dev`), merged into `dev` after each finished step
+passes the build, the smoke tests and the wind tests below.
+
+## Design
+
+| Piece | Role | Step |
+| --- | --- | --- |
+| `WindServer` (singleton) | The world's wind: mean speed and heading, gusts that travel with the wind, direction swing, turbulence. `sample(position)` on the CPU; the same noise in shaders through three global shader parameters. | 1 |
+| `res://.builtin/wind.gdshaderinc` | Built-in shader include served from memory: `wind_sample()`, `wind_grass_offset()`, `wind_tree_offset()`, `wind_to_local()`. | 1 |
+| `WindReceiver3D` | Child of a `RigidBody3D`: aerodynamic drag from the wind, at the node's position (torque when off-centre), area from the collision shapes. | 1 |
+| `GrassField3D` default material | Blades bend with the wind when the module is built. | 1 |
+| `PhysXCloth3D.use_global_wind` | Cloth adds the world's wind. | 1 |
+| `WindZone3D` | Local wind on top of the global one (downwash, blasts, vortices). | later |
+| `WeatherProfile` (resource) | One weather state. Blending walks the property list, so a new parameter is one property. A new weather type is a new `.tres`, no code. | 2 |
+| `Weather` (node) | Picks and blends profiles, drives the `WindServer`, sun, environment and exposure (restored before save), wetness globals, editor preview. | 2 |
+| `WeatherEffect` (base class) | Virtual `update(state, delta)` and `apply_quality()`. Rain, haze, mist motes, lightning, sky and sound are effects; snow or hail later are new subclasses (GDScript too). | 2 |
+| Sky and clouds | Sky shader with cloud layer, driven by the profile and the wind aloft. | 3 |
+| Rain, rain occlusion, wetness | GPU rain streaks and impacts, top-down occlusion map, wet surfaces. | 4 |
+| Ground haze, mist motes | Volumetric haze and near-camera droplets. | 5 |
+| Lightning | Bolts, flashes, thunder timing. | 6 |
+| Sound | Rain, wind and thunder synthesized in C++ at startup; own files override. | 7 |
+
+Native class names differ from the GDScript system's (`WeatherSystem`,
+`WeatherPreset`, `RainEmitter`, ...), so a project using the GDScript version
+keeps working until it switches.
+
+## Steps
+
+| Step | What | Status |
+| --- | --- | --- |
+| 1 | Wind core: `WindServer`, shader include, `WindReceiver3D`, grass default material, PhysX cloth | Done |
+| 2 | Weather core: `WeatherProfile`, `Weather` node, `WeatherEffect`, built-in profiles, scene driving, wetness | Next |
+| 3 | Sky and clouds | |
+| 4 | Rain, occlusion, wet surfaces | |
+| 5 | Ground haze, mist motes | |
+| 6 | Lightning | |
+| 7 | Sound synthesis | |
+
+## Wind
+
+The wind at a point is the mean wind plus gusts. Gusts are two octaves of
+value noise, `gust_scale` meters across, that move with the mean wind, so gust
+fronts sweep across a field at the wind's speed (`speed * (1 + gustiness *
+(gust * 1.4 - 0.4))`, as in the GDScript system). Gusts also swing the heading
+by up to `direction_swing_degrees * gustiness`. The pattern offset wraps at
+512 gust lengths, a whole period of every octave, so it never loses precision.
+
+The noise is written twice, in C++ (`WindServer::noise()`,
+`WindServer::sample_state()`) and in the include (`wind_noise()`,
+`wind_sample()`); keep them identical. The wind test below compares them.
+
+Shader globals (`vec4`, registered by the module before any scene loads):
+`wind_mean` (direction x, z, speed, gustiness), `wind_gust` (offset x, z,
+1 / gust size, swing radians), `wind_motion` (drift, turbulence). A project
+that declares the same names (as `vec4`) just keeps working.
+
+Usage:
+
+```glsl
+shader_type spatial;
+#include "res://.builtin/wind.gdshaderinc"
+
+void vertex() {
+	// Grass blade: root at the origin, UV.y 0 at the root to 1 at the tip.
+	vec3 root = MODEL_MATRIX[3].xyz;
+	float height = length(MODEL_MATRIX[1].xyz);
+	VERTEX += wind_to_local(MODEL_MATRIX, wind_grass_offset(root, UV.y, height, 5.0, TIME));
+}
+```
+
+Trees: `wind_tree_offset(world_vertex, root, height, stiffness, branch, leaf,
+world_normal, TIME)`, with branch and leaf weights from vertex colour or a
+height mask. The trunk leans downwind and rocks at a frequency that drops with
+height, branches bob, leaves flutter along their normal.
+
+Physics: add a `WindReceiver3D` under a `RigidBody3D`. The force is clamped so
+it can at most bring the body to the wind's speed in one physics step (light,
+wide bodies would otherwise shake), and sleeping bodies are only woken above
+`wake_acceleration`.
+
+## Tests
+
+The wind test project (written per run, not kept) checks:
+
+| Check | Result (2026-11-07, Vulkan, RTX 3060) |
+| --- | --- |
+| `WindServer` singleton exists, 90 degrees blows toward +X | pass |
+| Mean of 400 samples near the speed (10 m/s, gustiness 0.6) | 11.2 m/s (gusts average +18% at gustiness 0.6, by design) |
+| Gusts vary the speed | 7.6 to 16.0 m/s |
+| GPU `wind_sample()` (canvas shader into a half-float target) against `WindServer.sample()`, 16x16 points over 400 m | worst 0.043 m/s |
+| 2 kg unit box, no gravity, 4 s in the wind | 8.6 m/s downwind, area 1.14 m² |
+| `GrassField3D` default material with wind, a tree shader with `wind_tree_offset()` | compile without errors; grass bends downwind at 4 and 15 m/s, upright at 0 |
+
+## Findings
+
+* `RenderingServer.global_shader_parameter_add()` at the module's scene
+  level runs before `global_shader_parameters_load_settings()`, which only
+  sets parameters that already exist. So module globals and project globals
+  of the same name and type live together.
+* `ResourceLoader::exists()` and `load()` look in the resource cache first,
+  so a `ShaderInclude` with a path taken over in memory works for
+  `#include` without a file, in the editor and in exported games. A
+  dot-folder path (`res://.builtin/`) never clashes with project files.
+* `RenderingServer.frame_pre_draw` is emitted on the main thread in
+  `draw()`, also with the separate render thread, so the wind advances there.

@@ -78,6 +78,7 @@ private:
 	NodePath wind_area; // optional Area3D whose wind settings drive the cloth
 	Vector3 wind = Vector3(0, 0, 0); // constant base breeze, on top of the area
 	float wind_turbulence = 0.4;
+	bool use_global_wind = true; // add the WindServer's wind (weather module), when there is one
 	float drag = 1.0;
 	float lift = 0.2;
 
@@ -157,6 +158,8 @@ public:
 	Vector3 get_wind() const { return wind; }
 	void set_wind_turbulence(float p_v);
 	float get_wind_turbulence() const { return wind_turbulence; }
+	void set_use_global_wind(bool p_v) { use_global_wind = p_v; }
+	bool is_using_global_wind() const { return use_global_wind; }
 	void set_drag(float p_v);
 	float get_drag() const { return drag; }
 	void set_lift(float p_v);
