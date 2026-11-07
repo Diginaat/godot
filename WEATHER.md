@@ -20,9 +20,11 @@ passes the build, the smoke tests and the wind tests below.
 | `GrassField3D` default material | Blades bend with the wind when the module is built. | 1 |
 | `PhysXCloth3D.use_global_wind` | Cloth adds the world's wind. | 1 |
 | `WindZone3D` | Local wind on top of the global one (downwash, blasts, vortices). | later |
-| `WeatherProfile` (resource) | One weather state. Blending walks the property list, so a new parameter is one property. A new weather type is a new `.tres`, no code. | 2 |
-| `Weather` (node) | Picks and blends profiles, drives the `WindServer`, sun, environment and exposure (restored before save), wetness globals, editor preview. | 2 |
-| `WeatherEffect` (base class) | Virtual `update(state, delta)` and `apply_quality()`. Rain, haze, mist motes, lightning, sky and sound are effects; snow or hail later are new subclasses (GDScript too). | 2 |
+| `WeatherProfile` (resource) | One weather state (13 built-in parameters). Blending walks the property list, so a new parameter is one enum entry and one property, and script subclasses blend their own exported values. | 2 |
+| `WeatherLibrary` (resource) | The weather types by name. A new type is a new profile in a library, no code; the built-in 11 come from `WeatherLibrary.get_default()`. | 2 |
+| `Weather` (node) | Picks and blends profiles, drives the `WindServer`, wetness globals, runs its effects, editor preview. Scene values go through `drive()`, restored before save and on exit. | 2 |
+| `WeatherEffect` (resource) | Listed in `Weather.effects`, settings edited inline. Virtual `_start`, `_stop`, `_update`, `_apply_quality`. Rain, haze, mist motes, lightning, sky and sound are effects; snow or hail later are new subclasses (GDScript too). | 2 |
+| `WeatherLightingEffect` | Sun, sky light, exposure, volumetric and distance fog. | 2 |
 | Sky and clouds | Sky shader with cloud layer, driven by the profile and the wind aloft. | 3 |
 | Rain, rain occlusion, wetness | GPU rain streaks and impacts, top-down occlusion map, wet surfaces. | 4 |
 | Ground haze, mist motes | Volumetric haze and near-camera droplets. | 5 |
@@ -38,12 +40,40 @@ keeps working until it switches.
 | Step | What | Status |
 | --- | --- | --- |
 | 1 | Wind core: `WindServer`, shader include, `WindReceiver3D`, grass default material, PhysX cloth | Done |
-| 2 | Weather core: `WeatherProfile`, `Weather` node, `WeatherEffect`, built-in profiles, scene driving, wetness | Next |
-| 3 | Sky and clouds | |
+| 2 | Weather core: `WeatherProfile`, `WeatherLibrary`, `Weather` node, `WeatherEffect`, `WeatherLightingEffect`, scene driving, wetness | Done |
+| 3 | Sky and clouds | Next |
 | 4 | Rain, occlusion, wet surfaces | |
 | 5 | Ground haze, mist motes | |
 | 6 | Lightning | |
 | 7 | Sound synthesis | |
+
+## Weather core
+
+A `Weather` node in the level picks a type by name (`weather`, a dropdown of
+the library's names plus `Custom`) and blends every blendable property of
+the profiles over `transition_time` (smoothstep). The target profile is
+re-read every frame, so edits to it show at once. When the target is a
+different class or script than the profile being shown, the transition
+starts from a fresh instance of the target's kind (script defaults) filled
+with the values showing, so script-only values blend from their defaults.
+
+Each frame: blend, drive the `WindServer` (speed, heading, gustiness,
+swing), sample the gust at the camera for rain bursts, compute the horizon
+light, update wetness and the `weather_wetness` / `weather_rain` globals,
+then run the effects in list order (lighting first, so later effects see
+its horizon light).
+
+`drive(object, property, value)` remembers the object's own value. A
+value that differs from the last one written (an inspector edit, a
+day-night script) becomes the new base. `restore_scene()` runs before every
+editor save and when the node leaves the tree, so the weather never ends up
+in the scene file. `release(object, property)` gives one property back
+(for an effect that stops).
+
+Effects are resources in `Weather.effects` (local to scene), so their
+settings are edited inline and saved with the scene. The node starts with
+`Weather.create_default_effects()`. An effect added, removed or disabled at
+runtime or in the inspector is started or stopped on the next frame.
 
 ## Wind
 
@@ -100,6 +130,17 @@ The wind test project (written per run, not kept) checks:
 | 2 kg unit box, no gravity, 4 s in the wind | 8.6 m/s downwind, area 1.14 m² |
 | `GrassField3D` default material with wind, a tree shader with `wind_tree_offset()` | compile without errors; grass bends downwind at 4 and 15 m/s, upright at 0 |
 
+Weather core test (headless, 24 checks, 2026-11-07): starts Clear and drives
+the wind to 2 m/s; script effect started, updated and given quality High;
+11 types plus Custom; instant Storm hides the sun, dims the sky to 0.55, turns
+on distance fog 0.007, rain 0.82 with gusts, wetness 1.0 after 0.6 s with
+`wetting_time` 0.5; a 2 s transition is at 8 m/s halfway and 2 m/s at the
+end; pre-save restores sun, sky and fog and the next frame drives again; an
+outside edit becomes the base; a script profile's own value blends (0.5
+halfway); a removed effect is stopped; leaving the tree restores the sun and
+the wind. A saved scene keeps `weather` and the effect's settings and nothing
+else; the editor opens it without errors.
+
 ## Findings
 
 * `RenderingServer.global_shader_parameter_add()` at the module's scene
@@ -112,3 +153,8 @@ The wind test project (written per run, not kept) checks:
   dot-folder path (`res://.builtin/`) never clashes with project files.
 * `RenderingServer.frame_pre_draw` is emitted on the main thread in
   `draw()`, also with the separate render thread, so the wind advances there.
+* `Script::get_property_default_value()` returned nothing for a GDScript
+  inner class at runtime, so a profile of a new script class can't take
+  its defaults from the script. A fresh instance of the class does.
+* Godot doc XML: `&` in a code sample (`&"weather"`) must be written
+  `&amp;`, or the whole file fails to parse.

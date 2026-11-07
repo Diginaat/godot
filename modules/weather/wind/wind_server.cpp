@@ -86,10 +86,15 @@ float WindServer::noise(const Vector2 &p_position) {
 	return Math::lerp(Math::lerp(a, b, ux), Math::lerp(c, d, ux), uy);
 }
 
-Vector3 WindServer::sample_state(const State &p_state, const Vector3 &p_position) {
+float WindServer::gust_state(const State &p_state, const Vector3 &p_position) {
 	const Vector2 q = (Vector2(p_position.x, p_position.z) - p_state.offset) * p_state.inv_gust_scale;
 	const float g = noise(q) * 0.65f + noise(q * 2.0f + Vector2(17.0f + p_state.drift, 5.0f + p_state.drift)) * 0.35f;
-	const float gust = CLAMP((g - 0.5f) * 2.2f + 0.5f, 0.0f, 1.0f);
+	return CLAMP((g - 0.5f) * 2.2f + 0.5f, 0.0f, 1.0f);
+}
+
+Vector3 WindServer::sample_state(const State &p_state, const Vector3 &p_position) {
+	const Vector2 q = (Vector2(p_position.x, p_position.z) - p_state.offset) * p_state.inv_gust_scale;
+	const float gust = gust_state(p_state, p_position);
 	const float speed = p_state.speed * (1.0f + p_state.gustiness * (gust * 1.4f - 0.4f));
 	const float swing = (noise(q * 0.5f + Vector2(41.0f, 73.0f)) - 0.5f) * 2.0f * p_state.direction_swing * p_state.gustiness;
 	const float c = Math::cos(swing);
@@ -204,6 +209,10 @@ Vector3 WindServer::get_mean_wind() const {
 	return Vector3(s.direction.x, 0.0f, s.direction.y) * s.speed;
 }
 
+float WindServer::get_gust(const Vector3 &p_position) const {
+	return gust_state(get_state(), p_position);
+}
+
 float WindServer::get_gust_factor(const Vector3 &p_position) const {
 	const State s = get_state();
 	if (s.speed <= 0.0f) {
@@ -313,6 +322,7 @@ void WindServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sample", "position"), &WindServer::sample);
 	ClassDB::bind_method(D_METHOD("get_mean_wind"), &WindServer::get_mean_wind);
 	ClassDB::bind_method(D_METHOD("get_gust_factor", "position"), &WindServer::get_gust_factor);
+	ClassDB::bind_method(D_METHOD("get_gust", "position"), &WindServer::get_gust);
 	ClassDB::bind_method(D_METHOD("advance", "delta"), &WindServer::advance);
 	ClassDB::bind_method(D_METHOD("get_direction"), &WindServer::get_direction);
 	ClassDB::bind_method(D_METHOD("get_shader_include_path"), &WindServer::get_shader_include_path);

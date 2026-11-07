@@ -154,7 +154,7 @@ straight.
     (`scene/debugger/runtime_state_observer.cpp`,
     `editor/run/live_runtime_plugin.cpp`). See
     [SPLIT_WORKSPACE.md](SPLIT_WORKSPACE.md).
-  - The weather module (`modules/weather/`: `WindServer`, `WindReceiver3D`),
+  - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).
 

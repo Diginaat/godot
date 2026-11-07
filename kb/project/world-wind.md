@@ -1,6 +1,6 @@
 ---
 type: Finding
-title: World wind for foliage, cloth and bodies
+title: World wind and the weather core
 description: WindServer singleton with travelling gusts, the same noise on CPU and GPU, a built-in shader include served from memory, and drag on rigid bodies.
 tags: [weather, wind, foliage, physics, shaders]
 status: stable
@@ -32,3 +32,19 @@ Step 1 of the native weather (see `WEATHER.md` at the repository root):
   when the module exists (`#define WIND`), and `PhysXCloth3D` adds the world
   wind through the `WindServer` singleton, looked up by name so neither
   depends on the module at compile time.
+
+# Weather core (step 2)
+
+* **Types are data.** `WeatherProfile` holds 13 indexed parameters;
+  `WeatherLibrary` names them. A new weather type is a profile in a library.
+* **Blending is generic.** It walks the property list (floats, colors,
+  vectors; `degrees` hints the short way round), so script subclasses blend
+  their own values. A transition to a new class starts from a fresh
+  instance of it, because the script's default values aren't available
+  through `Script::get_property_default_value()` at runtime.
+* **Effects are resources** in `Weather.effects`, with virtual
+  `_start/_stop/_update/_apply_quality`, edited inline and saved with the
+  scene. `WeatherLightingEffect` is the first.
+* **Scene values are borrowed.** `Weather.drive()` keeps the scene's own
+  value (an outside edit becomes the new base) and `restore_scene()` puts it
+  back before every editor save and on exit. 24 headless checks pass.

@@ -3791,6 +3791,9 @@
 		<member name="threading/worker_pool/max_threads" type="int" setter="" getter="" default="-1">
 			Maximum number of threads to be used by [WorkerThreadPool]. On Web, a value of [code]-1[/code] means [code]1[/code]. On other platforms, it means all [i]logical[/i] CPU cores available (see [method OS.get_processor_count]).
 		</member>
+		<member name="weather/quality" type="int" setter="" getter="" default="2">
+			Quality of the weather effects for [Weather] nodes whose [member Weather.quality] is [b]Auto[/b]: [b]Low[/b], [b]Medium[/b], [b]High[/b] or [b]Ultra[/b]. Effects use it to pick particle counts, map sizes and shader detail.
+		</member>
 		<member name="weather/wind/default_direction_degrees" type="float" setter="" getter="" default="30.0">
 			Heading of the [WindServer]'s wind at startup, in degrees: [code]0[/code] blows toward -Z, increasing clockwise seen from above ([code]90[/code] blows toward +X). A weather node changes it at runtime.
 		</member>

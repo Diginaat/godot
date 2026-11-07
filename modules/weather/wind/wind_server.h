@@ -103,6 +103,7 @@ public:
 	// Gust noise, identical to wind_noise() in the shader include.
 	static float noise(const Vector2 &p_position);
 	static Vector3 sample_state(const State &p_state, const Vector3 &p_position);
+	static float gust_state(const State &p_state, const Vector3 &p_position);
 
 	void initialize();
 	void finalize();
@@ -111,6 +112,7 @@ public:
 	Vector3 sample(const Vector3 &p_position) const;
 	Vector3 get_mean_wind() const;
 	float get_gust_factor(const Vector3 &p_position) const;
+	float get_gust(const Vector3 &p_position) const;
 	void advance(double p_delta);
 
 	void set_direction_degrees(float p_degrees);

@@ -13,4 +13,4 @@
 * [Residency cut protocol](/project/residency-cut-protocol.md) - complete coarse fallback, evicted ancestors and GPU request feedback
 * [CLOD pages from disk](/project/clod-disk-paging.md) - checked page file, root-only memory, worker reads and dropped stale reads
 * [GPU voxel levels for the far field](/project/far-field-gpu-voxel-levels.md) - per-brick level selection in compute, indirect MultiMesh discs, exact CPU mirror
-* [World wind](/project/world-wind.md) - WindServer gusts shared by foliage shaders, cloth and rigid bodies; CPU and GPU noise match
+* [World wind and weather core](/project/world-wind.md) - WindServer gusts shared by foliage, cloth and bodies; Weather node, profiles, effects, borrowed scene values

@@ -10,5 +10,6 @@ module_obj = []
 
 env_weather.add_source_files(module_obj, "*.cpp")
 env_weather.add_source_files(module_obj, "wind/*.cpp")
+env_weather.add_source_files(module_obj, "effects/*.cpp")
 
 env.modules_sources += module_obj

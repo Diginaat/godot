@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherEffect" inherits="Resource" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		One part of the weather, run by a [Weather] node.
+	</brief_description>
+	<description>
+		Base class of the weather's effects: lighting, sky, rain, haze, lightning, sound. A [Weather] node runs the effects in its [member Weather.effects] list. A new kind of effect (snow, hail, sand) is a new subclass, in C++ or a script: [method _start] creates its nodes (as internal children of the [Weather] node), [method _update] follows the weather every frame, [method _stop] frees them, and [method _apply_quality] adapts to the quality level.
+		Scene values an effect changes should go through [method Weather.drive], so they are restored before the scene is saved. Effects keep per-scene state, so they are local to the scene.
+		[codeblock]
+		class_name SnowEffect extends WeatherEffect
+
+		func _update(weather: Weather, delta: float) -&gt; void:
+		    var snow: float = weather.get_current().get(&amp;"snow") if &amp;"snow" in weather.get_current() else 0.0
+		    # Show snow particles at this amount, drift them with weather.get_wind()...
+		[/codeblock]
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="_apply_quality" qualifiers="virtual">
+			<return type="void" />
+			<param index="0" name="weather" type="Weather" />
+			<param index="1" name="quality" type="int" />
+			<description>
+				Called before [method _start] and when the quality level changes. [param quality] is a [enum Weather.Quality] other than [constant Weather.QUALITY_AUTO].
+			</description>
+		</method>
+		<method name="_start" qualifiers="virtual">
+			<return type="void" />
+			<param index="0" name="weather" type="Weather" />
+			<description>
+				Called when the effect starts running on [param weather]: create its nodes here.
+			</description>
+		</method>
+		<method name="_stop" qualifiers="virtual">
+			<return type="void" />
+			<param index="0" name="weather" type="Weather" />
+			<description>
+				Called when the effect stops (removed, disabled, or the [Weather] node leaves the tree): free its nodes here.
+			</description>
+		</method>
+		<method name="_update" qualifiers="virtual">
+			<return type="void" />
+			<param index="0" name="weather" type="Weather" />
+			<param index="1" name="delta" type="float" />
+			<description>
+				Called every frame while the effect runs, after the weather has blended and driven the wind.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="enabled" type="bool" setter="set_enabled" getter="is_enabled" default="true">
+			If [code]false[/code], the effect stops and doesn't run.
+		</member>
+		<member name="resource_local_to_scene" type="bool" setter="set_local_to_scene" getter="is_local_to_scene" overrides="Resource" default="true" />
+	</members>
+</class>

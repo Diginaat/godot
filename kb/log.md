@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-07 (weather step 2: core)
+
+* **Implemented**: `WeatherProfile`, `WeatherLibrary` (11 built-in types),
+  `Weather` node (blending, wind driving, wetness globals, borrowed scene
+  values restored before save), `WeatherEffect` resources and
+  `WeatherLightingEffect`. 24 headless checks pass. See
+  [World wind and weather core](/project/world-wind.md) and `WEATHER.md`.
+
 ## 2026-11-07 (weather step 1: wind)
 
 * **Implemented**: `modules/weather/` with the `WindServer` singleton (gusts

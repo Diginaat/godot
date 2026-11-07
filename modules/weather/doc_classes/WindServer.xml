@@ -31,6 +31,13 @@
 				The direction the mean wind blows toward, horizontal and of unit length.
 			</description>
 		</method>
+		<method name="get_gust" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="position" type="Vector3" />
+			<description>
+				The gust strength at [param position], from [code]0.0[/code] (a lull) to [code]1.0[/code] (the strongest gust), [code]0.5[/code] on average. The same value the shaders get from [code]wind_gust_at()[/code].
+			</description>
+		</method>
 		<method name="get_gust_factor" qualifiers="const">
 			<return type="float" />
 			<param index="0" name="position" type="Vector3" />
