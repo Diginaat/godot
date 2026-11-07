@@ -113,9 +113,9 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   `flow_sdk=`. The packaging script refuses to run without their DLLs.
   The packaging script's default is the public package.
 - Naming (details in CUSTOM_BUILD.md, "Versioning"): own version in
-  `CUSTOM_VERSION`; tag `godot<base>-nvidia-rt-dlss-physx-v<own>`; title
-  `Godot NVIDIA + PhysX (Godot <base>) v<own>`; zip
-  `godot_<major>.<minor>-nvidia-rt-dlss-physx_v<own>-editor_windows_amd64[_mono].zip`.
+  `CUSTOM_VERSION`; tag `godot<base>-diginaat-physx-v<own>` (before 0.9.0:
+  `-nvidia-rt-dlss-physx-`); title `Godot Diginaat + PhysX (Godot <base>) v<own>`;
+  zip `godot_<major>.<minor>-diginaat-physx_v<own>-editor_windows_amd64[_mono].zip`.
   Git tags can't contain spaces, `+` or brackets.
 - Editor zips keep the files at the zip root, with no wrapping folder. Never
   zip with `tar -C <dir> .`: its `./` prefix shows up as a folder named `.`

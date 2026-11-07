@@ -73,8 +73,8 @@ reaches them bounces off the sunlit tracks, grass and vines.
 Prebuilt Windows editors and export templates (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
 Each release names the Godot version it's based on and this build's own
-version: `godot4.8-dev-nvidia-rt-dlss-physx-v0.5.1` is build 0.5.1, on Godot
-4.8-dev.
+version: `godot4.8-beta-diginaat-physx-v0.9.0` is build 0.9.0, on Godot
+4.8-beta. Releases before 0.9.0 are tagged `...-nvidia-rt-dlss-physx-v...`.
 
 > [!IMPORTANT]
 > **The downloads work out of the box. You only need the NVIDIA Streamline SDK

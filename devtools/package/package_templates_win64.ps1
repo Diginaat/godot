@@ -43,7 +43,7 @@ $versionPy = Get-Content (Join-Path $root "version.py") -Raw
 $godotMajor = [regex]::Match($versionPy, '(?m)^major = (\d+)').Groups[1].Value
 $godotMinor = [regex]::Match($versionPy, '(?m)^minor = (\d+)').Groups[1].Value
 $flavorSuffix = if ($Mono) { "_mono" } else { "" }
-$name = "godot_$godotMajor.$godotMinor-nvidia-rt-dlss-physx_v$custom-export_templates_windows_amd64$flavorSuffix"
+$name = "godot_$godotMajor.$godotMinor-diginaat-physx_v$custom-export_templates_windows_amd64$flavorSuffix"
 
 $dist = Join-Path $root "dist"
 $stage = Join-Path $dist $name

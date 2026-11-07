@@ -199,14 +199,15 @@ This build has its own version, separate from Godot's. It lives in
 Bump `CUSTOM_VERSION` in the commit that prepares a release, not before. A
 version number is never reused.
 
-Releases on GitHub name the Godot base and the own version:
+Releases on GitHub name the Godot base and the own version (before 0.9.0 the
+name part was `nvidia-rt-dlss-physx`, title "Godot NVIDIA + PhysX"):
 
 | What | Format | Example |
 | --- | --- | --- |
-| Git tag | `godot<major>.<minor>-<status>-nvidia-rt-dlss-physx-v<own>` | `godot4.8-dev-nvidia-rt-dlss-physx-v0.2.0` |
-| Release title | `Godot NVIDIA + PhysX (Godot <major>.<minor>-<status>) v<own>` | `Godot NVIDIA + PhysX (Godot 4.8-dev) v0.2.0` |
-| Zip | `godot_<major>.<minor>-nvidia-rt-dlss-physx_v<own>-editor_windows_amd64[_mono].zip` | `godot_4.8-nvidia-rt-dlss-physx_v0.2.0-editor_windows_amd64.zip` (.NET: `..._amd64_mono.zip`) |
-| Export templates | `godot_<major>.<minor>-nvidia-rt-dlss-physx_v<own>-export_templates_windows_amd64[_mono].tpz` | `godot_4.8-nvidia-rt-dlss-physx_v0.5.1-export_templates_windows_amd64.tpz` |
+| Git tag | `godot<major>.<minor>-<status>-diginaat-physx-v<own>` | `godot4.8-beta-diginaat-physx-v0.9.0` |
+| Release title | `Godot Diginaat + PhysX (Godot <major>.<minor>-<status>) v<own>` | `Godot Diginaat + PhysX (Godot 4.8-beta) v0.9.0` |
+| Zip | `godot_<major>.<minor>-diginaat-physx_v<own>-editor_windows_amd64[_mono].zip` | `godot_4.8-diginaat-physx_v0.9.0-editor_windows_amd64.zip` (.NET: `..._amd64_mono.zip`) |
+| Export templates | `godot_<major>.<minor>-diginaat-physx_v<own>-export_templates_windows_amd64[_mono].tpz` | `godot_4.8-diginaat-physx_v0.9.0-export_templates_windows_amd64.tpz` |
 
 `package_editor_win64.ps1` builds the zip name from `CUSTOM_VERSION` and
 `version.py`, and prints the tag and title to use.
@@ -227,6 +228,7 @@ Releases on GitHub name the Godot base and the own version:
 | 0.7.3 | 4.8-dev | `godot4.8-dev-nvidia-rt-dlss-physx-v0.7.3` | DDGI fixes: no flicker or blotches in dark places, no white dots near bright openings, near-field rays shorter (0.5 spacings); tunnel test view |
 | 0.8.0 | 4.8-beta | `godot4.8-beta-nvidia-rt-dlss-physx-v0.8.0` | Godot 4.8-beta base, PhysX module `97bd583c28`; DDGI: near-field rays removed (dark spots that moved with the camera), DDGI rays through glass fixed |
 | 0.8.1 | 4.8-beta | `godot4.8-beta-nvidia-rt-dlss-physx-v0.8.1` | Reflections: `PlanarReflector3D` with a mirror pass, automatic reflections from `DDGIVolume`, budgeted DDGI-normalized reflection probes; DDGI adaptive update budget; fix: sky flicker in mirrors with volumetric fog |
+| 0.9.0 | 4.8-beta | `godot4.8-beta-diginaat-physx-v0.9.0` | New release names (`diginaat-physx`); Modern Compact editor theme with Atkinson Hyperlegible Next; split workspace and Live Runtime view; large-world geometry (GPU culling, cluster LOD, far-field voxels, HZB occlusion); project backup before first open; Godot master `b47a795aa5`, PhysX module `92da57bda8` |
 
 ## Release packages (Windows)
 

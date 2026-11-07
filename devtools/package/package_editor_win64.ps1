@@ -27,7 +27,7 @@ if (-not (Test-Path (Join-Path $bin $exe))) { throw "Missing bin\$exe; build it 
 
 $version = (& (Join-Path $bin $console) --version).Trim()
 # Release names combine the Godot base this build tracks with its own version
-# (CUSTOM_VERSION), e.g. godot4.8-dev-nvidia-rt-dlss-physx-v0.2.0.
+# (CUSTOM_VERSION), e.g. godot4.8-beta-diginaat-physx-v0.9.0.
 # See "Versioning" in CUSTOM_BUILD.md.
 $custom = (Get-Content (Join-Path $root "CUSTOM_VERSION") -TotalCount 1).Trim()
 if ($custom -notmatch '^\d+\.\d+\.\d+$') { throw "CUSTOM_VERSION must be MAJOR.MINOR.PATCH, got '$custom'." }
@@ -35,10 +35,10 @@ $versionPy = Get-Content (Join-Path $root "version.py") -Raw
 $godotMajor = [regex]::Match($versionPy, '(?m)^major = (\d+)').Groups[1].Value
 $godotMinor = [regex]::Match($versionPy, '(?m)^minor = (\d+)').Groups[1].Value
 $godotStatus = [regex]::Match($versionPy, '(?m)^status = "(\w+)"').Groups[1].Value
-$tag = "godot$godotMajor.$godotMinor-$godotStatus-nvidia-rt-dlss-physx-v$custom"
+$tag = "godot$godotMajor.$godotMinor-$godotStatus-diginaat-physx-v$custom"
 $variant = if ($WithNvidiaRuntime) { "_with-nvidia-runtime_PRIVATE" } else { "" }
 $flavorSuffix = if ($Mono) { "_mono" } else { "" }
-$name = "godot_$godotMajor.$godotMinor-nvidia-rt-dlss-physx_v$custom-editor_windows_amd64$flavorSuffix$variant"
+$name = "godot_$godotMajor.$godotMinor-diginaat-physx_v$custom-editor_windows_amd64$flavorSuffix$variant"
 $dist = Join-Path $root "dist"
 $stage = Join-Path $dist $name
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
@@ -135,4 +135,4 @@ Remove-Item -Recurse -Force $stage
 Get-Item $zip | Select-Object Name, @{n = "MB"; e = { [math]::Round($_.Length / 1MB, 1) } }
 Write-Host "Engine version: $version"
 Write-Host "Release tag:    $tag"
-Write-Host "Release title:  Godot NVIDIA + PhysX (Godot $godotMajor.$godotMinor-$godotStatus) v$custom"
+Write-Host "Release title:  Godot Diginaat + PhysX (Godot $godotMajor.$godotMinor-$godotStatus) v$custom"
