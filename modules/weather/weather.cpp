@@ -36,6 +36,7 @@
 #include "effects/weather_motes_effect.h"
 #include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
+#include "effects/weather_sky_material.h"
 #include "effects/weather_sound_effect.h"
 #include "weather_wetness_shaders.h"
 #include "wind/wind_server.h"
@@ -95,9 +96,11 @@ void Weather::register_builtin_resources() {
 	wet_surface_shader.instantiate();
 	wet_surface_shader->set_code(weather_wet_surface_shader_code);
 	wet_surface_shader->set_path(WET_SURFACE_SHADER_PATH, true);
+	WeatherSkyMaterial::register_builtin_shader();
 }
 
 void Weather::free_builtin_resources() {
+	WeatherSkyMaterial::free_builtin_shader();
 	wet_surface_shader.unref();
 	wetness_include.unref();
 }

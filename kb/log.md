@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-11-08 (weather sky material)
+
+* **Implemented**: `WeatherSkyMaterial`, the built-in weather sky as a
+  `ShaderMaterial`, so it shows in a sky's material list. The shader is
+  served from memory at `res://.builtin/weather_sky.gdshader`; saved
+  materials refer to it by path.
+* **Finding**: a constructor that sets object properties (a shader, noise
+  textures) makes ClassDB keep them as default values until exit, after
+  the RenderingServer is gone: leaked RIDs and an "Instantiated ... used as
+  default value" warning on save. Fix: `ClassDB::set_property_default_value()`
+  with null for those properties. See
+  [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-08 (rain emission)
 
 * **Implemented**: `WeatherRainEffect.emission`, a self-lit glow of the

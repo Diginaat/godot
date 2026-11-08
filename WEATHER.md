@@ -27,6 +27,7 @@ into `dev` once the weather is complete.
 | `WeatherEffect` (resource) | Listed in `Weather.effects`, settings edited inline. Virtual `_start`, `_stop`, `_update`, `_apply_quality`. Rain, haze, mist motes, lightning, sky and sound are effects; snow or hail later are new subclasses (GDScript too). | 2 |
 | `WeatherLightingEffect` | Sun, sky light, exposure, volumetric and distance fog. | 2 |
 | `WeatherSkyEffect` | Sky and clouds: drives a weather-ready sky material, or shows the built-in weather sky in place of the scene's. Clouds drift with the wind aloft. | 3 |
+| `WeatherSkyMaterial` | The built-in weather sky as a `ShaderMaterial`, listed in a sky's material list. | 9 |
 | `WeatherRainEffect` | GPU raindrops and impacts around the camera, collision height field, top-down rain occlusion map. | 4 |
 | `res://.builtin/weather_wetness.gdshaderinc`, `res://.builtin/wet_surface.gdshader` | Wet surfaces: darkening in patches, puddles with ripples, water down walls, dry under cover. Served from memory; exports leave them out (`WeatherExportPlugin`). | 4 |
 | `WeatherHazeEffect` | Volumetric ground mist that thins out with height, rain shafts that lean with the wind, splash spray; takes over the environment's volumetric fog. | 5 |
@@ -50,6 +51,7 @@ keeps working until it switches.
 | 6 | Lightning: `WeatherLightningEffect`, `WeatherSkyEffect.set_lightning()`, `Weather.lightning_struck` | Done |
 | 7 | Sound: `WeatherSoundEffect`, `WeatherSoundSynth` | Done |
 | 8 | Local wind: `WindZone3D`, zones in `WindServer` and the shader include, editor gizmo | Done |
+| 9 | `WeatherSkyMaterial` in the sky material list; rain `emission` | Done |
 
 ## Weather core
 
@@ -95,9 +97,18 @@ runtime or in the inspector is started or stopped on the next frame.
   through `drive()`.
 
 The built-in sky is the GDScript system's sky shader, kept as a C++ string
-(`effects/weather_sky_shader.h`), with its two noise textures built in code.
-Its look is changed by saving `create_default_material()` as a resource and
-using that as the environment's sky. Every frame the effect passes the
+(`effects/weather_sky_shader.h`) and served from memory as
+`res://.builtin/weather_sky.gdshader`. `WeatherSkyMaterial` is a
+`ShaderMaterial` with that shader and its two noise textures already set,
+so a project picks it in a sky's material list (**New WeatherSkyMaterial**
+under `Sky.sky_material`) and edits its look in the Inspector; the effect
+drives it in place. Saved materials refer to the shader by path (the
+export plugin leaves it out; the module serves it at runtime) and store
+the noise textures as settings. `create_default_material()` returns one.
+The constructor's shader and textures would be ClassDB default values held
+until exit, after the RenderingServer is gone (leaked RIDs, an "Instantiated
+NoiseTexture2D used as default value" warning on save); the class registers
+null defaults for them instead. Every frame the effect passes the
 sky's horizon colour, overcast grey and energy to `Weather.set_sky_colors()`,
 which the lighting uses for the horizon light and the distance fog.
 
@@ -428,6 +439,17 @@ shelter zone over 64 x 64 points (942 inside zones): worst 0.031 m/s. A
 swirls in a vortex. The editor opens a scene with two zones without
 errors and leaves it unchanged; the wind test and the weather tests still
 pass.
+
+Sky material test (2026-11-08, 11 checks on Vulkan): `WeatherSkyMaterial`
+is listed among the `ShaderMaterial` inheriters (the sky material picker);
+it has the built-in shader by path and both noise textures; a saved scene
+refers to the shader by path without its code (1.2 KB) and loads back as a
+`WeatherSkyMaterial` with the shared shader and textures; Weather keeps the
+scene's material and drives it (Partly Cloudy coverage 0.45, Storm 1.0
+with overcast 0.92); no warnings and no leaked RIDs at exit; the editor
+opens without errors. Screenshots: Partly Cloudy shows clouds, Storm a
+dark overcast. Rain emission (Vulkan, dark storm): drops faint at 0, clear
+at 0.5, bright at 1.5.
 
 ## Findings
 

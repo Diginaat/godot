@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="WeatherSkyMaterial" inherits="ShaderMaterial" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		The weather sky with clouds, ready to pick as a [Sky]'s material.
+	</brief_description>
+	<description>
+		A [ShaderMaterial] with the built-in weather sky shader ([code]res://.builtin/weather_sky.gdshader[/code]) and its cloud noise textures already set. In the Inspector, pick [b]New WeatherSkyMaterial[/b] in [member Sky.sky_material].
+		A [Weather] node's [WeatherSkyEffect] drives this material directly: cloud coverage, overcast, cloud drift and lightning follow the weather. Without a [Weather] node it is a still, partly cloudy sky. The sky, cloud and colour parameters can be edited like any shader parameter.
+		Saved materials refer to the shader by its path, so they use the current version of the built-in shader.
+	</description>
+	<tutorials>
+	</tutorials>
+	<members>
+		<member name="shader" type="Shader" setter="set_shader" getter="get_shader" overrides="ShaderMaterial" default="null" />
+	</members>
+</class>

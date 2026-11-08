@@ -36,6 +36,7 @@
 #include "effects/weather_motes_effect.h"
 #include "effects/weather_rain_effect.h"
 #include "effects/weather_sky_effect.h"
+#include "effects/weather_sky_material.h"
 #include "effects/weather_sound_effect.h"
 #include "weather.h"
 #include "weather_effect.h"
@@ -78,6 +79,7 @@ void initialize_weather_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(WeatherEffect);
 		GDREGISTER_CLASS(WeatherLightingEffect);
 		GDREGISTER_CLASS(WeatherSkyEffect);
+		GDREGISTER_CLASS(WeatherSkyMaterial);
 		GDREGISTER_CLASS(WeatherRainEffect);
 		GDREGISTER_CLASS(WeatherHazeEffect);
 		GDREGISTER_CLASS(WeatherMotesEffect);
