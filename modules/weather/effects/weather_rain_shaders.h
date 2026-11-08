@@ -63,6 +63,10 @@ uniform float opacity : hint_range(0.0, 1.0) = 0.26;
 uniform float roughness : hint_range(0.0, 1.0) = 0.45;
 // Small self-lit term for light scattered by the water, so rain reads in dark storms.
 uniform float glint : hint_range(0.0, 1.0) = 0.08;
+// Self-lit glow in the rain colour (set by WeatherRainEffect). Not physical:
+// it keeps rain visible at night and against backgrounds the refraction
+// would otherwise blend it into.
+uniform float emission : hint_range(0.0, 4.0) = 0.5;
 // Light passing through the drop from behind.
 uniform float translucency : hint_range(0.0, 1.0) = 0.40;
 // Linear light of the sky near the horizon (set by WeatherRainEffect). A drop is a
@@ -154,7 +158,7 @@ void fragment() {
 	BACKLIGHT = rain_color * translucency;
 	float fresnel = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 3.0);
 	vec3 refracted = mix(behind, sky_light * sky_reflection, sky_refraction);
-	EMISSION = refracted + rain_color * glint + sky_light * sky_reflection * fresnel * 0.5;
+	EMISSION = refracted + rain_color * (glint + emission) + sky_light * sky_reflection * fresnel * 0.5;
 	// Motion-blurred drop: brightest at the leading end, fading along the tail.
 	// The quad's +Y points along the velocity, so the leading end is UV.y = 0.
 	float tail = 1.0 - UV.y;

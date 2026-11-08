@@ -295,6 +295,7 @@ void WeatherRainEffect::_build_rain() {
 	drop_material->set_shader_parameter("opacity", opacity);
 	drop_material->set_shader_parameter("far_fade", area_size * 0.9f);
 	drop_material->set_shader_parameter("sky_reflection", sky_reflection);
+	drop_material->set_shader_parameter("emission", emission);
 	materials.push_back(drop_material);
 	Ref<QuadMesh> drop_mesh;
 	drop_mesh.instantiate();
@@ -564,6 +565,15 @@ float WeatherRainEffect::get_sky_reflection() const {
 	return sky_reflection;
 }
 
+void WeatherRainEffect::set_emission(float p_emission) {
+	emission = MAX(0.0f, p_emission);
+	_changed();
+}
+
+float WeatherRainEffect::get_emission() const {
+	return emission;
+}
+
 void WeatherRainEffect::set_impacts_enabled(bool p_enabled) {
 	impacts_enabled = p_enabled;
 	_changed();
@@ -670,6 +680,8 @@ void WeatherRainEffect::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_opacity"), &WeatherRainEffect::get_opacity);
 	ClassDB::bind_method(D_METHOD("set_sky_reflection", "reflection"), &WeatherRainEffect::set_sky_reflection);
 	ClassDB::bind_method(D_METHOD("get_sky_reflection"), &WeatherRainEffect::get_sky_reflection);
+	ClassDB::bind_method(D_METHOD("set_emission", "emission"), &WeatherRainEffect::set_emission);
+	ClassDB::bind_method(D_METHOD("get_emission"), &WeatherRainEffect::get_emission);
 	ClassDB::bind_method(D_METHOD("set_impacts_enabled", "enabled"), &WeatherRainEffect::set_impacts_enabled);
 	ClassDB::bind_method(D_METHOD("is_impacts_enabled"), &WeatherRainEffect::is_impacts_enabled);
 	ClassDB::bind_method(D_METHOD("set_impact_mist", "enabled"), &WeatherRainEffect::set_impact_mist);
@@ -704,6 +716,7 @@ void WeatherRainEffect::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "streak_width", PROPERTY_HINT_RANGE, "0,0.05,0.0001,or_greater,suffix:m"), "set_streak_width", "get_streak_width");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "opacity", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_opacity", "get_opacity");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "sky_reflection", PROPERTY_HINT_RANGE, "0,4,0.01"), "set_sky_reflection", "get_sky_reflection");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "emission", PROPERTY_HINT_RANGE, "0,4,0.01,or_greater"), "set_emission", "get_emission");
 	ADD_GROUP("Impacts", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "impacts_enabled"), "set_impacts_enabled", "is_impacts_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "impact_mist"), "set_impact_mist", "is_impact_mist");

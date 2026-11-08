@@ -120,7 +120,9 @@ nodes leave the tree at once, so the new ones keep their names).
 * **Drops**: `GPUParticles3D` in a box of `area_size` around the camera,
   emitted upwind so slanted rain lands around it. `amount_ratio` follows
   `Weather.get_rain_amount()`, so the rain never restarts. The streak shader
-  gets the horizon light every frame.
+  gets the horizon light every frame. `emission` adds a self-lit glow in the
+  rain colour (default 0.5), so drops stay visible at night and where the
+  refraction would blend them into the background.
 * **Impacts**: a sub-emitter at collision, with draw passes for the ring,
   the crown sheet and (from Medium) the droplet crown.
 * **Collision**: a `GPUParticlesCollisionHeightField3D` following the

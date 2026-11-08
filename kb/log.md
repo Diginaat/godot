@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-08 (rain emission)
+
+* **Implemented**: `WeatherRainEffect.emission`, a self-lit glow of the
+  drops in the rain colour (default 0.5), so rain stays visible at night
+  and where the refracted background hides it. Checked on Vulkan in a dark
+  storm at 0, 0.5 and 1.5. See
+  [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-07 (weather step 8: wind zones)
 
 * **Implemented**: `WindZone3D` (directional, radial, vortex; sphere or

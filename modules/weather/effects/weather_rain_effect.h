@@ -73,6 +73,7 @@ class WeatherRainEffect : public WeatherEffect {
 	float streak_width = 0.005f;
 	float opacity = 0.35f;
 	float sky_reflection = 1.6f;
+	float emission = 0.5f;
 	bool impacts_enabled = true;
 	bool impact_mist = false;
 	float collision_refresh_interval = 0.2f;
@@ -142,6 +143,8 @@ public:
 	float get_opacity() const;
 	void set_sky_reflection(float p_reflection);
 	float get_sky_reflection() const;
+	void set_emission(float p_emission);
+	float get_emission() const;
 	void set_impacts_enabled(bool p_enabled);
 	bool is_impacts_enabled() const;
 	void set_impact_mist(bool p_enabled);

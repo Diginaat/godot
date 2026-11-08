@@ -53,6 +53,9 @@
 		<member name="cover_layers" type="int" setter="set_cover_layers" getter="get_cover_layers" default="262143">
 			Render layers that count as cover for the occlusion map. The rain's own layers are left out.
 		</member>
+		<member name="emission" type="float" setter="set_emission" getter="get_emission" default="0.5">
+			Self-lit glow of the drops in the rain colour, independent of the scene's lighting. Keeps rain visible at night and in dark storms. [code]0[/code] leaves only the lit and refracted look.
+		</member>
 		<member name="emit_height" type="float" setter="set_emit_height" getter="get_emit_height" default="14.0">
 			Height above the camera where drops start, in meters.
 		</member>
