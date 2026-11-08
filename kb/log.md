@@ -5,6 +5,8 @@
 * **Updated**: release 0.9.1 (weather and wind, shadow speed-ups) in
   CUSTOM_BUILD.md; README.md lists the weather, the performance work and a
   Credits section.
+* **Updated**: the engine calls itself "Godot Diginaat" (window titles,
+  startup header, version button), set in `methods.get_version_info()`.
 
 ## 2026-11-08 (render speed: shadow LODs, grass)
 
