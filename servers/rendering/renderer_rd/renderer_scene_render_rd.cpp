@@ -1634,6 +1634,11 @@ bool RendererSceneRenderRD::screen_space_roughness_limiter_is_active() const {
 	return screen_space_roughness_limiter;
 }
 
+uint64_t RendererSceneRenderRD::directional_shadow_cache_generation() const {
+	// Directional passes clear only their own atlas region (Forward+ and Mobile).
+	return 1 + RendererRD::LightStorage::get_singleton()->directional_shadow_get_generation();
+}
+
 float RendererSceneRenderRD::screen_space_roughness_limiter_get_amount() const {
 	return screen_space_roughness_limiter_amount;
 }

@@ -4,7 +4,10 @@ param(
 	[string]$Scene = "res://forest_map.tscn",
 	[string]$Label = "run",
 	# Extra user arguments for the scene, for example --far-static.
-	[string[]]$ExtraArgs = @()
+	[string[]]$ExtraArgs = @(),
+	# Frame-locked timing (--fixed-fps 60), so moving cameras sample the
+	# same positions in every run.
+	[switch]$FixedFps
 )
 # Whole-frame GPU time per timestamp interval (misc/large_world_test_project/gpu_intervals.gd).
 # Covers work outside the viewport's render time, which the benchmarks read.
@@ -15,7 +18,9 @@ $logs = Join-Path $Out "gpu_intervals"
 New-Item -ItemType Directory -Force $logs | Out-Null
 $ErrorActionPreference = "Continue"
 $userArgs = [string[]](@("--prof-scene=$Scene") + $ExtraArgs)
-$lines = & $editor --path $project --rendering-driver $Driver --gpu-profile --quit-after 3000 res://gpu_intervals.tscn -- @userArgs 2>&1 | ForEach-Object { "$_" }
+$engineArgs = [string[]]@("--path", $project, "--rendering-driver", $Driver, "--gpu-profile", "--quit-after", "3000")
+if ($FixedFps) { $engineArgs += [string[]]@("--fixed-fps", "60") }
+$lines = & $editor @engineArgs res://gpu_intervals.tscn -- @userArgs 2>&1 | ForEach-Object { "$_" }
 $code = $LASTEXITCODE
 $lines | Set-Content (Join-Path $logs "intervals_${Label}_$Driver.log")
 $lines | Where-Object { $_ -match "^GPU_INTERVAL" } | Write-Output

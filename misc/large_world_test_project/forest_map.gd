@@ -11,6 +11,8 @@ extends Node3D
 ## a custom vertex() shader on purpose: they must keep the conventional fallback.
 ##
 ## Run interactively, or with `-- --forest-map-smoke` for the automated check.
+## `-- --view-time=T` holds the camera at route time T with every flying
+## feature on (for devtools/test/gpu_intervals.ps1).
 
 signal profile_ready(stages: Dictionary)
 
@@ -50,6 +52,9 @@ var _random := RandomNumberGenerator.new()
 var _route: Array[Vector3] = []
 var _route_time := 0.0
 var _autopilot := true
+# --view-time=T: hold the camera at route time T (seconds at the default
+# speed), for profiling one view with every flying feature on.
+var _view_time := -1.0
 var _speed := 22.0
 var _smoke := false
 var _bench := false
@@ -999,6 +1004,8 @@ func _ready() -> void:
 			_far_gpu_resolution = arg.get_slice("=", 1).to_int()
 		elif arg.begins_with("--far-px="):
 			_far_gpu_pixels = arg.get_slice("=", 1).to_float()
+		elif arg.begins_with("--view-time="):
+			_view_time = arg.get_slice("=", 1).to_float()
 	# Samples at half a finest voxel apart.
 	_far_builder.sample_spacing = PATCH / (_far_gpu_resolution if _far_gpu else FAR_RESOLUTION) * 0.5
 	_smoke = _smoke or _bench # Both drive the camera themselves.
@@ -1037,7 +1044,7 @@ func _ready() -> void:
 	_camera.fov = 72
 	add_child(_camera)
 	_camera.current = true
-	_camera.transform = _camera_pose(0)
+	_camera.transform = _camera_pose(maxf(_view_time, 0.0))
 	_make_hud()
 	_update_hud()
 	if _far_compare:
@@ -1055,7 +1062,9 @@ func _process(delta: float) -> void:
 		_searchlight.rotation = Vector3(deg_to_rad(-16), time * 0.3, 0)
 	if _smoke:
 		return
-	if _autopilot:
+	if _view_time >= 0.0:
+		pass
+	elif _autopilot:
 		_route_time += delta * _speed / 22.0
 		_camera.transform = _camera.transform.interpolate_with(_camera_pose(_route_time), minf(1.0, delta * 4.0))
 	else:

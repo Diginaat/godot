@@ -60,6 +60,10 @@ public:
 		MAX_UPDATE_SHADOWS = 512
 	};
 
+	// Extra radius, as a share of the slice's, that a cached far directional
+	// cascade covers so the camera can move before it is rendered again.
+	static constexpr real_t DIRECTIONAL_CASCADE_CACHE_MARGIN = 0.1;
+
 	uint64_t render_pass;
 
 	static RendererSceneCull *singleton;
@@ -763,6 +767,29 @@ public:
 		uint32_t max_sdfgi_cascade = 2;
 		uint32_t cull_mask = 0xFFFFFFFF;
 
+		// Far directional cascades kept in the atlas between frames
+		// (rendering/lights_and_shadows/directional_shadow/far_cascade_update_interval).
+		// Holds what the last render of the cascade wrote, from any viewport:
+		// the light-space region its casters and map cover, and the parameters
+		// shading needs to sample it.
+		struct DirectionalCascadeCache {
+			bool valid = false;
+			uint64_t key = 0;
+			uint64_t frame = 0;
+			real_t x_min = 0, x_max = 0, y_min = 0, y_max = 0;
+			real_t z_min = 0; // Casters below this were culled.
+			real_t z_max = 0; // The map's plane toward the light.
+			Projection projection;
+			Transform3D transform;
+			real_t zfar = 0;
+			real_t split = 0;
+			real_t shadow_texel_size = 0;
+			real_t bias_scale = 0;
+			real_t range_begin = 0;
+			Vector2 uv_scale;
+		};
+		DirectionalCascadeCache directional_cascade_cache[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+
 	private:
 		// Instead of a single dirty flag, we maintain a count
 		// so that we can detect lights that are being made dirty
@@ -1153,7 +1180,7 @@ public:
 	_FORCE_INLINE_ void _update_instance_lightmap_captures(Instance *p_instance) const;
 	void _unpair_instance(Instance *p_instance);
 
-	void _light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect);
+	void _light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect, uint32_t p_visible_layers);
 
 	_FORCE_INLINE_ bool _light_instance_update_shadow(Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect, RID p_shadow_atlas, Scenario *p_scenario, float p_screen_mesh_lod_threshold, uint32_t p_visible_layers = 0xFFFFFF);
 
@@ -1175,6 +1202,8 @@ public:
 				real_t bias_scale;
 				real_t range_begin;
 				Vector2 uv_scale;
+				// Kept from an earlier frame: not culled, not rendered.
+				bool reused = false;
 
 			} cascades[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES]; //max 4 cascades
 			uint32_t cascade_count;

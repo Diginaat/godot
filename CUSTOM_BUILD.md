@@ -154,6 +154,13 @@ straight.
     (`scene/debugger/runtime_state_observer.cpp`,
     `editor/run/live_runtime_plugin.cpp`). See
     [SPLIT_WORKSPACE.md](SPLIT_WORKSPACE.md).
+  - Far directional cascades kept between frames
+    (`directional_shadow/far_cascade_update_interval`): the cache in
+    `RendererSceneCull::_light_instance_setup_directional_shadow()`,
+    `RendererSceneRender::directional_shadow_cache_generation()`, and
+    directional shadow passes that clear only their own atlas region in
+    Forward+ and Mobile (no whole-atlas clear). See
+    [kb/project/directional-cascade-cache.md](kb/project/directional-cascade-cache.md).
   - `RenderingServerDefault::finish()` makes the main RenderingDevice
     current on the main thread again after the separate render thread
     ends, so its `finalize()` runs at exit (without it the guard skipped

@@ -3315,6 +3315,9 @@
 		<member name="rendering/lights_and_shadows/directional_shadow/16_bits" type="bool" setter="" getter="" default="true">
 			Use 16 bits for the directional shadow depth map. Enabling this results in shadows having less precision and may result in shadow acne, but can lead to performance improvements on some devices.
 		</member>
+		<member name="rendering/lights_and_shadows/directional_shadow/far_cascade_update_interval" type="int" setter="" getter="" default="4">
+			How often the far cascades of a [DirectionalLight3D]'s shadow are rendered, in frames. With [constant DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS], the last cascade is rendered every this many frames and the third every half as many; with [constant DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS], the second cascade every half as many. The nearer cascades are rendered every frame. A cached cascade covers a 10% margin around the camera's view, and is rendered again early whenever the view no longer fits inside it, or when the light turns, changes, or the shadow atlas is resized. It works with the Forward+ and Mobile renderers. Moving objects in the far cascades update their shadows less often. [code]1[/code] renders every cascade every frame.
+		</member>
 		<member name="rendering/lights_and_shadows/directional_shadow/size" type="int" setter="" getter="" default="4096">
 			The directional shadow's size in pixels. Higher values will result in sharper shadows, at the cost of performance. The value is rounded up to the nearest power of 2.
 		</member>

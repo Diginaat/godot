@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-08 (render speed: directional shadow cascade cache)
+
+* **Implemented**: [far directional cascades kept between
+  frames](/project/directional-cascade-cache.md)
+  (`directional_shadow/far_cascade_update_interval`, default 4). Valley
+  shadows 3.53 to 2.03 ms held, 2.53 to 1.41 ms flying; whole frame -1.1
+  to -1.5 ms.
+* **Tooling**: `gpu_intervals.ps1 -FixedFps` (frame-locked moving cameras)
+  and the valley's `--view-time=T` (one held view, every flying feature on).
+
 ## 2026-11-08 (stability: separate render thread shutdown)
 
 * **Fixed**: with the separate render thread, the main RenderingDevice

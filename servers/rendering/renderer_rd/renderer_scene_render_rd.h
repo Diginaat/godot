@@ -266,6 +266,7 @@ public:
 
 	virtual void screen_space_roughness_limiter_set_active(bool p_enable, float p_amount, float p_limit) override;
 	virtual bool screen_space_roughness_limiter_is_active() const override;
+	virtual uint64_t directional_shadow_cache_generation() const override;
 	virtual float screen_space_roughness_limiter_get_amount() const;
 	virtual float screen_space_roughness_limiter_get_limit() const;
 

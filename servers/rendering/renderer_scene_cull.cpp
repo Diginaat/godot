@@ -2295,7 +2295,7 @@ void RendererSceneCull::_update_instance_lightmap_captures(Instance *p_instance)
 	geom->geometry_instance->set_lightmap_capture(p_instance->lightmap_sh.ptr());
 }
 
-void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect) {
+void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_index, Instance *p_instance, const Transform3D p_cam_transform, const Projection &p_cam_projection, bool p_cam_orthogonal, bool p_cam_vaspect, uint32_t p_visible_layers) {
 	// For later tight culling, the light culler needs to know the details of the directional light.
 	light_culler->prepare_directional_light_begin(p_instance, p_shadow_index);
 
@@ -2347,8 +2347,43 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 	cull.shadows[p_shadow_index].light_instance = light->instance;
 	cull.shadows[p_shadow_index].caster_mask = RSG::light_storage->light_get_shadow_caster_mask(p_instance->base);
 
+	// Far cascade cache: the far cascades are rendered every few frames,
+	// staggered, with a margin around the camera's slice. In between, a
+	// cascade keeps its map and parameters while the current slice still fits
+	// inside the region the last render covered (from any viewport: the map
+	// only depends on that region). A light, atlas or layer change starts over.
+	const uint64_t cache_generation = scene_render->directional_shadow_cache_generation();
+	const int update_interval = GLOBAL_GET_CACHED(int, "rendering/lights_and_shadows/directional_shadow/far_cascade_update_interval");
+	int cascade_intervals[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES] = { 1, 1, 1, 1 };
+	if (cache_generation != 0 && update_interval > 1) {
+		if (splits == 4) {
+			cascade_intervals[2] = MAX(1, update_interval / 2);
+			cascade_intervals[3] = update_interval;
+		} else if (splits == 2) {
+			cascade_intervals[1] = MAX(1, update_interval / 2);
+		}
+	}
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	uint32_t cache_hash = hash_murmur3_one_64(cache_generation);
+	cache_hash = hash_murmur3_one_64(RSG::light_storage->light_get_version(p_instance->base), cache_hash);
+	for (int axis = 0; axis < 3; axis++) {
+		cache_hash = hash_murmur3_one_real(light_transform.basis.rows[axis].x, cache_hash);
+		cache_hash = hash_murmur3_one_real(light_transform.basis.rows[axis].y, cache_hash);
+		cache_hash = hash_murmur3_one_real(light_transform.basis.rows[axis].z, cache_hash);
+	}
+	cache_hash = hash_murmur3_one_32(uint32_t(p_shadow_index), cache_hash);
+	cache_hash = hash_murmur3_one_32(uint32_t(splits), cache_hash);
+	cache_hash = hash_murmur3_one_32(p_visible_layers, cache_hash);
+	cache_hash = hash_murmur3_one_real(texture_size, cache_hash);
+	const uint64_t cache_key = hash_fmix32(cache_hash);
+
 	for (int i = 0; i < splits; i++) {
 		RENDER_TIMESTAMP("Cull DirectionalLight3D, Split " + itos(i));
+
+		const bool cacheable = cascade_intervals[i] > 1;
+		InstanceLightData::DirectionalCascadeCache &cache = light->directional_cascade_cache[i];
+		Cull::Shadow::Cascade &cascade = cull.shadows[p_shadow_index].cascades[i];
+		cascade.reused = false;
 
 		// setup a camera matrix for that range!
 		Projection camera_matrix;
@@ -2371,7 +2406,11 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 		bool res = camera_matrix.get_endpoints(p_cam_transform, endpoints);
 		ERR_CONTINUE(!res);
 
-		light_culler->prepare_directional_light_cascade(p_shadow_index, i, receiver_frustum_planes, endpoints);
+		if (!cacheable) {
+			// Tighter caster culling fits only this frame's slice; a cached
+			// cascade must hold every caster of its whole region.
+			light_culler->prepare_directional_light_cascade(p_shadow_index, i, receiver_frustum_planes, endpoints);
+		}
 
 		// obtain the light frustum ranges (given endpoints)
 
@@ -2448,6 +2487,11 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 
 			radius *= texture_size / (texture_size - 2.0); //add a texel by each side
 
+			// Cached cascades cover a margin around the slice, so the camera can
+			// move a little before they must be rendered again.
+			const real_t margin = cacheable ? radius * DIRECTIONAL_CASCADE_CACHE_MARGIN : 0.0;
+			radius += margin;
+
 			z_min_cam = z_vec.dot(center) - radius;
 
 			{
@@ -2463,6 +2507,31 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 					x_min -= soft_shadow_expand;
 					y_min -= soft_shadow_expand;
 				}
+			}
+
+			if (cacheable) {
+				// Keep the cached cascade when this frame's slice (its casters'
+				// region and the receivers' depth) lies inside the cached one,
+				// a quarter margin in from its edges for the shadow filter.
+				const real_t inset = margin * 0.25;
+				const bool due = (frame + uint64_t(i)) % uint64_t(cascade_intervals[i]) == 0 || frame - cache.frame >= uint64_t(cascade_intervals[i]);
+				if (!due && cache.valid && cache.key == cache_key && x_min >= cache.x_min + inset && x_max <= cache.x_max - inset && y_min >= cache.y_min + inset && y_max <= cache.y_max - inset && z_min >= cache.z_min + inset && z_max <= cache.z_max - inset) {
+					cascade.projection = cache.projection;
+					cascade.transform = cache.transform;
+					cascade.zfar = cache.zfar;
+					cascade.split = cache.split;
+					cascade.shadow_texel_size = cache.shadow_texel_size;
+					cascade.bias_scale = cache.bias_scale;
+					cascade.range_begin = cache.range_begin;
+					cascade.uv_scale = cache.uv_scale;
+					cascade.reused = true;
+					continue;
+				}
+				x_min -= margin;
+				x_max += margin;
+				y_min -= margin;
+				y_max += margin;
+				z_min -= margin;
 			}
 
 			// This trick here is what stabilizes the shadow (make potential jaggies to not move)
@@ -2515,6 +2584,28 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 			cull.shadows[p_shadow_index].cascades[i].bias_scale = (z_max - z_min_cam);
 			cull.shadows[p_shadow_index].cascades[i].range_begin = z_max - z_vec.dot(p_cam_transform.origin);
 			cull.shadows[p_shadow_index].cascades[i].uv_scale = uv_scale;
+		}
+
+		if (cacheable) {
+			cache.valid = true;
+			cache.key = cache_key;
+			cache.frame = frame;
+			cache.x_min = x_min;
+			cache.x_max = x_max;
+			cache.y_min = y_min;
+			cache.y_max = y_max;
+			cache.z_min = z_min;
+			cache.z_max = z_max;
+			cache.projection = cascade.projection;
+			cache.transform = cascade.transform;
+			cache.zfar = cascade.zfar;
+			cache.split = cascade.split;
+			cache.shadow_texel_size = cascade.shadow_texel_size;
+			cache.bias_scale = cascade.bias_scale;
+			cache.range_begin = cascade.range_begin;
+			cache.uv_scale = cascade.uv_scale;
+		} else {
+			cache.valid = false;
 		}
 	}
 }
@@ -3743,6 +3834,9 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 
 			for (uint32_t j = 0; j < cull_data.cull->shadow_count; j++) {
 				for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
+					if (cull_data.cull->shadows[j].cascades[k].reused) {
+						continue; // Kept from an earlier frame.
+					}
 					if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) { // pass the cascade index
 						continue;
 					}
@@ -3969,7 +4063,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		RSG::light_storage->set_directional_shadow_count(lights_with_shadow.size());
 
 		for (int i = 0; i < lights_with_shadow.size(); i++) {
-			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], frustum_transform, shadow_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect);
+			_light_instance_setup_directional_shadow(i, lights_with_shadow[i], frustum_transform, shadow_projection, p_camera_data->is_orthogonal, p_camera_data->vaspect, p_visible_layers);
 		}
 	}
 
@@ -4069,6 +4163,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 				const Cull::Shadow::Cascade &c = cull.shadows[i].cascades[j];
 				//			print_line("shadow " + itos(i) + " cascade " + itos(j) + " elements: " + itos(c.cull_result.size()));
 				RSG::light_storage->light_instance_set_shadow_transform(cull.shadows[i].light_instance, c.projection, c.transform, c.zfar, c.split, j, c.shadow_texel_size, c.bias_scale, c.range_begin, c.uv_scale);
+				if (c.reused) {
+					continue; // The atlas still holds it; only its parameters were set again.
+				}
 				if (max_shadows_used == MAX_UPDATE_SHADOWS) {
 					continue;
 				}

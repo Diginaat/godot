@@ -16,7 +16,7 @@ versioning) are in [CUSTOM_BUILD.md](../CUSTOM_BUILD.md). Feature notes:
 | `test/` | `smoke.ps1` | The smoke tests every merge and release must pass |
 | `test/` | `large_world.ps1` | Real scene import, GPU culling/CLOD commands, native materials/shadows and lifetime regressions |
 | `test/` | `forest.ps1` | Dense lit forest: source versus GPU culling/CLOD/HZB pixel A/B with light and shadow controls |
-| `test/` | `gpu_intervals.ps1` | Whole-frame GPU time per timestamp interval, including work recorded before the viewport |
+| `test/` | `gpu_intervals.ps1` | Whole-frame GPU time per timestamp interval, including work recorded before the viewport; `-FixedFps` for moving cameras, `-ExtraArgs --view-time=T` for one valley view |
 | `test/` | `forest_map.ps1` | Day/night valley fly-through with GPU geometry, volumetric fog, many lights and emissives; route screenshots |
 | `test/ddgi/` | `ddgi_tests.ps1`, `ddgi_eval.py` | DDGI measurements: flicker, light switch, weather, scrolling, GPU time, baking, comparison shots |
 | `docs/` | `update_class_docs.ps1`, `check_class_docs.py` | Keeps the class reference (editor help) complete |

@@ -456,6 +456,8 @@ private:
 		int size = 0;
 		bool use_16_bits = true;
 		int current_light = 0;
+		// Bumped when the atlas is reallocated and its contents are lost.
+		uint64_t generation = 0;
 	} directional_shadow;
 
 	/* SHADOW CUBEMAPS */
@@ -1184,6 +1186,7 @@ public:
 
 	Rect2i get_directional_shadow_rect();
 	void update_directional_shadow_atlas();
+	uint64_t directional_shadow_get_generation() const { return directional_shadow.generation; }
 
 	_FORCE_INLINE_ RID directional_shadow_get_texture() {
 		return directional_shadow.depth;

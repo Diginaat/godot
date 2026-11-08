@@ -2853,6 +2853,7 @@ void LightStorage::directional_shadow_atlas_set_size(int p_size, bool p_16_bits)
 
 	directional_shadow.size = p_size;
 	directional_shadow.use_16_bits = p_16_bits;
+	directional_shadow.generation++;
 
 	if (directional_shadow.depth.is_valid()) {
 		RD::get_singleton()->free_rid(directional_shadow.depth);
