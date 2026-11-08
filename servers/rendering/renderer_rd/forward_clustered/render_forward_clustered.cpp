@@ -3365,7 +3365,9 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	if (get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_DISABLE_LOD) {
 		scene_data.screen_mesh_lod_threshold = 0.0;
 	} else {
-		scene_data.screen_mesh_lod_threshold = p_screen_mesh_lod_threshold;
+		// Shadow outlines tolerate coarser meshes than the camera's view
+		// (rendering/mesh_lod/lod_change/shadow_threshold_scale).
+		scene_data.screen_mesh_lod_threshold = p_screen_mesh_lod_threshold * GLOBAL_GET_CACHED(float, "rendering/mesh_lod/lod_change/shadow_threshold_scale");
 	}
 
 	PassMode pass_mode = p_use_dp ? PASS_MODE_SHADOW_DP : PASS_MODE_SHADOW;

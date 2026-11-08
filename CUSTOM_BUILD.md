@@ -161,6 +161,10 @@ straight.
     directional shadow passes that clear only their own atlas region in
     Forward+ and Mobile (no whole-atlas clear). See
     [kb/project/directional-cascade-cache.md](kb/project/directional-cascade-cache.md).
+  - Shadow passes multiply the mesh LOD threshold
+    (`mesh_lod/lod_change/shadow_threshold_scale`, in `_render_shadow_append()`
+    of Forward+ and Mobile). See
+    [kb/project/shadow-lod-scale.md](kb/project/shadow-lod-scale.md).
   - `RenderingServerDefault::finish()` makes the main RenderingDevice
     current on the main thread again after the separate render thread
     ends, so its `finalize()` runs at exit (without it the guard skipped

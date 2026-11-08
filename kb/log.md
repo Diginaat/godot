@@ -1,5 +1,16 @@
 # Update log
 
+## 2026-11-09 (render speed: shadow LODs, grass)
+
+* **Implemented**: [coarser mesh LODs for shadow
+  casters](/project/shadow-lod-scale.md)
+  (`mesh_lod/lod_change/shadow_threshold_scale`, default 4): valley shadows
+  2.02 to 1.62 ms. `GrassField3D` no longer captures a timestamp per field.
+* **Finding**: a real level's grass costs 3.3 ms (of 7), pixel-bound:
+  alpha-tested overdraw inside Megascans clump meshes and the lit colour
+  pass. Near-first patch order and gating frame-level timestamps did not
+  help (recorded on the same page).
+
 ## 2026-11-08 (render speed: directional shadow cascade cache)
 
 * **Implemented**: [far directional cascades kept between
