@@ -109,6 +109,15 @@ void WeatherRainEffect::update(Weather *p_weather, double p_delta) {
 	if (root && camera) {
 		root->set_global_position(view_position);
 	}
+	if (collision && camera) {
+		// Any move re-renders the height field, so it doesn't ride on the
+		// root (that was a capture every frame) but follows in grid steps.
+		const float step = area_size * COLLISION_STEP;
+		const Vector3 snapped = (view_position / step).round() * step;
+		if (!collision->get_global_position().is_equal_approx(snapped)) {
+			collision->set_global_position(snapped);
+		}
+	}
 
 	const float amount = p_weather->get_rain_amount();
 	if (drops && amount != intensity) {
@@ -347,10 +356,14 @@ void WeatherRainEffect::_build_rain() {
 
 	collision = memnew(GPUParticlesCollisionHeightField3D);
 	collision->set_name("Collision");
-	collision->set_size(Vector3(area_size, emit_height + 12.0f, area_size));
+	// One step larger than the drop area, so it still covers the drops when
+	// the camera is half a step from its centre.
+	const float collision_step = area_size * COLLISION_STEP;
+	collision->set_size(Vector3(area_size + collision_step, emit_height + 12.0f + collision_step, area_size + collision_step));
 	collision->set_resolution((GPUParticlesCollisionHeightField3D::Resolution)collision_resolution);
 	collision->set_update_mode(GPUParticlesCollisionHeightField3D::UPDATE_MODE_WHEN_MOVED);
-	collision->set_follow_camera_enabled(true);
+	// Positioned in update(), independent of the root that follows the camera.
+	collision->set_as_top_level(true);
 	// cull_mask: which particles collide; heightfield_mask: which geometry is recorded.
 	collision->set_cull_mask(rain_layers);
 	collision->set_heightfield_mask(0xFFFFF & ~rain_layers);

@@ -63,6 +63,9 @@ class WeatherRainEffect : public WeatherEffect {
 	GDCLASS(WeatherRainEffect, WeatherEffect);
 
 	static constexpr float IMPACT_LIFETIME = 0.45f;
+	// The collision height field follows the camera in steps of this
+	// fraction of area_size: it re-renders the scene below whenever it moves.
+	static constexpr float COLLISION_STEP = 0.125f;
 	static constexpr uint32_t CAPTURE_LAYER = 1 << 18;
 
 	float wind_multiplier = 0.85f;

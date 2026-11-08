@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-08 (render speed: rain collision)
+
+* **Fixed**: the rain's collision height field moved with the camera-following
+  root every frame, and any move re-renders it: 0.25 ms GPU per frame in a
+  real level, even with a still camera. It now follows in grid steps (0.02
+  ms average). Checked: rain still stops on a roof after walking 20 m. See
+  [World wind and weather core](/project/world-wind.md).
+
 ## 2026-11-08 (render speed: GPU voxel field)
 
 * **Fixed**: `VoxelField3D` captured a GPU timestamp per field, which

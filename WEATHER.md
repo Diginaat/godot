@@ -138,6 +138,11 @@ nodes leave the tree at once, so the new ones keep their names).
   the crown sheet and (from Medium) the droplet crown.
 * **Collision**: a `GPUParticlesCollisionHeightField3D` following the
   camera, recaptured every `collision_refresh_interval` while it rains.
+  Any move of the node re-renders it, so it is top-level and follows the
+  camera in steps of `area_size / 8` (one step larger than the drop area),
+  not on the root that moves every frame. On the root it re-rendered every
+  frame, even with a still camera (0.25 ms GPU in a real level, now 0.02 ms
+  on average).
 * **Occlusion map**: an orthographic camera in a `SubViewport` looks down
   from `occlusion_capture_height`; a full-screen pass writes world height
   into a float texture. It is rendered once per `occlusion_update_step` of
