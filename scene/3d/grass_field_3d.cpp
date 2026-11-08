@@ -523,7 +523,8 @@ void GrassField3D::_render_generate(Ref<GrassField3DGPU> p_gpu, RID p_multimesh,
 	rd->buffer_clear(gpu.counter, 0, sizeof(uint32_t));
 	const uint32_t patches = uint32_t(params.patches[2]) * uint32_t(params.patches[2]);
 	uint32_t push[4] = {};
-	rd->capture_timestamp("GrassField3D generation");
+	// No timestamp here: one per field orders the render graph around it
+	// and serializes the fields' work.
 	RD::ComputeListID list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(list, gpu.pipeline);
 	rd->compute_list_bind_uniform_set(list, gpu.uniform_set, 0);
