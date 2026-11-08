@@ -91,6 +91,15 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
   correctness and coverage check with screenshots, not a benchmark. Measure with
   `devtools/test/forest_bench.ps1` (fixed views, alternating modes, p50/p95)
   before and after a renderer change.
+- The benches read the viewport's render time, which misses GPU work recorded
+  before the viewport (`call_on_render_thread()` compute, collider captures).
+  For those, measure the whole frame with `devtools/test/gpu_intervals.ps1`.
+- Never capture an RD timestamp per object: a timestamp orders the render
+  graph around it, so many small jobs run one after another (149 voxel fields
+  cost 3.1 ms that way, 0.5 ms without).
+- A node whose every move costs GPU work (height field colliders, capture
+  cameras) must not ride on a parent that follows the camera every frame;
+  make it top-level and move it in steps.
 - The `large_world` fixtures draw a few marker pixels on black and quit; their
   windows look black by design.
 
