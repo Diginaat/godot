@@ -248,6 +248,7 @@ name part was `nvidia-rt-dlss-physx`, title "Godot NVIDIA + PhysX"):
 | 0.8.0 | 4.8-beta | `godot4.8-beta-nvidia-rt-dlss-physx-v0.8.0` | Godot 4.8-beta base, PhysX module `97bd583c28`; DDGI: near-field rays removed (dark spots that moved with the camera), DDGI rays through glass fixed |
 | 0.8.1 | 4.8-beta | `godot4.8-beta-nvidia-rt-dlss-physx-v0.8.1` | Reflections: `PlanarReflector3D` with a mirror pass, automatic reflections from `DDGIVolume`, budgeted DDGI-normalized reflection probes; DDGI adaptive update budget; fix: sky flicker in mirrors with volumetric fog |
 | 0.9.0 | 4.8-beta | `godot4.8-beta-diginaat-physx-v0.9.0` | New release names (`diginaat-physx`); Modern Compact editor theme with Atkinson Hyperlegible Next; split workspace and Live Runtime view; large-world geometry (GPU culling, cluster LOD, far-field voxels, HZB occlusion); project backup before first open; Godot master `b47a795aa5`, PhysX module `92da57bda8` |
+| 0.9.1 | 4.8-beta | `godot4.8-beta-diginaat-physx-v0.9.1` | Native weather and wind (`modules/weather`: `WindServer`, `WindZone3D`, `Weather` with profiles, sky, rain and wet surfaces, haze, lightning, sound); shadow speed-ups (far directional cascades kept between frames, coarser shadow LODs); no per-field GPU timestamps in `VoxelField3D` and `GrassField3D`; fixes: RenderingDevice shutdown with the render thread, transparent popup corners |
 
 ## Release packages (Windows)
 

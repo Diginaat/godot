@@ -80,7 +80,7 @@ reaches them bounces off the sunlit tracks, grass and vines.
 Prebuilt Windows editors and export templates (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
 Each release names the Godot version it's based on and this build's own
-version: `godot4.8-beta-diginaat-physx-v0.9.0` is build 0.9.0, on Godot
+version: `godot4.8-beta-diginaat-physx-v0.9.1` is build 0.9.1, on Godot
 4.8-beta. Releases before 0.9.0 are tagged `...-nvidia-rt-dlss-physx-v...`.
 
 > [!IMPORTANT]
@@ -197,6 +197,42 @@ Off by default; for open worlds with many meshes and instances.
 - **Far field**: `VoxelProxyBuilder` splat proxies and `VoxelField3D` GPU
   voxel levels.
 - **`GrassField3D`**: GPU-generated grass with level of detail rings.
+
+### Weather and wind
+
+Native C++ weather (`modules/weather`). Details: [WEATHER.md](WEATHER.md).
+
+- **One world wind** (`WindServer`) with gusts that travel with the wind,
+  direction swing and turbulence. Grass (`GrassField3D`'s default material),
+  trees through the built-in `res://.builtin/wind.gdshaderinc`, PhysX cloth
+  (`PhysXCloth3D.use_global_wind`) and rigid bodies (`WindReceiver3D`) all
+  follow it.
+- **`WindZone3D`**: local wind in a sphere or a box: fans, downdrafts,
+  downwash, blasts, vortices, and calm shelters.
+- **`Weather` node**: picks a weather type by name and blends between them.
+  Types are `WeatherProfile` resources in a `WeatherLibrary` (11 built in), so
+  a new type needs no code.
+- **Effects** (`WeatherEffect` resources, also scriptable): sun, sky light
+  and fog; sky and clouds (`WeatherSkyMaterial`); GPU rain with occlusion and
+  wet surfaces (puddles, ripples, water running down walls, dry under cover);
+  ground haze and mist motes; lightning; and rain, wind and thunder sound
+  synthesized once per run.
+
+### Performance
+
+- **Far directional cascades kept between frames**: the far shadow cascades
+  of a directional light render every few frames, staggered
+  (`rendering/lights_and_shadows/directional_shadow/far_cascade_update_interval`,
+  default 4). In a large valley test scene (RTX 3060, Vulkan) shadows went from
+  3.53 to 2.03 ms.
+- **Coarser mesh LODs for shadow casters**
+  (`rendering/mesh_lod/lod_change/shadow_threshold_scale`, default 4): near
+  casters keep their detailed LOD, distant ones cast with coarser LODs.
+  Shadows 2.02 to 1.62 ms in the same scene.
+- `VoxelField3D` and `GrassField3D` no longer capture a GPU timestamp per
+  field, which made their GPU work run one field after another (valley frame
+  10.4 to 7.5 ms). The rain's collision height field no longer re-renders
+  every frame.
 
 ### PhysX 5 (from the godot_physx module)
 
@@ -453,6 +489,16 @@ File.
 The fork tracks three upstreams. The update procedure, conflict rules and smoke
 tests are in [`CUSTOM_BUILD.md`](CUSTOM_BUILD.md). Its tables and examples use
 the maintainer's own local paths; replace them with yours.
+
+## Credits
+
+- **[Snesmocha](https://github.com/Snesmocha)** (mocha), for helping with
+  this build's optimizations.
+- **[Wild Ox Studios](https://www.youtube.com/@WildOxStudios)**
+  ([uno1982](https://github.com/uno1982)), for the PhysX 5 module (see
+  [above](#physx-module-by-wild-ox-studios)).
+- The Godot contributors and NVIDIA's RTX team, for the engine and the DLSS
+  and path tracer branch this build is made from.
 
 ## Licenses
 

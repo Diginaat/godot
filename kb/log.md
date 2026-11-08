@@ -1,6 +1,12 @@
 # Update log
 
-## 2026-11-09 (render speed: shadow LODs, grass)
+## 2026-11-08 (release 0.9.1)
+
+* **Updated**: release 0.9.1 (weather and wind, shadow speed-ups) in
+  CUSTOM_BUILD.md; README.md lists the weather, the performance work and a
+  Credits section.
+
+## 2026-11-08 (render speed: shadow LODs, grass)
 
 * **Implemented**: [coarser mesh LODs for shadow
   casters](/project/shadow-lod-scale.md)
