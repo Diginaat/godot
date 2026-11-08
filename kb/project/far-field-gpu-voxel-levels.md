@@ -42,8 +42,16 @@ the auto-capacity bound, coverage and colour against the source, and a free
 with work in flight.
 
 In the valley, against the source meshes, the image error falls from 5.13 to
-3.69 (mean linear difference x 1000). The cost is -0.05, +0.71 and +0.16 ms
-GPU p50 against the static proxies (D018).
+3.69 (mean linear difference x 1000). The first cost figures (-0.05, +0.71
+and +0.16 ms GPU p50 against the static proxies, D018) came from the
+viewport's render time and missed the selection, which runs before the
+viewport ([the mistake](/mistakes/viewport-time-misses-pre-viewport-work.md)).
+Whole frame, the field cost 4.9 ms more than the static proxies, 3.1 ms of
+it from one GPU timestamp per field: a timestamp orders the render graph, so
+149 fields ran their clears, selections and copies one after another. Without
+the per-field timestamp (2026-11-08) the field costs 2.0 ms more on Vulkan
+and 1.6 ms on D3D12: 0.5 ms selection, the rest drawing about 27,000
+instanced two-triangle quads in the depth and opaque passes.
 
 # Limits
 
@@ -51,3 +59,6 @@ GPU p50 against the static proxies (D018).
 * A brick's level switch pops, without a blend.
 * Selection follows only the viewport's current camera.
 * The valley build doubles to 3.8 s.
+* Tiny instances draw slowly: about 30 ns per splat per pass. Drawing the
+  splats from one buffer without instancing (vertex pulling, six vertices
+  per splat) is the next step for its cost.

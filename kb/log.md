@@ -1,5 +1,16 @@
 # Update log
 
+## 2026-11-08 (render speed: GPU voxel field)
+
+* **Fixed**: `VoxelField3D` captured a GPU timestamp per field, which
+  serialized the render graph: 149 fields in the valley took 3.1 ms of GPU
+  selection, now 0.5 ms. Whole frame 10.4 to 7.5 ms on Vulkan.
+* **Tooling**: `devtools/test/gpu_intervals.ps1` (whole-frame GPU time per
+  timestamp interval).
+* **Mistake**: [the viewport's GPU time missed pre-viewport
+  work](/mistakes/viewport-time-misses-pre-viewport-work.md); the far-field
+  cost figures were corrected in [its page](/project/far-field-gpu-voxel-levels.md).
+
 ## 2026-11-08 (weather sky material)
 
 * **Implemented**: `WeatherSkyMaterial`, the built-in weather sky as a

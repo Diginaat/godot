@@ -234,6 +234,12 @@ against the source meshes at 27 m height: 3.69 against 5.13 (mean linear
 difference x 1000), and 2.51% against 3.47% of pixels off by more than 0.05.
 Shadows are off by default, because splats outside the camera view are not
 selected.
+Correction (2026-11-08): those GPU numbers missed the selection, which runs
+before the viewport's timing starts. Whole frame, the GPU field cost 4.9 ms
+more than the static proxies, 3.1 ms of it from one GPU timestamp per field
+serializing the render graph. Without those timestamps it costs 2.0 ms more
+(Vulkan; 1.6 ms on D3D12), mostly drawing ~27,000 instanced quads
+(PERFORMANCE_BENCHMARKS.md).
 
 ## D019 — Scene import writes page files into the imported folder
 

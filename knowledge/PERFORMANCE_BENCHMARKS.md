@@ -413,6 +413,24 @@ Repeated source runs differ by exactly 0, so the metric has no noise floor
 in this view. The GPU field at 64 voxels and 2 px is the valley's flying
 default. At 128 voxels the extra quality is small and the cost is large.
 
+**Correction, 2026-11-08.** These GPU numbers are the viewport's render time,
+which starts at the viewport. The fields' selection runs before it
+(`call_on_render_thread()`), so it was never counted. Whole-frame GPU time
+(`devtools/test/gpu_intervals.ps1`, the flying default view, RTX 3060):
+
+| Far field | Vulkan | D3D12 |
+| --- | --- | --- |
+| Static proxies (`--far-static`) | 5.55 | 5.77 |
+| GPU levels, one timestamp per field (before) | 10.43-10.45 | |
+| GPU levels, no per-field timestamp | 7.52-7.68 | 7.38 |
+
+Each of the 149 fields captured a GPU timestamp, and a timestamp orders the
+render graph around it, so every field's clear, selection and copy ran one
+after another: 3.1 ms. Without it, the selection costs 0.5 ms. The rest of
+the difference to the static proxies is drawing: the depth pre-pass +0.78
+ms and the opaque pass +0.82 ms for about 27,000 instanced two-triangle
+quads, against one merged mesh per patch.
+
 ## Repeatable performance protocol (future gates)
 
 Stable-compaction follow-up: three dispatch stages, 64-aligned ID ranges,

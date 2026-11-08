@@ -456,7 +456,9 @@ void VoxelField3D::_render_select(Ref<VoxelField3DGPU> p_gpu, RID p_multimesh, c
 	const uint32_t bricks = params.info[0];
 	const uint32_t width = MAX(1u, params.misc[2]);
 	uint32_t push[4] = {};
-	rd->capture_timestamp("VoxelField3D selection");
+	// No timestamp here: one per field orders the render graph around it,
+	// which serializes every field's clear, selection and copy (149 fields in
+	// the valley cost 3 ms of GPU time that way, instead of running together).
 	RD::ComputeListID list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(list, gpu.pipeline);
 	rd->compute_list_bind_uniform_set(list, gpu.uniform_set, 0);
