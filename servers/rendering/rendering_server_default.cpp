@@ -298,6 +298,16 @@ void RenderingServerDefault::finish() {
 			server_task_id = WorkerThreadPool::INVALID_TASK_ID;
 		}
 		server_thread = Thread::MAIN_ID;
+#ifdef RD_ENABLED
+		// _assign_mt_ids() made the main RD current on the server thread. Hand
+		// it back: the display server frees it from the main thread, and its
+		// finalize() would otherwise fail the thread guard and skip the
+		// shutdown (waiting for frames, freeing the device's resources).
+		RenderingDevice *rd = RenderingDevice::get_singleton();
+		if (rd) {
+			rd->make_current();
+		}
+#endif // RD_ENABLED
 	} else {
 		_finish();
 	}

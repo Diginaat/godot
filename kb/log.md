@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-08 (stability: separate render thread shutdown)
+
+* **Fixed**: with the separate render thread, the main RenderingDevice
+  stayed bound to the ended server thread, so `finalize()` failed its thread
+  guard at exit ("can only be called from the render thread") and skipped
+  the shutdown; two ObjectDB instances leaked. `RenderingServerDefault::finish()`
+  now makes it current on the main thread again. A real level exits clean.
+
 ## 2026-11-08 (render speed: rain collision)
 
 * **Fixed**: the rain's collision height field moved with the camera-following

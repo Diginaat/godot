@@ -154,6 +154,10 @@ straight.
     (`scene/debugger/runtime_state_observer.cpp`,
     `editor/run/live_runtime_plugin.cpp`). See
     [SPLIT_WORKSPACE.md](SPLIT_WORKSPACE.md).
+  - `RenderingServerDefault::finish()` makes the main RenderingDevice
+    current on the main thread again after the separate render thread
+    ends, so its `finalize()` runs at exit (without it the guard skipped
+    the shutdown and objects leaked). Drop it if upstream fixes the same.
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).
