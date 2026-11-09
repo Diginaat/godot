@@ -407,3 +407,34 @@ none with the setting off, negative control on visible rows. City bench:
 opaque pass -0.37 to -0.59 ms for a 0.02-0.03 ms test (PERFORMANCE_BENCHMARKS).
 Not done: depth-pass savings for instances (a history like D023); moving
 (motion-list) MultiMeshes use the same path but have no fixture yet.
+
+## D025 — GPU-first renderer: a persistent GPU instance table comes first
+
+2026-11-10. Planned (Phase 0 of [docs/renderer/](../docs/renderer/roadmap.md)).
+Problem: GPU culling, LOD and HZB exist for MultiMesh instances and CLOD
+groups, but ordinary `MeshInstance3D` nodes still take the whole CPU path:
+a threaded linear cull (cheap per instance), then per pass on one thread
+`_fill_render_list`, sort, `_fill_instance_data` (176 bytes per element per
+pass per frame, nothing kept between frames) and draw recording. Shadow
+passes repeat all of it.
+Candidates:
+1. GPU culling of ordinary instances right away. Rejected as the first
+   step: the GPU has no persistent scene data to cull, and returning
+   visibility to the CPU would need a readback.
+2. A separate deferred, bindless, fully GPU-driven renderer (the upstream
+   proposal godot-proposals #6109). Rejected for now: a second renderer
+   (D001), large conflicts with upstream, every material and feature
+   (DDGI, path tracer, weather) to port.
+3. A persistent per-instance GPU table next to the existing structures
+   (slot per geometry instance, dirty-range uploads), then GPU culling over
+   it into compacted per-bucket ID lists, then indirect submission. Chosen:
+   each step is useful and testable alone (the table alone already cuts the
+   per-frame 176-byte rewrite to 4-byte IDs), it reuses the MultiMesh
+   source-ID remap and culling kernels (D003, D010), and unsupported
+   instances keep the current path.
+Parallel render-list preparation (roadmap Phase 4) is planned independently,
+because the CPU path stays the fallback for skinned, transparent and other
+excluded instances.
+Benchmark evidence: pending (`instance_bench` baseline,
+docs/renderer/benchmarks.md). Revisit the order if the baseline shows that
+render-list work is not the main render-thread cost.

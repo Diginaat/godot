@@ -14,6 +14,11 @@ tracer, and update its step table and findings log as you go.
 Weather and wind (`modules/weather/`) are tracked in [WEATHER.md](WEATHER.md):
 design, step table, tests and findings. Keep it current with each step.
 
+GPU-driven renderer work (Forward+ modernization) is tracked in
+[docs/renderer/MEMORY.md](docs/renderer/MEMORY.md): current phase, next step,
+links to the architecture audit, roadmap and benchmarks. Read it before
+working on it and update it at the end of each session.
+
 Everything the project learns (research, findings, decisions, improvement
 ideas, measurements) goes into the knowledge base in [kb/](kb/index.md), an
 Open Knowledge Format (OKF) v0.2 bundle. Read [kb/kb-howto.md](kb/kb-howto.md),

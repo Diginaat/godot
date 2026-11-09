@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-10 (GPU-first renderer, Phase 0)
+
+* **Started**: GPU-driven Forward+ work on `dev-gpu-renderer`, tracked in
+  docs/renderer/ (audit, capability matrix, roadmap, bench protocol) and
+  D025. New many-instance CPU bench `devtools/test/instance_bench.ps1`.
+
 ## 2026-11-08 (release 0.9.1)
 
 * **Updated**: release 0.9.1 (weather and wind, shadow speed-ups) in
