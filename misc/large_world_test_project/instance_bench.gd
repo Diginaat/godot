@@ -27,12 +27,6 @@ const CASES := [
 const VIEWS: Array[String] = ["static", "orbit"]
 
 signal stages_ready(stages: Dictionary)
-# Stages whose CPU time is reported (frame profile marker names).
-const STAGES: Array[String] = [
-	"Prepare Render Frame", "Update Visibility Dependencies", "Cull 3D Scene", "Render 3D Scene",
-	"Prepare 3D Scene", "Setup 3D Scene", "Render Depth Pre-Pass", "Render Opaque Pass",
-	"Render 3D Transparent Pass", "Render Directional/SpotLight Shadows", "Render OmniLight Shadows",
-]
 
 var _camera: Camera3D
 var _root: Node3D
@@ -231,21 +225,32 @@ func _read_stages() -> void:
 func _profile(label: String) -> void:
 	# Only with --gpu-profile (which turns the RENDER_TIMESTAMP markers on),
 	# in its own run: the markers add render-graph nodes and change ordering.
+	# Every marker, with light/split/face numbers removed so that, e.g., all
+	# directional splits add up into one stage.
 	var stages := {}
-	for name in STAGES:
-		stages[name] = [] as Array[float]
+	var digits := RegEx.create_from_string("[0-9]+")
 	for frame in WARM_FRAMES:
 		await RenderingServer.frame_post_draw
 	for frame in PROFILE_FRAMES:
 		await RenderingServer.frame_post_draw
 		RenderingServer.call_on_render_thread(_read_stages)
 		var sums: Dictionary = await stages_ready
-		for name in STAGES:
-			stages[name].append(float(sums.get(name, 0.0)))
+		var merged := {}
+		for name: String in sums:
+			var key := digits.sub(name, "#", true)
+			merged[key] = float(merged.get(key, 0.0)) + float(sums[name])
+		for key: String in merged:
+			if not stages.has(key):
+				stages[key] = [] as Array[float]
+			stages[key].append(merged[key])
 	var row := PackedStringArray()
-	for name in STAGES:
-		var p50 := _percentile(stages[name], 0.5)
-		if p50 > 0.0:
+	for name: String in stages:
+		# A stage missing in some frames counts as zero there.
+		var values: Array[float] = stages[name]
+		while values.size() < PROFILE_FRAMES:
+			values.append(0.0)
+		var p50 := _percentile(values, 0.5)
+		if p50 >= 0.02:
 			row.append("'%s'=%.3f" % [name, p50])
 	if row.is_empty():
 		printerr("INSTANCE_BENCH_FAIL: %s has no stage markers (run with --gpu-profile)" % label)
@@ -255,8 +260,7 @@ func _profile(label: String) -> void:
 func _run() -> void:
 	var driver := RenderingServer.get_current_rendering_driver_name()
 	var stages := OS.get_cmdline_user_args().has("--stages")
-	var threads := str(ProjectSettings.get_setting("rendering/driver/threads/thread_model"))
-	print("INSTANCE_BENCH_SCENE: %s thread_model=%s %dx%d, %d CPU threads, adapter '%s' driver '%s', %s" % [driver, threads, get_window().size.x, get_window().size.y, OS.get_processor_count(), RenderingServer.get_video_adapter_name(), " ".join(OS.get_video_adapter_driver_info()), "stage profile, %d frames per view" % PROFILE_FRAMES if stages else "%d warm + %d timed frames per view, 2 repeats" % [WARM_FRAMES, FRAMES]])
+	print("INSTANCE_BENCH_SCENE: %s %dx%d, %d CPU threads, adapter '%s' driver '%s', %s" % [driver, get_window().size.x, get_window().size.y, OS.get_processor_count(), RenderingServer.get_video_adapter_name(), " ".join(OS.get_video_adapter_driver_info()), "stage profile, %d frames per view" % PROFILE_FRAMES if stages else "%d warm + %d timed frames per view, 2 repeats" % [WARM_FRAMES, FRAMES]])
 	for repeat in 1 if stages else 2:
 		for c in CASES.size():
 			var spec: Array = CASES[c if repeat == 0 else CASES.size() - 1 - c]

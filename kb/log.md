@@ -5,6 +5,9 @@
 * **Started**: GPU-driven Forward+ work on `dev-gpu-renderer`, tracked in
   docs/renderer/ (audit, capability matrix, roadmap, bench protocol) and
   D025. New many-instance CPU bench `devtools/test/instance_bench.ps1`.
+* **Finding**: baseline is render-thread CPU bound; at 100k nodes 16.4 of
+  20.4 ms is main-pass render-list preparation, the cull 1.2 ms, GPU 1.15 ms
+  (docs/renderer/benchmarks.md).
 
 ## 2026-11-08 (release 0.9.1)
 

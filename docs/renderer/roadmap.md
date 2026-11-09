@@ -38,14 +38,17 @@ for everything the GPU path does not cover.
 - [x] 0.3 Research notes: [research.md](research.md).
 - [x] 0.4 Many-instance bench: `misc/large_world_test_project/instance_bench.*`,
   `devtools/test/instance_bench.ps1`.
-- [x] 0.5 Baseline: [benchmarks.md](benchmarks.md).
+- [x] 0.5 Baseline: [benchmarks.md](benchmarks.md) (Vulkan, D3D12, both
+  render thread modes; per-stage CPU on Vulkan).
 - [x] 0.6 Branch `dev-gpu-renderer`, docs, MEMORY.md.
 
 ## Phase 1 - GPU instance table (P0)
 
-Problem: `_fill_instance_data` rewrites 176 bytes per render element per
-pass per frame (main pass and every shadow pass), for every visible element,
-even when nothing moved. The GPU has no persistent view of the scene, so no
+Problem: main-pass render-list preparation takes 16.4 of 20.4 ms render
+CPU at 84k visible objects in a static scene (baseline,
+[benchmarks.md](benchmarks.md)), about 195 ns per visible object per frame;
+shadow lists another 2-3 ms. `_fill_instance_data` rewrites 176 bytes per
+render element per pass per frame, even when nothing moved. The GPU has no persistent view of the scene, so no
 GPU culling or GPU submission for ordinary instances is possible.
 
 Goal: one persistent GPU buffer per renderer holding every eligible geometry
@@ -55,6 +58,7 @@ A parallel representation: `RendererSceneCull` and
 
 | Task | Change | Acceptance |
 | --- | --- | --- |
+| 1.0 Split the hotspot | `RENDER_TIMESTAMP` markers (per pass, not per object) between `_fill_render_list`, sort and `_fill_instance_data` in RFC `_render_scene` and `_render_shadow_append` | `-Stages` shows how the 16.4 ms of "Setup 3D Scene" in `massive_100k` splits; update the expected gain of 1.6 (IDs instead of records) against Phase 2 (no per-instance CPU list) |
 | 1.1 Slot allocator | Stable slot per `GeometryInstanceForwardClustered` (free list, generation). No GPU use yet | Unit test: add/remove/reuse; slots dense after churn; no behavior change, smoke pass |
 | 1.2 Table storage + CPU mirror | `GPUInstanceTable` in `forward_clustered/` (new file): CPU mirror of the record (transform, AABB, flags, layer mask, instance uniforms offset, GI offset, uv scale), dirty bitset, RD storage buffer with growth | Fixture reads the buffer back (test only) and matches the CPU mirror after add/move/remove/grow |
 | 1.3 Dirty uploads | Coalesce dirty slots into ranges; `buffer_update` per range, or one compute scatter from a staging ring when ranges are fragmented (decide by measurement, D025) | Bench `dynamic_20k`: upload bytes per frame proportional to moved instances; `small_1k` no regression |

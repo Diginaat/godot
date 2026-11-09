@@ -435,6 +435,10 @@ Candidates:
 Parallel render-list preparation (roadmap Phase 4) is planned independently,
 because the CPU path stays the fallback for skinned, transparent and other
 excluded instances.
-Benchmark evidence: pending (`instance_bench` baseline,
-docs/renderer/benchmarks.md). Revisit the order if the baseline shows that
-render-list work is not the main render-thread cost.
+Benchmark evidence (`instance_bench`, docs/renderer/benchmarks.md, RTX
+3060, Vulkan and D3D12): every case above 1k nodes is render-thread CPU
+bound. At 100k nodes (84k visible, 16 draws) render CPU is 20.4 ms against
+1.15 ms GPU; main-pass render-list preparation ("Setup 3D Scene") is 16.4 ms
+of it, the threaded cull 1.2 ms, shadow lists 2.5 ms. The order holds. Task
+1.0 splits the 16.4 ms before Phase 1 code, to tell how much the table alone
+saves and how much needs Phase 2.

@@ -24,3 +24,11 @@ generated: { by: claude_code/claude-opus-5-5, at: 2026-11-02T00:00:00Z }
   variants.
 - Write scratch scripts whole (one write) rather than patching them with
   regular expressions.
+
+# Recurrence (2026-11-10)
+
+- The first `instance_bench` run called `RenderingServer` frame-profile
+  functions that GDScript cannot reach; the script did not parse and the
+  empty window ran with VSync off for about 30 minutes, loading the GPU,
+  until the user closed it. `devtools/test/instance_bench.ps1` now passes
+  `--quit-after`, and a `--check-only` parse runs before each change.

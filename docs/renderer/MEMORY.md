@@ -17,17 +17,24 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 0, audit and baseline: docs done, baseline numbers pending |
-| Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench |
-| Active task | 0.5 Run the baseline (`instance_bench.ps1`, timing and `-Stages`, Vulkan and D3D12, safe and separate render thread) and fill [benchmarks.md](benchmarks.md) |
-| Next | Phase 1.1 slot allocator (only after the baseline confirms where render CPU goes) |
+| Phase | 0 complete (2026-11-10); Phase 1 not started |
+| Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
+| Active task | None. Waiting for the go-ahead for Phase 1 |
+| Next | Phase 1.0: markers that split "Setup 3D Scene" into list fill, sort and instance data, then 1.1 slot allocator |
 | Last verified build | `bin/` editor at `4bc2a22774` (2026-11-08); no engine code changed on this branch yet |
-| Last verified tests | None on this branch yet (docs and bench only) |
+| Last verified tests | `instance_bench.ps1` timing (Vulkan safe and separate, D3D12 safe) and `-Stages` (Vulkan) pass, 2026-11-10 |
+
+## Baseline in one line
+
+Render-thread CPU bound in every case above 1k nodes: `massive_100k` 20.4 ms
+CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation;
+the threaded cull is 1.2 ms. Details: [benchmarks.md](benchmarks.md).
 
 ## Known problems
 
-- Baseline run 1 failed (script used functions GDScript cannot call) and
-  ran without a hard stop; fixed with RD timestamps and `--quit-after`.
+- Open from the baseline: `unique_10k` frame is 3.6-4 ms above render CPU
+  (unexplained); D3D12 uses about 750 MiB video memory for 10k materials
+  (Vulkan 104 MiB); about 2 ms spread between repeats in the 20k cases.
 - RD cannot draw with a GPU-written count (driver code exists, no RD API,
   Vulkan feature not enabled); D3D12 ignores the indirect stride.
 
