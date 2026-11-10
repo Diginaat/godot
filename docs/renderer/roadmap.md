@@ -66,7 +66,7 @@ A parallel representation: `RendererSceneCull` and
 | ~~1.5 Shader read path~~ | Dropped 2026-11-10 (D027): measured, the CPU saving would be at most about 2.5 of 20 ms at 100k | - |
 | ~~1.6 Main pass on the table~~ | Dropped (D027), folded into Phase 2 | - |
 | ~~1.7 Shadow passes on the table~~ | Dropped (D027), folded into Phase 6 | - |
-| 1.8 Lifetime and limits | Freed instance while frames in flight; table growth mid-frame; memory reported in `get_memory_usage` and the bench | Lifetime fixture on Vulkan/D3D12; editor smoke; memory line in bench |
+| 1.8 Lifetime and limits (done 2026-11-10: `gpu_instances.ps1` frees, adds and replaces nodes every frame across views on Vulkan and D3D12; readbacks guarded after teardown; bench `buffer_mib`: 147.5 MiB GPU path vs 56.9 MiB CPU path at 100k) | Freed instance while frames in flight; table growth mid-frame; memory reported in `get_memory_usage` and the bench | Lifetime fixture on Vulkan/D3D12; editor smoke; memory line in bench |
 
 Measured before 1.5 (D027): of the 7.8 ms that `_fill_instance_data`
 takes at 100k, the 176-byte record write is about 0.6 ms and the transform

@@ -17,10 +17,10 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 6.1-6.3 shadow casters on the GPU path (directional, spot, omni, render info) done (2026-11-10); Phase 2 done except HZB occlusion; Phase 1 done except 1.8 |
+| Phase | 6.1-6.3 shadow casters on the GPU path (directional, spot, omni, render info) done (2026-11-10); Phase 2 done except HZB occlusion; Phase 1 done |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 3 multi-draw, Phase 5 HZB occlusion, 1.8 lifetime and limits; decide when the GPU path can be on by default (roadmap.md) |
+| Next | Phase 3 multi-draw, Phase 5 HZB occlusion; memory (+90 MiB at 100k); decide when the GPU path can be on by default (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
 | Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (33 camera and 33 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, spot and omni shadows, casters behind the camera and per-frame churn without rebuilds; 12 of 12 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
 
@@ -54,6 +54,10 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   draw each (twice with a shadow mesh); a new bucket key or a full bucket
   still rebuilds the scenario's buckets (7.6 ms at 100k); `unique_10k` gains nothing (one bucket per material); viewport render info
   of GPU-drawn instances is a few frames late (read back from the cull).
+- GPU path memory: +90 MiB of buffers at 100k nodes (147.5 vs 56.9 MiB):
+  table 21 MB, camera and shadow instance data about 23 MB each at
+  power-of-two capacity, visible IDs per pass. Exact capacities or one
+  shared instance data buffer would cut it.
 - RD cannot draw with a GPU-written count (driver code exists, no RD API,
   Vulkan feature not enabled); D3D12 ignores the indirect stride.
 
