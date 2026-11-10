@@ -1043,10 +1043,8 @@ protected:
 		RID stats_buffer; // Objects and primitives the cull pass drew, per view (render info).
 		RID visible_buffer; // A bit per table slot: visible in the view (from the scene cull).
 		uint32_t visible_capacity = 0; // Words.
-		// Shadow passes: instance data for all of them (the same values), and
-		// per pass its commands, visible IDs and bits.
-		RID shadow_output_buffer;
-		uint32_t shadow_output_capacity = 0;
+		// Shadow passes draw from the camera view's instance data; per pass
+		// they have their own commands, visible IDs and bits.
 		RID shadow_stats_buffer;
 		struct ShadowView {
 			RID commands;

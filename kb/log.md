@@ -56,6 +56,8 @@
   keeps them. Found by isolating the light type, then looking at where the
   images differed (the sun's shadows everywhere, not near the omni light).
 * **Implemented**: shadow render info for GPU-drawn casters (Phase 6.3).
+* **Changed**: shadow passes draw from the camera view's instance data (the
+  camera kernel writes every live member): buffers at 100k 147.5 to 125.5 MiB.
 
 ## 2026-11-08 (release 0.9.1)
 

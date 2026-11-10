@@ -270,7 +270,7 @@ void RenderForwardClustered::_gpu_instances_free_scenario(GPUInstanceScenario *p
 	}
 	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->output_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->stats_buffer, &p_scenario->visible_buffer });
 	RD *rd = RD::get_singleton();
-	for (RID buffer : { p_scenario->shadow_output_buffer, p_scenario->shadow_stats_buffer }) {
+	for (RID buffer : { p_scenario->shadow_stats_buffer }) {
 		if (buffer.is_valid()) {
 			rd->free_rid(buffer);
 		}
@@ -1036,13 +1036,6 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 		view.visible_capacity = Math::next_power_of_2(MAX(words, 64u));
 		view.visible = rd->storage_buffer_create(view.visible_capacity * sizeof(uint32_t));
 	}
-	if (scenario->shadow_output_capacity < scenario->member_capacity || scenario->shadow_output_buffer.is_null()) {
-		if (scenario->shadow_output_buffer.is_valid()) {
-			rd->free_rid(scenario->shadow_output_buffer);
-		}
-		scenario->shadow_output_capacity = scenario->member_capacity;
-		scenario->shadow_output_buffer = rd->storage_buffer_create(scenario->shadow_output_capacity * sizeof(SceneState::InstanceData));
-	}
 	if (scenario->shadow_stats_buffer.is_null()) {
 		scenario->shadow_stats_buffer = rd->storage_buffer_create(4 * sizeof(uint32_t));
 	}
@@ -1069,8 +1062,8 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 		}
 	}
 
-	// Every shadow pass writes the same instance data (no dynamic or GI
-	// flags), so they share one buffer; the camera's keeps its own flags.
+	// The camera view wrote every member's instance data; the shadow passes
+	// draw from it and write none.
 	GPUInstanceCullParams params = {};
 	params.member_count = scenario->member_count;
 	params.view_flags = GPU_INSTANCE_VIEW_SHADOW | (p_scene_data.cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0);
@@ -1082,7 +1075,7 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	params.lod_camera[2] = lod_camera.z;
 
 	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0);
-	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, view.commands, scenario->shadow_output_buffer, view.ids, scenario->lod_edges_buffer,
+	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, view.commands, scenario->output_buffer, view.ids, scenario->lod_edges_buffer,
 		scenario->command_primitives_buffer, scenario->shadow_stats_buffer, view.visible };
 	LocalVector<RD::Uniform> uniforms;
 	for (uint32_t binding = 0; binding < 10; binding++) {
@@ -1136,7 +1129,7 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	}
 	r_pass.gpu_commands = view.commands;
 	r_pass.gpu_ids = view.ids;
-	r_pass.gpu_instances = scenario->shadow_output_buffer;
+	r_pass.gpu_instances = scenario->output_buffer;
 
 	// Validation: what the pass drew against what the scene cull listed.
 	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instances/validate");

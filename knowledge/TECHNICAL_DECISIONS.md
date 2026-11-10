@@ -664,9 +664,12 @@ renderer uploads the slot bits and a fresh copy of the commands, runs the
 cull kernel with the shadow pass's LOD inputs (shadow threshold scale and
 distance multiplier, main camera position), and appends one element per
 bucket level to the pass's range of the shadow list. The draws use the
-depth twins (shadow mesh index counts). All shadow passes write the same
-instance data (no dynamic or GI flags) into one buffer, apart from the
-camera's; each pass has its own commands, visible IDs and bits. Views the
+depth twins (shadow mesh index counts). Each pass has its own commands,
+visible IDs and bits. The shadow passes draw from the camera view's
+instance data: the camera kernel writes every live member's record, visible
+or not, and the shadow kernels write none (shadow depth shaders read none of
+the view-dependent flags). A first version wrote a second copy per shadow
+pass: 22 MiB more at 100k and 4 writes per caster per frame. Views the
 GPU path does not draw (no camera GPU view in this render) put the casters
 back into the CPU list; instances that left during the render go to every
 cascade's CPU list, clipped where they do not belong. Positional lights

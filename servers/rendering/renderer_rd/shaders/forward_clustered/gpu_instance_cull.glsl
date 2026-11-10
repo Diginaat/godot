@@ -5,8 +5,9 @@
 #VERSION_DEFINES
 
 // GPU path for eligible instances (docs/renderer, Phase 2). One thread per
-// bucket member (an instance surface): drawn if the CPU scene cull found its
-// instance visible (a bit per table slot), with the index LOD as the CPU render list chooses it, whether
+// bucket member (an instance surface): in camera views its instance data,
+// then, if the CPU scene cull found its instance visible (a bit per table
+// slot), the index LOD as the CPU render list chooses it, whether
 // the motion pass draws it, then the
 // instance data Forward+ draws with, at the member's own index, and the
 // member's index appended to its bucket level's draw. The CPU zeroed each
@@ -149,15 +150,48 @@ uint cull_member(uint index, out uint r_primitives) {
 	if (member.x == 0xFFFFFFFFu) {
 		return 0; // A free member slot.
 	}
+	Record record = table.records[member.x];
+	Bucket bucket = buckets.data[member.y];
+	bool moved = bool(record.gpu_flags & GPU_FLAG_MOVED);
+	bool motion_pass = bool(params.view_flags & VIEW_FLAG_MOTION);
+
+	// A camera view writes every live member's instance data, visible or not:
+	// the shadow passes after it draw from the same data (they read none of
+	// the view-dependent flags) and write none.
+	if (!bool(params.view_flags & VIEW_FLAG_SHADOW)) {
+		// What _fill_render_list() and _fill_instance_data() write for an
+		// opaque instance without lightmap, VoxelGI, fade or motion pass.
+		uint flags = (record.flags & ~INSTANCE_FLAGS_FADE_MASK) | (255u << INSTANCE_FLAGS_FADE_SHIFT);
+		if (moved && !motion_pass) {
+			flags |= INSTANCE_FLAGS_DYNAMIC; // The motion pass computes motion vectors instead.
+		}
+		if (bool(params.view_flags & VIEW_FLAG_USE_GI_BUFFERS)) {
+			flags |= INSTANCE_FLAGS_USE_GI_BUFFERS;
+		}
+		if (bool(params.view_flags & VIEW_FLAG_USE_SDFGI) && bool(record.gpu_flags & GPU_FLAG_CAN_SDFGI)) {
+			flags |= INSTANCE_FLAGS_USE_SDFGI;
+		}
+		InstanceData data;
+		data.transform = record.transform;
+		data.compressed_aabb_position_pad = vec4(bucket.compressed_aabb_position, 0.0);
+		data.compressed_aabb_size = bucket.compressed_aabb_size;
+		data.material_feedback_index = bucket.material_feedback_index;
+		data.uv_scale = bucket.uv_scale;
+		data.flags = flags;
+		data.instance_uniforms_ofs = record.instance_uniforms_ofs;
+		data.gi_offset = 0xFFFFFFFFu;
+		data.layer_mask = record.layer_mask;
+		data.prev_transform = record.prev_transform;
+		data.lightmap_uv_scale = record.lightmap_uv_scale;
+		output_instances.data[index] = data;
+	}
+
 	// The scene cull's answer: frustum, layers, occluders.
 	if ((visible.bits[member.x >> 5] & (1u << (member.x & 31u))) == 0) {
 		return 0;
 	}
-	Record record = table.records[member.x];
 	vec3 aabb_min = record.aabb_position;
 	vec3 aabb_max = record.aabb_position + record.aabb_size;
-
-	Bucket bucket = buckets.data[member.y];
 
 	// The index LOD, as mesh_surface_get_lod() chooses it for the CPU list.
 	uint level = 0;
@@ -177,8 +211,6 @@ uint cull_member(uint index, out uint r_primitives) {
 	}
 	// In a view with a motion pass, members that moved have their own
 	// commands, after the others' (as the CPU list's motion list).
-	bool moved = bool(record.gpu_flags & GPU_FLAG_MOVED);
-	bool motion_pass = bool(params.view_flags & VIEW_FLAG_MOTION);
 	uint command = (motion_pass && moved ? bucket.lod_count + 1 : 0) + level;
 	uint rank = atomicAdd(commands.data[(bucket.command + command) * 5 + 1], 1);
 	ids.data[bucket.ids_first + command * bucket.capacity + rank] = index;
@@ -186,33 +218,6 @@ uint cull_member(uint index, out uint r_primitives) {
 		// A separate shadow mesh: the depth pre-pass draws as many instances.
 		atomicAdd(commands.data[(bucket.depth_command + command) * 5 + 1], 1);
 	}
-
-	// What _fill_render_list() and _fill_instance_data() write for an opaque
-	// instance without lightmap, VoxelGI, fade or motion pass.
-	uint flags = (record.flags & ~INSTANCE_FLAGS_FADE_MASK) | (255u << INSTANCE_FLAGS_FADE_SHIFT);
-	if (moved && !motion_pass && !bool(params.view_flags & VIEW_FLAG_SHADOW)) {
-		flags |= INSTANCE_FLAGS_DYNAMIC; // The motion pass computes motion vectors instead; shadow lists never set it.
-	}
-	if (bool(params.view_flags & VIEW_FLAG_USE_GI_BUFFERS)) {
-		flags |= INSTANCE_FLAGS_USE_GI_BUFFERS;
-	}
-	if (bool(params.view_flags & VIEW_FLAG_USE_SDFGI) && bool(record.gpu_flags & GPU_FLAG_CAN_SDFGI)) {
-		flags |= INSTANCE_FLAGS_USE_SDFGI;
-	}
-
-	InstanceData data;
-	data.transform = record.transform;
-	data.compressed_aabb_position_pad = vec4(bucket.compressed_aabb_position, 0.0);
-	data.compressed_aabb_size = bucket.compressed_aabb_size;
-	data.material_feedback_index = bucket.material_feedback_index;
-	data.uv_scale = bucket.uv_scale;
-	data.flags = flags;
-	data.instance_uniforms_ofs = record.instance_uniforms_ofs;
-	data.gi_offset = 0xFFFFFFFFu;
-	data.layer_mask = record.layer_mask;
-	data.prev_transform = record.prev_transform;
-	data.lightmap_uv_scale = record.lightmap_uv_scale;
-	output_instances.data[index] = data;
 	r_primitives = command_primitives.data[bucket.command + command];
 	return motion_pass && moved ? 2 : 1;
 }
