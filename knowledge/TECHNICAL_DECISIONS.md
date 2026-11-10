@@ -442,3 +442,37 @@ bound. At 100k nodes (84k visible, 16 draws) render CPU is 20.4 ms against
 of it, the threaded cull 1.2 ms, shadow lists 2.5 ms. The order holds. Task
 1.0 splits the 16.4 ms before Phase 1 code, to tell how much the table alone
 saves and how much needs Phase 2.
+
+## D026 — The GPU instance table holds only view-independent instance data
+
+2026-11-10. Implemented (Phase 1.2, opt-in
+`rendering/geometry/gpu_instance_table/enabled`, default off).
+Problem: the per-frame 176-byte `InstanceData` mixes three lifetimes.
+`_fill_render_list` recomputes `flags` and `gi_offset` for every pass and
+view (fade alpha from the camera distance, the dynamic/motion bit, lightmap,
+lightmap-capture, VoxelGI and SDFGI bits; shadow passes overwrite them).
+The compressed AABB, UV scale and texture-feedback index belong to the mesh
+surface, not the instance.
+Candidates:
+1. Store the full 176-byte record per instance. Rejected: the per-view parts
+   would need rewriting for every pass, which is the cost being removed, and
+   per-surface parts would need one record per instance and surface.
+2. One record per instance and surface. Rejected: multiplies memory and
+   uploads by the surface count for data that is mostly per instance.
+3. A 128-byte per-instance record (transform, previous transform, base
+   flags with non-uniform scale, instance uniform offset, layer mask, slot
+   generation, lightmap UV scale); per-view bits stay a small per-element
+   value, per-surface values a per-draw value. Chosen.
+Upkeep: change hooks in `set_transform`, `set_layer_mask`,
+`reset_motion_vectors`, `age_out_motion` and `_geometry_instance_update`
+mark the slot; records are rebuilt once per frame at the start of
+`_render_scene` and only dirty ones are uploaded. Turning the setting on
+rebuilds every slot; turning it off frees the buffer. Free slots hold zeroes
+with an even generation.
+Evidence: `devtools/test/instance_table.ps1` (Vulkan and D3D12): a
+non-stalling readback every 30 frames equals the CPU copy through growth past
+1024 and 2048 records, 200 moving nodes, layer and material changes, 300
+frees with slot reuse, and an off/on rebuild (18 checks); a self-test mode
+that drops one upload is reported. Cost: nothing in static scenes; with 2,000
+scattered moved nodes, one `buffer_update` per range costs +2.9 ms GPU (task
+1.3 replaces it). Not done: nothing reads the table yet (1.5).

@@ -109,6 +109,27 @@ data step (7.5 + 1.1 ms at 100k) should go; fill and sort (about 10 ms main
 and shadows at 100k) stay until Phase 2 moves eligible instances out of the
 CPU render list.
 
+### GPU instance table, uploads only (Phase 1.2), 2026-11-10
+
+`instance_bench.ps1 -Table` against the same build without it, Vulkan,
+static view, p50 ms (render CPU / GPU). Nothing reads the table yet, so this
+is the pure cost of keeping it current.
+
+| Case | Off | On |
+| --- | --- | --- |
+| `small_1k` | 0.38 / 0.26 | 0.39 / 0.27 |
+| `shared_20k` | 8.17 / 1.42 | 8.40 / 1.42 |
+| `massive_100k` | 20.57 / 1.15 | 20.66 / 1.15 |
+| `dynamic_20k` | 7.39 / 1.41 (r1 7.87 / 1.48) | 8.37 / 4.32 (r1 9.07 / 4.39) |
+| `lights_20k` | 6.81 / 1.67 | 6.68 / 1.66 |
+
+Static scenes pay nothing (no dirty records). `dynamic_20k` moves 2,000
+nodes spread over the grid (every 10th), so each frame has about 2,000
+one-record ranges; one `buffer_update` each costs 2.9 ms of GPU time and
+about 1 ms of render CPU. Task 1.3 replaces scattered ranges with one
+packed upload and a compute scatter. Table memory: 128 bytes per slot,
+rounded up to a power of two (100k nodes: 16 MiB).
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

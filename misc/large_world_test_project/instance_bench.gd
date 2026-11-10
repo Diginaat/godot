@@ -260,7 +260,9 @@ func _profile(label: String) -> void:
 func _run() -> void:
 	var driver := RenderingServer.get_current_rendering_driver_name()
 	var stages := OS.get_cmdline_user_args().has("--stages")
-	print("INSTANCE_BENCH_SCENE: %s %dx%d, %d CPU threads, adapter '%s' driver '%s', %s" % [driver, get_window().size.x, get_window().size.y, OS.get_processor_count(), RenderingServer.get_video_adapter_name(), " ".join(OS.get_video_adapter_driver_info()), "stage profile, %d frames per view" % PROFILE_FRAMES if stages else "%d warm + %d timed frames per view, 2 repeats" % [WARM_FRAMES, FRAMES]])
+	var table := OS.get_cmdline_user_args().has("--table")
+	ProjectSettings.set_setting("rendering/geometry/gpu_instance_table/enabled", table)
+	print("INSTANCE_BENCH_SCENE: %s gpu_instance_table=%s %dx%d, %d CPU threads, adapter '%s' driver '%s', %s" % [driver, table, get_window().size.x, get_window().size.y, OS.get_processor_count(), RenderingServer.get_video_adapter_name(), " ".join(OS.get_video_adapter_driver_info()), "stage profile, %d frames per view" % PROFILE_FRAMES if stages else "%d warm + %d timed frames per view, 2 repeats" % [WARM_FRAMES, FRAMES]])
 	for repeat in 1 if stages else 2:
 		for c in CASES.size():
 			var spec: Array = CASES[c if repeat == 0 else CASES.size() - 1 - c]

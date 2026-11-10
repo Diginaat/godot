@@ -2189,8 +2189,67 @@ void RenderForwardClustered::_render_3d_upscaling(const RenderDataRD *p_render_d
 	}
 }
 
+void RenderForwardClustered::_gpu_instance_table_build_record(uint32_t p_slot, GPUInstanceTable::Record &r_record) const {
+	memset(&r_record, 0, sizeof(r_record));
+	r_record.generation = gpu_instance_slots.get_generation(p_slot);
+	const GeometryInstanceForwardClustered *inst = p_slot < gpu_instance_owners.size() ? gpu_instance_owners[p_slot] : nullptr;
+	if (inst == nullptr) {
+		return; // Free slot: zeroes with an even generation.
+	}
+	// Same values as _fill_instance_data writes, minus the per-view flags
+	// (fade, motion, GI) that _fill_render_list adds for each pass.
+	const bool store_transform = inst->store_transform_cache;
+	RendererRD::MaterialStorage::store_transform_transposed_3x4(store_transform ? inst->transform : Transform3D(), r_record.transform);
+	RendererRD::MaterialStorage::store_transform_transposed_3x4(store_transform ? inst->prev_transform : Transform3D(), r_record.prev_transform);
+	r_record.flags = inst->base_flags | (inst->non_uniform_scale ? uint32_t(INSTANCE_DATA_FLAGS_NON_UNIFORM_SCALE) : 0u);
+	r_record.instance_uniforms_ofs = uint32_t(inst->shader_uniforms_offset);
+	r_record.layer_mask = inst->layer_mask;
+	r_record.lightmap_uv_scale[0] = inst->lightmap_uv_scale.position.x;
+	r_record.lightmap_uv_scale[1] = inst->lightmap_uv_scale.position.y;
+	r_record.lightmap_uv_scale[2] = inst->lightmap_uv_scale.size.x;
+	r_record.lightmap_uv_scale[3] = inst->lightmap_uv_scale.size.y;
+}
+
+void RenderForwardClustered::_update_gpu_instance_table() {
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	if (frame == gpu_instance_table_frame) {
+		return; // Once per frame, however many viewports render.
+	}
+	gpu_instance_table_frame = frame;
+
+	if (!GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instance_table/enabled")) {
+		if (gpu_instance_table_active) {
+			gpu_instance_table_active = false;
+			gpu_instance_table.free_buffer();
+		}
+		return;
+	}
+	if (!gpu_instance_table_active) {
+		// Changes were not tracked while off: rebuild every slot.
+		gpu_instance_table_active = true;
+		for (uint32_t slot = 0; slot < gpu_instance_slots.get_capacity(); slot++) {
+			gpu_instance_table.mark_dirty(slot);
+		}
+	}
+
+	_update_dirty_geometry_instances(); // Base flags and uniform offsets current.
+	for (uint32_t slot : gpu_instance_table.get_dirty_slots()) {
+		GPUInstanceTable::Record record;
+		_gpu_instance_table_build_record(slot, record);
+		gpu_instance_table.set_record(slot, record);
+	}
+
+	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instance_table/validate");
+	gpu_instance_table.upload(validate == 2);
+	if (validate > 0 && frame % 30 == 0) {
+		gpu_instance_table.request_validation(frame);
+	}
+}
+
 void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Color &p_default_bg_color) {
 	scene_state.used_uniform_buffer_count = 0;
+
+	_update_gpu_instance_table();
 
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 
@@ -5031,6 +5090,9 @@ void RenderForwardClustered::_geometry_instance_update(RenderGeometryInstance *p
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 	RendererRD::ParticlesStorage *particles_storage = RendererRD::ParticlesStorage::get_singleton();
 	GeometryInstanceForwardClustered *ginstance = static_cast<GeometryInstanceForwardClustered *>(p_geometry_instance);
+	// Flags, uniforms offset and lightmap scale may change below; the record
+	// is rebuilt when the table uploads, after every dirty instance updated.
+	_gpu_instance_table_mark(ginstance->gpu_slot);
 
 	if (ginstance->data->dirty_dependencies) {
 		ginstance->data->dependency_tracker.update_begin();
@@ -5576,6 +5638,11 @@ RenderGeometryInstance *RenderForwardClustered::geometry_instance_create(RID p_b
 	GeometryInstanceForwardClustered *ginstance = geometry_instance_alloc.alloc();
 	ginstance->data = memnew(GeometryInstanceForwardClustered::Data);
 	ginstance->gpu_slot = gpu_instance_slots.allocate();
+	if (gpu_instance_owners.size() <= ginstance->gpu_slot) {
+		gpu_instance_owners.resize(ginstance->gpu_slot + 1);
+	}
+	gpu_instance_owners[ginstance->gpu_slot] = ginstance;
+	_gpu_instance_table_mark(ginstance->gpu_slot);
 
 	ginstance->data->base = p_base;
 	ginstance->data->base_type = type;
@@ -5599,11 +5666,18 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::set_transform(con
 	}
 
 	RenderGeometryInstanceBase::set_transform(p_transform, p_aabb, p_transformed_aabb);
+	RenderForwardClustered::get_singleton()->_gpu_instance_table_mark(gpu_slot);
+}
+
+void RenderForwardClustered::GeometryInstanceForwardClustered::set_layer_mask(uint32_t p_layer_mask) {
+	RenderGeometryInstanceBase::set_layer_mask(p_layer_mask);
+	RenderForwardClustered::get_singleton()->_gpu_instance_table_mark(gpu_slot);
 }
 
 void RenderForwardClustered::GeometryInstanceForwardClustered::reset_motion_vectors() {
 	prev_transform = transform;
 	transform_status = TransformStatus::TELEPORTED;
+	RenderForwardClustered::get_singleton()->_gpu_instance_table_mark(gpu_slot);
 }
 
 void RenderForwardClustered::GeometryInstanceForwardClustered::age_out_motion(uint64_t p_frame) {
@@ -5614,6 +5688,7 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::age_out_motion(ui
 	if (transform_status != TransformStatus::NONE && p_frame > prev_transform_change_frame + 1 && prev_transform_change_frame) {
 		prev_transform = transform;
 		transform_status = TransformStatus::NONE;
+		RenderForwardClustered::get_singleton()->_gpu_instance_table_mark(gpu_slot);
 	}
 }
 
@@ -5700,6 +5775,8 @@ void RenderForwardClustered::geometry_instance_free(RenderGeometryInstance *p_ge
 		surf = next;
 	}
 	memdelete(ginstance->data);
+	gpu_instance_owners[ginstance->gpu_slot] = nullptr;
+	_gpu_instance_table_mark(ginstance->gpu_slot);
 	gpu_instance_slots.free(ginstance->gpu_slot);
 	geometry_instance_alloc.free(ginstance);
 }
@@ -5837,6 +5914,8 @@ RenderForwardClustered::RenderForwardClustered() {
 	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_enabled", false);
 	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_two_pass", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/error_pixels", PROPERTY_HINT_RANGE, "0,64,0.1,or_greater"), 1.0);
+	GLOBAL_DEF("rendering/geometry/gpu_instance_table/enabled", false);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instance_table/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
 	singleton = this;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);
 

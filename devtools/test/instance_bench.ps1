@@ -5,7 +5,9 @@ param(
 	[string]$RenderThread = "safe",
 	[string]$Label = "run",
 	# Per-stage CPU times (RENDER_TIMESTAMP markers) instead of timing.
-	[switch]$Stages
+	[switch]$Stages,
+	# Turn on rendering/geometry/gpu_instance_table.
+	[switch]$Table
 )
 # Many-instance CPU benchmark (docs/renderer/benchmarks.md): separate
 # MeshInstance3D nodes from 1k to 100k, shared and unique materials, moving
@@ -19,10 +21,14 @@ New-Item -ItemType Directory -Force $logs | Out-Null
 $ErrorActionPreference = "Continue"
 # --quit-after is a hard stop: a script that fails to load leaves an empty
 # scene running forever.
-$mode = if ($Stages) { @("--gpu-profile", "--quit-after", "10000", "res://instance_bench.tscn", "--", "--stages") } else { @("--quit-after", "30000", "res://instance_bench.tscn") }
+$mode = if ($Stages) { @("--gpu-profile", "--quit-after", "10000", "res://instance_bench.tscn") } else { @("--quit-after", "30000", "res://instance_bench.tscn") }
+$userArgs = @()
+if ($Stages) { $userArgs += "--stages" }
+if ($Table) { $userArgs += "--table" }
+if ($userArgs.Count -gt 0) { $mode += @("--") + $userArgs }
 $lines = & $editor --path $project --rendering-driver $Driver --render-thread $RenderThread @mode 2>&1 | ForEach-Object { "$_" }
 $code = $LASTEXITCODE
-$kind = if ($Stages) { "stages" } else { "timing" }
+$kind = $(if ($Stages) { "stages" } else { "timing" }) + $(if ($Table) { "_table" } else { "" })
 $lines | Set-Content (Join-Path $logs "instance_bench_${Label}_${Driver}_${RenderThread}_$kind.log")
 $rows = @($lines | Where-Object { $_ -match $(if ($Stages) { "^INSTANCE_BENCH_STAGES:" } else { "^INSTANCE_BENCH:" }) })
 $expected = if ($Stages) { 12 } else { 24 }

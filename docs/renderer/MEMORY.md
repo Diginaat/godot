@@ -17,12 +17,12 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 1, GPU instance table: 1.0 and 1.1 done (2026-11-10) |
+| Phase | 1, GPU instance table: 1.0, 1.1 and 1.2 done (2026-11-10) |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 1.2 table storage + CPU mirror (`GPUInstanceTable`, record layout, readback fixture) |
+| Next | Phase 1.3 packed dirty upload + compute scatter (scattered `buffer_update` ranges cost +2.9 ms GPU for 2,000 moved nodes) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `GPUInstanceSlots` unit tests (5 cases), standard smoke (PhysX game/editor, path tracer, DDGI), 2026-11-10 |
+| Last verified tests | `instance_table.ps1` on Vulkan and D3D12 (18 matching checks + self-test caught), `GPUInstanceSlots` unit tests, `instance_bench` with the table off and on (Vulkan), 2026-11-10 |
 
 ## Baseline in one line
 
@@ -35,6 +35,11 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
 - Open from the baseline: `unique_10k` frame is 3.6-4 ms above render CPU
   (unexplained); D3D12 uses about 750 MiB video memory for 10k materials
   (Vulkan 104 MiB); about 2 ms spread between repeats in the 20k cases.
+- Table uploads with one `buffer_update` per range: +2.9 ms GPU with 2,000
+  scattered moved nodes. Off by default; fixed in 1.3.
+- A motion age-out (`age_out_motion`) runs during the render, after the
+  table upload, so the previous-transform reset reaches the table one frame
+  late. Handle in 1.4.
 - RD cannot draw with a GPU-written count (driver code exists, no RD API,
   Vulkan feature not enabled); D3D12 ignores the indirect stride.
 
@@ -44,6 +49,9 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   extend Forward+ with a persistent GPU instance table first; GPU culling
   and indirect submission of ordinary instances build on it; parallel
   render-list preparation in parallel as the CPU fallback's speed-up.
+- D026: the table record (128 bytes) holds only per-instance values that are
+  the same in every view and pass; fade, motion and GI bits stay per render
+  element, per-surface values (compressed AABB, UV scale) per draw.
 - Earlier geometry decisions D001-D024 still hold (compute + indirect before
   mesh shaders, stable source IDs, opt-in settings, conventional fallback).
 

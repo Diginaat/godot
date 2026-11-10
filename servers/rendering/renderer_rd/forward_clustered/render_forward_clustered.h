@@ -40,6 +40,7 @@
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
 #include "servers/rendering/renderer_rd/forward_clustered/gpu_instance_slots.h"
+#include "servers/rendering/renderer_rd/forward_clustered/gpu_instance_table.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -877,6 +878,7 @@ protected:
 		virtual void _mark_dirty() override;
 
 		virtual void set_transform(const Transform3D &p_transform, const AABB &p_aabb, const AABB &p_transformed_aabb) override;
+		virtual void set_layer_mask(uint32_t p_layer_mask) override;
 		virtual void reset_motion_vectors() override;
 		virtual void set_use_lightmap(RID p_lightmap_instance, const Rect2 &p_lightmap_uv_scale, int p_lightmap_slice_index) override;
 		virtual void set_lightmap_capture(const Color *p_sh9) override;
@@ -911,6 +913,21 @@ protected:
 
 	PagedAllocator<GeometryInstanceForwardClustered> geometry_instance_alloc;
 	GPUInstanceSlots gpu_instance_slots;
+
+	/* GPU instance table (rendering/geometry/gpu_instance_table/*) */
+
+	GPUInstanceTable gpu_instance_table;
+	LocalVector<GeometryInstanceForwardClustered *> gpu_instance_owners; // Indexed by slot; null when free.
+	bool gpu_instance_table_active = false;
+	uint64_t gpu_instance_table_frame = UINT64_MAX;
+
+	_FORCE_INLINE_ void _gpu_instance_table_mark(uint32_t p_slot) {
+		if (gpu_instance_table_active) {
+			gpu_instance_table.mark_dirty(p_slot);
+		}
+	}
+	void _gpu_instance_table_build_record(uint32_t p_slot, GPUInstanceTable::Record &r_record) const;
+	void _update_gpu_instance_table();
 	PagedAllocator<GeometryInstanceSurfaceDataCache> geometry_instance_surface_alloc;
 	PagedAllocator<GeometryInstanceLightmapSH> geometry_instance_lightmap_sh;
 
