@@ -23,7 +23,7 @@ committed. Branch creation preserved every existing change.
 
 ## Current state
 
-- Phase 0 initial audit/checkpoint; complete project phases remain open.
+- Phase 0 committed as `ad1573b0e4`; Phase 1 unique-array experiment in progress.
 - Existing COW/STL-algorithm and robin-hood adapter prototype: builds and passes
   focused correctness, but **fails numeric-container performance/memory goals**.
 - No engine math modification. Explicit SSE dot/cross candidates lost locally.
@@ -42,6 +42,9 @@ committed. Branch creation preserved every existing change.
 | Candidate standalone benchmark | Built; checks passed, but numeric map/set regressions |
 | Exploratory x86 math | Built; finite float32 checks passed; no accepted SIMD implementation |
 | Phase 0 isolated original-source snapshot | Both container control binaries compile and pass all 24 workloads; math probe compiles and passes finite checks; no experimental engine headers/vendor files needed |
+| Phase 1 unique array baseline | 56 LocalVector/STL paired workloads, seven sizes; count/timing checksum parity and initial contracts pass |
+| Phase 1 copy candidate | 11 alternating original/candidate process pairs; bulk-copy improvement at 256/4K ints; allocations unchanged; small-copy costs and control confounders documented |
+| Phase 1 editor build/test gate | Running; do not commit candidate until notification/results checked |
 | Full suite, scene/renderer/physics/C# smoke | Not run in this audit |
 | GCC/Clang/Linux, double precision, sanitizers, ARM | Pending |
 
@@ -59,12 +62,14 @@ remain comparison controls, not mandatory dependencies. See D011.
 
 ## Next independent task
 
-Phase 1: establish a baseline-only, small/medium/large container contract and
-allocation-count matrix, then evaluate one uniquely owned array path against
-std::vector with the Godot allocator. Preserve the inherited shared-container
-experiment until a reviewed, validated replacement or explicit rollback is
-chosen. No global API or storage rewrite. Phase 2 later isolates map backend
-costs from hash policy. Update the active phase and this file after each gate.
+Finish Phase 1 LocalVector copy candidate's editor/test gate. Its only engine
+edit is in local_vector.h (bulk copy for >=256 trivial elements); regression
+tests are in test_local_vector.cpp. Both were clean before this slice. Benchmark
+files are array_bench_counters.h and unique_array_bench.{cpp,py}. Commit separately
+from the inherited shared-container/hash/String/Mono prototype. Do not stage the
+whole tree. All evidence: kb/project/unique-array-evaluation.md. Preserve original
+negative experiments; no std::vector storage replacement is accepted. Broader
+container contracts and platform gates remain; Phase 2 native-map work follows.
 
 ## Resume commands
 

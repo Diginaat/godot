@@ -1,0 +1,100 @@
+---
+type: Finding
+title: Unique array baseline and bulk-copy candidate
+description: Original LocalVector versus Godot-allocated std::vector, measured allocator events, and a narrow trait-aware copy optimization awaiting editor validation.
+tags: [core, containers, allocation, benchmarks, compatibility]
+status: draft
+generated: { by: opencode/gpt-6.1-sol, at: 2026-11-10T00:00:00Z }
+sources:
+  - id: runner
+    resource: ../../devtools/test/unique_array_bench.py
+    title: Baseline snapshot and copy-pair runner
+  - id: workload
+    resource: ../../devtools/test/unique_array_bench.cpp
+    title: Contract checks and measured workloads
+  - id: phase
+    resource: ../../docs/core-modernization/phases/01-containers.md
+    title: Phase 1 acceptance state
+---
+
+# Scope and baseline
+
+Baseline `172e099b95307708005dafcf719693d20b1e7088`, archived original headers
+and Memory source; candidate overlays **only** working-tree `local_vector.h`.
+No inherited hash/String/COW prototype participates. Windows x86-64, Ryzen 5
+3600, MSVC `/O2 /MT`, C++17, DEBUG_ENABLED, no LTO. CPU affinity/frequency not
+pinned. The driver refuses measurement while compilers/SCons are active.
+
+Initial matrix: seven sizes (0, 1, 16, 256, 4,096, 32,768, 1,048,576 integers)
+and eight paired operations: append, reserved append, initialized resize, copy,
+copy-then-move, sequential traversal, deterministic permuted access, copy-then-
+pop-all. Setup is excluded for prepared read fixtures; create/copy/destruction
+costs are included where named. This is 56 paired workloads, not comprehensive
+coverage of every container or element category.[^runner][^workload]
+
+Contract checks cover deep-copy independence, moves, nontrivial lifetime,
+capacity-preserving clear, explicit reset, self-push, initialized integer resize
+and original shared Vector COW detachment. They do not prove all aliases,
+OOM/exception handling, over-aligned types or all nontrivial relocatability.
+
+# Allocation measurement
+
+Timing binary compiles original Memory code **without hooks**. A second untimed
+binary force-includes CRT malloc/calloc/realloc/free hooks only in memory.cpp.
+Measured standard vectors allocate through an experimental Godot allocator;
+standard-library fixture allocations do not participate. Hooks leave the real
+allocator implementation intact. Counts include all repeated cycles, excluding
+prepared source fixtures. Count/timing checksums must match.
+
+`live_requested_bytes` comes from Godot accounting. `crt_peak_delta` tracks
+CRT `_msize` usable sizes including engine headers; it is neither RSS nor
+physical process peak. Allocation/reallocation/free events are separate.
+For 32,768-element unreserved append, each original LocalVector cycle uses one
+allocation and 24 reallocations; the tested MSVC std::vector uses 27 allocations
+and no reallocations. Its growth cannot automatically substitute for Godot's
+byte-relocating realloc behavior. No production STL storage adoption follows.
+
+# Narrow candidate
+
+Original LocalVector Span constructor copies elements individually. Reuse
+existing `copy_arr_placement` only for trivially copyable spans with at least
+256 elements; retain the original loop for small/nontrivial copies. No API,
+layout, storage, allocator or COW change. This is not std::vector adoption.
+Threshold is an initial local policy selected from tested integer sizes, not a
+universal hardware optimum. Nontrivial types keep constructor/destructor paths.
+
+An unconditional bulk-copy candidate was rejected: small sizes regressed
+~19–31% in that experiment, while unrelated STL controls also shifted. Its
+samples and exact candidate header remain under the ignored `copy/rejected_*`
+artifacts. Do not pool that run with the thresholded candidate.
+
+# Controlled copy-only results
+
+Eleven alternating original/candidate process pairs, one warmup per process,
+seven sizes. Larger copies process roughly 256 MiB per sample to avoid short
+measurement intervals; small sizes cap repetitions at 32,768. p95 is nearest-
+rank maximum of eleven observations. Unit: **ns per complete copy/destruction**.
+
+| Integers | Original p50 | Candidate p50 | Original p95 | Candidate p95 | Candidate/original |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 2.390 | 2.628 | 2.548 | 2.792 | 1.100 |
+| 1 | 37.933 | 38.599 | 38.071 | 39.835 | 1.018 |
+| 16 | 44.308 | 44.266 | 46.802 | 45.670 | 0.999 |
+| 256 | 126.385 | 52.701 | 128.598 | 59.698 | 0.417 |
+| 4,096 | 1,524.786 | 347.400 | 1,533.148 | 352.039 | 0.228 |
+| 32,768 | 25,972.363 | 9,634.619 | 26,313.037 | 10,393.115 | 0.371 |
+| 1,048,576 | 1,019,729.688 | 814,082.813 | 1,030,420.313 | 830,675.000 | 0.798 |
+
+All count/capacity/live-byte/CRT-peak measurements match between original and
+candidate copy cases. All workload checksums match. Small empty/single copies
+show 0.24/0.67 ns extra respectively; do not claim zero regression. At 32K,
+the unrelated STL control differs markedly (46.45 -> 14.86 us), so layout/heap
+effects remain a confounder for attribution of that particular size. The 256/4K
+controls are much closer (49.48 -> 50.59 ns and 334.92 -> 346.78 ns), supporting
+further validation of the sizeable native-copy improvement there. These results
+are not engine frame-time improvements or allocator-independent guarantees.
+
+Artifacts: `devtools/out/unique_array_bench/` baseline/candidate matrices and
+`copy/paired.csv`, `copy/paired_results.json`, per-build source hashes and counts.
+Editor build/regression tests for the candidate are pending; Phase 1 remains
+in progress.[^phase]

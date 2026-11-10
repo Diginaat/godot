@@ -1,5 +1,19 @@
 # Update log
 
+## 2026-11-10 (core modernization Phase 1 unique arrays)
+
+* Added baseline-only LocalVector/std::vector-Godot-allocator evaluation: 56
+  paired operations/sizes, basic contracts and untimed CRT allocation-event/peak
+  instrumentation separate from timing. No allocator/storage backend change.
+* Isolated LocalVector Span-copy candidate: use existing trait-aware bulk helper
+  for >=256 trivial elements; preserve small/nontrivial copy loops. Added lifetime,
+  no-default-constructor, independence, empty-span and bulk-path regression tests.
+* Eleven alternating copy-only process pairs: 256 ints 126.39 -> 52.70 ns,
+  4K ints 1524.79 -> 347.40 ns; allocation counts/capacities/bytes identical.
+  Empty/single-copy extra cost and 32K STL-control confounding recorded explicitly.
+  Editor build/test gate running; candidate not promoted. See
+  [evidence](/project/unique-array-evaluation.md).
+
 ## 2026-11-10 (core modernization Phase 0 checkpoint)
 
 * Created `feat/core-stl-simd-modernization` from `dev-stl-core` at
