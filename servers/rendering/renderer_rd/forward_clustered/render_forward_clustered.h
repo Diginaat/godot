@@ -1138,11 +1138,14 @@ protected:
 	struct GPUInstanceViewInfo {
 		uint32_t objects = 0;
 		uint32_t primitives = 0;
+		uint32_t shadow_objects = 0; // Summed over the view's shadow passes.
+		uint32_t shadow_primitives = 0;
 		uint64_t frame = 0;
 	};
 	HashMap<uint64_t, GPUInstanceViewInfo> gpu_instances_view_info;
 	uint64_t gpu_instances_view_key = 0;
 	static void _gpu_instances_stats_received(const Vector<uint8_t> &p_data, uint64_t p_view, bool p_check);
+	static void _gpu_instances_shadow_stats_received(const Vector<uint8_t> &p_data, uint64_t p_view);
 	uint64_t gpu_instances_moved_frame = 0; // Last frame an instance moved (stays moved for one more frame).
 	void _gpu_instances_free();
 	PagedAllocator<GeometryInstanceSurfaceDataCache> geometry_instance_surface_alloc;

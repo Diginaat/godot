@@ -127,13 +127,20 @@ func _capture() -> Image:
 	return get_viewport().get_texture().get_image()
 
 
+# Shadow casters drawn in the last frame, as the render info counts them.
+func _shadow_objects() -> int:
+	return RenderingServer.viewport_get_render_info(get_viewport().get_viewport_rid(), RenderingServer.VIEWPORT_RENDER_INFO_TYPE_SHADOW, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
+
+
 # Same frame content with and without the GPU path: nothing may move.
 func _compare(label: String) -> void:
 	var moving := _moving
 	_moving = 0
 	var with_gpu := await _capture()
+	var shadow_objects_gpu := _shadow_objects()
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", false)
 	var without_gpu := await _capture()
+	print("GPU_INSTANCES_SHADOW_INFO: %s gpu=%d cpu=%d" % [label, shadow_objects_gpu, _shadow_objects()])
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", true)
 	await _wait(3)
 	_moving = moving

@@ -55,6 +55,7 @@
   enough passes: a dual paraboloid omni light made it show). The copy now
   keeps them. Found by isolating the light type, then looking at where the
   images differed (the sun's shadows everywhere, not near the omni light).
+* **Implemented**: shadow render info for GPU-drawn casters (Phase 6.3).
 
 ## 2026-11-08 (release 0.9.1)
 

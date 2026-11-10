@@ -206,8 +206,11 @@ render CPU down.
   a render has its own commands and IDs (cube faces too). Fixed on the way:
   when the shadow instance buffer grew mid-frame, the copy from scratch
   turned earlier passes' GPU path elements into CPU draws.
-- 6.3 Next: shadow render info (objects, primitives) for GPU-drawn casters;
-  HZB or caster culling against the camera for cascades.
+- 6.3 Shadow render info done 2026-11-10: the shadow passes of a render
+  add their casters into one counter, read back after each pass; the
+  view's next render adds the total (objects equal to the CPU path's in
+  every comparison where both drew shadows).
+- 6.4 Next: HZB or caster culling against the camera for cascades.
 
 ## Phase 7 - lighting and GI scheduling (P2)
 

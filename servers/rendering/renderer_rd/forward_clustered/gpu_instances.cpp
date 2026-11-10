@@ -1057,6 +1057,17 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	}
 	rd->buffer_update(view.visible, 0, words * sizeof(uint32_t), bits.ptr());
 	rd->buffer_update(view.commands, 0, scenario->commands.size() * sizeof(uint32_t), scenario->commands.ptr());
+	// Render info: the passes of a render add up their casters; what the
+	// view's last render drew goes into this one (read back a few frames late).
+	if (gpu_instances_shadow_views_used == 1) {
+		const uint32_t zero_stats[4] = {};
+		rd->buffer_update(scenario->shadow_stats_buffer, 0, sizeof(zero_stats), zero_stats);
+		const GPUInstanceViewInfo *info = gpu_instances_view_info.getptr(gpu_instances_view_key);
+		if (info && p_render_info) {
+			p_render_info[RSE::VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME] += info->shadow_objects;
+			p_render_info[RSE::VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME] += info->shadow_primitives;
+		}
+	}
 
 	// Every shadow pass writes the same instance data (no dynamic or GI
 	// flags), so they share one buffer; the camera's keeps its own flags.
@@ -1087,6 +1098,10 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	rd->compute_list_set_push_constant(compute_list, &params, sizeof(params));
 	rd->compute_list_dispatch(compute_list, (params.member_count + 63) / 64, 1, 1);
 	rd->compute_list_end();
+	if (gpu_instances_view_key != 0) {
+		// The total so far; the render's last pass reads back the full sum.
+		rd->buffer_get_data_async(scenario->shadow_stats_buffer, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_stats_received).bind(gpu_instances_view_key), 0, 2 * sizeof(uint32_t));
+	}
 
 	// One element per bucket level in the pass's range.
 	RenderList &list = render_list[RENDER_LIST_SECONDARY];
@@ -1167,6 +1182,19 @@ void RenderForwardClustered::_gpu_instances_shadow_check_received(const Vector<u
 		print_line(vformat("GPU_INSTANCES_SHADOW_CHECK: ok frame=%d drawn=%d", self->gpu_instances_shadow_check_frame, drawn));
 	} else {
 		ERR_PRINT(vformat("GPU instances shadow check (frame %d): the GPU path drew %d caster surfaces, the scene cull listed %d.", self->gpu_instances_shadow_check_frame, drawn, self->gpu_instances_shadow_check_expected));
+	}
+}
+
+void RenderForwardClustered::_gpu_instances_shadow_stats_received(const Vector<uint8_t> &p_data, uint64_t p_view) {
+	RenderForwardClustered *self = get_singleton();
+	if (!self || !gpu_instances_readbacks_alive || p_data.size() < int(2 * sizeof(uint32_t))) {
+		return;
+	}
+	const uint32_t *words = reinterpret_cast<const uint32_t *>(p_data.ptr());
+	GPUInstanceViewInfo *info = self->gpu_instances_view_info.getptr(p_view);
+	if (info) {
+		info->shadow_objects = words[0];
+		info->shadow_primitives = words[1];
 	}
 }
 

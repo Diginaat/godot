@@ -17,10 +17,10 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 6.1-6.2 shadow casters on the GPU path (directional, spot, omni) done (2026-11-10); Phase 2 done except HZB occlusion; Phase 1 done except 1.8 |
+| Phase | 6.1-6.3 shadow casters on the GPU path (directional, spot, omni, render info) done (2026-11-10); Phase 2 done except HZB occlusion; Phase 1 done except 1.8 |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 6.3 shadow render info; then Phase 3 multi-draw, Phase 5 HZB occlusion, 1.8 lifetime and limits (roadmap.md) |
+| Next | Phase 3 multi-draw, Phase 5 HZB occlusion, 1.8 lifetime and limits; decide when the GPU path can be on by default (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
 | Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (33 camera and 33 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, spot and omni shadows, casters behind the camera and per-frame churn without rebuilds; 12 of 12 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
 
