@@ -23,7 +23,8 @@ committed. Branch creation preserved every existing change.
 
 ## Current state
 
-- Phase 0 committed as `ad1573b0e4`; Phase 1 unique-array experiment in progress.
+- Phase 0 committed as `ad1573b0e4`; Phase 1 infrastructure `ce25718574`.
+  First LocalVector copy slice passes the Windows build/test gate; Phase 1 remains open.
 - Existing COW/STL-algorithm and robin-hood adapter prototype: builds and passes
   focused correctness, but **fails numeric-container performance/memory goals**.
 - No engine math modification. Explicit SSE dot/cross candidates lost locally.
@@ -44,7 +45,7 @@ committed. Branch creation preserved every existing change.
 | Phase 0 isolated original-source snapshot | Both container control binaries compile and pass all 24 workloads; math probe compiles and passes finite checks; no experimental engine headers/vendor files needed |
 | Phase 1 unique array baseline | 56 LocalVector/STL paired workloads, seven sizes; count/timing checksum parity and initial contracts pass |
 | Phase 1 copy candidate | 11 alternating original/candidate process pairs; bulk-copy improvement at 256/4K ints; allocations unchanged; small-copy costs and control confounders documented |
-| Phase 1 editor build/test gate | Running; do not commit candidate until notification/results checked |
+| Phase 1 editor build/test gate | Passed MSVC production editor build (15m09s); 279 focused tests / 3,803,093 assertions, zero failures; dirty-tree prototype dependencies remain outside this slice |
 | Full suite, scene/renderer/physics/C# smoke | Not run in this audit |
 | GCC/Clang/Linux, double precision, sanitizers, ARM | Pending |
 
@@ -62,14 +63,14 @@ remain comparison controls, not mandatory dependencies. See D011.
 
 ## Next independent task
 
-Finish Phase 1 LocalVector copy candidate's editor/test gate. Its only engine
-edit is in local_vector.h (bulk copy for >=256 trivial elements); regression
-tests are in test_local_vector.cpp. Both were clean before this slice. Benchmark
-files are array_bench_counters.h and unique_array_bench.{cpp,py}. Commit separately
-from the inherited shared-container/hash/String/Mono prototype. Do not stage the
-whole tree. All evidence: kb/project/unique-array-evaluation.md. Preserve original
-negative experiments; no std::vector storage replacement is accepted. Broader
-container contracts and platform gates remain; Phase 2 native-map work follows.
+Next Phase 1 slice: threshold-neighborhood copy benchmarks (255/256/257), more
+element types, then remaining compiler/sanitizer/contract coverage. Current
+LocalVector optimization preserves layout/storage and uses bulk copy only for
+>=256 trivially copyable elements; tests cover nontrivial/no-default construction,
+empty spans, independence and the bulk path. Do not modify source during a build.
+No std::vector storage replacement accepted. Keep inherited shared-container/
+hash/String/Mono prototypes and unrelated work unstaged. Evidence and caveats:
+kb/project/unique-array-evaluation.md. Phase 2 native-map work follows its gates.
 
 ## Resume commands
 

@@ -36,6 +36,68 @@ TEST_FORCE_LINK(test_local_vector)
 
 namespace TestLocalVector {
 
+struct CopyTracked {
+	inline static int live = 0;
+	inline static int copies = 0;
+	int value;
+	CopyTracked() = delete;
+	explicit CopyTracked(int p_value) : value(p_value) { live++; }
+	CopyTracked(const CopyTracked &p_other) : value(p_other.value) {
+		live++;
+		copies++;
+	}
+	~CopyTracked() { live--; }
+};
+
+TEST_CASE("[LocalVector] Span and copy construction preserve element lifetime") {
+	CHECK(CopyTracked::live == 0);
+	{
+		const CopyTracked source[] = { CopyTracked(7), CopyTracked(11), CopyTracked(13) };
+		CopyTracked::copies = 0;
+		LocalVector<CopyTracked> values(Span<CopyTracked>(source, 3));
+		CHECK(CopyTracked::copies == 3);
+		CHECK(CopyTracked::live == 6);
+		LocalVector<CopyTracked> copy(values);
+		CHECK(CopyTracked::copies == 6);
+		CHECK(CopyTracked::live == 9);
+		CHECK(copy.size() == 3);
+		CHECK(copy[0].value == 7);
+		CHECK(copy[2].value == 13);
+		copy[0].value = 19;
+		CHECK(values[0].value == 7);
+	}
+	CHECK(CopyTracked::live == 0);
+}
+
+TEST_CASE("[LocalVector] Trivial span copies are independent and empty spans do not allocate") {
+	LocalVector<int> empty(Span<int>{});
+	CHECK(empty.size() == 0);
+	CHECK(empty.get_capacity() == 0);
+	CHECK(empty.ptr() == nullptr);
+	const int source[] = { 0, -1, 42, INT32_MAX };
+	LocalVector<int> values(Span<int>(source, 4));
+	LocalVector<int> copy(values);
+	CHECK(values.ptr() != copy.ptr());
+	for (int i = 0; i < 4; i++) {
+		CHECK(values[i] == source[i]);
+		CHECK(copy[i] == source[i]);
+	}
+	copy[2] = 19;
+	CHECK(values[2] == 42);
+	LocalVector<int> large;
+	large.resize_uninitialized(1024);
+	for (int i = 0; i < 1024; i++) {
+		large[i] = i * 17 - 91;
+	}
+	LocalVector<int> bulk_copy(large);
+	CHECK(large.ptr() != bulk_copy.ptr());
+	for (int i = 0; i < 1024; i++) {
+		CHECK(bulk_copy[i] == large[i]);
+	}
+	bulk_copy[512] = -1;
+	CHECK(large[512] == 512 * 17 - 91);
+}
+
 TEST_CASE("[LocalVector] List Initialization.") {
 	LocalVector<int> vector{ 0, 1, 2, 3, 4 };
 

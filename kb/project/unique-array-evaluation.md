@@ -1,7 +1,7 @@
 ---
 type: Finding
 title: Unique array baseline and bulk-copy candidate
-description: Original LocalVector versus Godot-allocated std::vector, measured allocator events, and a narrow trait-aware copy optimization awaiting editor validation.
+description: Original LocalVector versus Godot-allocated std::vector, measured allocator events, and a narrow trait-aware copy optimization validated on Windows.
 tags: [core, containers, allocation, benchmarks, compatibility]
 status: draft
 generated: { by: opencode/gpt-6.1-sol, at: 2026-11-10T00:00:00Z }
@@ -96,5 +96,10 @@ are not engine frame-time improvements or allocator-independent guarantees.
 
 Artifacts: `devtools/out/unique_array_bench/` baseline/candidate matrices and
 `copy/paired.csv`, `copy/paired_results.json`, per-build source hashes and counts.
-Editor build/regression tests for the candidate are pending; Phase 1 remains
-in progress.[^phase]
+The candidate passed the MSVC production editor build with tests=yes (15m09s)
+and **279 focused core tests / 3,803,093 assertions**, zero failures. The engine
+build includes inherited uncommitted prototypes; standalone before/after
+measurements isolate only the LocalVector header against original sources.
+This is a narrow Windows checkpoint, not global Phase 1, cross-platform, full
+test-suite or engine-workload acceptance. Threshold-neighborhood measurements,
+more element types, sanitizer/OOM/aliasing gates and Linux/ARM remain open.[^phase]

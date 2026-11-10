@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-11-10 (LocalVector copy checkpoint validation)
+
+* MSVC production editor build with tests=yes completed successfully in 15m09s.
+  Focused LocalVector/Vector/Array/Dictionary/hash/String/Variant selection:
+  279 tests, 3,803,093 assertions, zero failures.
+* Checkpoint only the LocalVector trait-aware bulk-copy path (>=256 elements),
+  its regression tests and validation records. Layout, allocator and storage
+  remain unchanged; inherited hash/String/Mono/COW experiments stay unstaged.
+* Existing 11-pair copy measurements support 256/4K integer-copy improvements;
+  small-copy overhead, 32K control confounding and outstanding platform/threshold
+  gates remain explicit. No engine-wide or complete Phase 1 acceptance claimed.
+  See [evidence](/project/unique-array-evaluation.md).
+
 ## 2026-11-10 (core modernization Phase 1 unique arrays)
 
 * Added baseline-only LocalVector/std::vector-Godot-allocator evaluation: 56

@@ -1,6 +1,6 @@
 # Project
 
-* [Unique array baseline and bulk-copy candidate](/project/unique-array-evaluation.md) - 56 paired workloads with allocator events; conservative LocalVector copy candidate, editor gate pending
+* [Unique array baseline and bulk-copy candidate](/project/unique-array-evaluation.md) - 56 paired workloads with allocator events; narrow LocalVector copy change passes Windows build and 279 focused tests
 
 * [Core modernization phase-zero checkpoint](/project/core-modernization-audit.md) - baseline/branch, compatibility gates, benchmark tools, native-map direction and resumable phase plan
 

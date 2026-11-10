@@ -376,8 +376,13 @@ public:
 	}
 	explicit LocalVector(Span<T> p_span) {
 		reserve(p_span.size());
-		for (size_t i = 0; i < p_span.size(); i++) {
-			memnew_placement(&data[i], T(p_span.ptr()[i]));
+		// Keep the small-copy loop; baseline benchmarks favor bulk copying from 256 elements.
+		if (std::is_trivially_copyable_v<T> && p_span.size() >= 256) {
+			copy_arr_placement(data, p_span.ptr(), p_span.size());
+		} else {
+			for (size_t i = 0; i < p_span.size(); i++) {
+				memnew_placement(&data[i], T(p_span.ptr()[i]));
+			}
 		}
 		count = p_span.size();
 	}
