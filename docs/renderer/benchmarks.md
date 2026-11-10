@@ -151,6 +151,27 @@ The GPU cost of keeping 2,000 scattered moved records current is gone
 packing the dirty records); other differences are within the repeat
 spread (`shared_20k` and `small_1k` first repeats).
 
+### Where `_fill_instance_data` spends its time (before 1.5), 2026-11-10
+
+Temporary build switch (not committed) that removes parts of the
+per-element work; images are wrong in modes 1-3, only CPU time counts.
+`-Stages`, Vulkan, static view, "Fill Instance Data" (main pass / all
+shadow passes), ms p50:
+
+| Mode | Removed | `shared_20k` | `massive_100k` |
+| --- | --- | --- | --- |
+| 0 | nothing | 3.30 / 2.12 | 7.80 / 1.29 |
+| 1 | the two transform transposes | 1.43 / 1.10 | 5.95 / 0.94 |
+| 2 | plus the mesh-storage lookups | 1.80 / 1.37 | 5.93 / 0.97 |
+| 3 | plus the 176-byte write (a 4-byte slot instead) | 1.32 / 1.10 | 5.32 / 0.84 |
+
+At 100k the record write costs about 0.6 ms and the transposes about
+1.9 ms; about 5.3 ms (63 ns per element) is the walk itself: each render
+element points to its surface cache and its instance object, scattered in
+memory. `shared_20k` varies by about 0.4 ms between runs (mode 2 above
+mode 1). Conclusion (D027): replacing the record with a slot ID saves at
+most about 2.5 of 20 ms; the CPU has to stop visiting eligible instances.
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

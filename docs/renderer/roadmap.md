@@ -63,39 +63,66 @@ A parallel representation: `RendererSceneCull` and
 | 1.2 Table storage + CPU mirror (done 2026-11-10, D026: 128-byte record without per-view and per-surface fields; `forward_clustered/gpu_instance_table.*`; `instance_table.ps1` on Vulkan and D3D12) | `GPUInstanceTable` in `forward_clustered/` (new file): CPU mirror of the record (transform, AABB, flags, layer mask, instance uniforms offset, GI offset, uv scale), dirty bitset, RD storage buffer with growth | Fixture reads the buffer back (test only) and matches the CPU mirror after add/move/remove/grow |
 | 1.3 Dirty uploads (done 2026-11-10: up to 16 runs direct, more through one packed upload and `gpu_instance_scatter.glsl`; `dynamic_20k` GPU 4.32 to 1.43 ms) | Measured in 1.2: one `buffer_update` per contiguous range costs +2.9 ms GPU and about +1 ms render CPU for 2,000 scattered moved records (`dynamic_20k`). Replace scattered ranges with one upload of the packed dirty records plus a compute scatter into the table; keep direct range updates for a few long runs | Bench `dynamic_20k`: upload bytes per frame proportional to moved instances; `small_1k` no regression |
 | 1.4 Previous transforms (done 2026-11-10: table updated for every scene render after the motion age-out; per-element check against `_fill_instance_data`, incl. teleports and a second viewport; image A/B moves to 1.5, where shaders first read the table) | Keep prev transform in the table; a moved slot keeps "moved last frame" so prev is refreshed one frame after it stops | Motion-vector A/B (TAA) exact against the current path for moving, stopping and teleported instances |
-| 1.5 Shader read path | Specialization bit: scene shader reads `table[remap[base + INSTANCE_INDEX]]` (same remap idea as MultiMesh culling, binding 46) | Pixel A/B exact on Vulkan and D3D12: static, moving, instance uniforms, lightmaps, VoxelGI, layer masks |
-| 1.6 Main pass on the table | Eligible opaque elements write 4-byte slot IDs instead of 176-byte records | `shared_20k`, `massive_100k`: lower render CPU and upload bytes; GPU p50 within noise |
-| 1.7 Shadow passes on the table | Shadow lists write slot IDs too | Shadow A/B exact (directional 4 splits, spot, omni cube); bench gain reported |
+| ~~1.5 Shader read path~~ | Dropped 2026-11-10 (D027): measured, the CPU saving would be at most about 2.5 of 20 ms at 100k | - |
+| ~~1.6 Main pass on the table~~ | Dropped (D027), folded into Phase 2 | - |
+| ~~1.7 Shadow passes on the table~~ | Dropped (D027), folded into Phase 6 | - |
 | 1.8 Lifetime and limits | Freed instance while frames in flight; table growth mid-frame; memory reported in `get_memory_usage` and the bench | Lifetime fixture on Vulkan/D3D12; editor smoke; memory line in bench |
 
-Eligibility (first version): opaque or alpha-scissor `MeshInstance3D`
-without skinning/blend shapes, single precision. Everything else keeps the
-176-byte path. Setting `rendering/geometry/gpu_instance_table/enabled`,
-default off until 1.7 shows a gain.
+Measured before 1.5 (D027): of the 7.8 ms that `_fill_instance_data`
+takes at 100k, the 176-byte record write is about 0.6 ms and the transform
+transposes about 1.9 ms; about 5.3 ms is walking the elements (chasing each
+render element to its scattered instance object). Writing slot IDs instead
+of records cannot remove that walk, so the table pays off when the CPU
+stops visiting eligible instances at all (Phase 2). The table stays as
+built (1.1-1.4); 1.8 is still needed. Setting
+`rendering/geometry/gpu_instance_table/enabled` stays off by default until
+Phase 2 shows a gain.
 
-## Phase 2 - GPU culling of ordinary instances (P0)
+## Phase 2 - GPU path for eligible instances (P0)
 
-Needs P1. Same kernel design as MultiMesh culling (cull, scan, ordered
-scatter; D003, stable order).
+Needs P1. Revised 2026-11-10 (D027): the CPU must stop visiting eligible
+instances in the camera passes, so culling, the render list and instance
+data for them move to the GPU together. Same kernel design as MultiMesh
+culling (cull, scan, ordered scatter; D003, stable order).
 
-- 2.1 Static draw buckets: group eligible instances by the render-element
-  key without depth layer and LOD (pipeline, material, mesh surface); rebuilt
-  on change, not per frame.
-- 2.2 Compute frustum cull + layer mask + visibility range over each bucket's
-  slots into compacted ID lists; CPU cull still runs for lights, probes, GI
-  and notifiers, but eligible instances skip `_fill_render_list`.
-- 2.3 Per-instance LOD in the kernel (reuse D010).
-- 2.4 Multiple views (each viewport its own lists), jitter (widened frustum),
-  first frame and camera cuts (current-frame, no history).
-- Acceptance: exact pixel A/B against CPU culling; `massive_100k` render
-  CPU down; GPU cost reported per view; no readback.
+Eligible (first version): `MeshInstance3D` surfaces that are opaque or
+alpha-scissor, no skeleton or blend shapes, no fade or transparency, no
+lightmap, lightmap capture or VoxelGI, single precision, Forward+ main
+camera views (not mirrors, reflection probes or XR). Everything else keeps
+the CPU path.
+
+- 2.1 Draw buckets: eligible instance surfaces grouped by the render-element
+  key without depth layer and LOD (pipeline, material, mesh surface, mirror
+  flag), kept current through the table's change hooks, not per frame.
+- 2.2 Keep eligible instances out of the camera render lists. The CPU scene
+  cull still visits them (it is packed and cheap) for lights, probes and
+  notifiers, and shadow passes keep them until Phase 6; the camera list
+  skips them with a flag in the cull's packed data, without touching the
+  instance object.
+- 2.3 Compute pass per view: frustum, layer mask and visibility range over
+  each bucket's slots; for visible instances, write the existing 176-byte
+  `InstanceData` (from the table record plus per-view bits computed on the
+  GPU: dynamic/motion from transform against previous transform, SDFGI and
+  GI buffer flags from the pass) into a GPU-local per-view buffer, and the
+  bucket's instance count into an indirect command. The scene shader stays
+  as it is.
+- 2.4 Draw each bucket with one indirect draw (multi-draw where supported)
+  in the depth, opaque and motion passes; ordering by bucket key replaces
+  the CPU sort for these instances.
+- 2.5 Per-instance LOD in the kernel (reuse D010); multiple views (each
+  viewport its own buffers), jitter (widened frustum), first frame and
+  camera cuts (current-frame, no history).
+- Acceptance: exact pixel and motion-vector A/B against the CPU path on
+  Vulkan and D3D12; `massive_100k` and `shared_20k` render CPU down by most
+  of the "Setup 3D Scene" share; GPU cost reported per view; `small_1k` not
+  slower; no readback.
 
 ## Phase 3 - indirect submission (P0)
 
-Needs P2.
+Needs P2 (which already draws its buckets indirectly).
 
-- 3.1 One indirect record per bucket per LOD; multi-draw per pipeline group
-  where `SUPPORTS_MULTI_DRAW_INDIRECT`.
+- 3.1 Multi-draw per pipeline group where `SUPPORTS_MULTI_DRAW_INDIRECT`
+  (Phase 2 starts with one indirect draw per bucket).
 - 3.2 RD: `draw_list_draw_indirect_count` (Vulkan `drawIndirectCount`
   feature, D3D12 count buffer, Metal fallback loop); fix D3D12 ignoring
   `p_stride`. Upstreamable as its own PR.
@@ -105,7 +132,12 @@ Needs P2.
 
 ## Phase 4 - parallel render preparation (P1)
 
-Independent of P2/P3; helps the CPU fallback path.
+Independent of P2/P3; helps the CPU fallback path. D027 shows the CPU
+element walk is dominated by pointer chasing (about 63 ns per element at
+100k): keeping the per-element hot fields (flags, slot, mirror, mesh
+instance validity) in the surface cache or the render list itself, so
+`_fill_instance_data` does not touch the instance object, is a cheap
+candidate before threading.
 
 - 4.1 Measure `_fill_render_list` + sort + `_fill_instance_data` per pass
   with Tracy zones (add `GodotProfileZone` in RFC).

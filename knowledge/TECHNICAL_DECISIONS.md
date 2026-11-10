@@ -490,3 +490,32 @@ with its record (transforms, previous transforms, uniform offset, layer
 mask, lightmap scale, base flags as a subset of the element's flags); slots
 still dirty are skipped. Self-test mode also leaves one record stale, which
 this check reports. Fixture adds 100 teleports and a second viewport.
+
+## D027 — No slot-ID render elements; eligible instances leave the CPU camera lists
+
+2026-11-10. Decided from a measurement, before writing tasks 1.5-1.7.
+Problem: the plan was to make render elements carry a 4-byte table slot
+instead of the 176-byte `InstanceData`, with the scene shader reading the
+table. Its payoff depends on what `_fill_instance_data` spends its 7.8 ms
+on at 100k nodes.
+Measurement (temporary build switch, `-Stages`, Vulkan, 100k nodes, main
+pass): all work 7.80 ms; without the transform transposes 5.95; also
+without mesh lookups 5.93; also writing 4 bytes instead of 176: 5.32. So
+the record write is about 0.6 ms, the transposes about 1.9 ms, and the walk
+over the elements (each points to a scattered surface cache and instance
+object) about 5.3 ms. Same pattern in shadow passes and at 20k.
+Candidates:
+1. Shader read path plus slot-ID elements (1.5-1.7). Rejected: at most about
+   2.5 of 20 ms, with scene shader changes, doubled pipeline variants and
+   every material path to revalidate.
+2. A GPU expand pass from small per-element records into the existing
+   instance buffer. Rejected for the same reason: the CPU still walks every
+   element.
+3. Keep eligible instances out of the CPU camera render lists; per view, a
+   compute pass culls them from the table, writes the existing 176-byte
+   `InstanceData` for visible ones into a GPU-local buffer and fills one
+   indirect command per draw bucket. Chosen (revised Phase 2): the CPU stops
+   visiting them, and the scene shader stays unchanged.
+Also: making the CPU walk cache-friendly (hot per-element fields in the
+surface cache) is a separate, cheaper candidate for the CPU fallback path
+(Phase 4).

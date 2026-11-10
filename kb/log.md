@@ -8,6 +8,11 @@
 * **Finding**: baseline is render-thread CPU bound; at 100k nodes 16.4 of
   20.4 ms is main-pass render-list preparation, the cull 1.2 ms, GPU 1.15 ms
   (docs/renderer/benchmarks.md).
+* **Implemented**: GPU instance table (persistent per-instance records,
+  dirty uploads with a compute scatter, validation), opt-in, tasks 1.1-1.4.
+* **Decision**: D027. The per-element CPU walk (about 63 ns per element,
+  pointer chasing) dominates `_fill_instance_data`, so slot-ID elements were
+  dropped; eligible instances will leave the CPU camera lists (Phase 2).
 
 ## 2026-11-08 (release 0.9.1)
 

@@ -17,10 +17,10 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 1, GPU instance table: 1.0 to 1.4 done (2026-11-10) |
+| Phase | 1 done except 1.8 (lifetime and limits); 1.5-1.7 dropped by D027 (2026-11-10) |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 1.5 shader read path: scene shader reads `table[remap[...]]` behind a specialization bit; pixel and motion-vector A/B against the 176-byte path |
+| Next | Phase 2.1 draw buckets for eligible instances (revised Phase 2 in roadmap.md); 1.8 lifetime cases can go first |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
 | Last verified tests | `instance_table.ps1` on Vulkan and D3D12 (27 buffer + 27 element checks, both upload paths, teleports, second viewport, self-test catches both), standard smoke, 2026-11-10. Full large-world suites last run at 1.2; `instance_bench -Table` at 1.3 |
 
@@ -49,6 +49,11 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
 - D026: the table record (128 bytes) holds only per-instance values that are
   the same in every view and pass; fade, motion and GI bits stay per render
   element, per-surface values (compressed AABB, UV scale) per draw.
+- D027: no shader read path or slot-ID elements (1.5-1.7). Measured, the
+  CPU per-element walk (about 63 ns per element, pointer chasing) dominates;
+  only keeping eligible instances out of the CPU camera lists pays. Phase 2
+  writes the existing 176-byte instance data on the GPU per view, so the
+  scene shader does not change.
 - Earlier geometry decisions D001-D024 still hold (compute + indirect before
   mesh shaders, stable source IDs, opt-in settings, conventional fallback).
 
