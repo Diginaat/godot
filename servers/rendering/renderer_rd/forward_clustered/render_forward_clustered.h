@@ -919,7 +919,13 @@ protected:
 	GPUInstanceTable gpu_instance_table;
 	LocalVector<GeometryInstanceForwardClustered *> gpu_instance_owners; // Indexed by slot; null when free.
 	bool gpu_instance_table_active = false;
-	uint64_t gpu_instance_table_frame = UINT64_MAX;
+	uint64_t gpu_instance_table_frame = UINT64_MAX; // Last frame a validation was requested.
+	// Validation: every element _fill_instance_data writes is compared with
+	// its table record (counts reported with the buffer check).
+	bool gpu_instance_table_checking = false;
+	uint32_t gpu_instance_table_elements_checked = 0;
+	uint32_t gpu_instance_table_elements_failed = 0;
+	void _gpu_instance_table_check_element(const GeometryInstanceForwardClustered *p_instance, const SceneState::InstanceData &p_data);
 
 	_FORCE_INLINE_ void _gpu_instance_table_mark(uint32_t p_slot) {
 		if (gpu_instance_table_active) {

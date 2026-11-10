@@ -100,6 +100,7 @@ public:
 	void ensure_slot(uint32_t p_slot);
 	void mark_dirty(uint32_t p_slot);
 	bool has_dirty() const { return !dirty_slots.is_empty(); }
+	bool is_dirty(uint32_t p_slot) const { return p_slot < dirty_flags.size() && dirty_flags[p_slot]; }
 	const LocalVector<uint32_t> &get_dirty_slots() const { return dirty_slots; }
 	void set_record(uint32_t p_slot, const Record &p_record);
 	const Record &get_record(uint32_t p_slot) const { return records[p_slot]; }

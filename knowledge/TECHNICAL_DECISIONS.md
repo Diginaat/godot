@@ -481,3 +481,12 @@ upload (records plus slot list) and written by a compute scatter
 (`gpu_instance_scatter.glsl`); up to 16 contiguous runs still use one
 `buffer_update` each. `dynamic_20k` GPU 4.32 to 1.43 ms (table off: 1.41).
 Both paths and the self-test pass on Vulkan and D3D12.
+Update 2026-11-10 (task 1.4): the table is brought up to date at the start
+of every scene render, not once per frame. The motion age-out of a render's
+instances runs just before it (`RenderForwardClusteredPT::_render_scene`), so
+a second viewport's age-outs reach the table before that viewport draws.
+With validation on, every element `_fill_instance_data` writes is compared
+with its record (transforms, previous transforms, uniform offset, layer
+mask, lightmap scale, base flags as a subset of the element's flags); slots
+still dirty are skipped. Self-test mode also leaves one record stale, which
+this check reports. Fixture adds 100 teleports and a second viewport.

@@ -988,6 +988,9 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 		instance_data.set_uv_scale(uv_scale);
 
 		scene_state.curr_gpu_ptr[p_render_list][i + p_offset] = instance_data;
+		if (unlikely(gpu_instance_table_checking)) {
+			_gpu_instance_table_check_element(inst, instance_data);
+		}
 
 		const bool cant_repeat = instance_data.flags & INSTANCE_DATA_FLAG_MULTIMESH || inst->mesh_instance.is_valid();
 
@@ -2210,16 +2213,39 @@ void RenderForwardClustered::_gpu_instance_table_build_record(uint32_t p_slot, G
 	r_record.lightmap_uv_scale[3] = inst->lightmap_uv_scale.size.y;
 }
 
-void RenderForwardClustered::_update_gpu_instance_table() {
-	const uint64_t frame = RSG::rasterizer->get_frame_number();
-	if (frame == gpu_instance_table_frame) {
-		return; // Once per frame, however many viewports render.
+void RenderForwardClustered::_gpu_instance_table_check_element(const GeometryInstanceForwardClustered *p_instance, const SceneState::InstanceData &p_data) {
+#ifndef REAL_T_IS_DOUBLE
+	const uint32_t slot = p_instance->gpu_slot;
+	if (gpu_instance_table.is_dirty(slot) || slot >= gpu_instance_table.get_slot_count()) {
+		return; // Changed since the last upload; uploaded before it is drawn from.
 	}
-	gpu_instance_table_frame = frame;
+	const GPUInstanceTable::Record &record = gpu_instance_table.get_record(slot);
+	gpu_instance_table_elements_checked++;
+	// The record's flags are the view-independent part of the element's flags.
+	const bool same = memcmp(record.transform, p_data.transform, sizeof(record.transform)) == 0 &&
+			memcmp(record.prev_transform, p_data.prev_transform, sizeof(record.prev_transform)) == 0 &&
+			memcmp(record.lightmap_uv_scale, p_data.lightmap_uv_scale, sizeof(record.lightmap_uv_scale)) == 0 &&
+			record.instance_uniforms_ofs == p_data.instance_uniforms_ofs &&
+			record.layer_mask == p_data.layer_mask &&
+			(record.flags & ~p_data.flags) == 0 &&
+			(record.generation & 1);
+	if (!same) {
+		if (gpu_instance_table_elements_failed == 0) {
+			ERR_PRINT(vformat("GPU instance table element check: slot %d differs from the instance data written this frame.", slot));
+		}
+		gpu_instance_table_elements_failed++;
+	}
+#endif
+}
 
+void RenderForwardClustered::_update_gpu_instance_table() {
+	// Runs for every scene render (each viewport, probe and mirror), after the
+	// motion age-out of its instances, so each render draws from current
+	// records. Nothing dirty: nothing to do.
 	if (!GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instance_table/enabled")) {
 		if (gpu_instance_table_active) {
 			gpu_instance_table_active = false;
+			gpu_instance_table_checking = false;
 			gpu_instance_table.free_buffer();
 		}
 		return;
@@ -2233,15 +2259,38 @@ void RenderForwardClustered::_update_gpu_instance_table() {
 	}
 
 	_update_dirty_geometry_instances(); // Base flags and uniform offsets current.
+	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instance_table/validate");
+	// Self-test: leave the highest dirty slot's record stale (the element
+	// check must notice); upload() drops the lowest one (the buffer check must).
+	uint32_t stale_slot = GPUInstanceSlots::INVALID;
+	if (validate == 2) {
+		for (uint32_t slot : gpu_instance_table.get_dirty_slots()) {
+			if (stale_slot == GPUInstanceSlots::INVALID || slot > stale_slot) {
+				stale_slot = slot;
+			}
+		}
+	}
 	for (uint32_t slot : gpu_instance_table.get_dirty_slots()) {
+		if (slot == stale_slot) {
+			continue;
+		}
 		GPUInstanceTable::Record record;
 		_gpu_instance_table_build_record(slot, record);
 		gpu_instance_table.set_record(slot, record);
 	}
 
-	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instance_table/validate");
 	gpu_instance_table.upload(validate == 2);
-	if (validate > 0 && frame % 30 == 0) {
+	gpu_instance_table_checking = validate > 0;
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	if (validate > 0 && frame % 30 == 0 && frame != gpu_instance_table_frame) {
+		gpu_instance_table_frame = frame;
+		if (gpu_instance_table_elements_failed == 0) {
+			print_line(vformat("GPU_INSTANCE_TABLE_ELEMENTS: ok frame=%d checked=%d", frame, gpu_instance_table_elements_checked));
+		} else {
+			ERR_PRINT(vformat("GPU instance table element check (frame %d): %d of %d elements differ.", frame, gpu_instance_table_elements_failed, gpu_instance_table_elements_checked));
+		}
+		gpu_instance_table_elements_checked = 0;
+		gpu_instance_table_elements_failed = 0;
 		gpu_instance_table.request_validation(frame);
 	}
 }

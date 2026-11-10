@@ -3,10 +3,12 @@ extends Node3D
 ## rendering/geometry/gpu_instance_table with its validation, then changes the
 ## scene in phases: add nodes past the first buffer size, move them, change
 ## layers and materials, free and add again (slot reuse and a second growth),
-## turn the table off and on (full rebuild). The engine compares the GPU buffer
-## with its CPU copy every 30 frames and prints GPU_INSTANCE_TABLE_CHECK lines;
-## the runner counts them. With `-- --self-test` one changed record is left out
-## of every upload, so the check has to report a difference.
+## teleport nodes (motion reset), render a second viewport, turn the table off
+## and on (full rebuild). Every 30 frames the engine compares the GPU buffer
+## with its CPU copy (GPU_INSTANCE_TABLE_CHECK) and reports how many drawn
+## elements matched their records (GPU_INSTANCE_TABLE_ELEMENTS); the runner
+## counts both. With `-- --self-test` one record is left stale and one upload
+## dropped each frame, so both checks have to report a difference.
 
 const PHASE_FRAMES := 90
 
@@ -35,6 +37,21 @@ func _ready() -> void:
 	camera.look_at(Vector3.ZERO)
 	camera.current = true
 	_run.call_deferred(self_test)
+
+
+func _add_second_view() -> void:
+	# A second scene render in the same frame, seeing a different part of the
+	# grid: its instances' motion age-out happens after the first view's upload.
+	var viewport := SubViewport.new()
+	viewport.size = Vector2i(320, 180)
+	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.world_3d = get_world_3d()
+	var camera := Camera3D.new()
+	camera.position = Vector3(20, 6, 0)
+	viewport.add_child(camera)
+	add_child(viewport)
+	camera.look_at(Vector3(10, 0, -20))
+	camera.current = true
 
 
 func _add(count: int) -> void:
@@ -74,6 +91,18 @@ func _run(self_test: bool) -> void:
 	_moving = 200
 	_stride = 7
 	if not self_test:
+		_moving = 0
+		await _wait(4)
+		for i in 100:
+			var node := _nodes[i * 11 % _nodes.size()]
+			node.position.x += 0.25
+			RenderingServer.instance_teleport(node.get_instance())
+		await _wait(PHASE_FRAMES)
+		print("INSTANCE_TABLE_PHASE: teleported 100")
+		_add_second_view()
+		_moving = 200
+		await _wait(PHASE_FRAMES)
+		print("INSTANCE_TABLE_PHASE: second viewport")
 		for i in 100:
 			_nodes[i * 3].layers = 2
 		for i in 50:

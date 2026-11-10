@@ -17,12 +17,12 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 1, GPU instance table: 1.0 to 1.3 done (2026-11-10) |
+| Phase | 1, GPU instance table: 1.0 to 1.4 done (2026-11-10) |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 1.4 previous transforms in the table (age-out after the upload lands one frame late; motion-vector A/B) |
+| Next | Phase 1.5 shader read path: scene shader reads `table[remap[...]]` behind a specialization bit; pixel and motion-vector A/B against the 176-byte path |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `instance_table.ps1` on Vulkan and D3D12 (21 checks, both upload paths, self-test caught), standard smoke, `instance_bench -Table` (Vulkan), 2026-11-10. Full large-world suites last run at 1.2 |
+| Last verified tests | `instance_table.ps1` on Vulkan and D3D12 (27 buffer + 27 element checks, both upload paths, teleports, second viewport, self-test catches both), standard smoke, 2026-11-10. Full large-world suites last run at 1.2; `instance_bench -Table` at 1.3 |
 
 ## Baseline in one line
 
@@ -37,9 +37,6 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   (Vulkan 104 MiB); about 2 ms spread between repeats in the 20k cases.
 - With the table on, `dynamic_20k` still has about +0.5-0.8 ms render CPU
   (building/packing 2,000 dirty records per frame); GPU cost fixed in 1.3.
-- A motion age-out (`age_out_motion`) runs during the render, after the
-  table upload, so the previous-transform reset reaches the table one frame
-  late. Handle in 1.4.
 - RD cannot draw with a GPU-written count (driver code exists, no RD API,
   Vulkan feature not enabled); D3D12 ignores the indirect stride.
 
