@@ -686,3 +686,41 @@ Measured (Vulkan, render CPU p50, GPU path before / after): `massive_100k`
 8.1-8.4 / 7.1-7.7 ms, `small_1k` 0.31-0.34 / 0.25-0.26 ms. Shadow A/B is
 part of every image comparison of `gpu_instances.ps1` (the sun casts), and
 casters behind the camera darken 447 pixels in view.
+
+## D034 — HZB occlusion of GPU path instances for the colour passes
+
+2026-11-10, Phase 5.1. Opt-in `rendering/geometry/gpu_instances/occlusion`
+(default off).
+Problem: the GPU path draws every instance the scene cull lists, so
+instances hidden behind real geometry (not `OccluderInstance3D`) are shaded
+in the opaque pass. The HZB of D023/D024 rejected only CLOD groups and
+MultiMesh instances.
+Decision: after the depth pre-pass and the shared HZB build, a second mode
+of `gpu_instance_cull.glsl` (`MODE_OCCLUDE`) runs over the members with the
+camera run's push constant, so it chooses the same command (index LOD,
+motion) for each drawn member. It tests the member's world box from the
+table record with `hzb_box_occluded()` (one world-to-clip matrix per view,
+rounding bound abs(P) * abs(V) times the box's world magnitude, 128 float
+epsilons) and appends the members it cannot prove hidden to a second set of
+commands and IDs with the same layout (per scenario, uploaded from the CPU
+copy, not GPU-copied: kb mistake `d3d12-buffer-copy-then-compute-write`).
+The opaque and motion passes bind those; the depth pre-pass, shadows,
+validation and render info keep the camera run's. Same conditions as the
+other HZB users (depth pre-pass, no MSAA, compositor, render region,
+fragment depth or stencil writers, also among the buckets). Statistic
+`gpu_instances_occluded`.
+Evidence: `gpu_instances.ps1` wall phase on Vulkan and D3D12: 279 surfaces
+occluded, 0 with the setting off, image equal to the CPU path; the setting
+stays on for the later phases (positional shadows, offscreen casters, more
+views), all equal. Cost without occluders (instance bench, Vulkan, GPU p50):
+`small_1k` +0.08 ms, `shared_20k` +0.10 ms, `massive_100k` +0.08-0.12 ms;
+render CPU +0.03-0.07 ms.
+Found on the way: `_fill_instance_data()` counted earlier passes' elements
+again in the render info when the instance buffer was remapped mid-frame
+(upstream has the same order). On the GPU path a shadow pass with no CPU
+elements leaves the buffer unmapped, so the next pass remaps; a dual
+paraboloid light counted its 92 bucket elements again in some frames. The
+fixture's shadow render info comparison now sums 12 frames, because which
+passes a frame draws repeats and the GPU path's count arrives late.
+Not done: depth-pass savings (a two-pass history like D023); a bench scene
+with occluders for the GPU path.

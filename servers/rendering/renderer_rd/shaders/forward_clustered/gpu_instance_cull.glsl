@@ -12,6 +12,12 @@
 // instance data Forward+ draws with, at the member's own index, and the
 // member's index appended to its bucket level's draw. The CPU zeroed each
 // level's instance count.
+//
+// MODE_OCCLUDE runs after the depth pre-pass with the camera run's
+// parameters: it chooses the same command for each drawn member, tests the
+// member's world box against the depth pyramid built from that pre-pass,
+// and appends the members it cannot prove hidden to a second set of
+// commands and IDs (same layout), which the colour passes draw.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -79,10 +85,12 @@ layout(set = 0, binding = 3, std430) restrict buffer Commands {
 }
 commands;
 
+#ifndef MODE_OCCLUDE
 layout(set = 0, binding = 4, std430) restrict writeonly buffer Output {
 	InstanceData data[]; // One per member.
 }
 output_instances;
+#endif
 
 layout(set = 0, binding = 5, std430) restrict writeonly buffer IDs {
 	uint data[];
@@ -94,6 +102,7 @@ layout(set = 0, binding = 6, std430) restrict readonly buffer LODEdges {
 }
 lod_edges;
 
+#ifndef MODE_OCCLUDE
 layout(set = 0, binding = 7, std430) restrict readonly buffer CommandPrimitives {
 	uint data[]; // Primitives per instance of each command.
 }
@@ -107,6 +116,7 @@ stats;
 
 shared uint group_objects;
 shared uint group_primitives;
+#endif
 
 #define VIEW_FLAG_USE_GI_BUFFERS 1
 #define VIEW_FLAG_USE_SDFGI 2
@@ -130,6 +140,27 @@ layout(set = 0, binding = 9, std430) restrict readonly buffer Visible {
 }
 visible;
 
+#ifdef MODE_OCCLUDE
+layout(set = 0, binding = 10, std430) restrict readonly buffer Occlusion {
+	mat4 world_to_clip; // Jittered, as the colour passes rasterize.
+	mat4 abs_to_clip; // abs(P) * abs(V), bounds the rounding of world_to_clip.
+	uvec4 size; // Depth width and height.
+}
+occlusion;
+
+layout(set = 0, binding = 11) uniform sampler2D depth_pyramid;
+
+layout(set = 0, binding = 12, std430) restrict buffer Statistics {
+	uint data[];
+}
+statistics;
+
+// The word after the MultiMesh one in geometry_statistics.cpp.
+const uint STAT_GPU_INSTANCES_OCCLUDED = 29u;
+
+#include "mesh_hiz_inc.glsl"
+#endif
+
 layout(push_constant, std430) uniform Params {
 	uint member_count;
 	uint view_flags;
@@ -139,6 +170,61 @@ layout(push_constant, std430) uniform Params {
 	uint pad;
 }
 params;
+
+// The member's draw command, relative to its bucket's first: the index LOD
+// as mesh_surface_get_lod() chooses it for the CPU list and, in a view with
+// a motion pass, the moved members' own commands after the others' (as the
+// CPU list's motion list).
+uint member_command(Record record, Bucket bucket) {
+	vec3 aabb_min = record.aabb_position;
+	vec3 aabb_max = record.aabb_position + record.aabb_size;
+	uint level = 0;
+	if (bucket.lod_count > 0 && params.lod_threshold > 0.0) {
+		float distance = 1.0;
+		if (!bool(params.view_flags & VIEW_FLAG_ORTHOGONAL)) {
+			distance = length(max(max(vec3(0.0), aabb_min - params.lod_camera), params.lod_camera - aabb_max));
+		}
+		float distance_threshold = distance * params.lod_distance_multiplier;
+		for (uint i = 0; i < bucket.lod_count; i++) {
+			float screen_size = lod_edges.data[bucket.lod_edges_first + i] * record.lod_scale / distance_threshold;
+			if (screen_size > params.lod_threshold) {
+				break;
+			}
+			level = i + 1;
+		}
+	}
+	bool moved = bool(record.gpu_flags & GPU_FLAG_MOVED);
+	bool motion_pass = bool(params.view_flags & VIEW_FLAG_MOTION);
+	return (motion_pass && moved ? bucket.lod_count + 1 : 0) + level;
+}
+
+#ifdef MODE_OCCLUDE
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= params.member_count) {
+		return;
+	}
+	uvec2 member = members.data[index];
+	if (member.x == 0xFFFFFFFFu || (visible.bits[member.x >> 5] & (1u << (member.x & 31u))) == 0) {
+		return; // A free member slot, or not drawn in this view.
+	}
+	Record record = table.records[member.x];
+	Bucket bucket = buckets.data[member.y];
+	uint command = member_command(record, bucket);
+	// Rounding bound: the CPU matrix bound times the largest world magnitude
+	// of the box (as the MultiMesh test).
+	vec3 magnitude = max(abs(record.aabb_position), abs(record.aabb_position + record.aabb_size)) + 1.0;
+	vec4 error = (occlusion.abs_to_clip * vec4(magnitude, 1.0)) * (128.0 * 1.1920929e-7);
+	if (hzb_box_occluded(record.aabb_position, record.aabb_size, occlusion.world_to_clip, error, ivec2(occlusion.size.xy))) {
+		atomicAdd(statistics.data[STAT_GPU_INSTANCES_OCCLUDED], 1u);
+		return;
+	}
+	uint rank = atomicAdd(commands.data[(bucket.command + command) * 5 + 1], 1);
+	ids.data[bucket.ids_first + command * bucket.capacity + rank] = index;
+}
+
+#else
 
 // Culls one member; returns the render info objects it adds.
 uint cull_member(uint index, out uint r_primitives) {
@@ -190,28 +276,7 @@ uint cull_member(uint index, out uint r_primitives) {
 	if ((visible.bits[member.x >> 5] & (1u << (member.x & 31u))) == 0) {
 		return 0;
 	}
-	vec3 aabb_min = record.aabb_position;
-	vec3 aabb_max = record.aabb_position + record.aabb_size;
-
-	// The index LOD, as mesh_surface_get_lod() chooses it for the CPU list.
-	uint level = 0;
-	if (bucket.lod_count > 0 && params.lod_threshold > 0.0) {
-		float distance = 1.0;
-		if (!bool(params.view_flags & VIEW_FLAG_ORTHOGONAL)) {
-			distance = length(max(max(vec3(0.0), aabb_min - params.lod_camera), params.lod_camera - aabb_max));
-		}
-		float distance_threshold = distance * params.lod_distance_multiplier;
-		for (uint i = 0; i < bucket.lod_count; i++) {
-			float screen_size = lod_edges.data[bucket.lod_edges_first + i] * record.lod_scale / distance_threshold;
-			if (screen_size > params.lod_threshold) {
-				break;
-			}
-			level = i + 1;
-		}
-	}
-	// In a view with a motion pass, members that moved have their own
-	// commands, after the others' (as the CPU list's motion list).
-	uint command = (motion_pass && moved ? bucket.lod_count + 1 : 0) + level;
+	uint command = member_command(record, bucket);
 	uint rank = atomicAdd(commands.data[(bucket.command + command) * 5 + 1], 1);
 	ids.data[bucket.ids_first + command * bucket.capacity + rank] = index;
 	if (bucket.depth_command != 0xFFFFFFFFu) {
@@ -240,3 +305,5 @@ void main() {
 		atomicAdd(stats.primitives, group_primitives);
 	}
 }
+
+#endif

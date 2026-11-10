@@ -254,3 +254,11 @@ D3D12, same protocol, render CPU p50 (CPU path / GPU path): `small_1k`
   pins the cause.
 - Video memory reported by the bench only grows within one run (buffers
   grow and are kept), so per-case memory is an upper bound.
+
+GPU path HZB occlusion (D034, 2026-11-10), instance bench without
+occluders (the cost only), Vulkan, p50 GPU path / with occlusion: GPU
+`small_1k` 0.29 / 0.37 ms, `shared_20k` 1.32-1.37 / 1.42-1.49 ms,
+`massive_100k` 1.27-1.33 / 1.39-1.45 ms, `lights_20k` 1.61-1.66 /
+1.69-1.74 ms; render CPU +0.03-0.07 ms. Same run, render CPU p50 GPU path:
+`massive_100k` 1.43-1.83 ms, `shared_20k` 0.57-0.61 ms, `small_1k`
+0.24-0.27 ms.

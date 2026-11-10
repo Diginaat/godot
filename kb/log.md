@@ -62,6 +62,10 @@
   instead of every listed instance (camera, RT and GPU path):
   `massive_100k` render CPU 2.8-3.2 to 1.5-1.6 ms on the GPU path, about
   1 ms lower on the CPU path.
+* **Implemented**: HZB occlusion of GPU path instances for the colour passes
+  (D034, `rendering/geometry/gpu_instances/occlusion`, opt-in).
+* **Fixed**: shadow render info counted earlier passes' elements again when
+  the instance buffer was remapped mid-frame (upstream has the same order).
 
 ## 2026-11-08 (release 0.9.1)
 

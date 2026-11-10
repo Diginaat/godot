@@ -511,3 +511,115 @@ void RenderForwardClustered::_occlude_mesh_clod(const RenderDataRD *p_render_dat
 	}
 	rd->compute_list_end();
 }
+
+namespace {
+// Matches Occlusion in gpu_instance_cull.glsl (MODE_OCCLUDE).
+struct GPUInstanceOcclusionInput {
+	float world_to_clip[16];
+	float abs_to_clip[16];
+	uint32_t size[4];
+};
+static_assert(sizeof(GPUInstanceOcclusionInput) == 144);
+} // namespace
+
+bool RenderForwardClustered::_setup_gpu_instances_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
+	GPUInstanceScenario *scenario = gpu_instances_view;
+	if (!scenario || !p_buffers->hzb.ready || gpu_instance_cull.occlude_pipeline.is_null() || gpu_instances_view_params[0] == 0 ||
+			!GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion")) {
+		return false;
+	}
+	// As _setup_hzb() for the CPU list: a member whose colour pass writes
+	// fragment depth or stencil may be nearer than its box.
+	for (const GPUInstanceBucket &bucket : scenario->buckets) {
+		if (bucket.surface && (bucket.surface->shader->writes_fragment_depth || bucket.surface->shader->stencil_enabled)) {
+			return false;
+		}
+	}
+	RD *rd = RD::get_singleton();
+	// The colour passes' commands and IDs mirror the camera run's layout.
+	if (scenario->occluded_command_capacity != scenario->command_capacity || scenario->occluded_commands_buffer.is_null()) {
+		if (scenario->occluded_commands_buffer.is_valid()) {
+			rd->free_rid(scenario->occluded_commands_buffer);
+		}
+		scenario->occluded_commands_buffer = rd->storage_buffer_create(scenario->command_capacity * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		scenario->occluded_command_capacity = scenario->occluded_commands_buffer.is_valid() ? scenario->command_capacity : 0;
+	}
+	if (scenario->occluded_id_capacity != scenario->id_capacity || scenario->occluded_ids_buffer.is_null()) {
+		if (scenario->occluded_ids_buffer.is_valid()) {
+			rd->free_rid(scenario->occluded_ids_buffer);
+		}
+		scenario->occluded_ids_buffer = rd->storage_buffer_create(scenario->id_capacity * sizeof(uint32_t));
+		scenario->occluded_id_capacity = scenario->occluded_ids_buffer.is_valid() ? scenario->id_capacity : 0;
+	}
+	if (scenario->occlusion_buffer.is_null()) {
+		scenario->occlusion_buffer = rd->storage_buffer_create(sizeof(GPUInstanceOcclusionInput));
+	}
+	if (scenario->occluded_commands_buffer.is_null() || scenario->occluded_ids_buffer.is_null() || scenario->occlusion_buffer.is_null()) {
+		return false;
+	}
+	const Size2i size = p_render_data->render_buffers->get_internal_size();
+	const Projection projection = p_render_data->scene_data->get_cam_projection();
+	const Projection view(p_render_data->scene_data->cam_transform.affine_inverse());
+	GPUInstanceOcclusionInput input = {};
+	RendererRD::MaterialStorage::store_camera(projection * view, input.world_to_clip);
+	// abs(P) * abs(V) in double: the shader multiplies it by the world
+	// magnitude of each box to bound float rounding (as the MultiMesh test).
+	double bound[4][4]; // [column][row]
+	for (uint32_t column = 0; column < 4; column++) {
+		for (uint32_t row = 0; row < 4; row++) {
+			bound[column][row] = Math::abs(double(view[column][row]));
+		}
+	}
+	double next[4][4] = {};
+	for (uint32_t column = 0; column < 4; column++) {
+		for (uint32_t row = 0; row < 4; row++) {
+			for (uint32_t k = 0; k < 4; k++) {
+				next[column][row] += Math::abs(double(projection[k][row])) * bound[column][k];
+			}
+		}
+	}
+	for (uint32_t column = 0; column < 4; column++) {
+		for (uint32_t row = 0; row < 4; row++) {
+			input.abs_to_clip[column * 4 + row] = float(next[column][row]);
+		}
+	}
+	input.size[0] = size.width;
+	input.size[1] = size.height;
+	rd->buffer_update(scenario->occlusion_buffer, 0, sizeof(input), &input);
+	// Zero instances in every command; uploaded, not copied on the GPU (see
+	// _setup_multimesh_occlusion()).
+	rd->buffer_update(scenario->occluded_commands_buffer, 0, scenario->commands.size() * sizeof(uint32_t), scenario->commands.ptr());
+	return true;
+}
+
+void RenderForwardClustered::_occlude_gpu_instances(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
+	GPUInstanceScenario *scenario = gpu_instances_view;
+	if (!scenario || !p_buffers->hzb.ready) {
+		return;
+	}
+	RD *rd = RD::get_singleton();
+	const Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 1);
+	const RID resources[8] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->occluded_commands_buffer, scenario->occluded_ids_buffer,
+		scenario->lod_edges_buffer, scenario->visible_buffer, scenario->occlusion_buffer };
+	const uint32_t bindings[8] = { 0, 1, 2, 3, 5, 6, 9, 10 };
+	LocalVector<RD::Uniform> uniforms;
+	for (uint32_t i = 0; i < 8; i++) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, bindings[i], resources[i]));
+	}
+	RD::Uniform pyramid;
+	pyramid.binding = 11;
+	pyramid.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+	pyramid.append_id(RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
+	pyramid.append_id(rb->get_texture_slice(hzb_scope(), hzb_name(), 0, 0, 1, p_buffers->hzb.mipmaps));
+	uniforms.push_back(pyramid);
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, p_buffers->geometry_statistics.buffer));
+	rd->capture_timestamp("GPU Instances HZB Occlusion");
+	RD::ComputeListID compute = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(compute, gpu_instance_cull.occlude_pipeline);
+	rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
+	rd->compute_list_set_push_constant(compute, gpu_instances_view_params, sizeof(gpu_instances_view_params));
+	rd->compute_list_dispatch(compute, (gpu_instances_view_params[0] + 63) / 64, 1, 1);
+	rd->compute_list_end();
+	rd->capture_timestamp("GPU Instances HZB Occlusion End");
+}

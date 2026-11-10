@@ -81,7 +81,7 @@ uint32_t gpu_instance_indices_to_primitives(RSE::PrimitiveType p_primitive, uint
 // Marks the commands of moved members in GPUInstanceScenario::command_levels.
 constexpr uint8_t GPU_INSTANCE_MOVED_COMMAND = 0x80;
 
-void gpu_instances_free_buffers(RID *const (&p_buffers)[9]) {
+void gpu_instances_free_buffers(RID *const (&p_buffers)[12]) {
 	RD *rd = RD::get_singleton();
 	for (RID *buffer : p_buffers) {
 		if (buffer->is_valid()) {
@@ -268,7 +268,8 @@ void RenderForwardClustered::_gpu_instances_free_scenario(GPUInstanceScenario *p
 	if (gpu_instances_view == p_scenario) {
 		gpu_instances_view = nullptr;
 	}
-	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->output_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->stats_buffer, &p_scenario->visible_buffer });
+	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->output_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->stats_buffer, &p_scenario->visible_buffer,
+		&p_scenario->occluded_commands_buffer, &p_scenario->occluded_ids_buffer, &p_scenario->occlusion_buffer });
 	RD *rd = RD::get_singleton();
 	for (RID buffer : { p_scenario->shadow_stats_buffer }) {
 		if (buffer.is_valid()) {
@@ -660,9 +661,11 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	if (gpu_instance_cull.version.is_null()) {
 		Vector<String> modes;
 		modes.push_back("");
+		modes.push_back("\n#define MODE_OCCLUDE\n");
 		gpu_instance_cull.shader.initialize(modes);
 		gpu_instance_cull.version = gpu_instance_cull.shader.version_create();
 		gpu_instance_cull.pipeline = rd->compute_pipeline_create(gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0));
+		gpu_instance_cull.occlude_pipeline = rd->compute_pipeline_create(gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 1));
 	}
 	if (gpu_instance_cull.pipeline.is_null()) {
 		return false;
@@ -811,6 +814,8 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	params.lod_camera[1] = lod_camera.y;
 	params.lod_camera[2] = lod_camera.z;
 	params.lod_distance_multiplier = scene->lod_distance_multiplier;
+	static_assert(sizeof(params) == sizeof(gpu_instances_view_params));
+	memcpy(gpu_instances_view_params, &params, sizeof(params)); // The occlusion run chooses the same commands.
 
 	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0);
 	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer, scenario->ids_buffer, scenario->lod_edges_buffer,

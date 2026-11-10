@@ -100,7 +100,7 @@ protected:
 	SceneShaderForwardClustered scene_shader;
 
 public:
-	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 29;
+	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 30;
 	// MultiMesh culling words of shadow passes start here (same layout as the main view's).
 	static constexpr uint32_t GEOMETRY_STATISTICS_SHADOW_OFFSET = 12;
 	virtual Dictionary gpu_geometry_get_statistics(const Ref<RenderSceneBuffers> &p_render_buffers) override;
@@ -387,6 +387,10 @@ protected:
 	// passes; the depth pre-pass keeps the frustum-culled instances.
 	bool _setup_multimesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	void _occlude_multimesh(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	// GPU path instances (rendering/geometry/gpu_instances/occlusion): the
+	// colour passes draw the members the HZB cannot prove hidden.
+	bool _setup_gpu_instances_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	void _occlude_gpu_instances(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	// HZB occlusion of resident CLOD groups. Setup runs before the depth
 	// pre-pass; with two passes the split restricts the pre-pass to groups
 	// visible when last tested, and after the HZB test the recovered groups
@@ -1078,6 +1082,13 @@ protected:
 		LocalVector<ShadowView> shadow_views;
 		RID output_buffer; // InstanceData per member, written per view.
 		RID ids_buffer; // Members drawn per bucket level, written per view.
+		// HZB occlusion: the colour passes' commands and IDs (same layout as
+		// commands_buffer and ids_buffer), and the test's camera.
+		RID occluded_commands_buffer;
+		RID occluded_ids_buffer;
+		RID occlusion_buffer;
+		uint32_t occluded_command_capacity = 0;
+		uint32_t occluded_id_capacity = 0;
 		uint32_t member_capacity = 0;
 		uint32_t bucket_capacity = 0;
 		uint32_t command_capacity = 0;
@@ -1098,7 +1109,9 @@ protected:
 		GpuInstanceCullShaderRD shader;
 		RID version;
 		RID pipeline;
+		RID occlude_pipeline; // MODE_OCCLUDE.
 	} gpu_instance_cull;
+	uint32_t gpu_instances_view_params[8] = {}; // The camera run's push constant (GPUInstanceCullParams), for the occlusion run.
 	// Validation (rendering/geometry/gpu_instances/validate).
 	uint64_t gpu_instances_check_frame = UINT64_MAX;
 	bool gpu_instances_check_pending = false;

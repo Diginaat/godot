@@ -188,6 +188,18 @@ table instances only after compacting phase-2 commands (the city bench shows
 the fixed phase-2 cost). Acceptance: city bench and `massive_100k` with
 occluders; exact images.
 
+- 5.1 Colour-pass occlusion done 2026-11-10 (D034,
+  `rendering/geometry/gpu_instances/occlusion`, off by default): after the
+  depth pre-pass a second run of the cull kernel (`MODE_OCCLUDE`) chooses
+  each drawn member's command again, tests its world box against the shared
+  HZB and appends the members it cannot prove hidden to a second set of
+  commands and IDs, which the opaque and motion passes draw. Statistic
+  `gpu_instances_occluded`. `gpu_instances.ps1` phase: a wall hides 279
+  surfaces, none with the setting off, image equal to the CPU path on
+  Vulkan and D3D12.
+- 5.2 Next: depth-pass savings (two-pass with a per-member history, as
+  D023), and a bench scene with occluders for the GPU path.
+
 ## Phase 6 - GPU shadow caster lists (P1)
 
 Per shadow view (cascade, spot, omni face) cull table instances against the

@@ -931,6 +931,11 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 	// If p_offset == 0, grow_instance_buffer resets and increment the buffer.
 	// If this behavior ever changes, _render_shadow_begin may need to change.
 	scene_state.grow_instance_buffer(p_render_list, p_offset + element_total, p_offset != 0u);
+	// This call's elements only: a copy from scratch below covers earlier
+	// passes' elements too, which their own calls counted.
+	if (p_render_info) {
+		p_render_info[RSE::VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME] += element_total;
+	}
 	// Elements before this are from earlier calls (shadow passes); a copy from
 	// scratch keeps the GPU path's elements among them as they are.
 	uint32_t earlier_elements = 0;
@@ -940,10 +945,6 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 		element_total += p_offset;
 		p_offset = 0u;
 		scene_state.curr_gpu_ptr[p_render_list] = reinterpret_cast<SceneState::InstanceData *>(scene_state.instance_buffer[p_render_list].map_raw_for_upload(0u));
-	}
-
-	if (p_render_info) {
-		p_render_info[RSE::VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME] += element_total;
 	}
 
 	uint32_t repeats = 0;
@@ -2589,9 +2590,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_update_render_base_uniform_set();
 
 	_gpu_instances_begin_view(p_render_data, using_motion_pass, using_sdfgi, using_sdfgi || using_voxelgi || using_ddgi);
-	const RID gpu_instance_commands = gpu_instances_view ? gpu_instances_view->commands_buffer : RID();
+	RID gpu_instance_commands = gpu_instances_view ? gpu_instances_view->commands_buffer : RID();
 	const RID gpu_instance_data = gpu_instances_view ? gpu_instances_view->output_buffer : RID();
-	const RID gpu_instance_ids = gpu_instances_view ? gpu_instances_view->ids_buffer : RID();
+	RID gpu_instance_ids = gpu_instances_view ? gpu_instances_view->ids_buffer : RID();
 
 	RENDER_TIMESTAMP("Fill Render List");
 	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, using_sdfgi, using_sdfgi || using_voxelgi || using_ddgi, using_motion_pass);
@@ -2847,12 +2848,13 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_visible_ids, gpu_instance_data, gpu_instance_ids);
 
 		// HZB occlusion: with two passes the pre-pass draws only CLOD groups
-		// that were visible when last tested. MultiMesh instances are tested
-		// after the pre-pass and removed from the colour passes only.
-		const bool hzb_wanted = rb_data.is_valid() && ((mesh_clod_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_enabled"))) || (multimesh_cull_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/multimesh_gpu_culling/occlusion"))));
+		// that were visible when last tested. MultiMesh and GPU path instances
+		// are tested after the pre-pass and removed from the colour passes only.
+		const bool hzb_wanted = rb_data.is_valid() && ((mesh_clod_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_enabled"))) || (multimesh_cull_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/multimesh_gpu_culling/occlusion"))) || (gpu_instance_commands.is_valid() && GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion")));
 		const bool hzb = hzb_wanted && _setup_hzb(p_render_data, rb_data.ptr());
 		const bool clod_occlusion = hzb && mesh_clod_commands.is_valid() && _setup_mesh_clod_occlusion(p_render_data, rb_data.ptr());
 		const bool multimesh_occlusion = hzb && multimesh_cull_commands.is_valid() && _setup_multimesh_occlusion(p_render_data, rb_data.ptr());
+		const bool gpu_instances_occlusion = hzb && gpu_instance_commands.is_valid() && _setup_gpu_instances_occlusion(p_render_data, rb_data.ptr());
 		const bool clod_two_pass = clod_occlusion && rb_data->mesh_clod.two_pass;
 		// Always-on stage timestamps while a GPU geometry path is active, for
 		// benchmarks (RENDER_TIMESTAMP needs the profiler).
@@ -2870,7 +2872,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		render_list_params.gpu_instance_commands = gpu_instance_commands;
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 
-		if (clod_occlusion || multimesh_occlusion) {
+		if (clod_occlusion || multimesh_occlusion || gpu_instances_occlusion) {
 			// HZB from the phase-1 depth; the test clears occluded groups' opaque
 			// commands. Phase 2 adds the recovered groups to depth (and normals).
 			_build_hzb(p_render_data, rb_data.ptr());
@@ -2890,6 +2892,11 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				_occlude_multimesh(p_render_data, rb_data.ptr());
 				multimesh_cull_commands = rb_data->multimesh_cull.occluded_commands;
 				multimesh_visible_ids = rb_data->multimesh_cull.occluded_ids;
+			}
+			if (gpu_instances_occlusion) {
+				_occlude_gpu_instances(p_render_data, rb_data.ptr());
+				gpu_instance_commands = gpu_instances_view->occluded_commands_buffer;
+				gpu_instance_ids = gpu_instances_view->occluded_ids_buffer;
 			}
 		}
 		if (gpu_geometry_timestamps) {
@@ -6121,6 +6128,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instance_table/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
 	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
+	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", false);
 	singleton = this;
 	gpu_instances_readbacks_alive = true;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);

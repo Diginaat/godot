@@ -38,5 +38,6 @@ What worked is in [successes](/successes/).
 * [GPU stage check read timestamps after a texture readback](/mistakes/timestamps-after-texture-readback.md) - read RD timestamps before get_image(); a readback stalls and begins a new frame
 * [Averaged noisy frames after the tonemapper](/mistakes/tonemapped-noise-averages-darker.md) - compare brightness in linear HDR at a fixed exposure; a reference must not depend on spp
 * [GPU buffer copy followed by compute writes broke D3D12](/mistakes/d3d12-buffer-copy-then-compute-write.md) - seed a buffer that compute writes with buffer_update, not buffer_copy; run new GPU paths on D3D12 too
+* [A single-frame render info comparison passed by timing luck](/mistakes/single-frame-render-info-comparison.md) - compare late or cyclic counters as sums over whole cycles; isolate parts with switches in one build
 * [The viewport's GPU time missed work recorded before the viewport](/mistakes/viewport-time-misses-pre-viewport-work.md) - measure whole-frame GPU time for features that record work outside the viewport; never one GPU timestamp per object
 * [A benchmark ran with the feature it measures inactive](/mistakes/bench-without-the-feature-active.md) - check counters and timings are nonzero before printing numbers; shared mesh+material batches CLOD objects out of CLOD

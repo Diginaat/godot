@@ -6,6 +6,7 @@ extends Node3D
 ## visibility ranges, meshes with index LODs and LOD biases, frees and adds,
 ## nodes replaced and materials swapped every frame (no bucket rebuilds),
 ## an occluder (the GPU path draws what the scene cull found visible),
+## HZB occlusion behind a wall (left out of the colour passes, on from then on),
 ## spot and omni shadows, casters behind the camera (drawn only by the
 ## shadow passes),
 ## TAA and FSR 2 (a motion pass), compared through their motion vectors, a second view of the same world and a
@@ -127,9 +128,29 @@ func _capture() -> Image:
 	return get_viewport().get_texture().get_image()
 
 
-# Shadow casters drawn in the last frame, as the render info counts them.
+# GPU geometry statistics of a frame after this call.
+func _statistics() -> Dictionary:
+	var viewport := get_viewport().get_viewport_rid()
+	var after := Engine.get_frames_drawn()
+	for attempt in 90:
+		await RenderingServer.frame_post_draw
+		var result := RenderingServer.viewport_get_gpu_geometry_statistics(viewport)
+		if not result.is_empty() and int(result.frame) > after + 1:
+			return result
+	printerr("GPU_INSTANCES_HZB: statistics never arrived")
+	return {}
+
+
+# Shadow casters drawn in 12 frames, as the render info counts them. Which
+# shadow passes a frame draws repeats (moving lights, cached far cascades),
+# and the GPU path's count arrives a few frames late, so single frames of
+# the two paths do not match; sums over whole cycles do.
 func _shadow_objects() -> int:
-	return RenderingServer.viewport_get_render_info(get_viewport().get_viewport_rid(), RenderingServer.VIEWPORT_RENDER_INFO_TYPE_SHADOW, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
+	var total := 0
+	for frame in 12:
+		await RenderingServer.frame_post_draw
+		total += RenderingServer.viewport_get_render_info(get_viewport().get_viewport_rid(), RenderingServer.VIEWPORT_RENDER_INFO_TYPE_SHADOW, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
+	return total
 
 
 # Same frame content with and without the GPU path: nothing may move.
@@ -137,10 +158,10 @@ func _compare(label: String) -> void:
 	var moving := _moving
 	_moving = 0
 	var with_gpu := await _capture()
-	var shadow_objects_gpu := _shadow_objects()
+	var shadow_objects_gpu := await _shadow_objects()
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", false)
 	var without_gpu := await _capture()
-	print("GPU_INSTANCES_SHADOW_INFO: %s gpu=%d cpu=%d" % [label, shadow_objects_gpu, _shadow_objects()])
+	print("GPU_INSTANCES_SHADOW_INFO: %s gpu=%d cpu=%d" % [label, shadow_objects_gpu, await _shadow_objects()])
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", true)
 	await _wait(3)
 	_moving = moving
@@ -247,6 +268,24 @@ func _run(self_test: bool) -> void:
 	await _compare("occluder")
 	occluder.queue_free()
 	get_viewport().use_occlusion_culling = false
+	# HZB occlusion: behind a wall, members drawn by the depth pre-pass are
+	# left out of the colour passes; nothing with the setting off. The CPU
+	# path draws them, and the image must be the same. On from here on.
+	var wall := MeshInstance3D.new()
+	var wall_mesh := BoxMesh.new()
+	wall_mesh.size = Vector3(40.0, 8.0, 1.0)
+	wall.mesh = wall_mesh
+	wall.material_override = _materials[0]
+	wall.position = Vector3(0.0, 4.0, 14.0)
+	add_child(wall)
+	await _wait(PHASE_FRAMES)
+	var hzb_off := int((await _statistics()).get("gpu_instances_occluded", -1))
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", true)
+	await _wait(PHASE_FRAMES)
+	var hzb_on := int((await _statistics()).get("gpu_instances_occluded", -1))
+	print("GPU_INSTANCES_HZB: occluded %d with the setting off, %d with it on" % [hzb_off, hzb_on])
+	await _compare("hzb occlusion")
+	wall.queue_free()
 	# Positional shadows: a spot light, a cube omni light and a dual paraboloid
 	# omni light cast from GPU-drawn casters. The lights move in a three-frame
 	# cycle, so their shadows are drawn again in every frame, and the two

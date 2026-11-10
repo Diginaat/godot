@@ -9,7 +9,9 @@ param(
 	# Turn on rendering/geometry/gpu_instance_table.
 	[switch]$Table,
 	# Turn on rendering/geometry/gpu_instances (the GPU path for eligible instances).
-	[switch]$GpuInstances
+	[switch]$GpuInstances,
+	# Also rendering/geometry/gpu_instances/occlusion (HZB test of the GPU path's members).
+	[switch]$Occlusion
 )
 # Many-instance CPU benchmark (docs/renderer/benchmarks.md): separate
 # MeshInstance3D nodes from 1k to 100k, shared and unique materials, moving
@@ -28,6 +30,7 @@ $userArgs = @()
 if ($Stages) { $userArgs += "--stages" }
 if ($Table) { $userArgs += "--table" }
 if ($GpuInstances) { $userArgs += "--gpu-instances" }
+if ($Occlusion) { $userArgs += "--occlusion" }
 if ($userArgs.Count -gt 0) { $mode += @("--") + $userArgs }
 $lines = & $editor --path $project --rendering-driver $Driver --render-thread $RenderThread @mode 2>&1 | ForEach-Object { "$_" }
 $code = $LASTEXITCODE

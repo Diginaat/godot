@@ -276,9 +276,11 @@ func _run() -> void:
 	var stages := OS.get_cmdline_user_args().has("--stages")
 	var table := OS.get_cmdline_user_args().has("--table")
 	var gpu_instances := OS.get_cmdline_user_args().has("--gpu-instances")
+	var occlusion := OS.get_cmdline_user_args().has("--occlusion")
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", occlusion)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instance_table/enabled", table)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", gpu_instances)
-	print("INSTANCE_BENCH_SCENE: %s gpu_instance_table=%s gpu_instances=%s %dx%d, %d CPU threads, adapter '%s' driver '%s', %s" % [driver, table, gpu_instances, get_window().size.x, get_window().size.y, OS.get_processor_count(), RenderingServer.get_video_adapter_name(), " ".join(OS.get_video_adapter_driver_info()), "stage profile, %d frames per view" % PROFILE_FRAMES if stages else "%d warm + %d timed frames per view, 2 repeats" % [WARM_FRAMES, FRAMES]])
+	print("INSTANCE_BENCH_SCENE: %s gpu_instance_table=%s gpu_instances=%s occlusion=%s %dx%d, %d CPU threads, adapter '%s' driver '%s', %s" % [driver, table, gpu_instances, occlusion, get_window().size.x, get_window().size.y, OS.get_processor_count(), RenderingServer.get_video_adapter_name(), " ".join(OS.get_video_adapter_driver_info()), "stage profile, %d frames per view" % PROFILE_FRAMES if stages else "%d warm + %d timed frames per view, 2 repeats" % [WARM_FRAMES, FRAMES]])
 	for repeat in 1 if stages else 2:
 		for c in CASES.size():
 			var spec: Array = CASES[c if repeat == 0 else CASES.size() - 1 - c]
