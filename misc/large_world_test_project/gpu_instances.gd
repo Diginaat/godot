@@ -4,6 +4,7 @@ extends Node3D
 ## scene in phases: moves, layers the camera does not see, hidden nodes,
 ## materials that leave the path (transparent) and come back, transparency,
 ## visibility ranges, meshes with index LODs and LOD biases, frees and adds,
+## nodes replaced and materials swapped every frame (no bucket rebuilds),
 ## TAA and FSR 2 (a motion pass), compared through their motion vectors, a second view of the same world and a
 ## view of another world. Every 30 frames the engine compares what the GPU
 ## path drew with what the CPU cull found visible (GPU_INSTANCES_CHECK). After
@@ -19,6 +20,7 @@ var _materials: Array[StandardMaterial3D] = []
 var _transparent := StandardMaterial3D.new()
 var _moving := 0
 var _flipping := 0 # Nodes that alternate between two positions every frame.
+var _churn := 0 # Nodes replaced, and materials swapped, every frame.
 var _camera: Camera3D
 var _velocity := VelocityGrab.new()
 
@@ -83,6 +85,21 @@ func _process(_delta: float) -> void:
 	for i in mini(_moving, _nodes.size()):
 		var node := _nodes[i * 7 % _nodes.size()]
 		node.position.y = 0.5 + 0.5 * sin(float(_frame) * 0.1 + float(i))
+	for k in _churn:
+		var index := (_frame * 7 + k * 131) % _nodes.size()
+		var old := _nodes[index]
+		var node := MeshInstance3D.new()
+		node.mesh = old.mesh
+		node.material_override = old.material_override
+		node.transform = old.transform
+		node.lod_bias = old.lod_bias
+		node.layers = old.layers
+		add_child(node)
+		old.queue_free()
+		_nodes[index] = node
+		var swapped := _nodes[(_frame * 11 + k * 37) % _nodes.size()]
+		if _materials.has(swapped.material_override):
+			swapped.material_override = _materials[(_frame + k) % _materials.size()]
 	# Positions that depend only on the frame's parity, so that motion vectors
 	# repeat exactly. Lifted clear of the grid: where a moving and a resting
 	# node of one draw bucket intersect, equal depths let the draw order pick
@@ -190,6 +207,14 @@ func _run(self_test: bool) -> void:
 	await _wait(PHASE_FRAMES)
 	print("GPU_INSTANCES_PHASE: freed 300, added 600, %d" % _nodes.size())
 	await _compare("freed and added")
+	# Nodes come and go and change materials every frame: their surfaces join
+	# and leave buckets without a rebuild.
+	print("GPU_INSTANCES_PHASE: churn start")
+	_churn = 20
+	await _wait(PHASE_FRAMES)
+	_churn = 0
+	print("GPU_INSTANCES_PHASE: churn, 20 nodes replaced per frame")
+	await _compare("churn")
 	await _compare_motion(false)
 	await _compare_motion(true)
 	_add_views()

@@ -608,3 +608,29 @@ compared as numbers: D3D12 gave one zero vector the other sign in the GPU
 path's pipeline. Moving nodes are kept clear of resting ones, since equal
 depths let the draw order choose the vector and the GPU path orders a bucket
 differently.
+
+## D031 — GPU path buckets updated in place
+
+2026-11-10, Phase 2.5.
+Problem: every join, leave or surface change rebuilt the scenario's buckets
+(collect, sort, upload): measured 7.6 ms at 100k members, 1.4-1.8 ms at 20k.
+Games that spawn, despawn or change materials every frame would pay it every
+frame.
+Decision: buckets keep spare member slots (a quarter, at least 32) and a
+free list. A key-to-bucket map places a joining surface in a free slot of
+its bucket; a leaving instance's slots go back to the free list (the cull
+skips free slots). Each instance chains its member slots, so leaving touches
+only them and never its possibly freed surfaces. A bucket draws with the
+surface of one live member; when that one leaves, the next view picks
+another. `_mark_dirty()` frees an instance's surfaces at once, so it takes
+the instance's members out there and places the rebuilt surfaces before the
+next view. Changed member slots go up as contiguous runs. A full rebuild
+remains for a new key, a full bucket, a mesh whose index counts changed
+(checked on placement) and when free slots outnumber live ones.
+Also fixed here: a transform that flips the mirror sign now refreshes the
+instance (mirror is part of the key), and readback callbacks check a
+lifetime flag (see kb mistakes, readback callback after renderer teardown).
+Measured: `instance_bench` `churn_100k` (100 material changes per frame)
+6.1-6.8 ms render CPU on the GPU path against 4.8-5.2 ms without changes;
+`gpu_instances.ps1` replaces 20 nodes and swaps materials every frame for 60
+frames with no rebuild.

@@ -17,12 +17,12 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs, shadow meshes and motion-pass views done (2026-11-10); Phase 1 done except 1.8 |
+| Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs, shadow meshes, motion-pass views, render info and incremental buckets done (2026-11-10); Phase 1 done except 1.8 |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 2.5 rest: incremental buckets, `gpu_drawn` in the cull's packed data, occlusion (roadmap.md) |
+| Next | Phase 2.5 rest: `gpu_drawn` in the cull's packed data, occlusion; then Phase 3 multi-draw (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (24 count checks, with index LODs, shadow meshes and a motion pass; 8 of 8 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
+| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (26 count and render info checks, with index LODs, shadow meshes, a motion pass and per-frame churn without rebuilds; 9 of 9 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
 
 ## Phase 2 in one line
 
@@ -45,9 +45,8 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
 - With the table on, `dynamic_20k` still has about +0.5-0.8 ms render CPU
   (building/packing 2,000 dirty records per frame); GPU cost fixed in 1.3.
 - GPU path: LOD levels a view never uses still cost one empty indirect
-  draw each (twice with a shadow mesh); any membership change rebuilds the
-  scenario's buckets in full (a hitch when many nodes are added at once);
-  `unique_10k` gains nothing (one bucket per material); viewport render info
+  draw each (twice with a shadow mesh); a new bucket key or a full bucket
+  still rebuilds the scenario's buckets (7.6 ms at 100k); `unique_10k` gains nothing (one bucket per material); viewport render info
   of GPU-drawn instances is a few frames late (read back from the cull).
 - RD cannot draw with a GPU-written count (driver code exists, no RD API,
   Vulkan feature not enabled); D3D12 ignores the indirect stride.
@@ -77,6 +76,8 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
 - D030: views with a motion pass: moved members get their own commands per
   bucket level, marked per element (`gpu_motion`), drawn by the depth
   pre-pass and the motion pass.
+- D031: buckets updated in place (spare slots, free lists, key map); full
+  rebuild only for new keys, full buckets, mesh changes, fragmentation.
 - Earlier geometry decisions D001-D024 still hold (compute + indirect before
   mesh shaders, stable source IDs, opt-in settings, conventional fallback).
 

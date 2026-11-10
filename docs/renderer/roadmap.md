@@ -128,8 +128,10 @@ the CPU path.
   render info done 2026-11-10: the cull sums objects and primitives per
   workgroup into a per-view counter, read back without stalling and added
   to the view's render info a few frames later; equal to the CPU lists'
-  counts in every validation check. Next: incremental bucket updates
-  instead of full rebuilds; the `gpu_drawn` bit in the cull's packed data;
+  counts in every validation check. Incremental bucket updates done
+  2026-11-10 (D031): spare slots, free lists and a key map; a full rebuild
+  only for new keys, full buckets, mesh changes and fragmentation. Next:
+  the `gpu_drawn` bit in the cull's packed data;
   occlusion culling (`OccluderInstance3D` today, HZB
   later) for them.
 - Acceptance: exact pixel and motion-vector A/B against the CPU path on

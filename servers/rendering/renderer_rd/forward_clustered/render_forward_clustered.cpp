@@ -4860,6 +4860,7 @@ void RenderForwardClustered::sub_surface_scattering_set_scale(float p_scale, flo
 }
 
 RenderForwardClustered *RenderForwardClustered::singleton = nullptr;
+bool RenderForwardClustered::gpu_instances_readbacks_alive = false;
 
 void RenderForwardClustered::sdfgi_update(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, const Vector3 &p_world_position) {
 	Ref<RenderSceneBuffersRD> rb = p_render_buffers;
@@ -4979,8 +4980,12 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::_mark_dirty() {
 	surface_caches = nullptr;
 
 	if (gpu_member_scenario != 0) {
-		// Its draw buckets point to the freed surfaces.
-		RenderForwardClustered::get_singleton()->gpu_instance_scenarios[gpu_member_scenario]->dirty = true;
+		// Its bucket members point to the freed surfaces: they leave, and the
+		// rebuilt surfaces are placed again before the next view draws.
+		RenderForwardClustered *singleton = RenderForwardClustered::get_singleton();
+		GPUInstanceScenario *scenario = singleton->gpu_instance_scenarios[gpu_member_scenario];
+		singleton->_gpu_instances_unplace(*scenario, this);
+		singleton->_gpu_instances_join(*scenario, this);
 	}
 
 	RenderForwardClustered::get_singleton()->geometry_instance_dirty_list.add(&dirty_list_element);
@@ -5796,8 +5801,12 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::set_transform(con
 		prev_transform = transform;
 	}
 
+	const bool was_mirror = mirror;
 	RenderGeometryInstanceBase::set_transform(p_transform, p_aabb, p_transformed_aabb);
 	RenderForwardClustered::get_singleton()->_gpu_instance_table_mark(gpu_slot);
+	if (mirror != was_mirror && gpu_scenario != 0) {
+		_mark_dirty(); // Mirror is part of the GPU path's bucket key.
+	}
 }
 
 void RenderForwardClustered::GeometryInstanceForwardClustered::set_layer_mask(uint32_t p_layer_mask) {
@@ -6078,6 +6087,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", false);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
 	singleton = this;
+	gpu_instances_readbacks_alive = true;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);
 
 	/* SCENE SHADER */
@@ -6251,6 +6261,7 @@ RenderForwardClustered::RenderForwardClustered() {
 }
 
 RenderForwardClustered::~RenderForwardClustered() {
+	gpu_instances_readbacks_alive = false;
 	_gpu_instances_free();
 	if (gpu_instance_cull.version.is_valid()) {
 		gpu_instance_cull.shader.version_free(gpu_instance_cull.version);

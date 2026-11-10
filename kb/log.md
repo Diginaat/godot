@@ -34,6 +34,11 @@
 * **Implemented**: viewport render info (objects, primitives) for GPU-drawn
   instances: workgroup sums in the cull pass, read back per view; equal to
   the CPU lists' counts (`instance_bench` now reports 83,924 objects at 100k).
+* **Implemented**: GPU path buckets updated in place (D031): joins, leaves
+  and material changes without a rebuild; new bench case `churn_100k`.
+* **Fixed**: a crash on quit in about 70% of `gpu_instances.ps1` runs: the
+  per-frame render-info readback completed after the renderer was gone.
+  Added [readback callback after renderer teardown](/mistakes/readback-callback-after-renderer-teardown.md).
 
 ## 2026-11-08 (release 0.9.1)
 

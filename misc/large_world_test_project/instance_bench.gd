@@ -15,14 +15,16 @@ const FRAMES := 300
 const PROFILE_FRAMES := 60
 const SPACING := 2.0
 
-# name, nodes, meshes, materials (0 = one per node), moving nodes per frame, omni lights, shadowed spot lights
+# name, nodes, meshes, materials (0 = one per node), moving nodes per frame, omni lights, shadowed spot lights,
+# nodes that change material per frame
 const CASES := [
-	["small_1k", 1000, 1, 1, 0, 0, 0],
-	["shared_20k", 20000, 4, 4, 0, 0, 0],
-	["unique_10k", 10000, 1, 0, 0, 0, 0],
-	["massive_100k", 100000, 1, 1, 0, 0, 0],
-	["dynamic_20k", 20000, 4, 4, 2000, 0, 0],
-	["lights_20k", 20000, 4, 4, 0, 128, 8],
+	["small_1k", 1000, 1, 1, 0, 0, 0, 0],
+	["shared_20k", 20000, 4, 4, 0, 0, 0, 0],
+	["unique_10k", 10000, 1, 0, 0, 0, 0, 0],
+	["massive_100k", 100000, 1, 1, 0, 0, 0, 0],
+	["dynamic_20k", 20000, 4, 4, 2000, 0, 0, 0],
+	["lights_20k", 20000, 4, 4, 0, 128, 8, 0],
+	["churn_100k", 100000, 1, 2, 0, 0, 0, 100],
 ]
 const VIEWS: Array[String] = ["static", "orbit"]
 
@@ -31,6 +33,9 @@ signal stages_ready(stages: Dictionary)
 var _camera: Camera3D
 var _root: Node3D
 var _moving: Array[MeshInstance3D] = []
+var _nodes: Array[MeshInstance3D] = []
+var _materials: Array[StandardMaterial3D] = []
+var _churn := 0
 var _bases: PackedVector3Array
 var _extent := 0.0
 var _frame := 0
@@ -101,6 +106,8 @@ func _build(spec: Array) -> void:
 	if _root:
 		_root.free()
 	_moving.clear()
+	_nodes.clear()
+	_churn = int(spec[7])
 	_root = Node3D.new()
 	add_child(_root)
 	var count: int = spec[1]
@@ -120,9 +127,11 @@ func _build(spec: Array) -> void:
 		# Deterministic jitter in height so the grid is not one flat layer.
 		node.position = Vector3(x * SPACING - _extent, 0.5 + float((x * 7 + z * 13) % 5) * 0.4, z * SPACING - _extent)
 		_root.add_child(node)
+		_nodes.append(node)
 		if _moving.size() < int(spec[4]) and i % maxi(count / maxi(int(spec[4]), 1), 1) == 0:
 			_moving.append(node)
 			_bases.append(node.position)
+	_materials = materials
 	var ground := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	plane.size = Vector2.ONE * (_extent * 2.0 + 20.0)
@@ -169,6 +178,11 @@ func _process(_delta: float) -> void:
 	for i in _moving.size():
 		var phase := float(_frame) * 0.05 + float(i) * 0.37
 		_moving[i].position = _bases[i] + Vector3(sin(phase) * 0.5, 0.0, cos(phase) * 0.5)
+	# Material changes: each rebuilds the node's surfaces, which leave and
+	# join draw buckets.
+	for k in _churn:
+		var node := _nodes[(_frame * _churn + k * 997) % _nodes.size()]
+		node.material_override = _materials[(_frame + k) % _materials.size()]
 
 
 func _percentile(values: Array[float], fraction: float) -> float:

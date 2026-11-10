@@ -35,7 +35,7 @@ struct Bucket { // RenderForwardClustered::GPUInstanceBucketData, 80 bytes.
 	uint material_feedback_index;
 	vec4 uv_scale;
 	uint command; // Indirect command of level 0.
-	uint count;
+	uint capacity; // Visible IDs reserved per command.
 	uint lod_count;
 	uint lod_edges_first;
 	uint depth_command; // 0xFFFFFFFF: the depth pre-pass draws with command.
@@ -141,6 +141,9 @@ uint cull_member(uint index, out uint r_primitives) {
 		return 0;
 	}
 	uvec2 member = members.data[index];
+	if (member.x == 0xFFFFFFFFu) {
+		return 0; // A free member slot.
+	}
 	Record record = table.records[member.x];
 	if ((record.layer_mask & params.visible_layers) == 0) {
 		return 0;
@@ -181,7 +184,7 @@ uint cull_member(uint index, out uint r_primitives) {
 	bool motion_pass = bool(params.view_flags & VIEW_FLAG_MOTION);
 	uint command = (motion_pass && moved ? bucket.lod_count + 1 : 0) + level;
 	uint rank = atomicAdd(commands.data[(bucket.command + command) * 5 + 1], 1);
-	ids.data[bucket.ids_first + command * bucket.count + rank] = index;
+	ids.data[bucket.ids_first + command * bucket.capacity + rank] = index;
 	if (bucket.depth_command != 0xFFFFFFFFu) {
 		// A separate shadow mesh: the depth pre-pass draws as many instances.
 		atomicAdd(commands.data[(bucket.depth_command + command) * 5 + 1], 1);

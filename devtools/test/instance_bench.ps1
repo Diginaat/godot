@@ -13,7 +13,7 @@ param(
 )
 # Many-instance CPU benchmark (docs/renderer/benchmarks.md): separate
 # MeshInstance3D nodes from 1k to 100k, shared and unique materials, moving
-# instances, many lights; static and orbiting views, two repeats. Prints wall
+# instances, many lights, material changes every frame; static and orbiting views, two repeats. Prints wall
 # frame time, render CPU and GPU p50/p95/p99, draw counts and per-stage CPU.
 . "$PSScriptRoot\..\common.ps1"
 $editor = Get-Editor
@@ -34,7 +34,7 @@ $code = $LASTEXITCODE
 $kind = $(if ($Stages) { "stages" } else { "timing" }) + $(if ($Table) { "_table" } else { "" }) + $(if ($GpuInstances) { "_gpu" } else { "" })
 $lines | Set-Content (Join-Path $logs "instance_bench_${Label}_${Driver}_${RenderThread}_$kind.log")
 $rows = @($lines | Where-Object { $_ -match $(if ($Stages) { "^INSTANCE_BENCH_STAGES:" } else { "^INSTANCE_BENCH:" }) })
-$expected = if ($Stages) { 12 } else { 24 }
+$expected = if ($Stages) { 14 } else { 28 }
 $lines | Where-Object { $_ -match "^INSTANCE_BENCH_(SCENE|BUILD):" } | Write-Output
 $rows | Write-Output
 if ($code -ne 0 -or $rows.Count -ne $expected -or @($lines | Where-Object { $_ -match "ERROR:|SCRIPT ERROR:|INSTANCE_BENCH_FAIL" }).Count -gt 0) {

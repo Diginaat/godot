@@ -876,6 +876,8 @@ protected:
 		uint32_t gpu_member_index = UINT32_MAX;
 		uint32_t gpu_pending_index = UINT32_MAX; // In gpu_instances_pending until the next cull.
 		uint32_t gpu_surface_count = 0;
+		uint32_t gpu_member_head = UINT32_MAX; // First of its bucket members (chained through GPUInstanceScenario::member_next).
+		uint32_t gpu_join_index = UINT32_MAX; // In GPUInstanceScenario::joins until its surfaces are placed in buckets.
 		uint64_t prev_transform_change_frame = 0xFFFFFFFF;
 		uint64_t last_aged_frame = 0;
 		enum TransformStatus {
@@ -961,17 +963,33 @@ protected:
 	// layer, LOD and per-view GI bits, plus mirror) form a bucket: one
 	// indirect draw per index LOD, whose instances a compute pass culls, gives
 	// a LOD and writes per view.
+	// Buckets keep spare member slots, so that surfaces join and leave without
+	// a rebuild; a rebuild sorts all members again when a key is new, a bucket
+	// is full or its mesh changed.
 	struct GPUInstanceBucket {
-		GeometryInstanceSurfaceDataCache *surface = nullptr; // Drawn with this surface's state.
-		uint32_t first = 0; // First member.
-		uint32_t count = 0;
+		GeometryInstanceSurfaceDataCache *surface = nullptr; // Drawn with this surface's state (that of member rep).
+		uint32_t first = 0; // First member slot.
+		uint32_t count = 0; // Member slots used, live or free.
+		uint32_t capacity = 0; // Member slots reserved.
+		uint32_t live = 0;
+		uint32_t free_head = UINT32_MAX; // Free used slots, chained through member_next.
+		uint32_t rep = UINT32_MAX; // Member whose surface the bucket draws with.
+		void *mesh_surface = nullptr; // What the commands were made for.
+		void *shadow_surface = nullptr;
 		uint32_t levels = 1; // Index LODs of the surface, including the full mesh.
 		// Indirect commands, one per level for members that did not move, then
 		// one per level for those that moved (drawn by the motion pass in views
 		// with one; the others put every member in the first set).
 		uint32_t command = 0;
 		uint32_t depth_command = UINT32_MAX; // Same for the depth pre-pass when it draws a separate shadow mesh.
-		uint32_t ids_first = 0; // Visible IDs, count reserved per command, in the same order.
+		uint32_t ids_first = 0; // Visible IDs, capacity reserved per command, in the same order.
+	};
+	struct GPUInstanceBucketKey {
+		uint64_t key1 = 0;
+		uint64_t key2 = 0;
+		uint32_t mirror = 0;
+		bool operator==(const GPUInstanceBucketKey &p_other) const { return key1 == p_other.key1 && key2 == p_other.key2 && mirror == p_other.mirror; }
+		uint32_t hash() const { return hash_murmur3_one_32(mirror, hash_murmur3_one_64(key2, hash_murmur3_one_64(key1))); }
 	};
 	// Bucket in gpu_instance_cull.glsl.
 	struct GPUInstanceBucketData {
@@ -981,7 +999,7 @@ protected:
 		uint32_t material_feedback_index;
 		float uv_scale[4];
 		uint32_t command;
-		uint32_t count;
+		uint32_t capacity; // Visible IDs reserved per command.
 		uint32_t lod_count; // Reduced index LODs (levels - 1).
 		uint32_t lod_edges_first; // Their edge lengths in the LOD edges buffer.
 		uint32_t depth_command; // UINT32_MAX: the depth pre-pass uses command.
@@ -991,9 +1009,20 @@ protected:
 		// Members, including those that join at the next cull (not gpu_drawn yet).
 		LocalVector<GeometryInstanceForwardClustered *> instances;
 		bool dirty = true; // Buckets need a rebuild.
+		LocalVector<GeometryInstanceForwardClustered *> joins; // Drawn from this render on, surfaces not placed yet.
 		LocalVector<GPUInstanceBucket> buckets;
+		HashMap<GPUInstanceBucketKey, uint32_t> bucket_map;
+		// Per member slot: owner (null when free), surface, next member of the
+		// same instance (or next free slot of the bucket).
+		LocalVector<GeometryInstanceForwardClustered *> member_owner;
+		LocalVector<GeometryInstanceSurfaceDataCache *> member_surface;
+		LocalVector<uint32_t> member_next;
+		LocalVector<uint32_t> changed_members; // Slots to upload.
+		uint32_t live_members = 0;
+		uint32_t free_members = 0; // Used slots that are free (left gaps).
+		bool reps_dirty = false;
 		LocalVector<GPUInstanceBucketData> bucket_data;
-		LocalVector<uint32_t> members; // Table slot and bucket per drawn instance surface.
+		LocalVector<uint32_t> members; // Table slot (UINT32_MAX: free) and bucket per member slot.
 		LocalVector<uint32_t> commands; // Five words per bucket level, zero instances.
 		LocalVector<uint8_t> command_levels; // Index LOD of each command, plus GPU_INSTANCE_MOVED_COMMAND (validation).
 		LocalVector<uint32_t> command_depth; // Per command, its depth pre-pass twin or UINT32_MAX (UINT32_MAX - 1 for the twins).
@@ -1043,12 +1072,21 @@ protected:
 	LocalVector<uint8_t> gpu_instances_check_command_levels;
 	LocalVector<uint32_t> gpu_instances_check_command_depth;
 	static void _gpu_instances_check_received(const Vector<uint8_t> &p_data);
+	// Cleared when the renderer is destroyed: readbacks still in flight then
+	// complete during the RenderingDevice shutdown and must not touch it.
+	static bool gpu_instances_readbacks_alive;
 
 	bool _gpu_instance_eligible(const GeometryInstanceForwardClustered *p_instance) const;
 	void _gpu_instance_refresh(GeometryInstanceForwardClustered *p_instance, bool p_rendering);
 	void _gpu_instance_leave(GeometryInstanceForwardClustered *p_instance);
 	void _gpu_instances_update_setting();
 	void _gpu_instances_rebuild(GPUInstanceScenario &p_scenario);
+	bool _gpu_instances_place(GPUInstanceScenario &p_scenario, GeometryInstanceForwardClustered *p_instance);
+	void _gpu_instances_unplace(GPUInstanceScenario &p_scenario, GeometryInstanceForwardClustered *p_instance);
+	void _gpu_instances_join(GPUInstanceScenario &p_scenario, GeometryInstanceForwardClustered *p_instance);
+	void _gpu_instances_unjoin(GPUInstanceScenario &p_scenario, GeometryInstanceForwardClustered *p_instance);
+	void _gpu_instances_update_members(GPUInstanceScenario &p_scenario);
+	uint32_t gpu_instances_rebuilds = 0; // Full bucket rebuilds (validation reports them).
 	// Before the camera render list: decides whether the GPU path draws this
 	// view and, if so, culls and writes its instances (gpu_instances_view).
 	bool _gpu_instances_begin_view(RenderDataRD *p_render_data, bool p_using_motion_pass, bool p_using_sdfgi, bool p_using_opaque_gi);
