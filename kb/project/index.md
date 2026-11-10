@@ -1,6 +1,6 @@
 # Project
 
-* [Unique array baseline and bulk-copy candidate](/project/unique-array-evaluation.md) - 56 paired workloads with allocator events; narrow LocalVector copy change passes Windows build and 279 focused tests
+* [Unique array baseline and bulk-copy candidate](/project/unique-array-evaluation.md) - Windows correctness passes; 12-size boundary sweep finds small-copy regressions and blocks performance acceptance
 
 * [Core modernization phase-zero checkpoint](/project/core-modernization-audit.md) - baseline/branch, compatibility gates, benchmark tools, native-map direction and resumable phase plan
 

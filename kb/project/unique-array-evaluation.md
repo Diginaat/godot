@@ -1,7 +1,7 @@
 ---
 type: Finding
 title: Unique array baseline and bulk-copy candidate
-description: Original LocalVector versus Godot-allocated std::vector, measured allocator events, and a narrow trait-aware copy optimization validated on Windows.
+description: LocalVector/STL allocation and copy measurements; Windows correctness passes, but a follow-up boundary sweep blocks performance acceptance.
 tags: [core, containers, allocation, benchmarks, compatibility]
 status: draft
 generated: { by: opencode/gpt-6.1-sol, at: 2026-11-10T00:00:00Z }
@@ -103,3 +103,51 @@ measurements isolate only the LocalVector header against original sources.
 This is a narrow Windows checkpoint, not global Phase 1, cross-platform, full
 test-suite or engine-workload acceptance. Threshold-neighborhood measurements,
 more element types, sanitizer/OOM/aliasing gates and Linux/ARM remain open.[^phase]
+
+# Follow-up: threshold boundary sweep
+
+**Supersedes the earlier near-neutral small-copy observation.** Same original
+commit and committed LocalVector header (`ee5973f764`), no engine edits. New
+copy-only harness configuration adds 64/128/255/257/512 sizes; MSVC C++17 `/O2
+/MT`, same CPU, 11 alternating original/candidate process pairs, one warmup per
+process. Twelve sizes total. Non-power-of-two sizes are rejected outside copy-
+only mode. Old seven-size results are retained separately.
+
+| Integers | Original p50 ns | Candidate p50 ns | Candidate/original |
+| ---: | ---: | ---: | ---: |
+| 0 | 2.39 | 2.63 | 1.100 |
+| 1 | 35.82 | 39.68 | 1.108 |
+| 16 | 41.32 | 50.31 | 1.218 |
+| 64 | 53.20 | 70.68 | 1.329 |
+| 128 | 93.01 | 104.57 | 1.124 |
+| 255 | 124.79 | 136.25 | 1.092 |
+| 256 | 125.43 | 60.48 | 0.482 |
+| 257 | 124.63 | 57.60 | 0.462 |
+| 512 | 197.86 | 65.90 | 0.333 |
+| 4,096 | 1,538.43 | 429.90 | 0.279 |
+| 32,768 | 11,184.96 | 2,292.04 | 0.205 |
+| 1,048,576 | 988,392.19 | 811,689.06 | 0.821 |
+
+At 64 ints, MAD is 1.02% original / 0.77% candidate, versus 32.9% higher p50
+time; STL control is 39.51 -> 39.90 ns. At 255/256/257, controls are also close.
+That is sufficient to block general performance acceptance, but it does not
+identify the cause or establish a real-engine caller regression. Different
+executable/code layouts and allocator behavior remain possible contributors.
+Do not average these results with the earlier run or hide the regressions behind
+large-copy gains. Merely retaining the same small-copy source loop is not proof
+of unchanged generated-code performance.
+
+Allocation/reallocation/free counts, capacity, live requested bytes and CRT
+peak deltas match before/after for all twelve sizes; this is now a mandatory
+driver assertion, not just a manual post-check. Counter/timing checksums and
+all standalone contracts pass. A reporting omission was fixed: the old copy
+case did not populate `live_requested_bytes` (printed zero); the untimed binary
+now captures the copy's requested bytes excluding source fixtures, with no
+counter calls added to the timed copy loop. Historical zero fields were not
+evidence of zero allocation or zero retained memory.
+
+Artifacts: `devtools/out/unique_array_bench/boundary/copy/paired_results.json`,
+`paired.csv` and per-variant manifests/counters. The previous editor test result
+remains 279 passed; no full engine rebuild was needed for this tools-only change.
+Next: inspect codegen and representative call sites, then decide whether to
+retain, revise or explicitly roll back the policy. No silent retuning applied.

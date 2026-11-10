@@ -1,5 +1,7 @@
 # Mistakes
 
+* [Copy benchmark retained-byte omission](/mistakes/copy-benchmark-retained-bytes.md) - populate memory metrics per workload in untimed passes; zero defaults are not measured zero
+
 * [Benchmark snapshot dependencies](/mistakes/benchmark-snapshot-dependencies.md) - validate infrastructure against original sources; declare generated prerequisites and optional dependency fingerprints
 
 Mistakes agents made in this project: what went wrong, why, and the rule

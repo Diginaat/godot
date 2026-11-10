@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-11-10 (LocalVector threshold boundary follow-up)
+
+* Tools-only extension: copy-only 64/128/255/257/512 neighborhoods, independent
+  output directory, automated allocation/capacity parity and embedded manifests.
+* Twelve sizes / eleven alternating process pairs pass contracts and checksum/
+  allocation checks. Small copies regress ~9–33% with close STL controls; 256+
+  copies improve. Performance acceptance blocked despite existing 279-test
+  correctness pass. No engine edit, threshold retuning or new engine-wide claim.
+* Corrected copy retained-byte reporting only in the untimed count binary;
+  historical zero fields were omissions, not measured zero memory. Recorded
+  [metric lesson](/mistakes/copy-benchmark-retained-bytes.md) and
+  [all results/caveats](/project/unique-array-evaluation.md).
+
 ## 2026-11-10 (LocalVector copy checkpoint validation)
 
 * MSVC production editor build with tests=yes completed successfully in 15m09s.

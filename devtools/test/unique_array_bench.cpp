@@ -201,6 +201,9 @@ void sample(const char *variant, int operation, size_t n, int index) {
 #endif
 	const size_t repeats = std::max<size_t>(1, std::min<size_t>(32768, work / std::max<size_t>(1, n)));
 	const uint64_t base = ArrayBench::live;
+#if ARRAY_BENCH_COUNT_RUN
+	const uint64_t fixture_requested = Memory::get_mem_usage();
+#endif
 	ArrayBench::reset();
 	uint64_t checksum = 0, retained_bytes = 0, cap = 0;
 	const auto start = std::chrono::steady_clock::now();
@@ -226,6 +229,10 @@ void sample(const char *variant, int operation, size_t n, int index) {
 			checksum += a.size() + (n ? a[n - 1] : 0);
 		} else if (operation == 3 || operation == 4) {
 			Array a(original);
+#if ARRAY_BENCH_COUNT_RUN
+			cap = capacity(a);
+			retained_bytes = Memory::get_mem_usage() - fixture_requested;
+#endif
 			if (operation == 4) {
 				Array moved(std::move(a));
 				require(data(moved) != nullptr || n == 0);
@@ -271,8 +278,13 @@ void sample(const char *variant, int operation, size_t n, int index) {
 int main() {
 	contracts();
 	std::puts("variant,case,n,sample,ns_per_cycle,repeats,checksum,allocations,reallocations,frees,crt_peak_delta,live_requested_bytes,capacity");
+#if ARRAY_BENCH_BOUNDARY
+	const size_t sizes[] = { 0, 1, 16, 64, 128, 255, 256, 257, 512, 4096, 32768, 1048576 };
+#else
+	const size_t sizes[] = { 0, 1, 16, 256, 4096, 32768, 1048576 };
+#endif
 	for (int index = -1; index < ARRAY_BENCH_SAMPLES; index++) {
-		for (size_t n : { size_t(0), size_t(1), size_t(16), size_t(256), size_t(4096), size_t(32768), size_t(1048576) }) {
+		for (size_t n : sizes) {
 			for (int operation = 0; operation < 8; operation++) {
 #if ARRAY_BENCH_COPY_ONLY
 				if (operation != 3) {

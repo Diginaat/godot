@@ -25,6 +25,9 @@ committed. Branch creation preserved every existing change.
 
 - Phase 0 committed as `ad1573b0e4`; Phase 1 infrastructure `ce25718574`.
   First LocalVector copy slice passes the Windows build/test gate; Phase 1 remains open.
+- Follow-up boundary sweep blocks performance acceptance: small copies regress
+  ~9–33% in the extended harness; large-copy gains remain. Do not promote the
+  copy policy or retune its threshold without investigating codegen/callers.
 - Existing COW/STL-algorithm and robin-hood adapter prototype: builds and passes
   focused correctness, but **fails numeric-container performance/memory goals**.
 - No engine math modification. Explicit SSE dot/cross candidates lost locally.
@@ -46,6 +49,7 @@ committed. Branch creation preserved every existing change.
 | Phase 1 unique array baseline | 56 LocalVector/STL paired workloads, seven sizes; count/timing checksum parity and initial contracts pass |
 | Phase 1 copy candidate | 11 alternating original/candidate process pairs; bulk-copy improvement at 256/4K ints; allocations unchanged; small-copy costs and control confounders documented |
 | Phase 1 editor build/test gate | Passed MSVC production editor build (15m09s); 279 focused tests / 3,803,093 assertions, zero failures; dirty-tree prototype dependencies remain outside this slice |
+| Phase 1 boundary follow-up | 12 sizes / 11 alternating pairs, checksum and allocation parity pass; small-copy regressions block performance acceptance; tools-only change |
 | Full suite, scene/renderer/physics/C# smoke | Not run in this audit |
 | GCC/Clang/Linux, double precision, sanitizers, ARM | Pending |
 
@@ -63,14 +67,19 @@ remain comparison controls, not mandatory dependencies. See D011.
 
 ## Next independent task
 
-Next Phase 1 slice: threshold-neighborhood copy benchmarks (255/256/257), more
-element types, then remaining compiler/sanitizer/contract coverage. Current
+Next Phase 1 slice: investigate small-copy codegen/layout and representative
+callers. Boundary sweep is complete, not pending. It finds small-copy regressions
+despite passing correctness/allocation gates; inspect before retuning or explicit
+rollback. Then extend element types and compiler/sanitizer/contract coverage. Current
 LocalVector optimization preserves layout/storage and uses bulk copy only for
 >=256 trivially copyable elements; tests cover nontrivial/no-default construction,
 empty spans, independence and the bulk path. Do not modify source during a build.
 No std::vector storage replacement accepted. Keep inherited shared-container/
 hash/String/Mono prototypes and unrelated work unstaged. Evidence and caveats:
 kb/project/unique-array-evaluation.md. Phase 2 native-map work follows its gates.
+Boundary artifacts: devtools/out/unique_array_bench/boundary/copy/. Earlier
+seven-size results remain in the separate copy/ directory. --boundary is copy-
+only; non-power-of-two sizes must not enter the random-access permutation suite.
 
 ## Resume commands
 

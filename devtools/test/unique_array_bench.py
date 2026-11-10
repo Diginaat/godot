@@ -16,6 +16,8 @@ from core_templates_bench import ROOT, ensure_idle
 
 BASELINE = "172e099b95307708005dafcf719693d20b1e7088"
 OUT = ROOT / "devtools/out/unique_array_bench"
+MATRIX_SIZES = (0, 1, 16, 256, 4096, 32768, 1048576)
+BOUNDARY_SIZES = (0, 1, 16, 64, 128, 255, 256, 257, 512, 4096, 32768, 1048576)
 
 
 def checked(args, **kwargs):
@@ -25,17 +27,29 @@ def checked(args, **kwargs):
     return result.stdout
 
 
-def compare_copy():
+def compare_copy(boundary=False):
+    sizes = BOUNDARY_SIZES if boundary else MATRIX_SIZES
     for extra in ([], ["--candidate-local"]):
-        print(checked([sys.executable, str(Path(__file__).resolve()), "--copy-only", "--samples", "1", *extra]), end="")
+        options = ["--boundary"] if boundary else []
+        print(checked([sys.executable, str(Path(__file__).resolve()), "--copy-only", "--samples", "1", *options, *extra]), end="")
     directory = OUT / "copy"
+    metrics = ("allocations", "reallocations", "frees", "crt_peak_delta", "live_requested_bytes", "capacity")
+    manifests = {}
+    counts = {}
+    for variant in ("baseline", "candidate"):
+        result = json.loads((directory / variant / "results.json").read_text(encoding="utf-8"))
+        manifests[variant] = result["metadata"]
+        counts[variant] = {r["n"]: r["local"] for r in result["summary"]}
+    for n in sizes:
+        if any(counts["baseline"][n][key] != counts["candidate"][n][key] for key in metrics):
+            raise RuntimeError(f"Before/after allocation or capacity mismatch at n={n}")
     raw = []
     for sample in range(11):
         ensure_idle()
         order = ("baseline", "candidate") if sample % 2 else ("candidate", "baseline")
         for variant in order:
             rows = list(csv.DictReader(io.StringIO(checked([str(directory / variant / "timing/bench.exe")], timeout=120))))
-            if len(rows) != 14:
+            if len(rows) != len(sizes) * 2:
                 raise RuntimeError("Invalid copy comparison rows")
             raw.extend({"pair": sample, "build": variant, **row} for row in rows)
     with (directory / "paired.csv").open("w", encoding="utf-8", newline="") as file:
@@ -43,7 +57,7 @@ def compare_copy():
         writer.writeheader()
         writer.writerows(raw)
     summary = []
-    for n in (0, 1, 16, 256, 4096, 32768, 1048576):
+    for n in sizes:
         row = {"n": n}
         sums = set()
         for variant in ("baseline", "candidate"):
@@ -51,6 +65,8 @@ def compare_copy():
                 values = [r for r in raw if int(r["n"]) == n and r["build"] == variant and r["variant"] == implementation]
                 sums.update(r["checksum"] for r in values)
                 times = sorted(float(r["ns_per_cycle"]) for r in values)
+                if len(times) != 11 or any(t <= 0 for t in times):
+                    raise RuntimeError("Invalid copy sample count/timing")
                 median = statistics.median(times)
                 row[f"{variant}_{implementation}"] = {"p50_ns": median, "p95_ns": times[-1], "mad_pct": statistics.median(abs(t - median) for t in times) / median * 100}
         if len(sums) != 1:
@@ -58,7 +74,7 @@ def compare_copy():
         row["ratio"] = row["candidate_local"]["p50_ns"] / row["baseline_local"]["p50_ns"]
         summary.append(row)
         print(f"COPY n={n:7} {row['baseline_local']['p50_ns']:.2f} -> {row['candidate_local']['p50_ns']:.2f} ns/copy ratio={row['ratio']:.3f}; STL control {row['baseline_stl']['p50_ns']:.2f} -> {row['candidate_stl']['p50_ns']:.2f}")
-    (directory / "paired_results.json").write_text(json.dumps({"pairs": 11, "warmup_per_process": 1, "summary": summary}, indent=2), encoding="utf-8")
+    (directory / "paired_results.json").write_text(json.dumps({"pairs": 11, "warmup_per_process": 1, "boundary": boundary, "manifests": manifests, "allocation_parity": True, "allocation_counts": counts, "summary": summary}, indent=2), encoding="utf-8")
 
 
 def main():
@@ -67,10 +83,15 @@ def main():
     parser.add_argument("--candidate-local", action="store_true", help="Overlay only working-tree local_vector.h on original baseline headers")
     parser.add_argument("--copy-only", action="store_true")
     parser.add_argument("--compare-copy", action="store_true")
+    parser.add_argument("--boundary", action="store_true", help="Copy-only threshold-neighborhood sweep in a separate output directory")
     parser.add_argument("--samples", type=int, default=11)
     args = parser.parse_args()
+    if args.boundary and not (args.copy_only or args.compare_copy):
+        parser.error("--boundary requires --copy-only or --compare-copy (non-power-of-two inputs are copy-only)")
+    if args.boundary:
+        OUT = OUT / "boundary"
     if args.compare_copy:
-        compare_copy()
+        compare_copy(args.boundary)
         return
     if args.samples < 1:
         parser.error("At least one sample required")
@@ -104,7 +125,7 @@ def main():
         flags = ["cl", "/nologo", "/O2", "/MT", "/std:c++17", "/Zc:__cplusplus", "/DDEBUG_ENABLED", "/DWINDOWS_ENABLED", f"/I{baseline}", f"/I{baseline / 'platform/windows'}"]
         commands = [
             flags + ["/c", f"/FI{header}", f"/DARRAY_BENCH_HOOKS={int(mode == 'counts')}", f"/Fo{directory / 'memory.obj'}", str(baseline / "core/os/memory.cpp")],
-            flags + [f"/DARRAY_BENCH_COPY_ONLY={int(args.copy_only)}", f"/DARRAY_BENCH_SAMPLES={1 if mode == 'counts' else args.samples}", f"/Fo{directory / 'bench.obj'}", f"/Fe{directory / 'bench.exe'}", str(source), str(directory / "memory.obj")],
+            flags + [f"/DARRAY_BENCH_COPY_ONLY={int(args.copy_only)}", f"/DARRAY_BENCH_BOUNDARY={int(args.boundary)}", f"/DARRAY_BENCH_COUNT_RUN={int(mode == 'counts')}", f"/DARRAY_BENCH_SAMPLES={1 if mode == 'counts' else args.samples}", f"/Fo{directory / 'bench.obj'}", f"/Fe{directory / 'bench.exe'}", str(source), str(directory / "memory.obj")],
         ]
         script = directory / "build.cmd"
         text = f'@call "{vcvars}" >nul\n@if errorlevel 1 exit /b %errorlevel%\n'
@@ -117,11 +138,12 @@ def main():
         output = checked([str(OUT / mode / "bench.exe")], timeout=240)
         (OUT / f"{mode}.csv").write_text(output, encoding="utf-8")
         outputs[mode] = list(csv.DictReader(io.StringIO(output)))
-    cases = 7 if args.copy_only else 56
+    sizes = BOUNDARY_SIZES if args.boundary else MATRIX_SIZES
+    cases = len(sizes) * (1 if args.copy_only else 8)
     if len(outputs["timing"]) != cases * 2 * args.samples or len(outputs["counts"]) != cases * 2:
         raise RuntimeError("Wrong workload/sample counts")
     summary = []
-    for n in (0, 1, 16, 256, 4096, 32768, 1048576):
+    for n in sizes:
         for case in dict.fromkeys(r["case"] for r in outputs["timing"]):
             row = {"n": n, "case": case}
             checksums = []
