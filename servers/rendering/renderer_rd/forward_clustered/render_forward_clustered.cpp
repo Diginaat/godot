@@ -2405,6 +2405,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	RD::get_singleton()->draw_command_begin_label("Render Setup");
 
+	// Markers split render-list preparation (CPU) into its steps; they only
+	// record while timestamps are captured (profiler, --gpu-profile).
+	RENDER_TIMESTAMP("Setup Render Lists");
 	_setup_lightmaps(p_render_data, *p_render_data->lightmaps, p_render_data->scene_data->cam_transform);
 	_setup_voxelgis(*p_render_data->voxel_gi_instances);
 	uint32_t depth_prepass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, false);
@@ -2412,15 +2415,19 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	// May have changed due to the above (light buffer enlarged, as an example).
 	_update_render_base_uniform_set();
 
+	RENDER_TIMESTAMP("Fill Render List");
 	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, using_sdfgi, using_sdfgi || using_voxelgi || using_ddgi, using_motion_pass);
+	RENDER_TIMESTAMP("Sort Render List");
 	render_list[RENDER_LIST_OPAQUE].sort_by_key();
 	render_list[RENDER_LIST_MOTION].sort_by_key();
 	render_list[RENDER_LIST_ALPHA].sort_by_reverse_depth_and_priority();
 
 	int *render_info = p_render_data->render_info ? p_render_data->render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_VISIBLE] : (int *)nullptr;
+	RENDER_TIMESTAMP("Fill Instance Data");
 	_fill_instance_data(RENDER_LIST_OPAQUE, render_info);
 	_fill_instance_data(RENDER_LIST_MOTION, render_info);
 	_fill_instance_data(RENDER_LIST_ALPHA, render_info);
+	RENDER_TIMESTAMP("Prepare GPU Geometry");
 	if (rb_data.is_valid()) {
 		_begin_geometry_statistics(rb_data.ptr());
 	}
@@ -3355,6 +3362,7 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	render_data.instances = &p_instances;
 	render_data.render_info = p_render_info;
 
+	RENDER_TIMESTAMP("Setup Shadow Pass");
 	Size2i screen_size = RD::get_singleton()->framebuffer_get_size(p_framebuffer);
 	Size2i viewport_size = p_rect.size;
 	if (viewport_size == Size2()) {
@@ -3373,10 +3381,14 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	PassMode pass_mode = p_use_dp ? PASS_MODE_SHADOW_DP : PASS_MODE_SHADOW;
 
 	uint32_t render_list_from = render_list[RENDER_LIST_SECONDARY].elements.size();
+	RENDER_TIMESTAMP("Fill Shadow Render List");
 	_fill_render_list(RENDER_LIST_SECONDARY, &render_data, pass_mode, false, false, false, true);
 	uint32_t render_list_size = render_list[RENDER_LIST_SECONDARY].elements.size() - render_list_from;
+	RENDER_TIMESTAMP("Sort Shadow Render List");
 	render_list[RENDER_LIST_SECONDARY].sort_by_key_range(render_list_from, render_list_size);
+	RENDER_TIMESTAMP("Fill Shadow Instance Data");
 	_fill_instance_data(RENDER_LIST_SECONDARY, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr, render_list_from, render_list_size, false);
+	RENDER_TIMESTAMP("Shadow Render List Ready");
 
 	{
 		//regular forward for now

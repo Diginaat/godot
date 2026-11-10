@@ -81,6 +81,34 @@ marker until the next one; a stage holds everything until the next marker):
 7. **Small scenes**: `small_1k` renders in 0.3-0.4 ms CPU; any new path must
    keep it there (regression guard).
 
+### Render-list split (Phase 1.0), 2026-11-10
+
+New `RENDER_TIMESTAMP` markers inside the main pass and each shadow pass
+(`render_forward_clustered.cpp`; only recorded while timestamps are
+captured). Vulkan, static view, `-Stages`, ms p50:
+
+| Step | `shared_20k` | `unique_10k` | `massive_100k` | `dynamic_20k` | `lights_20k` |
+| --- | --- | --- | --- | --- | --- |
+| Main: fill render list | 1.01 | 0.47 | 5.61 | 0.79 | 0.87 |
+| Main: sort | 0.81 | 0.34 | 3.23 | 0.81 | 0.78 |
+| Main: fill instance data | 2.26 | 0.69 | 7.54 | 1.39 | 1.39 |
+| Shadows: fill render lists (all passes) | 0.63 | 0.23 | 0.96 | 0.46 | 0.52 |
+| Shadows: sort | 0.80 | 0.29 | 0.35 | 0.80 | 0.78 |
+| Shadows: fill instance data | 1.71 | 0.31 | 1.14 | 1.14 | 1.17 |
+| Shadow draw recording ("Shadow Render List Ready" until the next marker) | 0.09 | 0.98 | 0.05 | 0.06 | 0.07 |
+
+The three main steps add up to the 16.4 ms "Setup 3D Scene" of the
+baseline (100k). Per visible element: fill about 67 ns, sort about 38 ns,
+instance data about 90 ns. `_fill_instance_data` transposes two transforms,
+does three mesh-storage lookups, writes the 176-byte record into mapped
+memory and detects repeats.
+
+Expected effect, to be measured in 1.6 and 1.7: the instance table replaces
+the record build and write with a 4-byte slot ID, so most of the instance
+data step (7.5 + 1.1 ms at 100k) should go; fill and sort (about 10 ms main
+and shadows at 100k) stay until Phase 2 moves eligible instances out of the
+CPU render list.
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

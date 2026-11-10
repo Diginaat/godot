@@ -17,18 +17,18 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 0 complete (2026-11-10); Phase 1 not started |
+| Phase | 1, GPU instance table: 1.0 done (2026-11-10) |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
-| Active task | None. Waiting for the go-ahead for Phase 1 |
-| Next | Phase 1.0: markers that split "Setup 3D Scene" into list fill, sort and instance data, then 1.1 slot allocator |
-| Last verified build | `bin/` editor at `4bc2a22774` (2026-11-08); no engine code changed on this branch yet |
-| Last verified tests | `instance_bench.ps1` timing (Vulkan safe and separate, D3D12 safe) and `-Stages` (Vulkan) pass, 2026-11-10 |
+| Active task | None |
+| Next | Phase 1.1 slot allocator (stable slot per `GeometryInstanceForwardClustered`) |
+| Last verified build | Production editor with the 1.0 markers, 2026-11-10 |
+| Last verified tests | Standard smoke (PhysX game/editor, path tracer, DDGI) and `instance_bench.ps1 -Stages` (Vulkan) pass, 2026-11-10 |
 
 ## Baseline in one line
 
 Render-thread CPU bound in every case above 1k nodes: `massive_100k` 20.4 ms
-CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation;
-the threaded cull is 1.2 ms. Details: [benchmarks.md](benchmarks.md).
+CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
+(fill 5.6, sort 3.2, instance data 7.5); the threaded cull is 1.2 ms. Details: [benchmarks.md](benchmarks.md).
 
 ## Known problems
 

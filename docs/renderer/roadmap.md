@@ -58,7 +58,7 @@ A parallel representation: `RendererSceneCull` and
 
 | Task | Change | Acceptance |
 | --- | --- | --- |
-| 1.0 Split the hotspot | `RENDER_TIMESTAMP` markers (per pass, not per object) between `_fill_render_list`, sort and `_fill_instance_data` in RFC `_render_scene` and `_render_shadow_append` | `-Stages` shows how the 16.4 ms of "Setup 3D Scene" in `massive_100k` splits; update the expected gain of 1.6 (IDs instead of records) against Phase 2 (no per-instance CPU list) |
+| 1.0 Split the hotspot (done 2026-11-10: fill 5.6, sort 3.2, instance data 7.5 ms at 100k) | `RENDER_TIMESTAMP` markers (per pass, not per object) between `_fill_render_list`, sort and `_fill_instance_data` in RFC `_render_scene` and `_render_shadow_append` | `-Stages` shows how the 16.4 ms of "Setup 3D Scene" in `massive_100k` splits; update the expected gain of 1.6 (IDs instead of records) against Phase 2 (no per-instance CPU list) |
 | 1.1 Slot allocator | Stable slot per `GeometryInstanceForwardClustered` (free list, generation). No GPU use yet | Unit test: add/remove/reuse; slots dense after churn; no behavior change, smoke pass |
 | 1.2 Table storage + CPU mirror | `GPUInstanceTable` in `forward_clustered/` (new file): CPU mirror of the record (transform, AABB, flags, layer mask, instance uniforms offset, GI offset, uv scale), dirty bitset, RD storage buffer with growth | Fixture reads the buffer back (test only) and matches the CPU mirror after add/move/remove/grow |
 | 1.3 Dirty uploads | Coalesce dirty slots into ranges; `buffer_update` per range, or one compute scatter from a staging ring when ranges are fragmented (decide by measurement, D025) | Bench `dynamic_20k`: upload bytes per frame proportional to moved instances; `small_1k` no regression |
