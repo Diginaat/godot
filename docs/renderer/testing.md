@@ -17,7 +17,13 @@ before measuring.
 4. **Correctness of the new path:** an exact pixel A/B against the CPU path
    (new path on/off, same frame), on Vulkan and D3D12, covering the cases
    below that the change touches. Add a fixture to `large_world.ps1`.
-5. **Performance:** the benches below, before and after, same session,
+5. **Unit tests** (CPU-side structures): a separate tests build that keeps its
+   own object files, so it never invalidates the production build:
+   `python -m SCons -j10 platform=windows target=editor production=yes tests=yes object_prefix=t_ extra_suffix=tests`
+   (full build the first time), then
+   `bin\godot.windows.editor.x86_64.tests.console.exe --test --test-case="*GPUInstanceSlots*"`.
+   Tests live in `tests/servers/rendering/` and register themselves.
+6. **Performance:** the benches below, before and after, same session,
    alternating order where the bench supports it. Report regressions.
 
 ## Correctness cases

@@ -39,6 +39,7 @@
 #include "servers/rendering/renderer_rd/effects/planar_reflections.h"
 #include "servers/rendering/renderer_rd/effects/ss_effects.h"
 #include "servers/rendering/renderer_rd/effects/taa.h"
+#include "servers/rendering/renderer_rd/forward_clustered/gpu_instance_slots.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
@@ -857,6 +858,7 @@ protected:
 		bool using_softshadows = false;
 
 		//used during setup
+		uint32_t gpu_slot = GPUInstanceSlots::INVALID; // Index in the GPU instance table.
 		uint64_t prev_transform_change_frame = 0xFFFFFFFF;
 		uint64_t last_aged_frame = 0;
 		enum TransformStatus {
@@ -908,6 +910,7 @@ protected:
 	SelfList<GeometryInstanceSurfaceDataCache>::List geometry_surface_compilation_all_list;
 
 	PagedAllocator<GeometryInstanceForwardClustered> geometry_instance_alloc;
+	GPUInstanceSlots gpu_instance_slots;
 	PagedAllocator<GeometryInstanceSurfaceDataCache> geometry_instance_surface_alloc;
 	PagedAllocator<GeometryInstanceLightmapSH> geometry_instance_lightmap_sh;
 

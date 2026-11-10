@@ -17,12 +17,12 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 1, GPU instance table: 1.0 done (2026-11-10) |
+| Phase | 1, GPU instance table: 1.0 and 1.1 done (2026-11-10) |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 1.1 slot allocator (stable slot per `GeometryInstanceForwardClustered`) |
-| Last verified build | Production editor with the 1.0 markers, 2026-11-10 |
-| Last verified tests | Standard smoke (PhysX game/editor, path tracer, DDGI) and `instance_bench.ps1 -Stages` (Vulkan) pass, 2026-11-10 |
+| Next | Phase 1.2 table storage + CPU mirror (`GPUInstanceTable`, record layout, readback fixture) |
+| Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
+| Last verified tests | `GPUInstanceSlots` unit tests (5 cases), standard smoke (PhysX game/editor, path tracer, DDGI), 2026-11-10 |
 
 ## Baseline in one line
 

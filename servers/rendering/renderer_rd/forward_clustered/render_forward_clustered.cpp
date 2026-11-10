@@ -5575,6 +5575,7 @@ RenderGeometryInstance *RenderForwardClustered::geometry_instance_create(RID p_b
 
 	GeometryInstanceForwardClustered *ginstance = geometry_instance_alloc.alloc();
 	ginstance->data = memnew(GeometryInstanceForwardClustered::Data);
+	ginstance->gpu_slot = gpu_instance_slots.allocate();
 
 	ginstance->data->base = p_base;
 	ginstance->data->base_type = type;
@@ -5699,6 +5700,7 @@ void RenderForwardClustered::geometry_instance_free(RenderGeometryInstance *p_ge
 		surf = next;
 	}
 	memdelete(ginstance->data);
+	gpu_instance_slots.free(ginstance->gpu_slot);
 	geometry_instance_alloc.free(ginstance);
 }
 
