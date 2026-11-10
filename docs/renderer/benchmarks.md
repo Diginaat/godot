@@ -212,6 +212,17 @@ p50: `massive_100k` 5.2-5.4 ms (5.0-5.2 before), `churn_100k` 6.6-6.8 ms,
 `small_1k` 0.31-0.34 ms. Built on the render thread from the pointer list
 instead, the bits cost +2.7 ms at 100k.
 
+### Directional shadow casters on the GPU path (Phase 6.1), 2026-11-10
+
+`instance_bench.ps1 -GpuInstances`, Vulkan, safe render thread, render CPU
+p50 static view, two repeats (before / after D033): `small_1k` 0.31-0.34 /
+0.25-0.26 ms, `shared_20k` 4.3-5.5 / 0.69-0.79 ms, `unique_10k` 8.1-8.4 /
+7.1-7.7 ms (draws 10,001 to 8,776, shadow draws as on the CPU path),
+`massive_100k` 5.2-5.4 / 2.75-2.85 ms, `dynamic_20k` 4.4-5.4 / 2.1-2.2 ms,
+`lights_20k` 3.3-4.2 / 0.75 ms, `churn_100k` 6.6-6.8 / 3.6-3.8 ms. GPU time
+unchanged (1.26 ms at 100k). Before the used-bucket filter `unique_10k` had
+30,003 shadow draws and a 17-18 ms frame.
+
 D3D12, same protocol, render CPU p50 (CPU path / GPU path): `small_1k`
 0.40-0.54 / 0.29-0.40, `shared_20k` 7.7-10.1 / 3.2-6.2, `unique_10k`
 8.2-9.2 / 7.9-8.9, `massive_100k` 20.7-22.3 / 5.5-5.9, `dynamic_20k`

@@ -43,6 +43,10 @@
   (D032): slot bits from the cull threads, so occluders apply. Building the
   bits from the pointer list on the render thread cost 2.7 ms at 100k; from
   the cull's slot list 0.2 ms.
+* **Implemented**: directional shadow casters on the GPU path (Phase 6.1,
+  D033): `massive_100k` render CPU 5.2 to 2.8 ms, `shared_20k` 4.3-5.5 to
+  0.7-0.8 ms. A view with many buckets and few listed instances skips the
+  empty buckets (`unique_10k` shadow draws 30,003 back to the CPU count).
 
 ## 2026-11-08 (release 0.9.1)
 

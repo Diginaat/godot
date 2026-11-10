@@ -991,6 +991,9 @@ public:
 
 		struct DirectionalShadow {
 			PagedArray<RenderGeometryInstance *> cascade_geometry_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+			// Casters the renderer's GPU path draws, and their gpu_cull_slot.
+			PagedArray<RenderGeometryInstance *> cascade_gpu_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
+			LocalVector<uint32_t> cascade_gpu_slots[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
 		} directional_shadows[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
 
 		PagedArray<RenderGeometryInstance *> sdfgi_region_geometry_instances[SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE];
@@ -1013,6 +1016,8 @@ public:
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].clear();
+					directional_shadows[i].cascade_gpu_instances[j].clear();
+					directional_shadows[i].cascade_gpu_slots[j].clear();
 				}
 			}
 
@@ -1042,6 +1047,8 @@ public:
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].reset();
+					directional_shadows[i].cascade_gpu_instances[j].reset();
+					directional_shadows[i].cascade_gpu_slots[j].reset();
 				}
 			}
 
@@ -1077,6 +1084,15 @@ public:
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_geometry_instances[j]);
+					directional_shadows[i].cascade_gpu_instances[j].merge_unordered(p_cull_result.directional_shadows[i].cascade_gpu_instances[j]);
+					LocalVector<uint32_t> &slots = directional_shadows[i].cascade_gpu_slots[j];
+					LocalVector<uint32_t> &from_slots = p_cull_result.directional_shadows[i].cascade_gpu_slots[j];
+					if (!from_slots.is_empty()) {
+						const uint32_t from = slots.size();
+						slots.resize(from + from_slots.size());
+						memcpy(slots.ptr() + from, from_slots.ptr(), from_slots.size() * sizeof(uint32_t));
+						from_slots.clear();
+					}
 				}
 			}
 
@@ -1105,6 +1121,7 @@ public:
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].set_page_pool(p_geometry_instance_pool);
+					directional_shadows[i].cascade_gpu_instances[j].set_page_pool(p_geometry_instance_pool);
 				}
 			}
 

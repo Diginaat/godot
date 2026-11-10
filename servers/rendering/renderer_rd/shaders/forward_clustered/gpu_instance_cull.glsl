@@ -111,6 +111,7 @@ shared uint group_primitives;
 #define VIEW_FLAG_USE_SDFGI 2
 #define VIEW_FLAG_ORTHOGONAL 4
 #define VIEW_FLAG_MOTION 8
+#define VIEW_FLAG_SHADOW 16
 
 #define GPU_FLAG_MOVED 1
 #define GPU_FLAG_CAN_SDFGI 2
@@ -189,8 +190,8 @@ uint cull_member(uint index, out uint r_primitives) {
 	// What _fill_render_list() and _fill_instance_data() write for an opaque
 	// instance without lightmap, VoxelGI, fade or motion pass.
 	uint flags = (record.flags & ~INSTANCE_FLAGS_FADE_MASK) | (255u << INSTANCE_FLAGS_FADE_SHIFT);
-	if (moved && !motion_pass) {
-		flags |= INSTANCE_FLAGS_DYNAMIC; // The motion pass computes motion vectors instead.
+	if (moved && !motion_pass && !bool(params.view_flags & VIEW_FLAG_SHADOW)) {
+		flags |= INSTANCE_FLAGS_DYNAMIC; // The motion pass computes motion vectors instead; shadow lists never set it.
 	}
 	if (bool(params.view_flags & VIEW_FLAG_USE_GI_BUFFERS)) {
 		flags |= INSTANCE_FLAGS_USE_GI_BUFFERS;

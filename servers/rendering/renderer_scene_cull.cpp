@@ -3874,7 +3874,12 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 
 						const bool is_inactive_particle = (base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(idata.base_rid);
 						if (((1 << base_type) & RSE::INSTANCE_GEOMETRY_MASK) && idata.flags & InstanceData::FLAG_CAST_SHADOWS && (LAYER_CHECK & cull_data.cull->shadows[j].caster_mask) && !is_inactive_particle) {
-							cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
+							if (cull_data.gpu_split && idata.instance_geometry->gpu_drawn) {
+								cull_result.directional_shadows[j].cascade_gpu_instances[k].push_back(idata.instance_geometry);
+								cull_result.directional_shadows[j].cascade_gpu_slots[k].push_back(idata.instance_geometry->gpu_cull_slot);
+							} else {
+								cull_result.directional_shadows[j].cascade_geometry_instances[k].push_back(idata.instance_geometry);
+							}
 							mesh_visible = true;
 						}
 					}
@@ -4203,6 +4208,8 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 				render_shadow_data[max_shadows_used].light = cull.shadows[i].light_instance;
 				render_shadow_data[max_shadows_used].pass = j;
 				render_shadow_data[max_shadows_used].instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_geometry_instances[j]);
+				render_shadow_data[max_shadows_used].gpu_instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_gpu_instances[j]);
+				render_shadow_data[max_shadows_used].gpu_slots = scene_cull_result.directional_shadows[i].cascade_gpu_slots[j];
 				max_shadows_used++;
 			}
 		}
@@ -4451,6 +4458,8 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	for (uint32_t i = 0; i < max_shadows_used; i++) {
 		render_shadow_data[i].instances.clear();
+		render_shadow_data[i].gpu_instances.clear();
+		render_shadow_data[i].gpu_slots.clear();
 	}
 	max_shadows_used = 0;
 
@@ -5401,6 +5410,7 @@ RendererSceneCull::RendererSceneCull() {
 
 	for (uint32_t i = 0; i < MAX_UPDATE_SHADOWS; i++) {
 		render_shadow_data[i].instances.set_page_pool(&geometry_instance_cull_page_pool);
+		render_shadow_data[i].gpu_instances.set_page_pool(&geometry_instance_cull_page_pool);
 	}
 	for (uint32_t i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
 		render_sdfgi_data[i].instances.set_page_pool(&geometry_instance_cull_page_pool);
@@ -5432,6 +5442,8 @@ RendererSceneCull::~RendererSceneCull() {
 
 	for (uint32_t i = 0; i < MAX_UPDATE_SHADOWS; i++) {
 		render_shadow_data[i].instances.reset();
+		render_shadow_data[i].gpu_instances.reset();
+		render_shadow_data[i].gpu_slots.reset();
 	}
 	for (uint32_t i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
 		render_sdfgi_data[i].instances.reset();

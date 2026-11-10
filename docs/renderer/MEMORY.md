@@ -17,12 +17,18 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs, shadow meshes, motion-pass views, render info, incremental buckets and scene-cull visibility done (2026-11-10); Phase 1 done except 1.8 |
+| Phase | 6.1 directional shadow casters on the GPU path done (2026-11-10); Phase 2 done except HZB occlusion; Phase 1 done except 1.8 |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 3: multi-draw per pipeline group, `draw_indirect_count` in RD; HZB occlusion for the GPU path later (roadmap.md) |
+| Next | Phase 6.2: spot/omni shadow casters on the GPU path, shadow render info; then Phase 3 multi-draw, HZB occlusion (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (27 count and render info checks, with index LODs, shadow meshes, a motion pass, an occluder and per-frame churn without rebuilds; 10 of 10 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
+| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (32 camera and 32 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, casters behind the camera and per-frame churn without rebuilds; 11 of 11 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
+
+## Shadows in one line
+
+D033: with directional casters on the GPU path, `massive_100k` render CPU
+is 2.8 ms (CPU path 21 ms), `shared_20k` 0.7-0.8 ms. Details:
+[benchmarks.md](benchmarks.md).
 
 ## Phase 2 in one line
 
@@ -80,6 +86,8 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   rebuild only for new keys, full buckets, mesh changes, fragmentation.
 - D032: the kernel draws members whose slot bit the scene cull set (exact
   frustum, layers, occluders); the cull lists the slots (+0.2 ms at 100k).
+- D033: directional cascades on the GPU path (per-pass kernel run, shared
+  shadow instance data); used-bucket filter when buckets are many.
 - Earlier geometry decisions D001-D024 still hold (compute + indirect before
   mesh shaders, stable source IDs, opt-in settings, conventional fallback).
 

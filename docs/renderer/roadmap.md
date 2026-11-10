@@ -195,6 +195,15 @@ light frustum, never the camera's. Keep the far-cascade cache. Acceptance:
 casters outside the camera frustum still cast; shadow A/B exact; shadow-pass
 render CPU down.
 
+- 6.1 Directional cascades done 2026-11-10 (D033): the scene cull lists the
+  GPU path's casters per cascade with their slots; per pass a kernel run
+  and one element per bucket level; shared shadow instance data, per-pass
+  commands and IDs; buckets without listed casters skipped when buckets are
+  many. `massive_100k` render CPU 5.2 to 2.8 ms, `shared_20k` 4.3-5.5 to
+  0.7-0.8 ms; images equal, casters behind the camera cast.
+- 6.2 Next: spot and omni (atlas) shadows, cube omni shadows; shadow render
+  info (objects, primitives) for GPU-drawn casters.
+
 ## Phase 7 - lighting and GI scheduling (P2)
 
 Light binning is already on the GPU. First measure `update_light_buffers`

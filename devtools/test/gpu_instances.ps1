@@ -4,7 +4,8 @@ param(
 )
 # GPU path for eligible instances: while the fixture moves, hides, re-layers,
 # changes, gives meshes index LODs and shadow meshes, frees and adds nodes
-# (also every frame, where buckets must not be rebuilt), adds an occluder,
+# (also every frame, where buckets must not be rebuilt), adds an occluder
+# and casters behind the camera,
 # turns on TAA and FSR 2 (a motion pass) and opens more views, the engine compares
 # what the GPU path drew with what the CPU cull found visible, and the
 # fixture compares each phase's image (with TAA and FSR 2, the motion vectors) with
@@ -42,14 +43,18 @@ if ($start -ge 0 -and $end -gt $start) {
 $incremental = $churn.Count -ge 2 -and @($churn | Select-Object -Unique).Count -eq 1
 # The occluder must hide objects (occlusion culling took effect).
 $occluded = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_PHASE: occluder, objects (\d+) before, (\d+) with it" -and [int]$Matches[2] -lt [int]$Matches[1] })
+# Shadow passes: what they drew equals what the scene cull listed, and
+# casters outside the camera's view cast into it.
+$shadowChecks = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_SHADOW_CHECK: ok .*drawn=[1-9]" })
+$casters = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_CASTERS: ([1-9]\d*) pixels darker" })
 $done = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_TEST_DONE: .* 0 image differences" })
-# Ten phases with an image comparison each, two count checks per phase.
-if ($code -ne 0 -or $errors.Count -gt 0 -or $done.Count -ne 1 -or $equal.Count -ne 10 -or $checks.Count -lt 20 -or -not $incremental -or $occluded.Count -ne 1 -or $lods.Count -eq 0 -or $shadows.Count -eq 0 -or $moved.Count -eq 0 -or $vectors.Count -ne 2 -or $info.Count -lt 8) {
+# Eleven phases with an image comparison each, two count checks per phase.
+if ($code -ne 0 -or $errors.Count -gt 0 -or $done.Count -ne 1 -or $equal.Count -ne 11 -or $checks.Count -lt 22 -or $shadowChecks.Count -lt 10 -or $casters.Count -ne 1 -or -not $incremental -or $occluded.Count -ne 1 -or $lods.Count -eq 0 -or $shadows.Count -eq 0 -or $moved.Count -eq 0 -or $vectors.Count -ne 2 -or $info.Count -lt 8) {
 	$lines | Where-Object { $_ -match "ERROR|GPU_INSTANCES" } | Write-Output
-	Write-Result "GPU instances ($Driver)" $false "exit $code, $($checks.Count) count checks, $($equal.Count) of 10 images equal, occluder hid objects $($occluded.Count) times, churn rebuilds $($churn -join '/'), $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($vectors.Count) motion vector comparisons equal, $($info.Count) render info checks; see devtools/out/large_world"
+	Write-Result "GPU instances ($Driver)" $false "exit $code, $($checks.Count) count checks, $($equal.Count) of 11 images equal, $($shadowChecks.Count) shadow checks, offscreen casters cast $($casters.Count) times, occluder hid objects $($occluded.Count) times, churn rebuilds $($churn -join '/'), $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($vectors.Count) motion vector comparisons equal, $($info.Count) render info checks; see devtools/out/large_world"
 	exit 1
 }
-Write-Result "GPU instances ($Driver)" $true "$($checks.Count) count checks ($($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($info.Count) render info checks), 10 of 10 images and the TAA and FSR 2 motion vectors equal to the CPU path, no rebuild while $($churn.Count) checks ran during churn: moves, layers, hidden, ineligible and back, index LODs and shadow meshes, free and add, churn, occluder, TAA, FSR 2 motion pass, more views"
+Write-Result "GPU instances ($Driver)" $true "$($checks.Count) count checks ($($shadowChecks.Count) shadow checks, $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($info.Count) render info checks), 11 of 11 images and the TAA and FSR 2 motion vectors equal to the CPU path, no rebuild while $($churn.Count) checks ran during churn: moves, layers, hidden, ineligible and back, index LODs and shadow meshes, free and add, churn, occluder, casters behind the camera, TAA, FSR 2 motion pass, more views"
 
 $lines = & $editor --path $project --rendering-driver $Driver --quit-after 1000 res://gpu_instances.tscn -- --self-test 2>&1 | ForEach-Object { "$_" }
 $lines | Set-Content (Join-Path $logs "gpu_instances_selftest_$Driver.log")

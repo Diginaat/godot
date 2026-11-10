@@ -6,6 +6,7 @@ extends Node3D
 ## visibility ranges, meshes with index LODs and LOD biases, frees and adds,
 ## nodes replaced and materials swapped every frame (no bucket rebuilds),
 ## an occluder (the GPU path draws what the scene cull found visible),
+## casters behind the camera (drawn only by the shadow passes),
 ## TAA and FSR 2 (a motion pass), compared through their motion vectors, a second view of the same world and a
 ## view of another world. Every 30 frames the engine compares what the GPU
 ## path drew with what the CPU cull found visible (GPU_INSTANCES_CHECK). After
@@ -234,6 +235,32 @@ func _run(self_test: bool) -> void:
 	await _compare("occluder")
 	occluder.queue_free()
 	get_viewport().use_occlusion_culling = false
+	# Casters behind the camera: only the shadow passes draw them, and their
+	# shadows fall into the view.
+	var casters: Array[MeshInstance3D] = []
+	var tall := BoxMesh.new()
+	tall.size = Vector3(1.0, 30.0, 1.0)
+	for i in 20:
+		var caster := MeshInstance3D.new()
+		caster.mesh = tall
+		caster.material_override = _materials[i % _materials.size()]
+		caster.position = Vector3(float(i) * 3.0 - 30.0, 15.0, 52.0)
+		add_child(caster)
+		casters.append(caster)
+	await _wait(PHASE_FRAMES)
+	var with_casters := await _capture()
+	print("GPU_INSTANCES_PHASE: casters behind the camera")
+	await _compare("offscreen casters")
+	for caster in casters:
+		caster.queue_free()
+	await _wait(3)
+	var without_casters := await _capture()
+	var darker := 0
+	for y in with_casters.get_height():
+		for x in with_casters.get_width():
+			if with_casters.get_pixel(x, y).get_luminance() < without_casters.get_pixel(x, y).get_luminance() - 0.01:
+				darker += 1
+	print("GPU_INSTANCES_CASTERS: %d pixels darker with the casters" % darker)
 	await _compare_motion(false)
 	await _compare_motion(true)
 	_add_views()

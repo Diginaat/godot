@@ -651,3 +651,33 @@ its bit is set. Frustum, layers and occluders come from the CPU, exactly.
 Rejected: building the bits on the render thread from the pointer list:
 +2.7 ms at 100k (84k pointer chases); from the cull's slot list it is
 +0.2 ms. GPU occlusion (HZB) can later clear bits or test after them.
+
+## D033 — Directional shadow casters on the GPU path
+
+2026-11-10, Phase 6.1.
+Problem: with the camera passes on the GPU path, the CPU shadow lists (fill,
+sort, instance data per cascade) were most of the remaining render CPU:
+about 3.0 of 5.2 ms at 100k nodes and 4.6 of 5.3 ms at 20k.
+Decision: as for the camera (D032), the scene cull lists the GPU path's
+casters apart per directional cascade, with their slots. Per shadow pass the
+renderer uploads the slot bits and a fresh copy of the commands, runs the
+cull kernel with the shadow pass's LOD inputs (shadow threshold scale and
+distance multiplier, main camera position), and appends one element per
+bucket level to the pass's range of the shadow list. The draws use the
+depth twins (shadow mesh index counts). All shadow passes write the same
+instance data (no dynamic or GI flags) into one buffer, apart from the
+camera's; each pass has its own commands, visible IDs and bits. Views the
+GPU path does not draw (no camera GPU view in this render) put the casters
+back into the CPU list; instances that left during the render go to every
+cascade's CPU list, clipped where they do not belong. Positional lights
+keep the CPU lists for now.
+Also: with many buckets for few listed instances (one per material), a
+view marks the buckets its listed instances use and skips the others
+(`unique_10k`: 30,003 shadow draws, mostly empty, down to the CPU path's
+count; camera draws 10,001 to 8,776).
+Measured (Vulkan, render CPU p50, GPU path before / after): `massive_100k`
+5.2-5.4 / 2.8-2.9 ms, `shared_20k` 4.3-5.5 / 0.7-0.8 ms, `lights_20k`
+3.3-4.2 / 0.75 ms, `dynamic_20k` 4.4-5.4 / 2.1-2.2 ms, `unique_10k`
+8.1-8.4 / 7.1-7.7 ms, `small_1k` 0.31-0.34 / 0.25-0.26 ms. Shadow A/B is
+part of every image comparison of `gpu_instances.ps1` (the sun casts), and
+casters behind the camera darken 447 pixels in view.

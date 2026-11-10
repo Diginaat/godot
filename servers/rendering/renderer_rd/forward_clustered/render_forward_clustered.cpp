@@ -677,7 +677,7 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 				RD::get_singleton()->draw_list_draw(draw_list, false, mesh_storage->mesh_surface_get_vertex_count(mesh_surface), instance_count * 6);
 			} else if (gpu_bucket) {
 				// The depth pre-pass draws the shadow mesh, which may have other index counts.
-				const uint32_t command = p_pass_mode == PASS_MODE_DEPTH ? element_info.gpu_depth_bucket : element_info.gpu_bucket;
+				const uint32_t command = (p_pass_mode == PASS_MODE_DEPTH || shadow_pass) ? element_info.gpu_depth_bucket : element_info.gpu_bucket;
 				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), p_params->gpu_instance_commands, command * 5 * sizeof(uint32_t), 1, 0);
 			} else if (use_clod) {
 				const uint32_t group_count = mesh_storage->mesh_surface_get_cluster_data(mesh_surface).group_count;
@@ -1092,7 +1092,9 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 	// render when it does.
 	const PagedArray<RenderGeometryInstance *> *gpu_listed = nullptr;
 	const LocalVector<GeometryInstanceForwardClustered *> *gpu_left = nullptr;
-	if (p_render_list == RENDER_LIST_OPAQUE && p_pass_mode == PASS_MODE_COLOR && !p_alpha_only && p_render_data->gpu_instances) {
+	const bool gpu_list_pass = (p_render_list == RENDER_LIST_OPAQUE && p_pass_mode == PASS_MODE_COLOR) ||
+			(p_render_list == RENDER_LIST_SECONDARY && (p_pass_mode == PASS_MODE_SHADOW || p_pass_mode == PASS_MODE_SHADOW_DP));
+	if (gpu_list_pass && !p_alpha_only && p_render_data->gpu_instances) {
 		if (p_render_data->gpu_instances_drawn) {
 			gpu_left = &gpu_instances_left_view;
 		} else {
@@ -1929,7 +1931,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 		//render directional shadows
 		for (uint32_t i = 0; i < p_render_data->directional_shadows.size(); i++) {
-			_render_shadow_pass(p_render_data->render_shadows[p_render_data->directional_shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->directional_shadows[i]].pass, p_render_data->render_shadows[p_render_data->directional_shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, false, i == p_render_data->directional_shadows.size() - 1, true, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform);
+			_render_shadow_pass(p_render_data->render_shadows[p_render_data->directional_shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->directional_shadows[i]].pass, p_render_data->render_shadows[p_render_data->directional_shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, false, i == p_render_data->directional_shadows.size() - 1, true, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform, &p_render_data->render_shadows[p_render_data->directional_shadows[i]]);
 		}
 		//render positional shadows
 		for (uint32_t i = 0; i < p_render_data->shadows.size(); i++) {
@@ -3303,7 +3305,7 @@ void RenderForwardClustered::_render_buffers_debug_draw(const RenderDataRD *p_re
 	}
 }
 
-void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, bool p_open_pass, bool p_close_pass, bool p_clear_region, RenderingServerTypes::RenderInfo *p_render_info, const Size2i &p_viewport_size, const Transform3D &p_main_cam_transform) {
+void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, bool p_open_pass, bool p_close_pass, bool p_clear_region, RenderingServerTypes::RenderInfo *p_render_info, const Size2i &p_viewport_size, const Transform3D &p_main_cam_transform, const RenderShadowData *p_shadow_data) {
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 
 	ERR_FAIL_COND(!light_storage->owns_light_instance(p_light));
@@ -3472,7 +3474,7 @@ void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas
 
 	if (render_cubemap) {
 		//rendering to cubemap
-		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, reverse_cull_face, false, false, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, Rect2(), false, true, true, true, p_render_info, p_viewport_size, p_main_cam_transform);
+		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, reverse_cull_face, false, false, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, Rect2(), false, true, true, true, p_render_info, p_viewport_size, p_main_cam_transform, p_shadow_data);
 		if (finalize_cubemap) {
 			_render_shadow_process();
 			_render_shadow_end();
@@ -3490,12 +3492,13 @@ void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas
 
 	} else {
 		//render shadow
-		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, reverse_cull_face, using_dual_paraboloid, using_dual_paraboloid_flip, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, p_clear_region, p_open_pass, p_close_pass, p_render_info, p_viewport_size, p_main_cam_transform);
+		_render_shadow_append(render_fb, p_instances, light_projection, light_transform, zfar, 0, 0, reverse_cull_face, using_dual_paraboloid, using_dual_paraboloid_flip, use_pancake, p_lod_distance_multiplier, p_screen_mesh_lod_threshold, atlas_rect, flip_y, p_clear_region, p_open_pass, p_close_pass, p_render_info, p_viewport_size, p_main_cam_transform, p_shadow_data);
 	}
 }
 
 void RenderForwardClustered::_render_shadow_begin() {
 	scene_state.shadow_passes.clear();
+	gpu_instances_shadow_views_used = 0;
 	RD::get_singleton()->draw_command_begin_label("Shadow Setup");
 	_update_render_base_uniform_set();
 
@@ -3504,7 +3507,7 @@ void RenderForwardClustered::_render_shadow_begin() {
 	// because _fill_instance_data will do that if it detects p_offset == 0u.
 }
 
-void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_reverse_cull_face, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, const Rect2i &p_rect, bool p_flip_y, bool p_clear_region, bool p_begin, bool p_end, RenderingServerTypes::RenderInfo *p_render_info, const Size2i &p_viewport_size, const Transform3D &p_main_cam_transform) {
+void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_reverse_cull_face, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier, float p_screen_mesh_lod_threshold, const Rect2i &p_rect, bool p_flip_y, bool p_clear_region, bool p_begin, bool p_end, RenderingServerTypes::RenderInfo *p_render_info, const Size2i &p_viewport_size, const Transform3D &p_main_cam_transform, const RenderShadowData *p_shadow_data) {
 	SceneState::ShadowPass shadow_pass;
 
 	RenderSceneDataRD scene_data;
@@ -3528,6 +3531,14 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	render_data.cluster_max_elements = 32;
 	render_data.instances = &p_instances;
 	render_data.render_info = p_render_info;
+	// The GPU path's casters, listed apart by the scene cull: the CPU list
+	// takes them when the GPU path does not draw this pass.
+	const bool gpu_casters = p_shadow_data && p_shadow_data->gpu_instances.size() > 0;
+	if (gpu_casters) {
+		render_data.gpu_instances = &p_shadow_data->gpu_instances;
+		render_data.gpu_slots = &p_shadow_data->gpu_slots;
+		render_data.gpu_instances_drawn = gpu_instances_view != nullptr;
+	}
 
 	RENDER_TIMESTAMP("Setup Shadow Pass");
 	Size2i screen_size = RD::get_singleton()->framebuffer_get_size(p_framebuffer);
@@ -3555,6 +3566,11 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	render_list[RENDER_LIST_SECONDARY].sort_by_key_range(render_list_from, render_list_size);
 	RENDER_TIMESTAMP("Fill Shadow Instance Data");
 	_fill_instance_data(RENDER_LIST_SECONDARY, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr, render_list_from, render_list_size, false);
+	if (gpu_casters && render_data.gpu_instances_drawn) {
+		RENDER_TIMESTAMP("GPU Instances Shadow Cull");
+		_gpu_instances_shadow_pass(p_shadow_data, scene_data, render_list_from + render_list_size, shadow_pass, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr);
+		render_list_size = render_list[RENDER_LIST_SECONDARY].elements.size() - render_list_from;
+	}
 	RENDER_TIMESTAMP("Shadow Render List Ready");
 
 	{
@@ -3605,7 +3621,7 @@ void RenderForwardClustered::_render_shadow_process(RenderBufferDataForwardClust
 	for (uint32_t i = 0; i < scene_state.shadow_passes.size(); i++) {
 		//render passes need to be configured after instance buffer is done, since they need the latest version
 		SceneState::ShadowPass &shadow_pass = scene_state.shadow_passes[i];
-		shadow_pass.rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_SECONDARY, nullptr, false, RID(), RendererRD::MaterialStorage::get_singleton()->samplers_rd_get_default(), shadow_pass.uniform_buffer_index, false, shadow_visible_ids);
+		shadow_pass.rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_SECONDARY, nullptr, false, RID(), RendererRD::MaterialStorage::get_singleton()->samplers_rd_get_default(), shadow_pass.uniform_buffer_index, false, shadow_visible_ids, shadow_pass.gpu_instances, shadow_pass.gpu_ids);
 	}
 
 	RD::get_singleton()->draw_command_end_label();
@@ -3616,6 +3632,7 @@ void RenderForwardClustered::_render_shadow_end() {
 	for (SceneState::ShadowPass &shadow_pass : scene_state.shadow_passes) {
 		RenderListParameters render_list_parameters(render_list[RENDER_LIST_SECONDARY].elements.ptr() + shadow_pass.element_from, render_list[RENDER_LIST_SECONDARY].element_info.ptr() + shadow_pass.element_from, shadow_pass.element_count, shadow_pass.flip_cull, shadow_pass.pass_mode, 0, true, false, shadow_pass.rp_uniform_set, false, Vector2(), shadow_pass.lod_distance_multiplier, shadow_pass.screen_mesh_lod_threshold, 1, shadow_pass.element_from);
 		render_list_parameters.multimesh_cull_commands = scene_state.shadow_multimesh_cull_commands;
+		render_list_parameters.gpu_instance_commands = shadow_pass.gpu_commands;
 		_render_list_with_draw_list(&render_list_parameters, shadow_pass.framebuffer, shadow_pass.clear_depth ? RD::DRAW_CLEAR_DEPTH : RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0, shadow_pass.rect);
 	}
 

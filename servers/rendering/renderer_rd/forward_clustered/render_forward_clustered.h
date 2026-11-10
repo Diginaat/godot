@@ -704,6 +704,11 @@ protected:
 			Projection cam_projection;
 			Transform3D cam_transform;
 			Transform3D main_cam_transform;
+
+			// GPU path draws of the pass (invalid: none).
+			RID gpu_commands;
+			RID gpu_ids;
+			RID gpu_instances;
 		};
 
 		LocalVector<ShadowPass> shadow_passes;
@@ -1038,6 +1043,20 @@ protected:
 		RID stats_buffer; // Objects and primitives the cull pass drew, per view (render info).
 		RID visible_buffer; // A bit per table slot: visible in the view (from the scene cull).
 		uint32_t visible_capacity = 0; // Words.
+		// Shadow passes: instance data for all of them (the same values), and
+		// per pass its commands, visible IDs and bits.
+		RID shadow_output_buffer;
+		uint32_t shadow_output_capacity = 0;
+		RID shadow_stats_buffer;
+		struct ShadowView {
+			RID commands;
+			RID ids;
+			RID visible;
+			uint32_t command_capacity = 0;
+			uint32_t id_capacity = 0;
+			uint32_t visible_capacity = 0;
+		};
+		LocalVector<ShadowView> shadow_views;
 		RID output_buffer; // InstanceData per member, written per view.
 		RID ids_buffer; // Members drawn per bucket level, written per view.
 		uint32_t member_capacity = 0;
@@ -1095,8 +1114,24 @@ protected:
 	bool _gpu_instances_begin_view(RenderDataRD *p_render_data, bool p_using_motion_pass, bool p_using_sdfgi, bool p_using_opaque_gi);
 	// After the CPU elements are prepared: one element per bucket.
 	void _gpu_instances_append(int *p_render_info, float p_lod_threshold);
+	// Culls and appends the GPU path's casters of one shadow pass; false when
+	// the CPU list must draw them.
+	bool _gpu_instances_shadow_pass(const RenderShadowData *p_shadow_data, const RenderSceneDataRD &p_scene_data, uint32_t p_render_list_from, SceneState::ShadowPass &r_pass, int *p_render_info);
+	void _gpu_instances_free_scenario(GPUInstanceScenario *p_scenario);
+	// With many buckets for the listed instances, marks the buckets they use,
+	// so that a view skips empty draws; false: every bucket is drawn.
+	bool _gpu_instances_used_buckets(const GPUInstanceScenario &p_scenario, const LocalVector<uint32_t> *p_slots, LocalVector<uint8_t> &r_used) const;
+	LocalVector<uint8_t> gpu_instances_used_buckets;
+	uint32_t gpu_instances_shadow_views_used = 0; // This frame.
+	// Shadow validation (one pass every 30 frames).
+	bool gpu_instances_shadow_check_pending = false;
+	uint64_t gpu_instances_shadow_check_frame = UINT64_MAX;
+	uint32_t gpu_instances_shadow_check_expected = 0;
+	LocalVector<uint32_t> gpu_instances_shadow_check_command_depth;
+	static void _gpu_instances_shadow_check_received(const Vector<uint8_t> &p_data);
 	GPUInstanceScenario *gpu_instances_view = nullptr; // Drawn by the current camera render.
 	bool gpu_instances_view_motion = false; // The view has a motion pass, and members may have moved.
+	const LocalVector<uint32_t> *gpu_instances_view_slots = nullptr; // What its scene cull listed.
 	// Render info of GPU-drawn instances per view (its render buffers), as read
 	// back from the cull pass a few frames later.
 	struct GPUInstanceViewInfo {
@@ -1267,9 +1302,9 @@ protected:
 
 	/* Render shadows */
 
-	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
+	void _render_shadow_pass(RID p_light, RID p_shadow_atlas, int p_pass, const PagedArray<RenderGeometryInstance *> &p_instances, float p_lod_distance_multiplier = 0, float p_screen_mesh_lod_threshold = 0.0, bool p_open_pass = true, bool p_close_pass = true, bool p_clear_region = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D(), const RenderShadowData *p_shadow_data = nullptr);
 	void _render_shadow_begin();
-	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_reverse_cull_face, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D());
+	void _render_shadow_append(RID p_framebuffer, const PagedArray<RenderGeometryInstance *> &p_instances, const Projection &p_projection, const Transform3D &p_transform, float p_zfar, float p_bias, float p_normal_bias, bool p_reverse_cull_face, bool p_use_dp, bool p_use_dp_flip, bool p_use_pancake, float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, const Rect2i &p_rect = Rect2i(), bool p_flip_y = false, bool p_clear_region = true, bool p_begin = true, bool p_end = true, RenderingServerTypes::RenderInfo *p_render_info = nullptr, const Size2i &p_viewport_size = Size2i(1, 1), const Transform3D &p_main_cam_transform = Transform3D(), const RenderShadowData *p_shadow_data = nullptr);
 	void _render_shadow_process(RenderBufferDataForwardClustered *p_cull_buffers = nullptr);
 	void _render_shadow_end();
 

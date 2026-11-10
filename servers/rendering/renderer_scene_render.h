@@ -309,6 +309,10 @@ public:
 		RID light;
 		int pass = 0;
 		PagedArray<RenderGeometryInstance *> instances;
+		// Casters for the renderer's GPU path (directional cascades), listed
+		// apart like the camera's (set_gpu_instance_view).
+		PagedArray<RenderGeometryInstance *> gpu_instances;
+		LocalVector<uint32_t> gpu_slots;
 	};
 
 	struct RenderSDFGIData {
