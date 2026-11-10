@@ -39,6 +39,7 @@ func _ready() -> void:
 	var self_test := OS.get_cmdline_user_args().has("--self-test")
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", true)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/validate", 2 if self_test else 1)
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", false) # On from the HZB phase.
 	_meshes.append(BoxMesh.new())
 	var sphere := SphereMesh.new()
 	sphere.radial_segments = 16

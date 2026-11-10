@@ -17,6 +17,10 @@ var _expect_hzb := true
 
 func _ready() -> void:
 	ProjectSettings.set_setting(OCCLUSION, true)
+	# The HZB timestamp counts every build of the shared pyramid; only CLOD
+	# may build it here (the GPU path and MultiMesh occlusion are on by default).
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", false)
+	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion", false)
 	_camera = Camera3D.new()
 	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	_camera.size = 12

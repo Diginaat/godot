@@ -22,6 +22,9 @@ var _frame := 0
 
 func _ready() -> void:
 	var self_test := OS.get_cmdline_user_args().has("--self-test")
+	# The table on its own: its records are checked against the CPU render
+	# list's elements, which the GPU path (on by default) would take over.
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", false)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instance_table/enabled", true)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instance_table/validate", 2 if self_test else 1)
 	for i in 4:

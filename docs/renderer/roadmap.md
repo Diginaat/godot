@@ -189,7 +189,7 @@ the fixed phase-2 cost). Acceptance: city bench and `massive_100k` with
 occluders; exact images.
 
 - 5.1 Colour-pass occlusion done 2026-11-10 (D034,
-  `rendering/geometry/gpu_instances/occlusion`, off by default): after the
+  `rendering/geometry/gpu_instances/occlusion`, on by default since D035): after the
   depth pre-pass a second run of the cull kernel (`MODE_OCCLUDE`) chooses
   each drawn member's command again, tests its world box against the shared
   HZB and appends the members it cannot prove hidden to a second set of

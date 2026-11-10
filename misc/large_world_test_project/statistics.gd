@@ -23,6 +23,12 @@ func _multimesh(count: int, mesh: Mesh) -> MultiMesh:
 
 
 func _ready() -> void:
+	# Exact counts of the culling paths alone: resident cluster data (no
+	# streaming pool) and no MultiMesh or GPU path occlusion, which are on by
+	# default.
+	ProjectSettings.set_setting("rendering/geometry/cluster_lod/streaming/enabled", false)
+	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion", false)
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", false)
 	var box := BoxMesh.new()
 	box.size = Vector3.ONE * 0.3
 	box.material = _material(Color(0.8, 0.3, 0.2))

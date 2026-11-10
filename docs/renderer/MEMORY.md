@@ -20,7 +20,7 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Phase | 5.1 HZB occlusion of GPU path instances for the colour passes done (2026-11-10, D034); 6.1-6.3 shadow casters on the GPU path done; Phases 1 and 2 done |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | 5.2 depth-pass savings (two-pass) and an occluder bench for the GPU path; Phase 3 multi-draw; decide when the GPU path can be on by default (roadmap.md) |
+| Next | `unique_10k` (many materials: one bucket each, almost no gain; the maintainer's priority); 5.2 depth-pass savings and an occluder bench; Phase 3 multi-draw (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
 | Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (42 camera and 42 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, HZB occlusion behind a wall, spot and omni shadows, casters behind the camera and per-frame churn without rebuilds; 13 of 13 images, shadow render info over 12 frames and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), large-world suites on Vulkan and D3D12, standard smoke, 2026-11-10 |
 
@@ -93,7 +93,10 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
 - D033: directional cascades on the GPU path (per-pass kernel run, shared
   shadow instance data); used-bucket filter when buckets are many.
 - D034: HZB occlusion of GPU path members for the colour passes (second
-  kernel run after the pre-pass, second commands and IDs); opt-in.
+  kernel run after the pre-pass, second commands and IDs).
+- D035: the GPU path, its occlusion, the table, MultiMesh GPU culling
+  (shadows, occlusion), cluster LOD (occlusion, streaming) are on by
+  default; fixtures that test one path pin the others.
 - Earlier geometry decisions D001-D024 still hold (compute + indirect before
   mesh shaders, stable source IDs, opt-in settings, conventional fallback).
 

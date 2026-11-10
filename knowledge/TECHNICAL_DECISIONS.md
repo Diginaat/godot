@@ -724,3 +724,27 @@ fixture's shadow render info comparison now sums 12 frames, because which
 passes a frame draws repeats and the GPU path's count arrives late.
 Not done: depth-pass savings (a two-pass history like D023); a bench scene
 with occluders for the GPU path.
+
+## D035 — The GPU geometry paths are on by default
+
+2026-11-10, at the maintainer's request. These Forward+ settings now
+default to true: `rendering/geometry/gpu_instances/enabled` and
+`occlusion`, `gpu_instance_table/enabled`,
+`multimesh_gpu_culling/enabled`, `shadows` and `occlusion`,
+`cluster_lod/enabled` and `occlusion_enabled`, and
+`cluster_lod/streaming/enabled`. Each still falls back to the CPU path for
+what it does not cover, and each can be turned off per project. Projects
+that saved a value keep it.
+Fixtures that test one path on its own now pin the others:
+`clod_raster` (only CLOD builds the HZB), `statistics` (no streaming pool,
+no MultiMesh or GPU path occlusion), `instance_table` (GPU path off, so the
+CPU elements can be checked against the table) and `gpu_instances`
+(occlusion off until its HZB phase).
+Measured: instance bench (Vulkan, render CPU p50) `massive_100k` 19-21 to
+1.4-1.8 ms, `shared_20k` 6-7 to 0.6 ms, `small_1k` 0.36 to 0.24-0.29 ms,
+`unique_10k` 8.1 to 7.2 ms. The valley (few occluders, MultiMesh vegetation,
+same build with an `override.cfg` holding the old defaults, one run each)
+is slightly slower: render CPU +0.02 to +0.19 ms, GPU about +0.1 ms, mostly
+the HZB and the occlusion tests without anything to occlude.
+Not done: the editor's own viewports were checked only by the smoke test;
+`unique_10k` (one bucket per material) gains little.

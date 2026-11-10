@@ -6117,18 +6117,18 @@ void RenderForwardClustered::_update_shader_quality_settings() {
 }
 
 RenderForwardClustered::RenderForwardClustered() {
-	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/enabled", false);
-	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/shadows", false);
-	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/occlusion", false);
-	GLOBAL_DEF("rendering/geometry/cluster_lod/enabled", false);
-	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_enabled", false);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/enabled", true);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/shadows", true);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/occlusion", true);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/enabled", true);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_enabled", true);
 	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_two_pass", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/error_pixels", PROPERTY_HINT_RANGE, "0,64,0.1,or_greater"), 1.0);
-	GLOBAL_DEF("rendering/geometry/gpu_instance_table/enabled", false);
+	GLOBAL_DEF("rendering/geometry/gpu_instance_table/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instance_table/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
-	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", false);
+	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
-	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", false);
+	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", true);
 	singleton = this;
 	gpu_instances_readbacks_alive = true;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);

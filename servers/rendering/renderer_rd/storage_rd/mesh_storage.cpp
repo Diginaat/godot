@@ -47,7 +47,7 @@ MeshStorage *MeshStorage::get_singleton() {
 MeshStorage::MeshStorage() {
 	singleton = this;
 
-	GLOBAL_DEF("rendering/geometry/cluster_lod/streaming/enabled", false);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/streaming/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/streaming/budget_mb", PROPERTY_HINT_RANGE, "0.25,4096,0.25,or_greater"), 64.0);
 
 	default_rd_storage_buffer = RD::get_singleton()->storage_buffer_create(sizeof(uint32_t) * 4);

@@ -262,3 +262,10 @@ occluders (the cost only), Vulkan, p50 GPU path / with occlusion: GPU
 1.69-1.74 ms; render CPU +0.03-0.07 ms. Same run, render CPU p50 GPU path:
 `massive_100k` 1.43-1.83 ms, `shared_20k` 0.57-0.61 ms, `small_1k`
 0.24-0.27 ms.
+
+Defaults on (D035, 2026-11-10), valley bench (`forest_bench.ps1`,
+Vulkan, one run each, same build; old defaults through a temporary
+`override.cfg`), render CPU p50 old / new: view 0 0.51-0.62 / 0.53-0.69 ms,
+view 1 0.72-1.04 / 0.76-1.23 ms, view 2 0.51-0.73 / 0.56-0.80 ms; GPU p50
++0.04 to +0.12 ms (view 2 source -0.08). Few occluders: the HZB and
+occlusion tests cost without saving.

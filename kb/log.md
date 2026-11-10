@@ -66,6 +66,8 @@
   (D034, `rendering/geometry/gpu_instances/occlusion`, opt-in).
 * **Fixed**: shadow render info counted earlier passes' elements again when
   the instance buffer was remapped mid-frame (upstream has the same order).
+* **Changed**: the GPU geometry paths (GPU path and its occlusion, table,
+  MultiMesh GPU culling, cluster LOD, streaming) are on by default (D035).
 
 ## 2026-11-08 (release 0.9.1)
 
