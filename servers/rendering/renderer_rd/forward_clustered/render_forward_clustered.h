@@ -49,6 +49,7 @@
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_clod_select.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_occlude.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_reduce.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/forward_clustered/gpu_instance_cull.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/multimesh_cull.glsl.gen.h"
 
 #ifdef METAL_ENABLED
@@ -283,7 +284,7 @@ protected:
 
 	void _update_render_base_uniform_set();
 	RID _setup_sdfgi_render_pass_uniform_set(RID p_albedo_texture, RID p_emission_texture, RID p_emission_aniso_texture, RID p_geom_facing_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index);
-	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, RID p_visible_ids = RID());
+	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, RID p_visible_ids = RID(), RID p_gpu_instances = RID());
 	void _prepare_multimesh_culling(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	void _prepare_multimesh_shadow_culling(RenderBufferDataForwardClustered *p_buffers);
 	// TAA and upscalers shift NDC x/y by the jitter (Projection::add_jitter_offset).
@@ -471,6 +472,7 @@ protected:
 		RID multimesh_cull_commands;
 		RID mesh_clod_commands;
 		bool mesh_clod_only = false; // Draw only CLOD elements (phase-2 depth of two-pass occlusion).
+		RID gpu_instance_commands; // GPU path draw buckets' indirect commands.
 
 		RenderListParameters(GeometryInstanceSurfaceDataCache **p_elements, RenderElementInfo *p_element_info, int p_element_count, bool p_reverse_cull, PassMode p_pass_mode, uint32_t p_color_pass_flags, bool p_no_gi, bool p_use_directional_soft_shadows, RID p_render_pass_uniform_set, bool p_force_wireframe = false, const Vector2 &p_uv_offset = Vector2(), float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, uint32_t p_view_count = 1, uint32_t p_element_offset = 0, SceneShaderForwardClustered::ShaderSpecialization p_base_specialization = {}, bool p_use_material_feedback = false) {
 			elements = p_elements;
@@ -738,6 +740,8 @@ protected:
 		uint32_t multimesh_cull_lod; // GPU LOD level count << 24 | visible IDs reserved per level.
 		uint32_t multimesh_cull_last_lod; // Index LOD of the last GPU LOD level; level 0 is lod_index.
 		uint32_t mesh_clod_offset;
+		uint32_t gpu_bucket; // GPU path draw bucket (UINT32_MAX: none); its indirect command.
+		uint32_t gpu_first; // The bucket's first record in the GPU path's instance data.
 	};
 
 	static_assert(std::is_trivially_destructible_v<RenderElementInfo>);
@@ -860,6 +864,13 @@ protected:
 
 		//used during setup
 		uint32_t gpu_slot = GPUInstanceSlots::INVALID; // Index in the GPU instance table.
+		// GPU path (gpu_instances.cpp): the scenario the scene cull reported, the
+		// one whose draw buckets hold the instance (0: none) and its index there.
+		uint64_t gpu_scenario = 0;
+		uint64_t gpu_member_scenario = 0;
+		uint32_t gpu_member_index = UINT32_MAX;
+		uint32_t gpu_pending_index = UINT32_MAX; // In gpu_instances_pending until the next cull.
+		uint32_t gpu_surface_count = 0;
 		uint64_t prev_transform_change_frame = 0xFFFFFFFF;
 		uint64_t last_aged_frame = 0;
 		enum TransformStatus {
@@ -896,6 +907,9 @@ protected:
 		virtual void pair_voxel_gi_instances(const RID *p_voxel_gi_instances, uint32_t p_voxel_gi_instance_count) override;
 
 		virtual void set_softshadow_projector_pairing(bool p_softshadow, bool p_projector) override;
+
+		virtual void set_gpu_scenario(uint64_t p_scenario) override;
+		virtual void set_transparency(float p_transparency) override;
 
 		void age_out_motion(uint64_t p_frame);
 	};
@@ -934,6 +948,75 @@ protected:
 	}
 	void _gpu_instance_table_build_record(uint32_t p_slot, GPUInstanceTable::Record &r_record) const;
 	void _update_gpu_instance_table();
+
+	/* GPU path for eligible instances (rendering/geometry/gpu_instances/*, gpu_instances.cpp) */
+
+	// Instance surfaces drawn alike (render-element sort key without depth
+	// layer, LOD and per-view GI bits, plus mirror) form a bucket: one
+	// indirect draw whose instances a compute pass culls and writes per view.
+	struct GPUInstanceBucket {
+		GeometryInstanceSurfaceDataCache *surface = nullptr; // Drawn with this surface's state.
+		uint32_t first = 0;
+		uint32_t count = 0;
+	};
+	// Bucket in gpu_instance_cull.glsl.
+	struct GPUInstanceBucketData {
+		float compressed_aabb_position[3];
+		uint32_t first;
+		float compressed_aabb_size[3];
+		uint32_t material_feedback_index;
+		float uv_scale[4];
+	};
+	struct GPUInstanceScenario {
+		// Members, including those that join at the next cull (not gpu_drawn yet).
+		LocalVector<GeometryInstanceForwardClustered *> instances;
+		bool dirty = true; // Buckets need a rebuild.
+		LocalVector<GPUInstanceBucket> buckets;
+		LocalVector<GPUInstanceBucketData> bucket_data;
+		LocalVector<uint32_t> members; // Table slot and bucket per drawn instance surface.
+		LocalVector<uint32_t> commands; // Five words per bucket, zero instances.
+		uint32_t member_count = 0;
+		RID members_buffer;
+		RID buckets_buffer;
+		RID commands_buffer;
+		RID output_buffer; // InstanceData per member, written per view.
+		uint32_t member_capacity = 0;
+		uint32_t bucket_capacity = 0;
+	};
+	HashMap<uint64_t, GPUInstanceScenario *> gpu_instance_scenarios;
+	bool gpu_instances_active = false; // rendering/geometry/gpu_instances/enabled as applied.
+	// Instances that left the GPU path during this render while the cull had
+	// listed them for it: the CPU list draws them this time.
+	LocalVector<GeometryInstanceForwardClustered *> gpu_instances_left;
+	// Members that start being drawn by the GPU path at the next camera cull,
+	// so that the cull and the draw buckets agree within a render.
+	LocalVector<GeometryInstanceForwardClustered *> gpu_instances_pending;
+	LocalVector<GeometryInstanceForwardClustered *> gpu_instances_left_view;
+	struct GPUInstanceCull {
+		GpuInstanceCullShaderRD shader;
+		RID version;
+		RID pipeline;
+	} gpu_instance_cull;
+	// Validation (rendering/geometry/gpu_instances/validate).
+	uint64_t gpu_instances_check_frame = UINT64_MAX;
+	bool gpu_instances_check_pending = false;
+	uint32_t gpu_instances_check_expected = 0;
+	uint32_t gpu_instances_check_buckets = 0;
+	uint32_t gpu_instances_check_members = 0;
+	static void _gpu_instances_check_received(const Vector<uint8_t> &p_data);
+
+	bool _gpu_instance_eligible(const GeometryInstanceForwardClustered *p_instance) const;
+	void _gpu_instance_refresh(GeometryInstanceForwardClustered *p_instance, bool p_rendering);
+	void _gpu_instance_leave(GeometryInstanceForwardClustered *p_instance);
+	void _gpu_instances_update_setting();
+	void _gpu_instances_rebuild(GPUInstanceScenario &p_scenario);
+	// Before the camera render list: decides whether the GPU path draws this
+	// view and, if so, culls and writes its instances (gpu_instances_view).
+	bool _gpu_instances_begin_view(RenderDataRD *p_render_data, bool p_using_motion_pass, bool p_using_sdfgi, bool p_using_opaque_gi);
+	// After the CPU elements are prepared: one element per bucket.
+	void _gpu_instances_append(int *p_render_info);
+	GPUInstanceScenario *gpu_instances_view = nullptr; // Drawn by the current camera render.
+	void _gpu_instances_free();
 	PagedAllocator<GeometryInstanceSurfaceDataCache> geometry_instance_surface_alloc;
 	PagedAllocator<GeometryInstanceLightmapSH> geometry_instance_lightmap_sh;
 
@@ -1208,6 +1291,8 @@ public:
 
 	virtual RenderGeometryInstance *geometry_instance_create(RID p_base) override;
 	virtual void geometry_instance_free(RenderGeometryInstance *p_geometry_instance) override;
+
+	virtual bool gpu_instances_begin_cull() override;
 
 	virtual uint32_t geometry_instance_get_pair_mask() override;
 

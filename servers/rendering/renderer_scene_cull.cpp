@@ -1318,6 +1318,7 @@ void RendererSceneCull::instance_set_ignore_culling(RID p_instance, bool p_enabl
 			idata.flags &= ~InstanceData::FLAG_IGNORE_ALL_CULLING;
 		}
 	}
+	_update_instance_gpu_scenario(instance);
 }
 
 Vector<ObjectID> RendererSceneCull::instances_cull_aabb(const AABB &p_aabb, RID p_scenario) const {
@@ -1490,6 +1491,7 @@ void RendererSceneCull::instance_geometry_set_cast_shadows_setting(RID p_instanc
 			idata.flags &= ~InstanceData::FLAG_CAST_SHADOWS_ONLY;
 		}
 	}
+	_update_instance_gpu_scenario(instance);
 
 	if ((1 << instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK && instance->base_data) {
 		InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(instance->base_data);
@@ -1669,6 +1671,24 @@ void RendererSceneCull::_update_instance_visibility_dependencies(Instance *p_ins
 			}
 		}
 	}
+	_update_instance_gpu_scenario(p_instance);
+}
+
+void RendererSceneCull::_update_instance_gpu_scenario(Instance *p_instance) const {
+	// Camera views may leave a mesh instance to the renderer's GPU path only
+	// when nothing but the frustum and layer tests decides whether it shows:
+	// no visibility range or parent, not shadows-only, not exempt from culling.
+	if (p_instance->base_type != RSE::INSTANCE_MESH || !p_instance->base_data) {
+		return;
+	}
+	InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(p_instance->base_data);
+	if (!geom->geometry_instance) {
+		return;
+	}
+	const bool has_visibility_range = p_instance->visibility_range_begin > 0.0 || p_instance->visibility_range_end > 0.0;
+	const bool eligible = p_instance->scenario && p_instance->array_index != -1 && !has_visibility_range && !p_instance->visibility_parent &&
+			p_instance->cast_shadows != RSE::SHADOW_CASTING_SETTING_SHADOWS_ONLY && !p_instance->ignore_all_culling;
+	geom->geometry_instance->set_gpu_scenario(eligible ? p_instance->scenario->self.get_id() : 0);
 }
 
 void RendererSceneCull::instance_geometry_set_lightmap(RID p_instance, RID p_lightmap, const Rect2 &p_lightmap_uv_scale, int p_slice_index) {
@@ -2111,6 +2131,7 @@ void RendererSceneCull::_unpair_instance(Instance *p_instance) {
 
 	//uninitialize
 	p_instance->array_index = -1;
+	_update_instance_gpu_scenario(p_instance);
 	if ((1 << p_instance->base_type) & RSE::INSTANCE_GEOMETRY_MASK) {
 		// Clear these now because the InstanceData containing the dirty flags is gone
 		InstanceGeometryData *geom = static_cast<InstanceGeometryData *>(p_instance->base_data);
@@ -3807,7 +3828,10 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 						}
 
 						ERR_FAIL_NULL(geom->geometry_instance);
+						// Locked: the renderer may mark the instance dirty.
+						cull_data.cull->lock.lock();
 						geom->geometry_instance->pair_voxel_gi_instances(instance_pair_buffer, idx);
+						cull_data.cull->lock.unlock();
 
 						idata.flags &= ~InstanceData::FLAG_GEOM_VOXEL_GI_DIRTY;
 					}
@@ -3827,7 +3851,11 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 					}
 
 					if (keep) {
-						cull_result.geometry_instances.push_back(idata.instance_geometry);
+						if (cull_data.gpu_split && idata.instance_geometry->gpu_drawn) {
+							cull_result.gpu_geometry_instances.push_back(idata.instance_geometry);
+						} else {
+							cull_result.geometry_instances.push_back(idata.instance_geometry);
+						}
 					}
 				}
 			}
@@ -4093,6 +4121,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	}
 
 	scene_cull_result.clear();
+	const bool gpu_split = scene_render->gpu_instances_begin_cull();
 
 	{
 		uint64_t cull_from = 0;
@@ -4112,6 +4141,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.camera_matrix = &p_camera_data->main_projection;
 		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
 		cull_data.reflection_probes_enabled = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probes_enabled");
+		cull_data.gpu_split = gpu_split;
 #ifdef DEBUG_CULL_TIME
 		uint64_t time_from = OS::get_singleton()->get_ticks_usec();
 #endif
@@ -4410,7 +4440,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		}
 	}
 
+	scene_render->set_gpu_instance_view(gpu_split ? p_scenario.get_id() : 0, gpu_split ? &scene_cull_result.gpu_geometry_instances : nullptr, p_visible_layers);
 	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info, &scene_cull_result.rt_geometry_instances, &scene_cull_result.rt_light_instances, planar_reflections);
+	scene_render->set_gpu_instance_view(0, nullptr, 0);
 
 	if (p_viewport.is_valid() && !p_camera_data->mirror_pass) {
 		RSG::viewport->viewport_set_prev_camera_data(p_viewport, p_camera_data);

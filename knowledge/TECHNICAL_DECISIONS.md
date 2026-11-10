@@ -519,3 +519,36 @@ Candidates:
 Also: making the CPU walk cache-friendly (hot per-element fields in the
 surface cache) is a separate, cheaper candidate for the CPU fallback path
 (Phase 4).
+
+## D028 — The GPU path writes its own instance buffer (binding 47)
+
+2026-11-10, Phase 2.3/2.4.
+Problem: D027 planned to keep the scene shader as it is, with the compute
+pass writing the 176-byte instance data where the shader already reads it
+(set 1, binding 2). That buffer is a dynamic persistent buffer, mapped by
+the CPU and declared as a dynamic descriptor in the scene shader's layout.
+On D3D12 such buffers live in an upload heap, which the GPU can only read:
+it can be neither a UAV nor a copy destination.
+Candidates:
+1. Compute writes into the binding-2 buffer. Rejected: impossible on D3D12
+   upload heaps, and the buffer is mapped once per frame by the CPU.
+2. Compute writes a GPU buffer and copies into binding 2. Rejected for the
+   same reason.
+3. A second instance buffer at binding 47, chosen per draw by a scene
+   shader specialization bit (`gpu_instances`, like
+   `multimesh_gpu_culling`); every read of the instance data goes through
+   one macro, `SCENE_INSTANCE(field)`. Chosen. Pipelines with the bit are
+   compiled only for materials drawn by buckets; the ubershader evaluates
+   the choice per read.
+Also decided here:
+- The table record grows to 160 bytes: world bounds for the frustum test,
+  and two bits (moved this frame, which gives the dynamic flag, and can use
+  SDFGI). Still view-independent (D026).
+- Consistency within a render: the scene cull reads `gpu_drawn` when it
+  culls, and the renderer may change eligibility later in the same render
+  (dirty instances update there). Joins only take effect at the next cull
+  (`gpu_instances_begin_cull`); an instance that leaves during a render is
+  drawn by the CPU list that time. So no instance is drawn twice or missed.
+- Instances in a view the GPU path does not cover (probe, mirror, XR,
+  motion list, debug draw) go through the CPU list from the cull's
+  separate list; nothing is lost when the path declines a view.

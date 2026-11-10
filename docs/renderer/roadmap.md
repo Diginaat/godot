@@ -91,31 +91,43 @@ lightmap, lightmap capture or VoxelGI, single precision, Forward+ main
 camera views (not mirrors, reflection probes or XR). Everything else keeps
 the CPU path.
 
-- 2.1 Draw buckets: eligible instance surfaces grouped by the render-element
-  key without depth layer and LOD (pipeline, material, mesh surface, mirror
-  flag), kept current through the table's change hooks, not per frame.
-- 2.2 Keep eligible instances out of the camera render lists. The CPU scene
-  cull still visits them (it is packed and cheap) for lights, probes and
-  notifiers, and shadow passes keep them until Phase 6; the camera list
-  skips them with a flag in the cull's packed data, without touching the
-  instance object.
-- 2.3 Compute pass per view: frustum, layer mask and visibility range over
-  each bucket's slots; for visible instances, write the existing 176-byte
-  `InstanceData` (from the table record plus per-view bits computed on the
-  GPU: dynamic/motion from transform against previous transform, SDFGI and
-  GI buffer flags from the pass) into a GPU-local per-view buffer, and the
-  bucket's instance count into an indirect command. The scene shader stays
-  as it is.
-- 2.4 Draw each bucket with one indirect draw (multi-draw where supported)
-  in the depth, opaque and motion passes; ordering by bucket key replaces
-  the CPU sort for these instances.
-- 2.5 Per-instance LOD in the kernel (reuse D010); multiple views (each
-  viewport its own buffers), jitter (widened frustum), first frame and
-  camera cuts (current-frame, no history).
+- 2.1 Draw buckets (done 2026-11-10, `forward_clustered/gpu_instances.cpp`):
+  eligible instance surfaces grouped by the render-element key without
+  depth layer, LOD and per-view GI bits, plus mirror; one scenario's buckets
+  are rebuilt (sorted, full) when a member joins, leaves or changes, not per
+  frame.
+- 2.2 Keep eligible instances out of the camera render lists (done): the
+  scene cull asks the instance (`RenderGeometryInstance::gpu_drawn`, one
+  load per visible instance in the threaded cull) and lists it apart; the
+  renderer gets that list and the scenario through
+  `RendererSceneRender::set_gpu_instance_view()`. Views the GPU path does
+  not cover take the list into the CPU render list. Lights, probes, pairing
+  and shadow passes are unchanged. Scene cull eligibility: no visibility
+  range or parent, not shadows-only, not exempt from culling.
+- 2.3 Compute pass per view (done, `gpu_instance_cull.glsl`): frustum (widened
+  for jitter) and camera layers from the table record (now 160 bytes with
+  world bounds and two per-instance bits, D028); writes the existing
+  176-byte `InstanceData` and appends to the bucket's indirect command.
+  The scene shader reads it from binding 47 under a specialization bit
+  (D028), so it changes in one macro, not in its logic.
+- 2.4 One indirect draw per bucket in the depth pre-pass and the opaque pass
+  (done). Views with a motion list (temporal upscaling), reflection probes,
+  mirrors, XR and debug draw modes use the CPU list. Multi-draw is Phase 3.
+- 2.5 Next: per-instance LOD in the kernel (reuse D010) so meshes with LODs
+  become eligible; separate shadow meshes; views with a motion list;
+  incremental bucket updates instead of full rebuilds; the `gpu_drawn` bit
+  in the cull's packed data; viewport render info (objects, primitives) for
+  GPU-drawn instances; occlusion culling (`OccluderInstance3D` today, HZB
+  later) for them.
 - Acceptance: exact pixel and motion-vector A/B against the CPU path on
   Vulkan and D3D12; `massive_100k` and `shared_20k` render CPU down by most
   of the "Setup 3D Scene" share; GPU cost reported per view; `small_1k` not
   slower; no readback.
+  Status 2026-11-10 (2.1-2.4): pixel A/B exact in all 7 phases of
+  `gpu_instances.ps1` on Vulkan and D3D12 (no motion-vector A/B yet: views
+  with a motion list stay on the CPU); `massive_100k` render CPU 22.0 to
+  5.5 ms, `shared_20k` about 4 ms lower; GPU +0.1-0.3 ms at 100k; readback
+  only for validation. See benchmarks.md.
 
 ## Phase 3 - indirect submission (P0)
 

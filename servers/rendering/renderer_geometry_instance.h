@@ -41,6 +41,14 @@ class RenderGeometryInstance {
 public:
 	virtual ~RenderGeometryInstance() {}
 
+	// GPU path for eligible instances (Forward+, docs/renderer/roadmap.md
+	// Phase 2). The scene cull reports the scenario whose arrays hold the
+	// instance when its camera draws may go to the GPU (0: they may not); the
+	// renderer sets gpu_drawn when its GPU path draws the instance, and camera
+	// culls then list it separately (RendererSceneRender::set_gpu_instance_view).
+	bool gpu_drawn = false;
+	virtual void set_gpu_scenario(uint64_t p_scenario) {}
+
 	virtual void _mark_dirty() = 0;
 
 	virtual void set_skeleton(RID p_skeleton) = 0;

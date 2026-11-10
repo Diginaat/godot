@@ -1531,6 +1531,9 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 		render_data.rt_instances = p_rt_instances;
 		render_data.rt_lights = p_rt_lights;
 		render_data.planar_reflections = p_planar_reflections;
+		render_data.gpu_instances = gpu_view_instances;
+		render_data.gpu_scenario = gpu_view_scenario;
+		render_data.gpu_visible_layers = gpu_view_visible_layers;
 
 		if (p_render_buffers.is_valid() && p_reflection_probe.is_null()) {
 			render_data.transparent_bg = texture_storage->render_target_get_transparent(rb->get_render_target());

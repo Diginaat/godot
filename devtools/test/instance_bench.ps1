@@ -7,7 +7,9 @@ param(
 	# Per-stage CPU times (RENDER_TIMESTAMP markers) instead of timing.
 	[switch]$Stages,
 	# Turn on rendering/geometry/gpu_instance_table.
-	[switch]$Table
+	[switch]$Table,
+	# Turn on rendering/geometry/gpu_instances (the GPU path for eligible instances).
+	[switch]$GpuInstances
 )
 # Many-instance CPU benchmark (docs/renderer/benchmarks.md): separate
 # MeshInstance3D nodes from 1k to 100k, shared and unique materials, moving
@@ -25,10 +27,11 @@ $mode = if ($Stages) { @("--gpu-profile", "--quit-after", "10000", "res://instan
 $userArgs = @()
 if ($Stages) { $userArgs += "--stages" }
 if ($Table) { $userArgs += "--table" }
+if ($GpuInstances) { $userArgs += "--gpu-instances" }
 if ($userArgs.Count -gt 0) { $mode += @("--") + $userArgs }
 $lines = & $editor --path $project --rendering-driver $Driver --render-thread $RenderThread @mode 2>&1 | ForEach-Object { "$_" }
 $code = $LASTEXITCODE
-$kind = $(if ($Stages) { "stages" } else { "timing" }) + $(if ($Table) { "_table" } else { "" })
+$kind = $(if ($Stages) { "stages" } else { "timing" }) + $(if ($Table) { "_table" } else { "" }) + $(if ($GpuInstances) { "_gpu" } else { "" })
 $lines | Set-Content (Join-Path $logs "instance_bench_${Label}_${Driver}_${RenderThread}_$kind.log")
 $rows = @($lines | Where-Object { $_ -match $(if ($Stages) { "^INSTANCE_BENCH_STAGES:" } else { "^INSTANCE_BENCH:" }) })
 $expected = if ($Stages) { 12 } else { 24 }

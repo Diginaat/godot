@@ -159,6 +159,12 @@ bool sc_multimesh_gpu_culling() {
 	return ((sc_packed_1() >> 9) & 1U) != 0;
 }
 
+// Draws of the GPU path for eligible instances (docs/renderer, Phase 2) read
+// the instance data a compute pass wrote (binding 47) instead of the CPU's.
+bool sc_gpu_instances() {
+	return ((sc_packed_1() >> 10) & 1U) != 0;
+}
+
 bool sc_material_feedback() {
 	return ((sc_packed_1() >> 7) & 1U) != 0;
 }
@@ -409,6 +415,14 @@ layout(set = 1, binding = 46, std430) readonly buffer MultiMeshVisibleIDs {
 	uint data[];
 }
 multimesh_visible_ids;
+
+layout(set = 1, binding = 47, std430) buffer restrict readonly GPUInstanceDataBuffer {
+	InstanceData data[];
+}
+gpu_instances;
+
+// One field of the drawn instance's data, from whichever buffer holds it.
+#define SCENE_INSTANCE(m_field) (sc_gpu_instances() ? gpu_instances.data[instance_index].m_field : instances.data[instance_index].m_field)
 
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 

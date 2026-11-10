@@ -17,12 +17,19 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 1 done except 1.8 (lifetime and limits); 1.5-1.7 dropped by D027 (2026-11-10) |
+| Phase | 2, GPU path for eligible instances: 2.1-2.4 done (2026-11-10); Phase 1 done except 1.8 |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 2.1 draw buckets for eligible instances (revised Phase 2 in roadmap.md); 1.8 lifetime cases can go first |
+| Next | Phase 2.5: per-instance LOD so meshes with LODs qualify, shadow meshes, motion-list views, incremental buckets (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `instance_table.ps1` on Vulkan and D3D12 (27 buffer + 27 element checks, both upload paths, teleports, second viewport, self-test catches both), standard smoke, 2026-11-10. Full large-world suites last run at 1.2; `instance_bench -Table` at 1.3 |
+| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (17 count checks, 7 of 7 images equal to the CPU path, self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
+
+## Phase 2 in one line
+
+`rendering/geometry/gpu_instances/enabled` (off by default): `massive_100k`
+render CPU 22.0 to 5.5 ms, `shared_20k` about 4 ms lower, images identical
+to the CPU path; the rest is mostly CPU shadow passes. Details:
+[benchmarks.md](benchmarks.md).
 
 ## Baseline in one line
 
@@ -37,6 +44,11 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   (Vulkan 104 MiB); about 2 ms spread between repeats in the 20k cases.
 - With the table on, `dynamic_20k` still has about +0.5-0.8 ms render CPU
   (building/packing 2,000 dirty records per frame); GPU cost fixed in 1.3.
+- GPU path: meshes with LODs (most imports) and separate shadow meshes are
+  not eligible yet; any membership change rebuilds the scenario's buckets
+  in full (a hitch when many nodes are added at once); `unique_10k` gains
+  nothing (one bucket per material); viewport render info misses GPU-drawn
+  objects.
 - RD cannot draw with a GPU-written count (driver code exists, no RD API,
   Vulkan feature not enabled); D3D12 ignores the indirect stride.
 
@@ -54,6 +66,11 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   only keeping eligible instances out of the CPU camera lists pays. Phase 2
   writes the existing 176-byte instance data on the GPU per view, so the
   scene shader does not change.
+- D028: the GPU path's instance data has its own binding (47) and a scene
+  shader specialization bit, because D3D12 upload heaps (the per-frame
+  instance buffer) cannot be written by the GPU. Within a render, the cull
+  and the buckets agree: joins start at the next cull, and instances that
+  leave during a render are drawn by the CPU list that time.
 - Earlier geometry decisions D001-D024 still hold (compute + indirect before
   mesh shaders, stable source IDs, opt-in settings, conventional fallback).
 

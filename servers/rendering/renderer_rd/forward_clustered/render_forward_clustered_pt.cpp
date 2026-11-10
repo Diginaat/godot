@@ -549,6 +549,13 @@ void RenderForwardClusteredPT::_age_out_motion_vectors(const RenderDataRD *p_ren
 		}
 	}
 
+	// Instances the camera cull listed for the GPU path.
+	if (p_render_data->gpu_instances) {
+		for (uint32_t i = 0; i < (uint32_t)p_render_data->gpu_instances->size(); i++) {
+			static_cast<GeometryInstanceForwardClustered *>((*p_render_data->gpu_instances)[i])->age_out_motion(frame);
+		}
+	}
+
 	// Process raster instances
 	if (p_render_data->instances) {
 		for (uint32_t i = 0; i < (uint32_t)p_render_data->instances->size(); i++) {

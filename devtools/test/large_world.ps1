@@ -39,3 +39,8 @@ foreach ($test in @("indirect", "culling", "clusters", "clod", "residency", "hzb
 if ($LASTEXITCODE -ne 0) {
 	exit 1
 }
+# GPU path for eligible instances (Phase 2): counts and images against the CPU path, plus a self-test.
+& "$PSScriptRoot\gpu_instances.ps1" -Driver $Driver
+if ($LASTEXITCODE -ne 0) {
+	exit 1
+}

@@ -60,6 +60,11 @@ class RendererSceneRenderRD : public RendererSceneRender, public RenderingShader
 	friend RendererRD::GI;
 
 protected:
+	// Set by the scene cull around each render_scene() (set_gpu_instance_view).
+	uint64_t gpu_view_scenario = 0;
+	const PagedArray<RenderGeometryInstance *> *gpu_view_instances = nullptr;
+	uint32_t gpu_view_visible_layers = 0;
+
 	RendererRD::ForwardIDStorage *forward_id_storage = nullptr;
 	RendererRD::BokehDOF *bokeh_dof = nullptr;
 	RendererRD::CopyEffects *copy_effects = nullptr;
@@ -250,6 +255,12 @@ public:
 	RID render_buffers_get_default_voxel_gi_buffer();
 
 	virtual void base_uniforms_changed() = 0;
+
+	virtual void set_gpu_instance_view(uint64_t p_scenario, const PagedArray<RenderGeometryInstance *> *p_instances, uint32_t p_visible_layers) override {
+		gpu_view_scenario = p_scenario;
+		gpu_view_instances = p_instances;
+		gpu_view_visible_layers = p_visible_layers;
+	}
 
 	virtual void render_scene(const Ref<RenderSceneBuffers> &p_render_buffers, const CameraData *p_camera_data, const CameraData *p_prev_camera_data, const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const PagedArray<RID> &p_reflection_probes, const PagedArray<RID> &p_voxel_gi_instances, const PagedArray<RID> &p_decals, const PagedArray<RID> &p_lightmaps, const PagedArray<RID> &p_fog_volumes, RID p_environment, RID p_camera_attributes, RID p_compositor, RID p_shadow_atlas, RID p_occluder_debug_tex, RID p_reflection_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, const RenderShadowData *p_render_shadows, int p_render_shadow_count, const RenderSDFGIData *p_render_sdfgi_regions, int p_render_sdfgi_region_count, float p_window_output_max_value, const RenderSDFGIUpdateData *p_sdfgi_update_data = nullptr, RenderingServerTypes::RenderInfo *r_render_info = nullptr, const PagedArray<RenderGeometryInstance *> *p_rt_instances = nullptr, const PagedArray<RID> *p_rt_lights = nullptr, const LocalVector<RenderPlanarReflection> *p_planar_reflections = nullptr) override;
 

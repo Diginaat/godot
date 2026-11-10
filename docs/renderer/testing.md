@@ -41,7 +41,7 @@ DDGI and path tracer scenes (smoke).
 
 | Bench | Command | Measures |
 | --- | --- | --- |
-| Many instances (CPU) | `devtools\test\instance_bench.ps1 -Driver vulkan [-RenderThread separate]` | Separate `MeshInstance3D` nodes, 1k to 100k; wall frame, render CPU, GPU p50/p95/p99; per-stage CPU from frame profile markers |
+| Many instances (CPU) | `devtools\test\instance_bench.ps1 -Driver vulkan [-RenderThread separate] [-GpuInstances]` | Separate `MeshInstance3D` nodes, 1k to 100k; wall frame, render CPU, GPU p50/p95/p99; per-stage CPU from frame profile markers; `-GpuInstances` turns on the Phase 2 GPU path |
 | Valley | `devtools\test\forest_bench.ps1 -Driver vulkan -Label <name>` | Real large-world scene: MultiMesh vegetation, CLOD, HZB, shadows |
 | HZB city | `devtools\test\hzb_bench.ps1 -Driver vulkan` | Occlusion-heavy views |
 | Whole-frame GPU | `devtools\test\gpu_intervals.ps1` | Every timestamp interval, including work before the viewport |

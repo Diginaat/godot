@@ -49,8 +49,18 @@ public:
 		uint32_t layer_mask;
 		uint32_t generation; // Slot generation; odd while the slot is in use.
 		float lightmap_uv_scale[4];
+		// World bounds and per-instance bits for the GPU path (Phase 2).
+		float aabb_position[3];
+		uint32_t gpu_flags; // GPU_FLAG_*.
+		float aabb_size[3];
+		uint32_t pad;
 	};
-	static_assert(sizeof(Record) == 128, "GPUInstanceTable::Record must stay 128 bytes (std430 layout).");
+	static_assert(sizeof(Record) == 160, "GPUInstanceTable::Record must stay 160 bytes (std430 layout).");
+
+	enum {
+		GPU_FLAG_MOVED = 1, // Moved this frame: the instance data gets the dynamic flag.
+		GPU_FLAG_CAN_SDFGI = 2, // Lit by SDFGI when the view uses it.
+	};
 
 	static constexpr uint32_t MIN_CAPACITY = 1024;
 	// Up to this many contiguous runs are written with one buffer_update

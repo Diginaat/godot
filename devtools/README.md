@@ -17,8 +17,9 @@ versioning) are in [CUSTOM_BUILD.md](../CUSTOM_BUILD.md). Feature notes:
 | `test/` | `large_world.ps1` | Real scene import, GPU culling/CLOD commands, native materials/shadows and lifetime regressions |
 | `test/` | `forest.ps1` | Dense lit forest: source versus GPU culling/CLOD/HZB pixel A/B with light and shadow controls |
 | `test/` | `gpu_intervals.ps1` | Whole-frame GPU time per timestamp interval, including work recorded before the viewport; `-FixedFps` for moving cameras, `-ExtraArgs --view-time=T` for one valley view |
-| `test/` | `instance_bench.ps1` | Many separate MeshInstance3D nodes (1k-100k): frame, render CPU, GPU p50/p95/p99; `-Stages` for per-stage CPU, `-Table` turns on the GPU instance table |
+| `test/` | `instance_bench.ps1` | Many separate MeshInstance3D nodes (1k-100k): frame, render CPU, GPU p50/p95/p99; `-Stages` for per-stage CPU, `-Table` turns on the GPU instance table, `-GpuInstances` the GPU path for eligible instances |
 | `test/` | `instance_table.ps1` | GPU instance table against its CPU copy (growth, moves, reuse, rebuild) plus a self-test; also run by `large_world.ps1` |
+| `test/` | `gpu_instances.ps1` | GPU path for eligible instances: drawn counts against the CPU cull and images against the CPU path through moves, layers, hiding, ineligible materials, frees, more views; plus a self-test; also run by `large_world.ps1` |
 | `test/` | `forest_map.ps1` | Day/night valley fly-through with GPU geometry, volumetric fog, many lights and emissives; route screenshots |
 | `test/ddgi/` | `ddgi_tests.ps1`, `ddgi_eval.py` | DDGI measurements: flicker, light switch, weather, scrolling, GPU time, baking, comparison shots |
 | `docs/` | `update_class_docs.ps1`, `check_class_docs.py` | Keeps the class reference (editor help) complete |

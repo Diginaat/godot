@@ -134,6 +134,7 @@ public:
 				// compiled out of every other pipeline.
 				uint32_t ddgi_probe_capture : 1;
 				uint32_t multimesh_gpu_culling : 1;
+				uint32_t gpu_instances : 1; // Instance data from the GPU path (binding 47).
 			};
 		};
 

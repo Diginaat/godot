@@ -172,6 +172,36 @@ memory. `shared_20k` varies by about 0.4 ms between runs (mode 2 above
 mode 1). Conclusion (D027): replacing the record with a slot ID saves at
 most about 2.5 of 20 ms; the CPU has to stop visiting eligible instances.
 
+### GPU path for eligible instances (Phase 2.1-2.4), 2026-11-10
+
+`instance_bench.ps1` with and without `-GpuInstances`, Vulkan, safe render
+thread, same session, ms p50 (static / orbit view, two repeats where they
+differ by more than 1 ms):
+
+| Case | Render CPU, CPU path | Render CPU, GPU path | GPU, CPU path | GPU, GPU path | Draws |
+| --- | --- | --- | --- | --- | --- |
+| `small_1k` | 0.36-0.41 | 0.34-0.40 | 0.26 | 0.27-0.34 | 3 / 2 |
+| `shared_20k` | 7.0-10.1 | 3.5-6.1 | 1.36-1.40 | 1.27-1.39 | 113 / 17 |
+| `unique_10k` | 8.4-9.3 | 8.1-8.7 | 1.28-1.36 | 1.12-1.15 | 8,800 / 10,001 |
+| `massive_100k` | 21.6-22.5 | 5.3-5.6 | 1.15 | 1.26-1.45 | 16 / 2 |
+| `dynamic_20k` | 8.0-10.6 | 4.8-5.9 | 1.37-1.42 | 1.36-1.44 | 113 / 17 |
+| `lights_20k` | 7.6-7.7 | 3.4-4.5 | 1.62-1.65 | 1.55-1.60 | 113 / 17 |
+
+Wall frame time follows render CPU (`massive_100k` 22.6 to 6.1 ms). The
+remaining render CPU at 100k is mostly the shadow passes, which still use
+the CPU lists (Phase 6). `unique_10k` gains nothing: 10,000 materials make
+10,000 buckets, one indirect draw each, and their per-view bucket data. GPU
+cost at 100k is the cull and 176-byte writes of 100k instance surfaces
+(+0.1-0.3 ms). Viewport render info counts no objects or primitives for
+GPU-drawn instances yet. Buffer memory grows by about 64 MiB at 100k (table,
+members and per-view instance data at power-of-two capacity).
+
+D3D12, same protocol, render CPU p50 (CPU path / GPU path): `small_1k`
+0.40-0.54 / 0.29-0.40, `shared_20k` 7.7-10.1 / 3.2-6.2, `unique_10k`
+8.2-9.2 / 7.9-8.9, `massive_100k` 20.7-22.3 / 5.5-5.9, `dynamic_20k`
+7.9-9.5 / 4.8-7.3, `lights_20k` 7.0-8.2 / 4.0-5.0. GPU p50 changes by
++0.13 ms at 100k and +0.07 ms in `unique_10k`, less elsewhere.
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

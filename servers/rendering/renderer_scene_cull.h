@@ -984,6 +984,9 @@ public:
 		PagedArray<RenderGeometryInstance *> rt_geometry_instances;
 		PagedArray<RID> rt_light_instances;
 
+		// Visible instances the renderer's GPU path draws (gpu_drawn).
+		PagedArray<RenderGeometryInstance *> gpu_geometry_instances;
+
 		struct DirectionalShadow {
 			PagedArray<RenderGeometryInstance *> cascade_geometry_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
 		} directional_shadows[RendererSceneRender::MAX_DIRECTIONAL_LIGHTS];
@@ -1003,6 +1006,7 @@ public:
 			fog_volumes.clear();
 			rt_geometry_instances.clear();
 			rt_light_instances.clear();
+			gpu_geometry_instances.clear();
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].clear();
@@ -1030,6 +1034,7 @@ public:
 			fog_volumes.reset();
 			rt_geometry_instances.reset();
 			rt_light_instances.reset();
+			gpu_geometry_instances.reset();
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].reset();
@@ -1057,6 +1062,7 @@ public:
 			fog_volumes.merge_unordered(p_cull_result.fog_volumes);
 			rt_geometry_instances.merge_unordered(p_cull_result.rt_geometry_instances);
 			rt_light_instances.merge_unordered(p_cull_result.rt_light_instances);
+			gpu_geometry_instances.merge_unordered(p_cull_result.gpu_geometry_instances);
 
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
@@ -1085,6 +1091,7 @@ public:
 			fog_volumes.set_page_pool(p_rid_pool);
 			rt_geometry_instances.set_page_pool(p_geometry_instance_pool);
 			rt_light_instances.set_page_pool(p_rid_pool);
+			gpu_geometry_instances.set_page_pool(p_geometry_instance_pool);
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].set_page_pool(p_geometry_instance_pool);
@@ -1150,6 +1157,7 @@ public:
 
 	bool _update_instance_visibility_depth(Instance *p_instance);
 	void _update_instance_visibility_dependencies(Instance *p_instance) const;
+	void _update_instance_gpu_scenario(Instance *p_instance) const;
 
 	// don't use these in a game!
 	virtual Vector<ObjectID> instances_cull_aabb(const AABB &p_aabb, RID p_scenario = RID()) const;
@@ -1256,6 +1264,7 @@ public:
 		const Projection *camera_matrix;
 		uint64_t visibility_viewport_mask;
 		bool reflection_probes_enabled = true; // rendering/global_illumination/reflections/probes_enabled
+		bool gpu_split = false; // List gpu_drawn instances apart (RendererSceneRender::gpu_instances_begin_cull()).
 	};
 
 	void _scene_cull_threaded(uint32_t p_thread, CullData *cull_data);

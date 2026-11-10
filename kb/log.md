@@ -13,6 +13,10 @@
 * **Decision**: D027. The per-element CPU walk (about 63 ns per element,
   pointer chasing) dominates `_fill_instance_data`, so slot-ID elements were
   dropped; eligible instances will leave the CPU camera lists (Phase 2).
+* **Implemented**: GPU path for eligible instances (Phase 2.1-2.4, D028),
+  opt-in: draw buckets, compute cull writing instance data, one indirect
+  draw per bucket. Images identical to the CPU path on Vulkan and D3D12;
+  `massive_100k` render CPU 22.0 to 5.5 ms.
 
 ## 2026-11-08 (release 0.9.1)
 
