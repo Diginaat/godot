@@ -3,7 +3,7 @@ param(
 	[string]$Driver = "vulkan"
 )
 # GPU path for eligible instances: while the fixture moves, hides, re-layers,
-# changes, frees and adds nodes and opens more views, the engine compares what
+# changes, gives meshes index LODs, frees and adds nodes and opens more views, the engine compares what
 # the GPU path drew with what the CPU cull found visible, and the fixture
 # compares each phase's image with and without the GPU path. Then a self-test
 # run, where one draw bucket is left out, must make both checks fail.
@@ -22,14 +22,16 @@ $checks = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_CHECK: ok .*drawn=
 $equal = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_AB: equal" })
 $errors = Get-RealErrors $lines
 $errors += @($lines | Where-Object { $_ -match "SCRIPT ERROR:|leaked|ObjectDB instances|GPU_INSTANCES_AB: differ" })
+# Index LODs chosen by the GPU path beyond level 0 (same counts as the CPU choice).
+$lods = @($checks | Where-Object { $_ -match "lods=.*,[1-9][0-9]*:[1-9]" })
 $done = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_TEST_DONE: .* 0 image differences" })
-# Seven phases with an image comparison each, two count checks per phase.
-if ($code -ne 0 -or $errors.Count -gt 0 -or $done.Count -ne 1 -or $equal.Count -ne 7 -or $checks.Count -lt 14) {
+# Eight phases with an image comparison each, two count checks per phase.
+if ($code -ne 0 -or $errors.Count -gt 0 -or $done.Count -ne 1 -or $equal.Count -ne 8 -or $checks.Count -lt 16 -or $lods.Count -eq 0) {
 	$lines | Where-Object { $_ -match "ERROR|GPU_INSTANCES" } | Write-Output
-	Write-Result "GPU instances ($Driver)" $false "exit $code, $($checks.Count) count checks, $($equal.Count) of 7 images equal; see devtools/out/large_world"
+	Write-Result "GPU instances ($Driver)" $false "exit $code, $($checks.Count) count checks, $($equal.Count) of 8 images equal, $($lods.Count) with index LODs; see devtools/out/large_world"
 	exit 1
 }
-Write-Result "GPU instances ($Driver)" $true "$($checks.Count) count checks, 7 of 7 images equal to the CPU path: moves, layers, hidden, ineligible and back, free and add, more views"
+Write-Result "GPU instances ($Driver)" $true "$($checks.Count) count checks ($($lods.Count) with index LODs), 8 of 8 images equal to the CPU path: moves, layers, hidden, ineligible and back, index LODs, free and add, more views"
 
 $lines = & $editor --path $project --rendering-driver $Driver --quit-after 1000 res://gpu_instances.tscn -- --self-test 2>&1 | ForEach-Object { "$_" }
 $lines | Set-Content (Join-Path $logs "gpu_instances_selftest_$Driver.log")

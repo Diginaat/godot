@@ -6,8 +6,10 @@
 
 // GPU path for eligible instances (docs/renderer, Phase 2). One thread per
 // bucket member (an instance surface): frustum and layer test from the GPU
-// instance table, then the instance data Forward+ draws with, appended to
-// the member's draw bucket. The CPU zeroed each bucket's instance count.
+// instance table, the index LOD as the CPU render list chooses it, then the
+// instance data Forward+ draws with, at the member's own index, and the
+// member's index appended to its bucket level's draw. The CPU zeroed each
+// level's instance count.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -22,15 +24,19 @@ struct Record { // GPUInstanceTable::Record, 160 bytes.
 	vec3 aabb_position;
 	uint gpu_flags;
 	vec3 aabb_size;
-	uint pad;
+	float lod_scale;
 };
 
-struct Bucket { // RenderForwardClustered::GPUInstanceBucketData, 48 bytes.
+struct Bucket { // RenderForwardClustered::GPUInstanceBucketData, 64 bytes.
 	vec3 compressed_aabb_position;
-	uint first; // First output record of the bucket.
+	uint ids_first; // Visible IDs of level 0; count are reserved per level.
 	vec3 compressed_aabb_size;
 	uint material_feedback_index;
 	vec4 uv_scale;
+	uint command; // Indirect command of level 0.
+	uint count;
+	uint lod_count;
+	uint lod_edges_first;
 };
 
 struct InstanceData { // SceneState::InstanceData, 176 bytes.
@@ -68,12 +74,23 @@ layout(set = 0, binding = 3, std430) restrict buffer Commands {
 commands;
 
 layout(set = 0, binding = 4, std430) restrict writeonly buffer Output {
-	InstanceData data[];
+	InstanceData data[]; // One per member.
 }
 output_instances;
 
+layout(set = 0, binding = 5, std430) restrict writeonly buffer IDs {
+	uint data[];
+}
+ids;
+
+layout(set = 0, binding = 6, std430) restrict readonly buffer LODEdges {
+	float data[];
+}
+lod_edges;
+
 #define VIEW_FLAG_USE_GI_BUFFERS 1
 #define VIEW_FLAG_USE_SDFGI 2
+#define VIEW_FLAG_ORTHOGONAL 4
 
 #define GPU_FLAG_MOVED 1
 #define GPU_FLAG_CAN_SDFGI 2
@@ -91,7 +108,9 @@ layout(push_constant, std430) uniform Params {
 	uint member_count;
 	uint visible_layers;
 	uint view_flags;
-	uint pad;
+	float lod_threshold; // Screen mesh LOD threshold; 0 or less: no LODs.
+	vec3 lod_camera;
+	float lod_distance_multiplier;
 }
 params;
 
@@ -118,7 +137,25 @@ void main() {
 	}
 
 	Bucket bucket = buckets.data[member.y];
-	uint rank = atomicAdd(commands.data[member.y * 5 + 1], 1);
+
+	// The index LOD, as mesh_surface_get_lod() chooses it for the CPU list.
+	uint level = 0;
+	if (bucket.lod_count > 0 && params.lod_threshold > 0.0) {
+		float distance = 1.0;
+		if (!bool(params.view_flags & VIEW_FLAG_ORTHOGONAL)) {
+			distance = length(max(max(vec3(0.0), aabb_min - params.lod_camera), params.lod_camera - aabb_max));
+		}
+		float distance_threshold = distance * params.lod_distance_multiplier;
+		for (uint i = 0; i < bucket.lod_count; i++) {
+			float screen_size = lod_edges.data[bucket.lod_edges_first + i] * record.lod_scale / distance_threshold;
+			if (screen_size > params.lod_threshold) {
+				break;
+			}
+			level = i + 1;
+		}
+	}
+	uint rank = atomicAdd(commands.data[(bucket.command + level) * 5 + 1], 1);
+	ids.data[bucket.ids_first + level * bucket.count + rank] = index;
 
 	// What _fill_render_list() and _fill_instance_data() write for an opaque
 	// instance without lightmap, VoxelGI, fade or motion pass.
@@ -145,5 +182,5 @@ void main() {
 	data.layer_mask = record.layer_mask;
 	data.prev_transform = record.prev_transform;
 	data.lightmap_uv_scale = record.lightmap_uv_scale;
-	output_instances.data[bucket.first + rank] = data;
+	output_instances.data[index] = data;
 }

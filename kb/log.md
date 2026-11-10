@@ -17,6 +17,10 @@
   opt-in: draw buckets, compute cull writing instance data, one indirect
   draw per bucket. Images identical to the CPU path on Vulkan and D3D12;
   `massive_100k` render CPU 22.0 to 5.5 ms.
+* **Implemented**: index LODs on the GPU path (Phase 2.5, D029): per-instance
+  LOD in the cull kernel with the CPU rule, a visible-ID list per bucket
+  level (D3D12 has no base instance). Meshes with LODs are now eligible;
+  per-level counts and images equal to the CPU path on Vulkan and D3D12.
 
 ## 2026-11-08 (release 0.9.1)
 

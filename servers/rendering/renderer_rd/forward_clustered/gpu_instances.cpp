@@ -58,14 +58,27 @@ struct GPUInstanceCullParams {
 	uint32_t member_count;
 	uint32_t visible_layers;
 	uint32_t view_flags;
-	uint32_t pad;
+	float lod_threshold;
+	float lod_camera[3];
+	float lod_distance_multiplier;
 };
-static_assert(sizeof(GPUInstanceCullParams) == 112);
+static_assert(sizeof(GPUInstanceCullParams) == 128);
 
 enum {
 	GPU_INSTANCE_VIEW_USE_GI_BUFFERS = 1,
 	GPU_INSTANCE_VIEW_USE_SDFGI = 2,
+	GPU_INSTANCE_VIEW_ORTHOGONAL = 4,
 };
+
+void gpu_instances_free_buffers(RID *const (&p_buffers)[6]) {
+	RD *rd = RD::get_singleton();
+	for (RID *buffer : p_buffers) {
+		if (buffer->is_valid()) {
+			rd->free_rid(*buffer);
+			*buffer = RID();
+		}
+	}
+}
 
 // Render-element sort key bits that change per view or frame (LOD, forward GI,
 // lightmap, depth layer); a bucket's key leaves them out.
@@ -113,8 +126,9 @@ bool RenderForwardClustered::_gpu_instance_eligible(const GeometryInstanceForwar
 	RendererRD::MeshStorage *storage = RendererRD::MeshStorage::get_singleton();
 	// Surfaces that need a pass, buffer or per-view choice the buckets do not
 	// make: transparency, screen and depth reads, stencil, motion vectors,
-	// index LODs, cluster LOD and separate shadow meshes (the depth pre-pass
-	// would draw those with different index counts).
+	// cluster LOD and separate shadow meshes (the depth pre-pass would draw
+	// those with different index counts). The cull pass chooses index LODs
+	// per instance.
 	const uint32_t excluded = GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA | GeometryInstanceSurfaceDataCache::FLAG_USES_SUBSURFACE_SCATTERING |
 			GeometryInstanceSurfaceDataCache::FLAG_USES_SCREEN_TEXTURE | GeometryInstanceSurfaceDataCache::FLAG_USES_DEPTH_TEXTURE |
 			GeometryInstanceSurfaceDataCache::FLAG_USES_NORMAL_TEXTURE | GeometryInstanceSurfaceDataCache::FLAG_USES_PARTICLE_TRAILS |
@@ -127,7 +141,7 @@ bool RenderForwardClustered::_gpu_instance_eligible(const GeometryInstanceForwar
 				surface->primitive == RSE::PRIMITIVE_POINTS) {
 			return false;
 		}
-		if (storage->mesh_surface_has_lod(surface->surface) || storage->mesh_surface_get_cluster_data(surface->surface).group_count > 0) {
+		if (storage->mesh_surface_get_cluster_data(surface->surface).group_count > 0) {
 			return false;
 		}
 	}
@@ -207,12 +221,7 @@ void RenderForwardClustered::_gpu_instance_leave(GeometryInstanceForwardClustere
 	p_instance->gpu_drawn = false;
 
 	if (scenario->instances.is_empty()) {
-		RD *rd = RD::get_singleton();
-		for (RID buffer : { scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer }) {
-			if (buffer.is_valid()) {
-				rd->free_rid(buffer);
-			}
-		}
+		gpu_instances_free_buffers({ &scenario->members_buffer, &scenario->buckets_buffer, &scenario->commands_buffer, &scenario->lod_edges_buffer, &scenario->output_buffer, &scenario->ids_buffer });
 		gpu_instance_scenarios.erase(key);
 		memdelete(scenario);
 	}
@@ -238,7 +247,6 @@ void RenderForwardClustered::_gpu_instances_update_setting() {
 }
 
 void RenderForwardClustered::_gpu_instances_free() {
-	RD *rd = RD::get_singleton();
 	for (KeyValue<uint64_t, GPUInstanceScenario *> &E : gpu_instance_scenarios) {
 		GPUInstanceScenario *scenario = E.value;
 		for (GeometryInstanceForwardClustered *instance : scenario->instances) {
@@ -247,11 +255,7 @@ void RenderForwardClustered::_gpu_instances_free() {
 			instance->gpu_pending_index = UINT32_MAX;
 			instance->gpu_drawn = false;
 		}
-		for (RID buffer : { scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer }) {
-			if (buffer.is_valid()) {
-				rd->free_rid(buffer);
-			}
-		}
+		gpu_instances_free_buffers({ &scenario->members_buffer, &scenario->buckets_buffer, &scenario->commands_buffer, &scenario->lod_edges_buffer, &scenario->output_buffer, &scenario->ids_buffer });
 		memdelete(scenario);
 	}
 	gpu_instance_scenarios.clear();
@@ -297,6 +301,8 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 	p_scenario.buckets.clear();
 	p_scenario.bucket_data.clear();
 	p_scenario.commands.clear();
+	p_scenario.command_levels.clear();
+	p_scenario.lod_edges.clear();
 	p_scenario.members.resize(entries.size() * 2);
 	for (uint32_t i = 0; i < entries.size(); i++) {
 		if (i == 0 || !entries[i].same_draw(entries[i - 1])) {
@@ -304,50 +310,85 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 			bucket.surface = entries[i].surface;
 			bucket.first = i;
 			p_scenario.buckets.push_back(bucket);
-			// One indexed or non-indexed command; the kernel writes word 1.
-			p_scenario.commands.push_back(storage->mesh_surface_get_vertices_drawn_count(entries[i].surface->surface));
-			for (uint32_t word = 1; word < 5; word++) {
-				p_scenario.commands.push_back(0);
-			}
 		}
 		p_scenario.buckets[p_scenario.buckets.size() - 1].count++;
 		p_scenario.members[i * 2 + 0] = entries[i].slot;
 		p_scenario.members[i * 2 + 1] = p_scenario.buckets.size() - 1;
 	}
+	// Per bucket, one indexed or non-indexed command per index LOD (the kernel
+	// writes word 1), and count visible IDs reserved per level.
+	uint32_t id_count = 0;
+	for (GPUInstanceBucket &bucket : p_scenario.buckets) {
+		void *surface = bucket.surface->surface;
+		const uint32_t lod_count = storage->mesh_surface_has_lod(surface) ? storage->mesh_surface_get_lod_count(surface) : 0;
+		bucket.levels = lod_count + 1;
+		bucket.command = p_scenario.commands.size() / 5;
+		bucket.ids_first = id_count;
+		id_count += bucket.count * bucket.levels;
+		for (uint32_t level = 0; level < bucket.levels; level++) {
+			p_scenario.commands.push_back(level == 0 ? storage->mesh_surface_get_vertices_drawn_count(surface) : storage->mesh_surface_get_index_count(surface, level));
+			for (uint32_t word = 1; word < 5; word++) {
+				p_scenario.commands.push_back(0);
+			}
+			p_scenario.command_levels.push_back(uint8_t(MIN(level, 7u)));
+		}
+		for (uint32_t lod = 0; lod < lod_count; lod++) {
+			p_scenario.lod_edges.push_back(storage->mesh_surface_get_lod_edge_length(surface, lod));
+		}
+	}
 	p_scenario.member_count = entries.size();
+	p_scenario.id_count = id_count;
 	p_scenario.bucket_data.resize(p_scenario.buckets.size());
+	if (p_scenario.lod_edges.is_empty()) {
+		p_scenario.lod_edges.push_back(0.0f); // A storage buffer cannot be empty.
+	}
 
 	RD *rd = RD::get_singleton();
-	if (p_scenario.member_capacity < p_scenario.member_count) {
-		for (RID *buffer : { &p_scenario.members_buffer, &p_scenario.output_buffer }) {
-			if (buffer->is_valid()) {
-				rd->free_rid(*buffer);
-				*buffer = RID();
-			}
+	struct Grow {
+		RID *buffer;
+		uint32_t *capacity;
+		uint32_t needed;
+		uint32_t minimum;
+		uint32_t element_size;
+		bool indirect;
+	};
+	const Grow grows[] = {
+		{ &p_scenario.members_buffer, &p_scenario.member_capacity, p_scenario.member_count, 64, 2 * sizeof(uint32_t), false },
+		{ &p_scenario.buckets_buffer, &p_scenario.bucket_capacity, p_scenario.buckets.size(), 16, sizeof(GPUInstanceBucketData), false },
+		{ &p_scenario.commands_buffer, &p_scenario.command_capacity, p_scenario.commands.size() / 5, 16, 5 * sizeof(uint32_t), true },
+		{ &p_scenario.lod_edges_buffer, &p_scenario.lod_edge_capacity, p_scenario.lod_edges.size(), 16, sizeof(float), false },
+		{ &p_scenario.ids_buffer, &p_scenario.id_capacity, id_count, 64, sizeof(uint32_t), false },
+	};
+	for (const Grow &grow : grows) {
+		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
+			continue;
 		}
-		p_scenario.member_capacity = Math::next_power_of_2(MAX(p_scenario.member_count, 64u));
-		p_scenario.members_buffer = rd->storage_buffer_create(p_scenario.member_capacity * 2 * sizeof(uint32_t));
-		p_scenario.output_buffer = rd->storage_buffer_create(p_scenario.member_capacity * sizeof(SceneState::InstanceData));
-	}
-	if (p_scenario.bucket_capacity < p_scenario.buckets.size()) {
-		for (RID *buffer : { &p_scenario.buckets_buffer, &p_scenario.commands_buffer }) {
-			if (buffer->is_valid()) {
-				rd->free_rid(*buffer);
-				*buffer = RID();
-			}
+		if (grow.buffer->is_valid()) {
+			rd->free_rid(*grow.buffer);
 		}
-		p_scenario.bucket_capacity = Math::next_power_of_2(MAX(p_scenario.buckets.size(), 16u));
-		p_scenario.buckets_buffer = rd->storage_buffer_create(p_scenario.bucket_capacity * sizeof(GPUInstanceBucketData));
-		p_scenario.commands_buffer = rd->storage_buffer_create(p_scenario.bucket_capacity * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		*grow.capacity = Math::next_power_of_2(MAX(grow.needed, grow.minimum));
+		BitField<RD::StorageBufferUsage> usage = {};
+		if (grow.indirect) {
+			usage.set_flag(RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		}
+		*grow.buffer = rd->storage_buffer_create(*grow.capacity * grow.element_size, {}, usage);
+		if (grow.buffer == &p_scenario.members_buffer) {
+			// The instance data has one record per member.
+			if (p_scenario.output_buffer.is_valid()) {
+				rd->free_rid(p_scenario.output_buffer);
+			}
+			p_scenario.output_buffer = rd->storage_buffer_create(*grow.capacity * sizeof(SceneState::InstanceData));
+		}
 	}
 	if (p_scenario.member_count > 0) {
 		rd->buffer_update(p_scenario.members_buffer, 0, p_scenario.members.size() * sizeof(uint32_t), p_scenario.members.ptr());
 	}
+	rd->buffer_update(p_scenario.lod_edges_buffer, 0, p_scenario.lod_edges.size() * sizeof(float), p_scenario.lod_edges.ptr());
 	p_scenario.dirty = false;
 }
 
 bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_data, bool p_using_motion_pass, bool p_using_sdfgi, bool p_using_opaque_gi) {
-	static_assert(sizeof(GPUInstanceBucketData) == 48);
+	static_assert(sizeof(GPUInstanceBucketData) == 64);
 	static_assert(sizeof(SceneState::InstanceData) == 176 || sizeof(real_t) != sizeof(float));
 	static_assert(INSTANCE_DATA_FLAGS_DYNAMIC == (1 << 3) && INSTANCE_DATA_FLAG_USE_GI_BUFFERS == (1 << 5) && INSTANCE_DATA_FLAG_USE_SDFGI == (1 << 6) && INSTANCE_DATA_FLAGS_FADE_SHIFT == 24,
 			"Update the instance flags in gpu_instance_cull.glsl.");
@@ -396,13 +437,14 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	}
 	const uint64_t max_members = uint64_t(rd->limit_get(RD::LIMIT_MAX_COMPUTE_WORKGROUP_COUNT_X)) * 64;
 	if (scenario->member_count == 0 || scenario->member_count > max_members || scenario->members_buffer.is_null() || scenario->output_buffer.is_null() ||
-			scenario->buckets_buffer.is_null() || scenario->commands_buffer.is_null()) {
+			scenario->buckets_buffer.is_null() || scenario->commands_buffer.is_null() || scenario->ids_buffer.is_null() || scenario->lod_edges_buffer.is_null()) {
 		ERR_FAIL_COND_V_MSG(scenario->member_count > max_members, true, "Too many instance surfaces for the GPU instance path; they are not drawn.");
 		return true;
 	}
 
 	// Per-surface values, as _fill_instance_data() writes them (the material
 	// feedback index can change while streaming runs).
+	uint32_t lod_edges_first = 0;
 	for (uint32_t i = 0; i < scenario->buckets.size(); i++) {
 		const GeometryInstanceSurfaceDataCache *surface = scenario->buckets[i].surface;
 		GPUInstanceBucketData &data = scenario->bucket_data[i];
@@ -425,8 +467,13 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		for (uint32_t component = 0; component < 4; component++) {
 			data.uv_scale[component] = uv_scale[component];
 		}
-		data.first = scenario->buckets[i].first;
+		data.ids_first = scenario->buckets[i].ids_first;
 		data.material_feedback_index = material_feedback_index;
+		data.command = scenario->buckets[i].command;
+		data.count = scenario->buckets[i].count;
+		data.lod_count = scenario->buckets[i].levels - 1;
+		data.lod_edges_first = lod_edges_first;
+		lod_edges_first += data.lod_count;
 	}
 	rd->buffer_update(scenario->buckets_buffer, 0, scenario->bucket_data.size() * sizeof(GPUInstanceBucketData), scenario->bucket_data.ptr());
 	// Zero instances in every bucket's command, then cull and append.
@@ -446,12 +493,19 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	// and both the count check and an image comparison must notice.
 	params.member_count = validate == 2 ? scenario->buckets[scenario->buckets.size() - 1].first : scenario->member_count;
 	params.visible_layers = p_render_data->gpu_visible_layers;
-	params.view_flags = (p_using_opaque_gi ? GPU_INSTANCE_VIEW_USE_GI_BUFFERS : 0) | (p_using_sdfgi ? GPU_INSTANCE_VIEW_USE_SDFGI : 0);
+	params.view_flags = (p_using_opaque_gi ? GPU_INSTANCE_VIEW_USE_GI_BUFFERS : 0) | (p_using_sdfgi ? GPU_INSTANCE_VIEW_USE_SDFGI : 0) | (scene->cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0);
+	// The LOD inputs of _fill_render_list().
+	params.lod_threshold = scene->screen_mesh_lod_threshold;
+	const Vector3 lod_camera = scene->main_cam_transform.origin;
+	params.lod_camera[0] = lod_camera.x;
+	params.lod_camera[1] = lod_camera.y;
+	params.lod_camera[2] = lod_camera.z;
+	params.lod_distance_multiplier = scene->lod_distance_multiplier;
 
 	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0);
-	const RID resources[5] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer };
+	const RID resources[7] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer, scenario->ids_buffer, scenario->lod_edges_buffer };
 	LocalVector<RD::Uniform> uniforms;
-	for (uint32_t binding = 0; binding < 5; binding++) {
+	for (uint32_t binding = 0; binding < 7; binding++) {
 		RD::Uniform uniform;
 		uniform.binding = binding;
 		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -472,13 +526,34 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		const uint64_t frame = RSG::rasterizer->get_frame_number();
 		if (!gpu_instances_check_pending && frame % 30 == 0 && frame != gpu_instances_check_frame) {
 			// What the CPU cull found visible: the surfaces of the listed instances.
+			// Per index LOD as _fill_render_list() would choose it.
+			RendererRD::MeshStorage *storage = RendererRD::MeshStorage::get_singleton();
 			uint32_t expected = 0;
+			for (uint32_t &count : gpu_instances_check_levels) {
+				count = 0;
+			}
 			for (uint32_t i = 0; i < p_render_data->gpu_instances->size(); i++) {
 				const GeometryInstanceForwardClustered *instance = static_cast<const GeometryInstanceForwardClustered *>((*p_render_data->gpu_instances)[i]);
-				if (instance->gpu_drawn && instance->gpu_member_scenario == p_render_data->gpu_scenario) {
-					expected += instance->gpu_surface_count;
+				if (!instance->gpu_drawn || instance->gpu_member_scenario != p_render_data->gpu_scenario) {
+					continue;
+				}
+				expected += instance->gpu_surface_count;
+				float lod_distance = 1.0;
+				if (!scene->cam_orthogonal) {
+					const Vector3 aabb_min = instance->transformed_aabb.position;
+					const Vector3 aabb_max = instance->transformed_aabb.position + instance->transformed_aabb.size;
+					lod_distance = Vector3(0.0, 0.0, 0.0).max(aabb_min - lod_camera).max(lod_camera - aabb_max).length();
+				}
+				for (const GeometryInstanceSurfaceDataCache *surface = instance->surface_caches; surface; surface = surface->next) {
+					uint32_t lod = 0;
+					if (scene->screen_mesh_lod_threshold > 0.0 && storage->mesh_surface_has_lod(surface->surface)) {
+						uint32_t indices = 0;
+						lod = storage->mesh_surface_get_lod(surface->surface, instance->lod_model_scale * instance->lod_bias, lod_distance * scene->lod_distance_multiplier, scene->screen_mesh_lod_threshold, indices);
+					}
+					gpu_instances_check_levels[MIN(lod, 7u)]++;
 				}
 			}
+			gpu_instances_check_command_levels = scenario->command_levels;
 			gpu_instances_check_frame = frame;
 			gpu_instances_check_pending = true;
 			gpu_instances_check_expected = expected;
@@ -501,39 +576,63 @@ void RenderForwardClustered::_gpu_instances_check_received(const Vector<uint8_t>
 	const uint32_t *words = reinterpret_cast<const uint32_t *>(p_data.ptr());
 	const uint32_t word_count = p_data.size() / sizeof(uint32_t);
 	uint32_t drawn = 0;
+	uint32_t levels[8] = {};
 	for (uint32_t i = 1; i < word_count; i += 5) {
 		drawn += words[i];
+		const uint32_t command = i / 5;
+		levels[command < self->gpu_instances_check_command_levels.size() ? self->gpu_instances_check_command_levels[command] : 0] += words[i];
 	}
-	if (drawn == self->gpu_instances_check_expected) {
-		print_line(vformat("GPU_INSTANCES_CHECK: ok frame=%d buckets=%d members=%d drawn=%d", self->gpu_instances_check_frame, self->gpu_instances_check_buckets, self->gpu_instances_check_members, drawn));
-	} else {
+	String drawn_lods;
+	String expected_lods;
+	bool same_lods = true;
+	for (uint32_t level = 0; level < 8; level++) {
+		const uint32_t expected = self->gpu_instances_check_levels[level];
+		same_lods = same_lods && levels[level] == expected;
+		if (levels[level] > 0 || expected > 0) {
+			drawn_lods += vformat("%s%d:%d", drawn_lods.is_empty() ? "" : ",", level, levels[level]);
+			expected_lods += vformat("%s%d:%d", expected_lods.is_empty() ? "" : ",", level, expected);
+		}
+	}
+	if (drawn != self->gpu_instances_check_expected) {
 		ERR_PRINT(vformat("GPU instances check (frame %d): the GPU path drew %d instance surfaces, the CPU cull found %d visible.", self->gpu_instances_check_frame, drawn, self->gpu_instances_check_expected));
+	} else if (!same_lods) {
+		ERR_PRINT(vformat("GPU instances check (frame %d): instance surfaces per index LOD %s, the CPU choice gives %s.", self->gpu_instances_check_frame, drawn_lods, expected_lods));
+	} else {
+		print_line(vformat("GPU_INSTANCES_CHECK: ok frame=%d buckets=%d members=%d drawn=%d lods=%s", self->gpu_instances_check_frame, self->gpu_instances_check_buckets, self->gpu_instances_check_members, drawn, drawn_lods));
 	}
 }
 
-void RenderForwardClustered::_gpu_instances_append(int *p_render_info) {
+void RenderForwardClustered::_gpu_instances_append(int *p_render_info, float p_lod_threshold) {
 	if (!gpu_instances_view) {
 		return;
 	}
 	RenderList &list = render_list[RENDER_LIST_OPAQUE];
+	uint32_t draws = 0;
 	for (uint32_t i = 0; i < gpu_instances_view->buckets.size(); i++) {
-		GeometryInstanceSurfaceDataCache *surface = gpu_instances_view->buckets[i].surface;
+		const GPUInstanceBucket &bucket = gpu_instances_view->buckets[i];
+		GeometryInstanceSurfaceDataCache *surface = bucket.surface;
 		// The CPU list did not visit the surface in this view.
 		surface->color_pass_inclusion_mask = 0;
-		list.elements.push_back(surface);
-		RenderElementInfo info;
-		info.value = uint32_t(surface->sort.sort_key1 & 0x300); // Soft shadow and projector bits; LOD 0, no lightmap or forward GI.
-		info.repeat = 1;
-		info.multimesh_cull_draw = UINT32_MAX;
-		info.multimesh_visible_ids_offset = 0;
-		info.multimesh_cull_lod = 0;
-		info.multimesh_cull_last_lod = 0;
-		info.mesh_clod_offset = UINT32_MAX;
-		info.gpu_bucket = i;
-		info.gpu_first = gpu_instances_view->buckets[i].first;
-		list.element_info.push_back(info);
+		// One element per index LOD; a view without LODs fills level 0 only.
+		const uint32_t levels = p_lod_threshold > 0.0f ? bucket.levels : 1;
+		for (uint32_t level = 0; level < levels; level++) {
+			list.elements.push_back(surface);
+			RenderElementInfo info;
+			info.value = uint32_t(surface->sort.sort_key1 & 0x300); // Soft shadow and projector bits; no lightmap or forward GI.
+			info.lod_index = level;
+			info.repeat = 1;
+			info.multimesh_cull_draw = UINT32_MAX;
+			info.multimesh_visible_ids_offset = 0;
+			info.multimesh_cull_lod = 0;
+			info.multimesh_cull_last_lod = 0;
+			info.mesh_clod_offset = UINT32_MAX;
+			info.gpu_bucket = bucket.command + level;
+			info.gpu_first = bucket.ids_first + level * bucket.count;
+			list.element_info.push_back(info);
+		}
+		draws += levels;
 	}
 	if (p_render_info) {
-		p_render_info[RSE::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME] += gpu_instances_view->buckets.size();
+		p_render_info[RSE::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME] += draws;
 	}
 }

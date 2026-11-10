@@ -774,6 +774,9 @@ void main() {
 	if (!sc_multimesh()) {
 		instance_index += INSTANCE_INDEX;
 	}
+	if (sc_gpu_instances()) {
+		instance_index = gpu_instance_ids.data[instance_index];
+	}
 
 	instance_index_interp = instance_index;
 

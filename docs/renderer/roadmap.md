@@ -113,8 +113,12 @@ the CPU path.
 - 2.4 One indirect draw per bucket in the depth pre-pass and the opaque pass
   (done). Views with a motion list (temporal upscaling), reflection probes,
   mirrors, XR and debug draw modes use the CPU list. Multi-draw is Phase 3.
-- 2.5 Next: per-instance LOD in the kernel (reuse D010) so meshes with LODs
-  become eligible; separate shadow meshes; views with a motion list;
+- 2.5 Index LODs done 2026-11-10 (D029): the kernel chooses each instance
+  surface's index LOD with the CPU rule and appends it to that level's
+  visible-ID list (binding 48); one indirect draw per bucket level. Meshes
+  with LODs are eligible; `gpu_instances.ps1` has an index-LOD phase (all
+  levels drawn, per-level counts equal to the CPU choice, image equal).
+  Next: separate shadow meshes; views with a motion list;
   incremental bucket updates instead of full rebuilds; the `gpu_drawn` bit
   in the cull's packed data; viewport render info (objects, primitives) for
   GPU-drawn instances; occlusion culling (`OccluderInstance3D` today, HZB

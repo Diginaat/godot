@@ -284,7 +284,7 @@ protected:
 
 	void _update_render_base_uniform_set();
 	RID _setup_sdfgi_render_pass_uniform_set(RID p_albedo_texture, RID p_emission_texture, RID p_emission_aniso_texture, RID p_geom_facing_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index);
-	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, RID p_visible_ids = RID(), RID p_gpu_instances = RID());
+	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, RID p_visible_ids = RID(), RID p_gpu_instances = RID(), RID p_gpu_instance_ids = RID());
 	void _prepare_multimesh_culling(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	void _prepare_multimesh_shadow_culling(RenderBufferDataForwardClustered *p_buffers);
 	// TAA and upscalers shift NDC x/y by the jitter (Projection::add_jitter_offset).
@@ -890,6 +890,7 @@ protected:
 
 		virtual void set_transform(const Transform3D &p_transform, const AABB &p_aabb, const AABB &p_transformed_aabb) override;
 		virtual void set_layer_mask(uint32_t p_layer_mask) override;
+		virtual void set_lod_bias(float p_lod_bias) override;
 		virtual void reset_motion_vectors() override;
 		virtual void set_use_lightmap(RID p_lightmap_instance, const Rect2 &p_lightmap_uv_scale, int p_lightmap_slice_index) override;
 		virtual void set_lightmap_capture(const Color *p_sh9) override;
@@ -953,19 +954,27 @@ protected:
 
 	// Instance surfaces drawn alike (render-element sort key without depth
 	// layer, LOD and per-view GI bits, plus mirror) form a bucket: one
-	// indirect draw whose instances a compute pass culls and writes per view.
+	// indirect draw per index LOD, whose instances a compute pass culls, gives
+	// a LOD and writes per view.
 	struct GPUInstanceBucket {
 		GeometryInstanceSurfaceDataCache *surface = nullptr; // Drawn with this surface's state.
-		uint32_t first = 0;
+		uint32_t first = 0; // First member.
 		uint32_t count = 0;
+		uint32_t levels = 1; // Index LODs of the surface, including the full mesh.
+		uint32_t command = 0; // Indirect command of level 0; one per level follows.
+		uint32_t ids_first = 0; // Visible IDs of level 0; count are reserved per level.
 	};
 	// Bucket in gpu_instance_cull.glsl.
 	struct GPUInstanceBucketData {
 		float compressed_aabb_position[3];
-		uint32_t first;
+		uint32_t ids_first;
 		float compressed_aabb_size[3];
 		uint32_t material_feedback_index;
 		float uv_scale[4];
+		uint32_t command;
+		uint32_t count;
+		uint32_t lod_count; // Reduced index LODs (levels - 1).
+		uint32_t lod_edges_first; // Their edge lengths in the LOD edges buffer.
 	};
 	struct GPUInstanceScenario {
 		// Members, including those that join at the next cull (not gpu_drawn yet).
@@ -974,14 +983,22 @@ protected:
 		LocalVector<GPUInstanceBucket> buckets;
 		LocalVector<GPUInstanceBucketData> bucket_data;
 		LocalVector<uint32_t> members; // Table slot and bucket per drawn instance surface.
-		LocalVector<uint32_t> commands; // Five words per bucket, zero instances.
+		LocalVector<uint32_t> commands; // Five words per bucket level, zero instances.
+		LocalVector<uint8_t> command_levels; // Index LOD of each command (validation).
+		LocalVector<float> lod_edges; // Screen-space edge length per reduced LOD.
 		uint32_t member_count = 0;
+		uint32_t id_count = 0;
 		RID members_buffer;
 		RID buckets_buffer;
 		RID commands_buffer;
+		RID lod_edges_buffer;
 		RID output_buffer; // InstanceData per member, written per view.
+		RID ids_buffer; // Members drawn per bucket level, written per view.
 		uint32_t member_capacity = 0;
 		uint32_t bucket_capacity = 0;
+		uint32_t command_capacity = 0;
+		uint32_t id_capacity = 0;
+		uint32_t lod_edge_capacity = 0;
 	};
 	HashMap<uint64_t, GPUInstanceScenario *> gpu_instance_scenarios;
 	bool gpu_instances_active = false; // rendering/geometry/gpu_instances/enabled as applied.
@@ -1003,6 +1020,8 @@ protected:
 	uint32_t gpu_instances_check_expected = 0;
 	uint32_t gpu_instances_check_buckets = 0;
 	uint32_t gpu_instances_check_members = 0;
+	uint32_t gpu_instances_check_levels[8] = {}; // Expected surfaces per index LOD (the last counts the rest).
+	LocalVector<uint8_t> gpu_instances_check_command_levels;
 	static void _gpu_instances_check_received(const Vector<uint8_t> &p_data);
 
 	bool _gpu_instance_eligible(const GeometryInstanceForwardClustered *p_instance) const;
@@ -1014,7 +1033,7 @@ protected:
 	// view and, if so, culls and writes its instances (gpu_instances_view).
 	bool _gpu_instances_begin_view(RenderDataRD *p_render_data, bool p_using_motion_pass, bool p_using_sdfgi, bool p_using_opaque_gi);
 	// After the CPU elements are prepared: one element per bucket.
-	void _gpu_instances_append(int *p_render_info);
+	void _gpu_instances_append(int *p_render_info, float p_lod_threshold);
 	GPUInstanceScenario *gpu_instances_view = nullptr; // Drawn by the current camera render.
 	void _gpu_instances_free();
 	PagedAllocator<GeometryInstanceSurfaceDataCache> geometry_instance_surface_alloc;

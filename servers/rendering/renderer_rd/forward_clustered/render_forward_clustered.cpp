@@ -2253,6 +2253,7 @@ void RenderForwardClustered::_gpu_instance_table_build_record(uint32_t p_slot, G
 	if (inst->can_sdfgi) {
 		r_record.gpu_flags |= GPUInstanceTable::GPU_FLAG_CAN_SDFGI;
 	}
+	r_record.lod_scale = inst->lod_model_scale * inst->lod_bias;
 }
 
 void RenderForwardClustered::_gpu_instance_table_check_element(const GeometryInstanceForwardClustered *p_instance, const SceneState::InstanceData &p_data) {
@@ -2570,6 +2571,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	_gpu_instances_begin_view(p_render_data, using_motion_pass, using_sdfgi, using_sdfgi || using_voxelgi || using_ddgi);
 	const RID gpu_instance_commands = gpu_instances_view ? gpu_instances_view->commands_buffer : RID();
 	const RID gpu_instance_data = gpu_instances_view ? gpu_instances_view->output_buffer : RID();
+	const RID gpu_instance_ids = gpu_instances_view ? gpu_instances_view->ids_buffer : RID();
 
 	RENDER_TIMESTAMP("Fill Render List");
 	_fill_render_list(RENDER_LIST_OPAQUE, p_render_data, PASS_MODE_COLOR, using_sdfgi, using_sdfgi || using_voxelgi || using_ddgi, using_motion_pass);
@@ -2598,7 +2600,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	}
 	const bool gpu_geometry_timestamps = mesh_clod_commands.is_valid() || multimesh_cull_commands.is_valid();
 	// After the GPU geometry preparation above, which reads the CPU elements.
-	_gpu_instances_append(render_info);
+	_gpu_instances_append(render_info, p_render_data->scene_data->screen_mesh_lod_threshold);
 
 	RD::get_singleton()->draw_command_end_label();
 
@@ -2822,7 +2824,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RD::get_singleton()->draw_command_begin_label("Render Depth Pre-Pass");
 
-		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_visible_ids, gpu_instance_data);
+		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_visible_ids, gpu_instance_data, gpu_instance_ids);
 
 		// HZB occlusion: with two passes the pre-pass draws only CLOD groups
 		// that were visible when last tested. MultiMesh instances are tested
@@ -2945,7 +2947,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	uint32_t opaque_pass_uniform_buffer_index = _setup_environment(p_render_data, is_reflection_probe, screen_size, screen_size, p_default_bg_color, true, using_motion_pass);
 
-	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true, multimesh_visible_ids, gpu_instance_data);
+	RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true, multimesh_visible_ids, gpu_instance_data, gpu_instance_ids);
 
 	{
 		bool render_motion_pass = !render_list[RENDER_LIST_MOTION].elements.is_empty();
@@ -4097,7 +4099,7 @@ bool RenderForwardClustered::_probe_capture_ddgi(const RenderDataRD *p_render_da
 	return _ddgi_get_capture_resources(r_resources[0], r_resources[1], r_resources[2], r_resources[3]);
 }
 
-RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas, RID p_visible_ids, RID p_gpu_instances) {
+RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas, RID p_visible_ids, RID p_gpu_instances, RID p_gpu_instance_ids) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 
@@ -4568,6 +4570,14 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		u.binding = 47;
 		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
 		u.append_id(p_gpu_instances.is_valid() ? p_gpu_instances : scene_shader.default_vec4_xform_buffer);
+		uniforms.push_back(u);
+	}
+	{
+		// Which of those instances each GPU path draw reads (per bucket level).
+		RD::Uniform u;
+		u.binding = 48;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		u.append_id(p_gpu_instance_ids.is_valid() ? p_gpu_instance_ids : scene_shader.default_vec4_xform_buffer);
 		uniforms.push_back(u);
 	}
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
@@ -5786,6 +5796,11 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::set_transform(con
 
 void RenderForwardClustered::GeometryInstanceForwardClustered::set_layer_mask(uint32_t p_layer_mask) {
 	RenderGeometryInstanceBase::set_layer_mask(p_layer_mask);
+	RenderForwardClustered::get_singleton()->_gpu_instance_table_mark(gpu_slot);
+}
+
+void RenderForwardClustered::GeometryInstanceForwardClustered::set_lod_bias(float p_lod_bias) {
+	RenderGeometryInstanceBase::set_lod_bias(p_lod_bias);
 	RenderForwardClustered::get_singleton()->_gpu_instance_table_mark(gpu_slot);
 }
 

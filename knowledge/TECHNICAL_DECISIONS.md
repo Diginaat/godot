@@ -552,3 +552,34 @@ Also decided here:
 - Instances in a view the GPU path does not cover (probe, mirror, XR,
   motion list, debug draw) go through the CPU list from the cull's
   separate list; nothing is lost when the path declines a view.
+
+## D029 — GPU path index LODs: per-level visible IDs, instance data per member
+
+2026-11-10, Phase 2.5 (first item).
+Problem: a bucket whose surface has index LODs needs one draw per level,
+each with its own index buffer and its own run of instances. The scene
+shader finds an instance as push-constant base plus `gl_InstanceIndex`, and
+D3D12 runs with base instance zero (`first_vertex_and_base_instance_mode`
+is `DXIL_SPIRV_SYSVAL_TYPE_ZERO`), so the indirect command's
+`firstInstance` cannot carry a GPU-computed offset: each level's start must
+be known on the CPU.
+Candidates:
+1. Reserve a full bucket of 176-byte records per level. Rejected: memory
+   is members times levels (about 100 MiB at 100k members and 6 levels).
+2. Count, prefix and write in two passes, with a GPU offset in the command.
+   Rejected: needs base instance, which D3D12 does not give.
+3. The kernel writes each member's instance data once, at the member's own
+   index, and appends the member index to a visible-ID list per bucket
+   level (count IDs reserved per level, 4 bytes each). The scene shader
+   reads `gpu_instance_ids[base + gl_InstanceIndex]` (binding 48) under the
+   existing `gpu_instances` specialization bit. Chosen; non-LOD buckets use
+   the same path with one level.
+Also decided here:
+- The kernel chooses the level with the CPU rule (`mesh_surface_get_lod`:
+  distance from the main camera to the world bounds, model scale times LOD
+  bias from the table record, which now keeps it in place of padding; the
+  view's distance multiplier and threshold; orthogonal views use 1).
+  Validation compares the GPU's per-level counts with the CPU's choice.
+- One render element per bucket level, `lod_index` set, so the draw loop
+  binds the level's index array as for CPU elements. A view with LODs off
+  (threshold 0) appends level 0 only.

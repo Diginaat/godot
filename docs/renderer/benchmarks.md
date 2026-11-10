@@ -196,6 +196,11 @@ cost at 100k is the cull and 176-byte writes of 100k instance surfaces
 GPU-drawn instances yet. Buffer memory grows by about 64 MiB at 100k (table,
 members and per-view instance data at power-of-two capacity).
 
+After index LODs (D029, visible-ID indirection for every GPU path draw),
+same bench with `-GpuInstances`, Vulkan: `massive_100k` render CPU
+4.9-5.1 ms, GPU 1.26-1.30 ms; `shared_20k` 3.2-4.4 ms; `small_1k`
+0.31-0.38 ms. No regression (the bench meshes have no LODs).
+
 D3D12, same protocol, render CPU p50 (CPU path / GPU path): `small_1k`
 0.40-0.54 / 0.29-0.40, `shared_20k` 7.7-10.1 / 3.2-6.2, `unique_10k`
 8.2-9.2 / 7.9-8.9, `massive_100k` 20.7-22.3 / 5.5-5.9, `dynamic_20k`

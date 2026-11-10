@@ -3,7 +3,7 @@ extends Node3D
 ## rendering/geometry/gpu_instances with its validation, then changes the
 ## scene in phases: moves, layers the camera does not see, hidden nodes,
 ## materials that leave the path (transparent) and come back, transparency,
-## visibility ranges, frees and adds, a second view of the same world and a
+## visibility ranges, meshes with index LODs and LOD biases, frees and adds, a second view of the same world and a
 ## view of another world. Every 30 frames the engine compares what the GPU
 ## path drew with what the CPU cull found visible (GPU_INSTANCES_CHECK). After
 ## each phase the image with the GPU path is compared with the image without
@@ -152,6 +152,15 @@ func _run(self_test: bool) -> void:
 	await _wait(PHASE_FRAMES)
 	print("GPU_INSTANCES_PHASE: back to eligible")
 	await _compare("eligible again")
+	var lod_mesh := _lod_mesh()
+	for i in range(0, _nodes.size(), 2):
+		_nodes[i].mesh = lod_mesh
+	# Biases from coarser to much finer, so that every index LOD is drawn.
+	for i in 1000:
+		_nodes[i * 2 % _nodes.size()].lod_bias = [0.5, 4.0, 16.0, 64.0, 256.0][i % 5]
+	await _wait(PHASE_FRAMES)
+	print("GPU_INSTANCES_PHASE: index LODs")
+	await _compare("index LODs")
 	_moving = 0
 	for i in 300:
 		var node: MeshInstance3D = _nodes.pop_back()
@@ -168,6 +177,19 @@ func _run(self_test: bool) -> void:
 	await _compare("more views")
 	print("GPU_INSTANCES_TEST_DONE: %d nodes, %d image differences" % [_nodes.size(), _ab_failures])
 	get_tree().quit(0)
+
+
+# A dense sphere with generated index LODs, so that the LOD chosen per instance
+# changes with distance across the grid.
+func _lod_mesh() -> Mesh:
+	var sphere := SphereMesh.new()
+	sphere.radial_segments = 96
+	sphere.rings = 48
+	var importer := ImporterMesh.new()
+	importer.add_surface(Mesh.PRIMITIVE_TRIANGLES, sphere.get_mesh_arrays())
+	importer.generate_lods(25.0, 60.0, [])
+	print("GPU_INSTANCES_PHASE: LOD mesh with %d index LODs" % importer.get_surface_lod_count(0))
+	return importer.get_mesh()
 
 
 func _add_views() -> void:

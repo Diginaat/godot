@@ -53,7 +53,7 @@ public:
 		float aabb_position[3];
 		uint32_t gpu_flags; // GPU_FLAG_*.
 		float aabb_size[3];
-		uint32_t pad;
+		float lod_scale; // Model scale times LOD bias, as the CPU LOD choice uses it.
 	};
 	static_assert(sizeof(Record) == 160, "GPUInstanceTable::Record must stay 160 bytes (std430 layout).");
 

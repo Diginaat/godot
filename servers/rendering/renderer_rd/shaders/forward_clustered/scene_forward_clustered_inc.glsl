@@ -421,6 +421,12 @@ layout(set = 1, binding = 47, std430) buffer restrict readonly GPUInstanceDataBu
 }
 gpu_instances;
 
+// Per GPU path draw, the instances it draws (indices into gpu_instances).
+layout(set = 1, binding = 48, std430) buffer restrict readonly GPUInstanceIDs {
+	uint data[];
+}
+gpu_instance_ids;
+
 // One field of the drawn instance's data, from whichever buffer holds it.
 #define SCENE_INSTANCE(m_field) (sc_gpu_instances() ? gpu_instances.data[instance_index].m_field : instances.data[instance_index].m_field)
 
