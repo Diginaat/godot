@@ -14,6 +14,7 @@ var _nodes: Array[MeshInstance3D] = []
 var _mesh := BoxMesh.new()
 var _materials: Array[StandardMaterial3D] = []
 var _moving := 0
+var _stride := 7 # Moving nodes are spread (scatter path); 1 moves neighbours (direct path).
 var _frame := 0
 
 
@@ -50,7 +51,7 @@ func _add(count: int) -> void:
 func _process(_delta: float) -> void:
 	_frame += 1
 	for i in mini(_moving, _nodes.size()):
-		var node := _nodes[i * 7 % _nodes.size()]
+		var node := _nodes[i * _stride % _nodes.size()]
 		node.position.y = 0.5 + 0.5 * sin(float(_frame) * 0.1 + float(i))
 
 
@@ -65,7 +66,13 @@ func _run(self_test: bool) -> void:
 	print("INSTANCE_TABLE_PHASE: added %d" % _nodes.size())
 	_moving = 200
 	await _wait(PHASE_FRAMES)
-	print("INSTANCE_TABLE_PHASE: moving 200")
+	print("INSTANCE_TABLE_PHASE: moving 200 spread")
+	_moving = 8
+	_stride = 1
+	await _wait(PHASE_FRAMES)
+	print("INSTANCE_TABLE_PHASE: moving 8 adjacent")
+	_moving = 200
+	_stride = 7
 	if not self_test:
 		for i in 100:
 			_nodes[i * 3].layers = 2

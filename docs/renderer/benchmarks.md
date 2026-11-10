@@ -130,6 +130,27 @@ about 1 ms of render CPU. Task 1.3 replaces scattered ranges with one
 packed upload and a compute scatter. Table memory: 128 bytes per slot,
 rounded up to a power of two (100k nodes: 16 MiB).
 
+### Packed upload and compute scatter (Phase 1.3), 2026-11-10
+
+Up to 16 contiguous runs of dirty records are still written with one
+`buffer_update` each; more are packed into one upload (records plus a slot
+list) and written to their slots by `gpu_instance_scatter.glsl` (one
+dispatch). Same bench, `-Table`, Vulkan, static view, p50 ms (render CPU / GPU):
+
+| Case | Table off (1.2 run) | Table on, 1.2 (ranges) | Table on, 1.3 (scatter) |
+| --- | --- | --- | --- |
+| `small_1k` | 0.38 / 0.26 | 0.39 / 0.27 | 0.45 / 0.27 (r1 0.36 / 0.26) |
+| `shared_20k` | 8.17 / 1.42 | 8.40 / 1.42 | 9.56 / 1.40 (r1 6.65 / 1.39) |
+| `massive_100k` | 20.57 / 1.15 | 20.66 / 1.15 | 21.16 / 1.15 (r1 20.06 / 1.15) |
+| `dynamic_20k` | 7.39 / 1.41 (r1 7.87 / 1.48) | 8.37 / 4.32 (r1 9.07 / 4.39) | 8.15 / 1.44 (r1 8.35 / 1.42) |
+| `lights_20k` | 6.81 / 1.67 | 6.68 / 1.66 | 7.03 / 1.65 (r1 6.76 / 1.64) |
+
+The GPU cost of keeping 2,000 scattered moved records current is gone
+(1.43 vs 1.41 ms). About 0.5-0.8 ms of render CPU remains in
+`dynamic_20k` with the table on, in both repeats (likely building and
+packing the dirty records); other differences are within the repeat
+spread (`shared_20k` and `small_1k` first repeats).
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

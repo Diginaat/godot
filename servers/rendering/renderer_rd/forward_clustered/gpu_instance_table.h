@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/templates/local_vector.h"
+#include "servers/rendering/renderer_rd/shaders/forward_clustered/gpu_instance_scatter.glsl.gen.h"
 #include "servers/rendering/rendering_device.h"
 
 // Persistent per-instance GPU data for Forward+ (docs/renderer/roadmap.md,
@@ -52,6 +53,9 @@ public:
 	static_assert(sizeof(Record) == 128, "GPUInstanceTable::Record must stay 128 bytes (std430 layout).");
 
 	static constexpr uint32_t MIN_CAPACITY = 1024;
+	// Up to this many contiguous runs are written with one buffer_update
+	// each; more go through one packed upload and a compute scatter.
+	static constexpr uint32_t MAX_DIRECT_RANGES = 16;
 
 private:
 	LocalVector<Record> records; // CPU mirror, indexed by slot.
@@ -60,10 +64,26 @@ private:
 	RID buffer;
 	uint32_t buffer_capacity = 0; // Records the GPU buffer holds.
 
+	// Packed upload for the scatter path.
+	GpuInstanceScatterShaderRD scatter_shader;
+	RID scatter_version;
+	RID scatter_pipeline;
+	RID upload_records;
+	RID upload_slots;
+	uint32_t upload_capacity = 0;
+	LocalVector<Record> packed_records;
+	bool _ensure_scatter(uint32_t p_count);
+	void _scatter(const LocalVector<uint32_t> &p_slots);
+
 	// Validation (rendering/geometry/gpu_instance_table/validate).
 	bool validation_pending = false;
 	LocalVector<Record> validation_snapshot;
 	uint64_t validation_frame = 0;
+	// Uploads since the last requested check, by path (reported with it).
+	uint32_t direct_uploads = 0;
+	uint32_t scattered_uploads = 0;
+	uint32_t validation_direct = 0;
+	uint32_t validation_scattered = 0;
 	// The readback callback finds the table through this (cleared when the
 	// table is destroyed, so a late callback does nothing).
 	static GPUInstanceTable *validating_table;
@@ -72,7 +92,8 @@ private:
 public:
 	struct UploadStats {
 		uint32_t records = 0; // Dirty records written.
-		uint32_t ranges = 0; // buffer_update calls.
+		uint32_t ranges = 0; // Contiguous runs of dirty records.
+		bool scattered = false; // Packed upload and compute scatter used.
 		bool grown = false;
 	};
 

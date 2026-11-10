@@ -476,3 +476,8 @@ frees with slot reuse, and an off/on rebuild (18 checks); a self-test mode
 that drops one upload is reported. Cost: nothing in static scenes; with 2,000
 scattered moved nodes, one `buffer_update` per range costs +2.9 ms GPU (task
 1.3 replaces it). Not done: nothing reads the table yet (1.5).
+Update 2026-11-10 (task 1.3): scattered dirty records are packed into one
+upload (records plus slot list) and written by a compute scatter
+(`gpu_instance_scatter.glsl`); up to 16 contiguous runs still use one
+`buffer_update` each. `dynamic_20k` GPU 4.32 to 1.43 ms (table off: 1.41).
+Both paths and the self-test pass on Vulkan and D3D12.
