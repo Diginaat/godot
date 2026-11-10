@@ -158,9 +158,13 @@ func _run(self_test: bool) -> void:
 	# Biases from coarser to much finer, so that every index LOD is drawn.
 	for i in 1000:
 		_nodes[i * 2 % _nodes.size()].lod_bias = [0.5, 4.0, 16.0, 64.0, 256.0][i % 5]
+	# Separate shadow meshes, which the depth pre-pass draws.
+	var shadowed := _shadowed_meshes()
+	for i in range(1, _nodes.size(), 4):
+		_nodes[i].mesh = shadowed[(i / 4) % shadowed.size()]
 	await _wait(PHASE_FRAMES)
-	print("GPU_INSTANCES_PHASE: index LODs")
-	await _compare("index LODs")
+	print("GPU_INSTANCES_PHASE: index LODs and shadow meshes")
+	await _compare("index LODs and shadow meshes")
 	_moving = 0
 	for i in 300:
 		var node: MeshInstance3D = _nodes.pop_back()
@@ -190,6 +194,25 @@ func _lod_mesh() -> Mesh:
 	importer.generate_lods(25.0, 60.0, [])
 	print("GPU_INSTANCES_PHASE: LOD mesh with %d index LODs" % importer.get_surface_lod_count(0))
 	return importer.get_mesh()
+
+
+# Meshes with a separate shadow mesh: one whose shadow mesh has other index
+# counts (a coarser sphere), and one with index LODs on both.
+func _shadowed_meshes() -> Array[Mesh]:
+	var fine := SphereMesh.new()
+	fine.radial_segments = 32
+	fine.rings = 16
+	var coarse := SphereMesh.new()
+	coarse.radial_segments = 10
+	coarse.rings = 5
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, fine.get_mesh_arrays())
+	var shadow := ArrayMesh.new()
+	shadow.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, coarse.get_mesh_arrays())
+	mesh.shadow_mesh = shadow
+	var lod_mesh: ArrayMesh = _lod_mesh()
+	lod_mesh.shadow_mesh = _lod_mesh()
+	return [mesh, lod_mesh]
 
 
 func _add_views() -> void:

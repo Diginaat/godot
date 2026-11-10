@@ -736,7 +736,10 @@ protected:
 		};
 		uint32_t repeat;
 		uint32_t multimesh_cull_draw; // First indirect command record.
-		uint32_t multimesh_visible_ids_offset;
+		union {
+			uint32_t multimesh_visible_ids_offset;
+			uint32_t gpu_depth_bucket; // GPU path: the indirect command of the depth pre-pass (shadow mesh index counts).
+		};
 		uint32_t multimesh_cull_lod; // GPU LOD level count << 24 | visible IDs reserved per level.
 		uint32_t multimesh_cull_last_lod; // Index LOD of the last GPU LOD level; level 0 is lod_index.
 		uint32_t mesh_clod_offset;
@@ -962,6 +965,7 @@ protected:
 		uint32_t count = 0;
 		uint32_t levels = 1; // Index LODs of the surface, including the full mesh.
 		uint32_t command = 0; // Indirect command of level 0; one per level follows.
+		uint32_t depth_command = UINT32_MAX; // Same for the depth pre-pass when it draws a separate shadow mesh.
 		uint32_t ids_first = 0; // Visible IDs of level 0; count are reserved per level.
 	};
 	// Bucket in gpu_instance_cull.glsl.
@@ -975,6 +979,8 @@ protected:
 		uint32_t count;
 		uint32_t lod_count; // Reduced index LODs (levels - 1).
 		uint32_t lod_edges_first; // Their edge lengths in the LOD edges buffer.
+		uint32_t depth_command; // UINT32_MAX: the depth pre-pass uses command.
+		uint32_t pad[3];
 	};
 	struct GPUInstanceScenario {
 		// Members, including those that join at the next cull (not gpu_drawn yet).
@@ -985,6 +991,7 @@ protected:
 		LocalVector<uint32_t> members; // Table slot and bucket per drawn instance surface.
 		LocalVector<uint32_t> commands; // Five words per bucket level, zero instances.
 		LocalVector<uint8_t> command_levels; // Index LOD of each command (validation).
+		LocalVector<uint32_t> command_depth; // Per command, its depth pre-pass twin or UINT32_MAX (UINT32_MAX - 1 for the twins).
 		LocalVector<float> lod_edges; // Screen-space edge length per reduced LOD.
 		uint32_t member_count = 0;
 		uint32_t id_count = 0;
@@ -1022,6 +1029,7 @@ protected:
 	uint32_t gpu_instances_check_members = 0;
 	uint32_t gpu_instances_check_levels[8] = {}; // Expected surfaces per index LOD (the last counts the rest).
 	LocalVector<uint8_t> gpu_instances_check_command_levels;
+	LocalVector<uint32_t> gpu_instances_check_command_depth;
 	static void _gpu_instances_check_received(const Vector<uint8_t> &p_data);
 
 	bool _gpu_instance_eligible(const GeometryInstanceForwardClustered *p_instance) const;

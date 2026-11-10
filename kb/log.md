@@ -21,6 +21,9 @@
   LOD in the cull kernel with the CPU rule, a visible-ID list per bucket
   level (D3D12 has no base instance). Meshes with LODs are now eligible;
   per-level counts and images equal to the CPU path on Vulkan and D3D12.
+* **Implemented**: meshes with a separate shadow mesh on the GPU path: the
+  depth pre-pass draws through twin indirect commands with the shadow
+  mesh's index counts.
 
 ## 2026-11-08 (release 0.9.1)
 

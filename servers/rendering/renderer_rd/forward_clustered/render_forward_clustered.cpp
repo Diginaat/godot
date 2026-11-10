@@ -674,7 +674,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 				}
 				RD::get_singleton()->draw_list_draw(draw_list, false, mesh_storage->mesh_surface_get_vertex_count(mesh_surface), instance_count * 6);
 			} else if (gpu_bucket) {
-				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), p_params->gpu_instance_commands, element_info.gpu_bucket * 5 * sizeof(uint32_t), 1, 0);
+				// The depth pre-pass draws the shadow mesh, which may have other index counts.
+				const uint32_t command = p_pass_mode == PASS_MODE_DEPTH ? element_info.gpu_depth_bucket : element_info.gpu_bucket;
+				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), p_params->gpu_instance_commands, command * 5 * sizeof(uint32_t), 1, 0);
 			} else if (use_clod) {
 				const uint32_t group_count = mesh_storage->mesh_surface_get_cluster_data(mesh_surface).group_count;
 				// One command record per group (unselected groups have zero

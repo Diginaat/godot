@@ -118,7 +118,10 @@ the CPU path.
   visible-ID list (binding 48); one indirect draw per bucket level. Meshes
   with LODs are eligible; `gpu_instances.ps1` has an index-LOD phase (all
   levels drawn, per-level counts equal to the CPU choice, image equal).
-  Next: separate shadow meshes; views with a motion list;
+  Separate shadow meshes done 2026-11-10: the depth pre-pass draws them
+  through a twin command per bucket level with the shadow mesh's index
+  counts (the kernel counts into both); a shadow mesh with fewer index LODs
+  than the mesh stays on the CPU path. Next: views with a motion list;
   incremental bucket updates instead of full rebuilds; the `gpu_drawn` bit
   in the cull's packed data; viewport render info (objects, primitives) for
   GPU-drawn instances; occlusion culling (`OccluderInstance3D` today, HZB

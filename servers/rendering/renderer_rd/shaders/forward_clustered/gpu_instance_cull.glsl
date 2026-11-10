@@ -27,7 +27,7 @@ struct Record { // GPUInstanceTable::Record, 160 bytes.
 	float lod_scale;
 };
 
-struct Bucket { // RenderForwardClustered::GPUInstanceBucketData, 64 bytes.
+struct Bucket { // RenderForwardClustered::GPUInstanceBucketData, 80 bytes.
 	vec3 compressed_aabb_position;
 	uint ids_first; // Visible IDs of level 0; count are reserved per level.
 	vec3 compressed_aabb_size;
@@ -37,6 +37,10 @@ struct Bucket { // RenderForwardClustered::GPUInstanceBucketData, 64 bytes.
 	uint count;
 	uint lod_count;
 	uint lod_edges_first;
+	uint depth_command; // 0xFFFFFFFF: the depth pre-pass draws with command.
+	uint pad0;
+	uint pad1;
+	uint pad2;
 };
 
 struct InstanceData { // SceneState::InstanceData, 176 bytes.
@@ -156,6 +160,10 @@ void main() {
 	}
 	uint rank = atomicAdd(commands.data[(bucket.command + level) * 5 + 1], 1);
 	ids.data[bucket.ids_first + level * bucket.count + rank] = index;
+	if (bucket.depth_command != 0xFFFFFFFFu) {
+		// A separate shadow mesh: the depth pre-pass draws as many instances.
+		atomicAdd(commands.data[(bucket.depth_command + level) * 5 + 1], 1);
+	}
 
 	// What _fill_render_list() and _fill_instance_data() write for an opaque
 	// instance without lightmap, VoxelGI, fade or motion pass.

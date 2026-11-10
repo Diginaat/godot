@@ -17,12 +17,12 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 2, GPU path for eligible instances: 2.1-2.4 and 2.5 index LODs done (2026-11-10); Phase 1 done except 1.8 |
+| Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs and shadow meshes done (2026-11-10); Phase 1 done except 1.8 |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 2.5 rest: separate shadow meshes, motion-list views, incremental buckets, render info (roadmap.md) |
+| Next | Phase 2.5 rest: motion-list views, incremental buckets, render info, occlusion (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (19 count checks, 8 with index LODs, 8 of 8 images equal to the CPU path, self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
+| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (19 count checks, 8 with index LODs and 8 with shadow meshes, 8 of 8 images equal to the CPU path, self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
 
 ## Phase 2 in one line
 
@@ -44,8 +44,8 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   (Vulkan 104 MiB); about 2 ms spread between repeats in the 20k cases.
 - With the table on, `dynamic_20k` still has about +0.5-0.8 ms render CPU
   (building/packing 2,000 dirty records per frame); GPU cost fixed in 1.3.
-- GPU path: separate shadow meshes are not eligible yet; LOD levels a
-  view never uses still cost one empty indirect draw each; any membership change rebuilds the scenario's buckets
+- GPU path: LOD levels a view never uses still cost one empty indirect
+  draw each (twice with a shadow mesh); any membership change rebuilds the scenario's buckets
   in full (a hitch when many nodes are added at once); `unique_10k` gains
   nothing (one bucket per material); viewport render info misses GPU-drawn
   objects.

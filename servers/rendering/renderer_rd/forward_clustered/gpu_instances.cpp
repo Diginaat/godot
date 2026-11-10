@@ -126,9 +126,9 @@ bool RenderForwardClustered::_gpu_instance_eligible(const GeometryInstanceForwar
 	RendererRD::MeshStorage *storage = RendererRD::MeshStorage::get_singleton();
 	// Surfaces that need a pass, buffer or per-view choice the buckets do not
 	// make: transparency, screen and depth reads, stencil, motion vectors,
-	// cluster LOD and separate shadow meshes (the depth pre-pass would draw
-	// those with different index counts). The cull pass chooses index LODs
-	// per instance.
+	// cluster LOD, and shadow meshes with fewer index LODs than the mesh (the
+	// depth pre-pass draws the shadow mesh at the mesh's LOD). The cull pass
+	// chooses index LODs per instance.
 	const uint32_t excluded = GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA | GeometryInstanceSurfaceDataCache::FLAG_USES_SUBSURFACE_SCATTERING |
 			GeometryInstanceSurfaceDataCache::FLAG_USES_SCREEN_TEXTURE | GeometryInstanceSurfaceDataCache::FLAG_USES_DEPTH_TEXTURE |
 			GeometryInstanceSurfaceDataCache::FLAG_USES_NORMAL_TEXTURE | GeometryInstanceSurfaceDataCache::FLAG_USES_PARTICLE_TRAILS |
@@ -137,12 +137,19 @@ bool RenderForwardClustered::_gpu_instance_eligible(const GeometryInstanceForwar
 		if (!(surface->flags & (GeometryInstanceSurfaceDataCache::FLAG_PASS_DEPTH | GeometryInstanceSurfaceDataCache::FLAG_PASS_OPAQUE)) || (surface->flags & excluded)) {
 			return false;
 		}
-		if (!surface->surface || surface->surface_shadow != surface->surface || !surface->shader || !surface->shader_shadow || !surface->material ||
+		if (!surface->surface || !surface->surface_shadow || !surface->shader || !surface->shader_shadow || !surface->material ||
 				surface->primitive == RSE::PRIMITIVE_POINTS) {
 			return false;
 		}
 		if (storage->mesh_surface_get_cluster_data(surface->surface).group_count > 0) {
 			return false;
+		}
+		if (surface->surface_shadow != surface->surface) {
+			const uint32_t lods = storage->mesh_surface_has_lod(surface->surface) ? storage->mesh_surface_get_lod_count(surface->surface) : 0;
+			const uint32_t shadow_lods = storage->mesh_surface_has_lod(surface->surface_shadow) ? storage->mesh_surface_get_lod_count(surface->surface_shadow) : 0;
+			if (shadow_lods < lods || storage->mesh_surface_get_cluster_data(surface->surface_shadow).group_count > 0) {
+				return false;
+			}
 		}
 	}
 	return true;
@@ -302,6 +309,7 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 	p_scenario.bucket_data.clear();
 	p_scenario.commands.clear();
 	p_scenario.command_levels.clear();
+	p_scenario.command_depth.clear();
 	p_scenario.lod_edges.clear();
 	p_scenario.members.resize(entries.size() * 2);
 	for (uint32_t i = 0; i < entries.size(); i++) {
@@ -331,6 +339,22 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 				p_scenario.commands.push_back(0);
 			}
 			p_scenario.command_levels.push_back(uint8_t(MIN(level, 7u)));
+			p_scenario.command_depth.push_back(UINT32_MAX);
+		}
+		bucket.depth_command = UINT32_MAX;
+		void *shadow = bucket.surface->surface_shadow;
+		if (shadow != surface) {
+			// The same instance counts, with the shadow mesh's index counts.
+			bucket.depth_command = p_scenario.commands.size() / 5;
+			for (uint32_t level = 0; level < bucket.levels; level++) {
+				p_scenario.commands.push_back(level == 0 ? storage->mesh_surface_get_vertices_drawn_count(shadow) : storage->mesh_surface_get_index_count(shadow, level));
+				for (uint32_t word = 1; word < 5; word++) {
+					p_scenario.commands.push_back(0);
+				}
+				p_scenario.command_levels.push_back(0);
+				p_scenario.command_depth.push_back(UINT32_MAX - 1);
+				p_scenario.command_depth[bucket.command + level] = bucket.depth_command + level;
+			}
 		}
 		for (uint32_t lod = 0; lod < lod_count; lod++) {
 			p_scenario.lod_edges.push_back(storage->mesh_surface_get_lod_edge_length(surface, lod));
@@ -388,7 +412,7 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 }
 
 bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_data, bool p_using_motion_pass, bool p_using_sdfgi, bool p_using_opaque_gi) {
-	static_assert(sizeof(GPUInstanceBucketData) == 64);
+	static_assert(sizeof(GPUInstanceBucketData) == 80);
 	static_assert(sizeof(SceneState::InstanceData) == 176 || sizeof(real_t) != sizeof(float));
 	static_assert(INSTANCE_DATA_FLAGS_DYNAMIC == (1 << 3) && INSTANCE_DATA_FLAG_USE_GI_BUFFERS == (1 << 5) && INSTANCE_DATA_FLAG_USE_SDFGI == (1 << 6) && INSTANCE_DATA_FLAGS_FADE_SHIFT == 24,
 			"Update the instance flags in gpu_instance_cull.glsl.");
@@ -473,6 +497,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		data.count = scenario->buckets[i].count;
 		data.lod_count = scenario->buckets[i].levels - 1;
 		data.lod_edges_first = lod_edges_first;
+		data.depth_command = scenario->buckets[i].depth_command;
 		lod_edges_first += data.lod_count;
 	}
 	rd->buffer_update(scenario->buckets_buffer, 0, scenario->bucket_data.size() * sizeof(GPUInstanceBucketData), scenario->bucket_data.ptr());
@@ -554,6 +579,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 				}
 			}
 			gpu_instances_check_command_levels = scenario->command_levels;
+			gpu_instances_check_command_depth = scenario->command_depth;
 			gpu_instances_check_frame = frame;
 			gpu_instances_check_pending = true;
 			gpu_instances_check_expected = expected;
@@ -577,9 +603,22 @@ void RenderForwardClustered::_gpu_instances_check_received(const Vector<uint8_t>
 	const uint32_t word_count = p_data.size() / sizeof(uint32_t);
 	uint32_t drawn = 0;
 	uint32_t levels[8] = {};
+	// The depth pre-pass commands of buckets with a shadow mesh must draw as
+	// many instances as their twins.
+	uint32_t depth_drawn = 0;
+	uint32_t depth_mismatches = 0;
+	const LocalVector<uint32_t> &command_depth = self->gpu_instances_check_command_depth;
 	for (uint32_t i = 1; i < word_count; i += 5) {
-		drawn += words[i];
 		const uint32_t command = i / 5;
+		const uint32_t depth = command < command_depth.size() ? command_depth[command] : UINT32_MAX;
+		if (depth == UINT32_MAX - 1) {
+			depth_drawn += words[i];
+			continue;
+		}
+		if (depth != UINT32_MAX && (depth * 5 + 1 >= word_count || words[depth * 5 + 1] != words[i])) {
+			depth_mismatches++;
+		}
+		drawn += words[i];
 		levels[command < self->gpu_instances_check_command_levels.size() ? self->gpu_instances_check_command_levels[command] : 0] += words[i];
 	}
 	String drawn_lods;
@@ -593,12 +632,14 @@ void RenderForwardClustered::_gpu_instances_check_received(const Vector<uint8_t>
 			expected_lods += vformat("%s%d:%d", expected_lods.is_empty() ? "" : ",", level, expected);
 		}
 	}
-	if (drawn != self->gpu_instances_check_expected) {
+	if (depth_mismatches > 0) {
+		ERR_PRINT(vformat("GPU instances check (frame %d): %d depth pre-pass commands of shadow meshes draw other instance counts than their buckets.", self->gpu_instances_check_frame, depth_mismatches));
+	} else if (drawn != self->gpu_instances_check_expected) {
 		ERR_PRINT(vformat("GPU instances check (frame %d): the GPU path drew %d instance surfaces, the CPU cull found %d visible.", self->gpu_instances_check_frame, drawn, self->gpu_instances_check_expected));
 	} else if (!same_lods) {
 		ERR_PRINT(vformat("GPU instances check (frame %d): instance surfaces per index LOD %s, the CPU choice gives %s.", self->gpu_instances_check_frame, drawn_lods, expected_lods));
 	} else {
-		print_line(vformat("GPU_INSTANCES_CHECK: ok frame=%d buckets=%d members=%d drawn=%d lods=%s", self->gpu_instances_check_frame, self->gpu_instances_check_buckets, self->gpu_instances_check_members, drawn, drawn_lods));
+		print_line(vformat("GPU_INSTANCES_CHECK: ok frame=%d buckets=%d members=%d drawn=%d lods=%s shadow_meshes=%d", self->gpu_instances_check_frame, self->gpu_instances_check_buckets, self->gpu_instances_check_members, drawn, drawn_lods, depth_drawn));
 	}
 }
 
@@ -622,11 +663,11 @@ void RenderForwardClustered::_gpu_instances_append(int *p_render_info, float p_l
 			info.lod_index = level;
 			info.repeat = 1;
 			info.multimesh_cull_draw = UINT32_MAX;
-			info.multimesh_visible_ids_offset = 0;
 			info.multimesh_cull_lod = 0;
 			info.multimesh_cull_last_lod = 0;
 			info.mesh_clod_offset = UINT32_MAX;
 			info.gpu_bucket = bucket.command + level;
+			info.gpu_depth_bucket = (bucket.depth_command == UINT32_MAX ? bucket.command : bucket.depth_command) + level;
 			info.gpu_first = bucket.ids_first + level * bucket.count;
 			list.element_info.push_back(info);
 		}
