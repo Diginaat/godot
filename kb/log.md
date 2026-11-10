@@ -39,6 +39,10 @@
 * **Fixed**: a crash on quit in about 70% of `gpu_instances.ps1` runs: the
   per-frame render-info readback completed after the renderer was gone.
   Added [readback callback after renderer teardown](/mistakes/readback-callback-after-renderer-teardown.md).
+* **Implemented**: the GPU path draws what the scene cull found visible
+  (D032): slot bits from the cull threads, so occluders apply. Building the
+  bits from the pointer list on the render thread cost 2.7 ms at 100k; from
+  the cull's slot list 0.2 ms.
 
 ## 2026-11-08 (release 0.9.1)
 

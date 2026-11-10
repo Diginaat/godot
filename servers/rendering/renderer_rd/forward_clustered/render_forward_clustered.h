@@ -1036,6 +1036,8 @@ protected:
 		RID lod_edges_buffer;
 		RID command_primitives_buffer;
 		RID stats_buffer; // Objects and primitives the cull pass drew, per view (render info).
+		RID visible_buffer; // A bit per table slot: visible in the view (from the scene cull).
+		uint32_t visible_capacity = 0; // Words.
 		RID output_buffer; // InstanceData per member, written per view.
 		RID ids_buffer; // Members drawn per bucket level, written per view.
 		uint32_t member_capacity = 0;
@@ -1087,6 +1089,7 @@ protected:
 	void _gpu_instances_unjoin(GPUInstanceScenario &p_scenario, GeometryInstanceForwardClustered *p_instance);
 	void _gpu_instances_update_members(GPUInstanceScenario &p_scenario);
 	uint32_t gpu_instances_rebuilds = 0; // Full bucket rebuilds (validation reports them).
+	LocalVector<uint32_t> gpu_instances_visible_bits;
 	// Before the camera render list: decides whether the GPU path draws this
 	// view and, if so, culls and writes its instances (gpu_instances_view).
 	bool _gpu_instances_begin_view(RenderDataRD *p_render_data, bool p_using_motion_pass, bool p_using_sdfgi, bool p_using_opaque_gi);

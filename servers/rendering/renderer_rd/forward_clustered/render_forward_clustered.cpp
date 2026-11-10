@@ -5773,6 +5773,7 @@ RenderGeometryInstance *RenderForwardClustered::geometry_instance_create(RID p_b
 	GeometryInstanceForwardClustered *ginstance = geometry_instance_alloc.alloc();
 	ginstance->data = memnew(GeometryInstanceForwardClustered::Data);
 	ginstance->gpu_slot = gpu_instance_slots.allocate();
+	ginstance->gpu_cull_slot = ginstance->gpu_slot;
 	if (gpu_instance_owners.size() <= ginstance->gpu_slot) {
 		gpu_instance_owners.resize(ginstance->gpu_slot + 1);
 	}

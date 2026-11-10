@@ -17,12 +17,12 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs, shadow meshes, motion-pass views, render info and incremental buckets done (2026-11-10); Phase 1 done except 1.8 |
+| Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs, shadow meshes, motion-pass views, render info, incremental buckets and scene-cull visibility done (2026-11-10); Phase 1 done except 1.8 |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 2.5 rest: `gpu_drawn` in the cull's packed data, occlusion; then Phase 3 multi-draw (roadmap.md) |
+| Next | Phase 3: multi-draw per pipeline group, `draw_indirect_count` in RD; HZB occlusion for the GPU path later (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (26 count and render info checks, with index LODs, shadow meshes, a motion pass and per-frame churn without rebuilds; 9 of 9 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
+| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (27 count and render info checks, with index LODs, shadow meshes, a motion pass, an occluder and per-frame churn without rebuilds; 10 of 10 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
 
 ## Phase 2 in one line
 
@@ -78,6 +78,8 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   pre-pass and the motion pass.
 - D031: buckets updated in place (spare slots, free lists, key map); full
   rebuild only for new keys, full buckets, mesh changes, fragmentation.
+- D032: the kernel draws members whose slot bit the scene cull set (exact
+  frustum, layers, occluders); the cull lists the slots (+0.2 ms at 100k).
 - Earlier geometry decisions D001-D024 still hold (compute + indirect before
   mesh shaders, stable source IDs, opt-in settings, conventional fallback).
 

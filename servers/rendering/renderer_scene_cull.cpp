@@ -3853,6 +3853,7 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 					if (keep) {
 						if (cull_data.gpu_split && idata.instance_geometry->gpu_drawn) {
 							cull_result.gpu_geometry_instances.push_back(idata.instance_geometry);
+							cull_result.gpu_slots.push_back(idata.instance_geometry->gpu_cull_slot);
 						} else {
 							cull_result.geometry_instances.push_back(idata.instance_geometry);
 						}
@@ -4440,9 +4441,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		}
 	}
 
-	scene_render->set_gpu_instance_view(gpu_split ? p_scenario.get_id() : 0, gpu_split ? &scene_cull_result.gpu_geometry_instances : nullptr, p_visible_layers);
+	scene_render->set_gpu_instance_view(gpu_split ? p_scenario.get_id() : 0, gpu_split ? &scene_cull_result.gpu_geometry_instances : nullptr, gpu_split ? &scene_cull_result.gpu_slots : nullptr, p_visible_layers);
 	scene_render->render_scene(p_render_buffers, p_camera_data, prev_camera_data, scene_cull_result.geometry_instances, scene_cull_result.light_instances, scene_cull_result.reflections, scene_cull_result.voxel_gi_instances, scene_cull_result.decals, scene_cull_result.lightmaps, scene_cull_result.fog_volumes, p_environment, camera_attributes, p_compositor, p_shadow_atlas, occluders_tex, p_reflection_probe.is_valid() ? RID() : scenario->reflection_atlas, p_reflection_probe, p_reflection_probe_pass, p_screen_mesh_lod_threshold, render_shadow_data, max_shadows_used, render_sdfgi_data, cull.sdfgi.region_count, p_window_output_max_value, &sdfgi_update_data, r_render_info, &scene_cull_result.rt_geometry_instances, &scene_cull_result.rt_light_instances, planar_reflections);
-	scene_render->set_gpu_instance_view(0, nullptr, 0);
+	scene_render->set_gpu_instance_view(0, nullptr, nullptr, 0);
 
 	if (p_viewport.is_valid() && !p_camera_data->mirror_pass) {
 		RSG::viewport->viewport_set_prev_camera_data(p_viewport, p_camera_data);

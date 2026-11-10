@@ -130,10 +130,11 @@ the CPU path.
   to the view's render info a few frames later; equal to the CPU lists'
   counts in every validation check. Incremental bucket updates done
   2026-11-10 (D031): spare slots, free lists and a key map; a full rebuild
-  only for new keys, full buckets, mesh changes and fragmentation. Next:
-  the `gpu_drawn` bit in the cull's packed data;
-  occlusion culling (`OccluderInstance3D` today, HZB
-  later) for them.
+  only for new keys, full buckets, mesh changes and fragmentation.
+  Visibility from the scene cull done 2026-11-10 (D032): the cull lists the
+  instances' slots, the kernel draws members whose slot bit is set, so
+  `OccluderInstance3D` occlusion applies (fixture phase with an occluder).
+  Next: HZB occlusion for them (after the scene cull's bits).
 - Acceptance: exact pixel and motion-vector A/B against the CPU path on
   Vulkan and D3D12; `massive_100k` and `shared_20k` render CPU down by most
   of the "Setup 3D Scene" share; GPU cost reported per view; `small_1k` not

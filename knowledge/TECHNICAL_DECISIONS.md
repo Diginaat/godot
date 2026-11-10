@@ -634,3 +634,20 @@ Measured: `instance_bench` `churn_100k` (100 material changes per frame)
 6.1-6.8 ms render CPU on the GPU path against 4.8-5.2 ms without changes;
 `gpu_instances.ps1` replaces 20 nodes and swaps materials every frame for 60
 frames with no rebuild.
+
+## D032 — The GPU path draws what the scene cull found visible
+
+2026-11-10, Phase 2.5.
+Problem: the cull kernel tested the frustum and layers itself, so it ignored
+`OccluderInstance3D` occlusion (and its count check failed in scenes with
+occluders), and its widened frustum could differ from the CPU's at the edges.
+The scene cull still runs for every camera and already lists the GPU path's
+instances apart.
+Decision: the scene cull threads also list each such instance's renderer
+slot (`RenderGeometryInstance::gpu_cull_slot`, read next to `gpu_drawn` in
+the same object); the renderer turns the slots into a bit per table slot and
+uploads it per view (12.5 KiB at 100k slots); the kernel draws a member when
+its bit is set. Frustum, layers and occluders come from the CPU, exactly.
+Rejected: building the bits on the render thread from the pointer list:
++2.7 ms at 100k (84k pointer chases); from the cull's slot list it is
++0.2 ms. GPU occlusion (HZB) can later clear bits or test after them.

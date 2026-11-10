@@ -5,8 +5,8 @@
 #VERSION_DEFINES
 
 // GPU path for eligible instances (docs/renderer, Phase 2). One thread per
-// bucket member (an instance surface): frustum and layer test from the GPU
-// instance table, the index LOD as the CPU render list chooses it, whether
+// bucket member (an instance surface): drawn if the CPU scene cull found its
+// instance visible (a bit per table slot), with the index LOD as the CPU render list chooses it, whether
 // the motion pass draws it, then the
 // instance data Forward+ draws with, at the member's own index, and the
 // member's index appended to its bucket level's draw. The CPU zeroed each
@@ -123,14 +123,18 @@ shared uint group_primitives;
 #define INSTANCE_FLAGS_FADE_SHIFT 24
 #define INSTANCE_FLAGS_FADE_MASK (0xFFu << INSTANCE_FLAGS_FADE_SHIFT)
 
+layout(set = 0, binding = 9, std430) restrict readonly buffer Visible {
+	uint bits[]; // Per table slot: the scene cull found the instance visible in this view.
+}
+visible;
+
 layout(push_constant, std430) uniform Params {
-	vec4 planes[6]; // World space, normal pointing out, w = distance.
 	uint member_count;
-	uint visible_layers;
 	uint view_flags;
 	float lod_threshold; // Screen mesh LOD threshold; 0 or less: no LODs.
-	vec3 lod_camera;
 	float lod_distance_multiplier;
+	vec3 lod_camera;
+	uint pad;
 }
 params;
 
@@ -144,21 +148,13 @@ uint cull_member(uint index, out uint r_primitives) {
 	if (member.x == 0xFFFFFFFFu) {
 		return 0; // A free member slot.
 	}
-	Record record = table.records[member.x];
-	if ((record.layer_mask & params.visible_layers) == 0) {
+	// The scene cull's answer: frustum, layers, occluders.
+	if ((visible.bits[member.x >> 5] & (1u << (member.x & 31u))) == 0) {
 		return 0;
 	}
-	// Outside when the bounds' corner nearest to the inside lies outside a
-	// plane, as in the CPU scene cull.
+	Record record = table.records[member.x];
 	vec3 aabb_min = record.aabb_position;
 	vec3 aabb_max = record.aabb_position + record.aabb_size;
-	for (uint i = 0; i < 6; i++) {
-		vec3 normal = params.planes[i].xyz;
-		vec3 nearest = vec3(normal.x > 0.0 ? aabb_min.x : aabb_max.x, normal.y > 0.0 ? aabb_min.y : aabb_max.y, normal.z > 0.0 ? aabb_min.z : aabb_max.z);
-		if (dot(normal, nearest) > params.planes[i].w) {
-			return 0;
-		}
-	}
 
 	Bucket bucket = buckets.data[member.y];
 

@@ -63,6 +63,7 @@ protected:
 	// Set by the scene cull around each render_scene() (set_gpu_instance_view).
 	uint64_t gpu_view_scenario = 0;
 	const PagedArray<RenderGeometryInstance *> *gpu_view_instances = nullptr;
+	const LocalVector<uint32_t> *gpu_view_slots = nullptr;
 	uint32_t gpu_view_visible_layers = 0;
 
 	RendererRD::ForwardIDStorage *forward_id_storage = nullptr;
@@ -256,9 +257,10 @@ public:
 
 	virtual void base_uniforms_changed() = 0;
 
-	virtual void set_gpu_instance_view(uint64_t p_scenario, const PagedArray<RenderGeometryInstance *> *p_instances, uint32_t p_visible_layers) override {
+	virtual void set_gpu_instance_view(uint64_t p_scenario, const PagedArray<RenderGeometryInstance *> *p_instances, const LocalVector<uint32_t> *p_slots, uint32_t p_visible_layers) override {
 		gpu_view_scenario = p_scenario;
 		gpu_view_instances = p_instances;
+		gpu_view_slots = p_slots;
 		gpu_view_visible_layers = p_visible_layers;
 	}
 

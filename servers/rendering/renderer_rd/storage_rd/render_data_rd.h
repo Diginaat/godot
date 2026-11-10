@@ -107,6 +107,7 @@ public:
 	// the renderer draws them on the GPU it sets gpu_instances_drawn; otherwise
 	// the CPU render list takes them with the other instances.
 	const PagedArray<RenderGeometryInstance *> *gpu_instances = nullptr;
+	const LocalVector<uint32_t> *gpu_slots = nullptr; // Their renderer slots.
 	uint64_t gpu_scenario = 0;
 	uint32_t gpu_visible_layers = 0;
 	bool gpu_instances_drawn = false;

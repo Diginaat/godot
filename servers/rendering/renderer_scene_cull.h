@@ -984,8 +984,10 @@ public:
 		PagedArray<RenderGeometryInstance *> rt_geometry_instances;
 		PagedArray<RID> rt_light_instances;
 
-		// Visible instances the renderer's GPU path draws (gpu_drawn).
+		// Visible instances the renderer's GPU path draws (gpu_drawn), and their
+		// gpu_cull_slot, read here where the instance is in cache anyway.
 		PagedArray<RenderGeometryInstance *> gpu_geometry_instances;
+		LocalVector<uint32_t> gpu_slots;
 
 		struct DirectionalShadow {
 			PagedArray<RenderGeometryInstance *> cascade_geometry_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
@@ -1007,6 +1009,7 @@ public:
 			rt_geometry_instances.clear();
 			rt_light_instances.clear();
 			gpu_geometry_instances.clear();
+			gpu_slots.clear();
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].clear();
@@ -1035,6 +1038,7 @@ public:
 			rt_geometry_instances.reset();
 			rt_light_instances.reset();
 			gpu_geometry_instances.reset();
+			gpu_slots.reset();
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].reset();
@@ -1063,6 +1067,12 @@ public:
 			rt_geometry_instances.merge_unordered(p_cull_result.rt_geometry_instances);
 			rt_light_instances.merge_unordered(p_cull_result.rt_light_instances);
 			gpu_geometry_instances.merge_unordered(p_cull_result.gpu_geometry_instances);
+			if (!p_cull_result.gpu_slots.is_empty()) {
+				const uint32_t from = gpu_slots.size();
+				gpu_slots.resize(from + p_cull_result.gpu_slots.size());
+				memcpy(gpu_slots.ptr() + from, p_cull_result.gpu_slots.ptr(), p_cull_result.gpu_slots.size() * sizeof(uint32_t));
+				p_cull_result.gpu_slots.clear();
+			}
 
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {

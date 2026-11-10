@@ -47,6 +47,7 @@ public:
 	// renderer sets gpu_drawn when its GPU path draws the instance, and camera
 	// culls then list it separately (RendererSceneRender::set_gpu_instance_view).
 	bool gpu_drawn = false;
+	uint32_t gpu_cull_slot = UINT32_MAX; // The renderer's slot for it, listed with it (a bit per slot on the GPU).
 	virtual void set_gpu_scenario(uint64_t p_scenario) {}
 
 	virtual void _mark_dirty() = 0;

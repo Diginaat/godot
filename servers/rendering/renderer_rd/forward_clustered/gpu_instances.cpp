@@ -54,15 +54,14 @@ using namespace RendererSceneRenderImplementation;
 namespace {
 // Matches Params in gpu_instance_cull.glsl.
 struct GPUInstanceCullParams {
-	float planes[6][4];
 	uint32_t member_count;
-	uint32_t visible_layers;
 	uint32_t view_flags;
 	float lod_threshold;
-	float lod_camera[3];
 	float lod_distance_multiplier;
+	float lod_camera[3];
+	uint32_t pad;
 };
-static_assert(sizeof(GPUInstanceCullParams) == 128);
+static_assert(sizeof(GPUInstanceCullParams) == 32);
 
 enum {
 	GPU_INSTANCE_VIEW_USE_GI_BUFFERS = 1,
@@ -81,7 +80,7 @@ uint32_t gpu_instance_indices_to_primitives(RSE::PrimitiveType p_primitive, uint
 // Marks the commands of moved members in GPUInstanceScenario::command_levels.
 constexpr uint8_t GPU_INSTANCE_MOVED_COMMAND = 0x80;
 
-void gpu_instances_free_buffers(RID *const (&p_buffers)[8]) {
+void gpu_instances_free_buffers(RID *const (&p_buffers)[9]) {
 	RD *rd = RD::get_singleton();
 	for (RID *buffer : p_buffers) {
 		if (buffer->is_valid()) {
@@ -240,7 +239,7 @@ void RenderForwardClustered::_gpu_instance_leave(GeometryInstanceForwardClustere
 	p_instance->gpu_drawn = false;
 
 	if (scenario->instances.is_empty()) {
-		gpu_instances_free_buffers({ &scenario->members_buffer, &scenario->buckets_buffer, &scenario->commands_buffer, &scenario->lod_edges_buffer, &scenario->output_buffer, &scenario->ids_buffer, &scenario->command_primitives_buffer, &scenario->stats_buffer });
+		gpu_instances_free_buffers({ &scenario->members_buffer, &scenario->buckets_buffer, &scenario->commands_buffer, &scenario->lod_edges_buffer, &scenario->output_buffer, &scenario->ids_buffer, &scenario->command_primitives_buffer, &scenario->stats_buffer, &scenario->visible_buffer });
 		gpu_instance_scenarios.erase(key);
 		memdelete(scenario);
 	}
@@ -276,7 +275,7 @@ void RenderForwardClustered::_gpu_instances_free() {
 			instance->gpu_join_index = UINT32_MAX;
 			instance->gpu_drawn = false;
 		}
-		gpu_instances_free_buffers({ &scenario->members_buffer, &scenario->buckets_buffer, &scenario->commands_buffer, &scenario->lod_edges_buffer, &scenario->output_buffer, &scenario->ids_buffer, &scenario->command_primitives_buffer, &scenario->stats_buffer });
+		gpu_instances_free_buffers({ &scenario->members_buffer, &scenario->buckets_buffer, &scenario->commands_buffer, &scenario->lod_edges_buffer, &scenario->output_buffer, &scenario->ids_buffer, &scenario->command_primitives_buffer, &scenario->stats_buffer, &scenario->visible_buffer });
 		memdelete(scenario);
 	}
 	gpu_instance_scenarios.clear();
@@ -743,20 +742,36 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	const uint32_t zero_stats[4] = {};
 	rd->buffer_update(scenario->stats_buffer, 0, sizeof(zero_stats), zero_stats);
 
-	GPUInstanceCullParams params = {};
-	const Vector<Plane> planes = _jitter_safe_projection(scene->cam_projection, scene->taa_jitter).get_projection_planes(scene->cam_transform);
-	ERR_FAIL_COND_V(planes.size() != 6, true);
-	for (uint32_t i = 0; i < 6; i++) {
-		params.planes[i][0] = planes[i].normal.x;
-		params.planes[i][1] = planes[i].normal.y;
-		params.planes[i][2] = planes[i].normal.z;
-		params.planes[i][3] = planes[i].d;
+	// What the scene cull found visible, a bit per table slot: the cull pass
+	// draws exactly those (frustum, layers and occluders as the CPU tested).
+	const uint32_t words = MAX((gpu_instance_slots.get_capacity() + 31) / 32, 1u);
+	LocalVector<uint32_t> &bits = gpu_instances_visible_bits;
+	bits.resize(words);
+	memset(bits.ptr(), 0, words * sizeof(uint32_t));
+	// The cull listed the slots with the instances (no pointer chasing here).
+	// Instances that left during this render have no members: their bits
+	// draw nothing.
+	if (p_render_data->gpu_slots) {
+		for (uint32_t slot : *p_render_data->gpu_slots) {
+			if (slot < words * 32) {
+				bits[slot >> 5] |= 1u << (slot & 31);
+			}
+		}
 	}
+	if (scenario->visible_capacity < words || scenario->visible_buffer.is_null()) {
+		if (scenario->visible_buffer.is_valid()) {
+			rd->free_rid(scenario->visible_buffer);
+		}
+		scenario->visible_capacity = Math::next_power_of_2(MAX(words, 64u));
+		scenario->visible_buffer = rd->storage_buffer_create(scenario->visible_capacity * sizeof(uint32_t));
+	}
+	rd->buffer_update(scenario->visible_buffer, 0, words * sizeof(uint32_t), bits.ptr());
+
+	GPUInstanceCullParams params = {};
 	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instances/validate");
 	// Self-test: the last bucket's members are left out, so it draws nothing
 	// and both the count check and an image comparison must notice.
 	params.member_count = validate == 2 ? scenario->buckets[scenario->buckets.size() - 1].first : scenario->member_count;
-	params.visible_layers = p_render_data->gpu_visible_layers;
 	// Members can have moved only if an instance moved in this or the last
 	// frame; otherwise the motion pass gets no GPU path draws (and the
 	// validation reports moved members drawn without it).
@@ -773,10 +788,10 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	params.lod_distance_multiplier = scene->lod_distance_multiplier;
 
 	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0);
-	const RID resources[9] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer, scenario->ids_buffer, scenario->lod_edges_buffer,
-		scenario->command_primitives_buffer, scenario->stats_buffer };
+	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer, scenario->ids_buffer, scenario->lod_edges_buffer,
+		scenario->command_primitives_buffer, scenario->stats_buffer, scenario->visible_buffer };
 	LocalVector<RD::Uniform> uniforms;
-	for (uint32_t binding = 0; binding < 9; binding++) {
+	for (uint32_t binding = 0; binding < 10; binding++) {
 		RD::Uniform uniform;
 		uniform.binding = binding;
 		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;

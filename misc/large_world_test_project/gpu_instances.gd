@@ -5,6 +5,7 @@ extends Node3D
 ## materials that leave the path (transparent) and come back, transparency,
 ## visibility ranges, meshes with index LODs and LOD biases, frees and adds,
 ## nodes replaced and materials swapped every frame (no bucket rebuilds),
+## an occluder (the GPU path draws what the scene cull found visible),
 ## TAA and FSR 2 (a motion pass), compared through their motion vectors, a second view of the same world and a
 ## view of another world. Every 30 frames the engine compares what the GPU
 ## path drew with what the CPU cull found visible (GPU_INSTANCES_CHECK). After
@@ -215,6 +216,24 @@ func _run(self_test: bool) -> void:
 	_churn = 0
 	print("GPU_INSTANCES_PHASE: churn, 20 nodes replaced per frame")
 	await _compare("churn")
+	# Occlusion culling: the scene cull leaves out what an occluder covers, and
+	# the GPU path draws what the cull found visible.
+	await _wait(10) # Render info of the GPU path arrives a few frames late.
+	var viewport_rid := get_viewport().get_viewport_rid()
+	var objects_before := RenderingServer.viewport_get_render_info(viewport_rid, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
+	get_viewport().use_occlusion_culling = true
+	var occluder := OccluderInstance3D.new()
+	var box := BoxOccluder3D.new()
+	box.size = Vector3(40.0, 8.0, 1.0)
+	occluder.occluder = box
+	occluder.position = Vector3(0.0, 4.0, 14.0)
+	add_child(occluder)
+	await _wait(PHASE_FRAMES)
+	var objects_after := RenderingServer.viewport_get_render_info(viewport_rid, RenderingServer.VIEWPORT_RENDER_INFO_TYPE_VISIBLE, RenderingServer.VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME)
+	print("GPU_INSTANCES_PHASE: occluder, objects %d before, %d with it" % [objects_before, objects_after])
+	await _compare("occluder")
+	occluder.queue_free()
+	get_viewport().use_occlusion_culling = false
 	await _compare_motion(false)
 	await _compare_motion(true)
 	_add_views()

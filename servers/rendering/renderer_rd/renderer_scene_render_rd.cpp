@@ -1532,6 +1532,7 @@ void RendererSceneRenderRD::render_scene(const Ref<RenderSceneBuffers> &p_render
 		render_data.rt_lights = p_rt_lights;
 		render_data.planar_reflections = p_planar_reflections;
 		render_data.gpu_instances = gpu_view_instances;
+		render_data.gpu_slots = gpu_view_slots;
 		render_data.gpu_scenario = gpu_view_scenario;
 		render_data.gpu_visible_layers = gpu_view_visible_layers;
 
