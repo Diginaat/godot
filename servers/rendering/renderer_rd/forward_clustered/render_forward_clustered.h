@@ -998,17 +998,21 @@ protected:
 		LocalVector<uint8_t> command_levels; // Index LOD of each command, plus GPU_INSTANCE_MOVED_COMMAND (validation).
 		LocalVector<uint32_t> command_depth; // Per command, its depth pre-pass twin or UINT32_MAX (UINT32_MAX - 1 for the twins).
 		LocalVector<float> lod_edges; // Screen-space edge length per reduced LOD.
+		LocalVector<uint32_t> command_primitives; // Primitives per instance of each command, 0 for depth pre-pass ones (render info).
 		uint32_t member_count = 0;
 		uint32_t id_count = 0;
 		RID members_buffer;
 		RID buckets_buffer;
 		RID commands_buffer;
 		RID lod_edges_buffer;
+		RID command_primitives_buffer;
+		RID stats_buffer; // Objects and primitives the cull pass drew, per view (render info).
 		RID output_buffer; // InstanceData per member, written per view.
 		RID ids_buffer; // Members drawn per bucket level, written per view.
 		uint32_t member_capacity = 0;
 		uint32_t bucket_capacity = 0;
 		uint32_t command_capacity = 0;
+		uint32_t command_primitive_capacity = 0;
 		uint32_t id_capacity = 0;
 		uint32_t lod_edge_capacity = 0;
 	};
@@ -1034,6 +1038,8 @@ protected:
 	uint32_t gpu_instances_check_members = 0;
 	uint32_t gpu_instances_check_levels[8] = {}; // Expected surfaces per index LOD (the last counts the rest).
 	uint32_t gpu_instances_check_moved = 0; // Expected surfaces drawn by the motion pass.
+	uint32_t gpu_instances_check_objects = 0; // Expected render info.
+	uint32_t gpu_instances_check_primitives = 0;
 	LocalVector<uint8_t> gpu_instances_check_command_levels;
 	LocalVector<uint32_t> gpu_instances_check_command_depth;
 	static void _gpu_instances_check_received(const Vector<uint8_t> &p_data);
@@ -1050,6 +1056,16 @@ protected:
 	void _gpu_instances_append(int *p_render_info, float p_lod_threshold);
 	GPUInstanceScenario *gpu_instances_view = nullptr; // Drawn by the current camera render.
 	bool gpu_instances_view_motion = false; // The view has a motion pass, and members may have moved.
+	// Render info of GPU-drawn instances per view (its render buffers), as read
+	// back from the cull pass a few frames later.
+	struct GPUInstanceViewInfo {
+		uint32_t objects = 0;
+		uint32_t primitives = 0;
+		uint64_t frame = 0;
+	};
+	HashMap<uint64_t, GPUInstanceViewInfo> gpu_instances_view_info;
+	uint64_t gpu_instances_view_key = 0;
+	static void _gpu_instances_stats_received(const Vector<uint8_t> &p_data, uint64_t p_view, bool p_check);
 	uint64_t gpu_instances_moved_frame = 0; // Last frame an instance moved (stays moved for one more frame).
 	void _gpu_instances_free();
 	PagedAllocator<GeometryInstanceSurfaceDataCache> geometry_instance_surface_alloc;

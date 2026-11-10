@@ -93,6 +93,20 @@ layout(set = 0, binding = 6, std430) restrict readonly buffer LODEdges {
 }
 lod_edges;
 
+layout(set = 0, binding = 7, std430) restrict readonly buffer CommandPrimitives {
+	uint data[]; // Primitives per instance of each command.
+}
+command_primitives;
+
+layout(set = 0, binding = 8, std430) restrict buffer Stats {
+	uint objects; // As the CPU lists count them (moved surfaces twice in a view with a motion pass).
+	uint primitives;
+}
+stats;
+
+shared uint group_objects;
+shared uint group_primitives;
+
 #define VIEW_FLAG_USE_GI_BUFFERS 1
 #define VIEW_FLAG_USE_SDFGI 2
 #define VIEW_FLAG_ORTHOGONAL 4
@@ -120,15 +134,16 @@ layout(push_constant, std430) uniform Params {
 }
 params;
 
-void main() {
-	uint index = gl_GlobalInvocationID.x;
+// Culls one member; returns the render info objects it adds.
+uint cull_member(uint index, out uint r_primitives) {
+	r_primitives = 0;
 	if (index >= params.member_count) {
-		return;
+		return 0;
 	}
 	uvec2 member = members.data[index];
 	Record record = table.records[member.x];
 	if ((record.layer_mask & params.visible_layers) == 0) {
-		return;
+		return 0;
 	}
 	// Outside when the bounds' corner nearest to the inside lies outside a
 	// plane, as in the CPU scene cull.
@@ -138,7 +153,7 @@ void main() {
 		vec3 normal = params.planes[i].xyz;
 		vec3 nearest = vec3(normal.x > 0.0 ? aabb_min.x : aabb_max.x, normal.y > 0.0 ? aabb_min.y : aabb_max.y, normal.z > 0.0 ? aabb_min.z : aabb_max.z);
 		if (dot(normal, nearest) > params.planes[i].w) {
-			return;
+			return 0;
 		}
 	}
 
@@ -198,4 +213,25 @@ void main() {
 	data.prev_transform = record.prev_transform;
 	data.lightmap_uv_scale = record.lightmap_uv_scale;
 	output_instances.data[index] = data;
+	r_primitives = command_primitives.data[bucket.command + command];
+	return motion_pass && moved ? 2 : 1;
+}
+
+void main() {
+	if (gl_LocalInvocationIndex == 0) {
+		group_objects = 0;
+		group_primitives = 0;
+	}
+	barrier();
+	uint primitives;
+	uint objects = cull_member(gl_GlobalInvocationID.x, primitives);
+	if (objects > 0) {
+		atomicAdd(group_objects, objects);
+		atomicAdd(group_primitives, primitives);
+	}
+	barrier();
+	if (gl_LocalInvocationIndex == 0 && group_objects > 0) {
+		atomicAdd(stats.objects, group_objects);
+		atomicAdd(stats.primitives, group_primitives);
+	}
 }

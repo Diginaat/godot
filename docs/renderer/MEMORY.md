@@ -20,7 +20,7 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs, shadow meshes and motion-pass views done (2026-11-10); Phase 1 done except 1.8 |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 2.5 rest: incremental buckets, render info, `gpu_drawn` in the cull's packed data, occlusion (roadmap.md) |
+| Next | Phase 2.5 rest: incremental buckets, `gpu_drawn` in the cull's packed data, occlusion (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
 | Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (24 count checks, with index LODs, shadow meshes and a motion pass; 8 of 8 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
 
@@ -45,10 +45,10 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
 - With the table on, `dynamic_20k` still has about +0.5-0.8 ms render CPU
   (building/packing 2,000 dirty records per frame); GPU cost fixed in 1.3.
 - GPU path: LOD levels a view never uses still cost one empty indirect
-  draw each (twice with a shadow mesh); any membership change rebuilds the scenario's buckets
-  in full (a hitch when many nodes are added at once); `unique_10k` gains
-  nothing (one bucket per material); viewport render info misses GPU-drawn
-  objects.
+  draw each (twice with a shadow mesh); any membership change rebuilds the
+  scenario's buckets in full (a hitch when many nodes are added at once);
+  `unique_10k` gains nothing (one bucket per material); viewport render info
+  of GPU-drawn instances is a few frames late (read back from the cull).
 - RD cannot draw with a GPU-written count (driver code exists, no RD API,
   Vulkan feature not enabled); D3D12 ignores the indirect stride.
 

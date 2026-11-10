@@ -29,14 +29,16 @@ $lods = @($checks | Where-Object { $_ -match "lods=.*,[1-9][0-9]*:[1-9]" })
 $shadows = @($checks | Where-Object { $_ -match "shadow_meshes=[1-9]" })
 $moved = @($checks | Where-Object { $_ -match "moved=[1-9]" })
 $vectors = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_MV: equal" })
+# Render info (objects, primitives) of GPU-drawn instances equal to the CPU lists' counts.
+$info = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_INFO: ok .*objects=[1-9]" })
 $done = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_TEST_DONE: .* 0 image differences" })
 # Eight phases with an image comparison each, two count checks per phase.
-if ($code -ne 0 -or $errors.Count -gt 0 -or $done.Count -ne 1 -or $equal.Count -ne 8 -or $checks.Count -lt 16 -or $lods.Count -eq 0 -or $shadows.Count -eq 0 -or $moved.Count -eq 0 -or $vectors.Count -ne 2) {
+if ($code -ne 0 -or $errors.Count -gt 0 -or $done.Count -ne 1 -or $equal.Count -ne 8 -or $checks.Count -lt 16 -or $lods.Count -eq 0 -or $shadows.Count -eq 0 -or $moved.Count -eq 0 -or $vectors.Count -ne 2 -or $info.Count -lt 8) {
 	$lines | Where-Object { $_ -match "ERROR|GPU_INSTANCES" } | Write-Output
-	Write-Result "GPU instances ($Driver)" $false "exit $code, $($checks.Count) count checks, $($equal.Count) of 8 images equal, $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($vectors.Count) motion vector comparisons equal; see devtools/out/large_world"
+	Write-Result "GPU instances ($Driver)" $false "exit $code, $($checks.Count) count checks, $($equal.Count) of 8 images equal, $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($vectors.Count) motion vector comparisons equal, $($info.Count) render info checks; see devtools/out/large_world"
 	exit 1
 }
-Write-Result "GPU instances ($Driver)" $true "$($checks.Count) count checks ($($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass), 8 of 8 images and the TAA and FSR 2 motion vectors equal to the CPU path: moves, layers, hidden, ineligible and back, index LODs and shadow meshes, free and add, TAA, FSR 2 motion pass, more views"
+Write-Result "GPU instances ($Driver)" $true "$($checks.Count) count checks ($($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($info.Count) render info checks), 8 of 8 images and the TAA and FSR 2 motion vectors equal to the CPU path: moves, layers, hidden, ineligible and back, index LODs and shadow meshes, free and add, TAA, FSR 2 motion pass, more views"
 
 $lines = & $editor --path $project --rendering-driver $Driver --quit-after 1000 res://gpu_instances.tscn -- --self-test 2>&1 | ForEach-Object { "$_" }
 $lines | Set-Content (Join-Path $logs "gpu_instances_selftest_$Driver.log")

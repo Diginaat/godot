@@ -192,8 +192,8 @@ remaining render CPU at 100k is mostly the shadow passes, which still use
 the CPU lists (Phase 6). `unique_10k` gains nothing: 10,000 materials make
 10,000 buckets, one indirect draw each, and their per-view bucket data. GPU
 cost at 100k is the cull and 176-byte writes of 100k instance surfaces
-(+0.1-0.3 ms). Viewport render info counts no objects or primitives for
-GPU-drawn instances yet. Buffer memory grows by about 64 MiB at 100k (table,
+(+0.1-0.3 ms). Viewport render info counted no objects or primitives for
+GPU-drawn instances then (now it does, a few frames late). Buffer memory grows by about 64 MiB at 100k (table,
 members and per-view instance data at power-of-two capacity).
 
 After index LODs (D029, visible-ID indirection for every GPU path draw),

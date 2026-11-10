@@ -31,6 +31,9 @@
   of a zero between pipeline specializations on D3D12; compare them as
   numbers. Equal depths of a moving and a resting instance let the draw
   order pick the vector, so such tests keep movers clear of other geometry.
+* **Implemented**: viewport render info (objects, primitives) for GPU-drawn
+  instances: workgroup sums in the cull pass, read back per view; equal to
+  the CPU lists' counts (`instance_bench` now reports 83,924 objects at 100k).
 
 ## 2026-11-08 (release 0.9.1)
 
