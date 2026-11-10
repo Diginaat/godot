@@ -1,5 +1,7 @@
 # Mistakes
 
+* [Benchmark snapshot dependencies](/mistakes/benchmark-snapshot-dependencies.md) - validate infrastructure against original sources; declare generated prerequisites and optional dependency fingerprints
+
 Mistakes agents made in this project: what went wrong, why, and the rule
 that prevents it. Read these before testing or measuring. Add one whenever
 something goes wrong: a false claim, a wasted rebuild, a test that

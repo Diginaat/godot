@@ -1,5 +1,19 @@
 # Update log
 
+## 2026-11-10 (core modernization Phase 0 checkpoint)
+
+* Created `feat/core-stl-simd-modernization` from `dev-stl-core` at
+  `172e099b95307708005dafcf719693d20b1e7088`, preserving inherited dirty work.
+* Added `docs/core-modernization/` architecture, compatibility, benchmark,
+  decisions, persistent memory and six phase records. User-supplied Ankerl 2019
+  methodology reviewed; engine-owned hashmap is primary Phase 2 candidate.
+* Phase 0 benchmark isolation passed: original HEAD source snapshot plus only
+  benchmark files and configured generated profiling header builds both control
+  executables; all 24 container workloads pass. Math finite checks pass and
+  reproduce slower explicit SSE dot/cross. No engine implementation accepted.
+* Existing prototype implementation, vendor changes and prior KB records remain
+  outside the Phase 0 commit. See [audit](/project/core-modernization-audit.md).
+
 ## 2026-11-10 (GPU-first renderer, Phase 0)
 
 * **Started**: GPU-driven Forward+ work on `dev-gpu-renderer`, tracked in
