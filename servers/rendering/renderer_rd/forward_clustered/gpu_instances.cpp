@@ -68,7 +68,11 @@ enum {
 	GPU_INSTANCE_VIEW_USE_GI_BUFFERS = 1,
 	GPU_INSTANCE_VIEW_USE_SDFGI = 2,
 	GPU_INSTANCE_VIEW_ORTHOGONAL = 4,
+	GPU_INSTANCE_VIEW_MOTION = 8, // Members that moved go to the motion pass's commands.
 };
+
+// Marks the commands of moved members in GPUInstanceScenario::command_levels.
+constexpr uint8_t GPU_INSTANCE_MOVED_COMMAND = 0x80;
 
 void gpu_instances_free_buffers(RID *const (&p_buffers)[6]) {
 	RD *rd = RD::get_singleton();
@@ -324,7 +328,8 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		p_scenario.members[i * 2 + 1] = p_scenario.buckets.size() - 1;
 	}
 	// Per bucket, one indexed or non-indexed command per index LOD (the kernel
-	// writes word 1), and count visible IDs reserved per level.
+	// writes word 1), for members that did not move and again for those that
+	// did, and count visible IDs reserved per command.
 	uint32_t id_count = 0;
 	for (GPUInstanceBucket &bucket : p_scenario.buckets) {
 		void *surface = bucket.surface->surface;
@@ -332,13 +337,14 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		bucket.levels = lod_count + 1;
 		bucket.command = p_scenario.commands.size() / 5;
 		bucket.ids_first = id_count;
-		id_count += bucket.count * bucket.levels;
-		for (uint32_t level = 0; level < bucket.levels; level++) {
+		id_count += bucket.count * bucket.levels * 2;
+		for (uint32_t command = 0; command < bucket.levels * 2; command++) {
+			const uint32_t level = command % bucket.levels;
 			p_scenario.commands.push_back(level == 0 ? storage->mesh_surface_get_vertices_drawn_count(surface) : storage->mesh_surface_get_index_count(surface, level));
 			for (uint32_t word = 1; word < 5; word++) {
 				p_scenario.commands.push_back(0);
 			}
-			p_scenario.command_levels.push_back(uint8_t(MIN(level, 7u)));
+			p_scenario.command_levels.push_back(uint8_t(MIN(level, 7u)) | (command >= bucket.levels ? GPU_INSTANCE_MOVED_COMMAND : 0));
 			p_scenario.command_depth.push_back(UINT32_MAX);
 		}
 		bucket.depth_command = UINT32_MAX;
@@ -346,14 +352,15 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		if (shadow != surface) {
 			// The same instance counts, with the shadow mesh's index counts.
 			bucket.depth_command = p_scenario.commands.size() / 5;
-			for (uint32_t level = 0; level < bucket.levels; level++) {
+			for (uint32_t command = 0; command < bucket.levels * 2; command++) {
+				const uint32_t level = command % bucket.levels;
 				p_scenario.commands.push_back(level == 0 ? storage->mesh_surface_get_vertices_drawn_count(shadow) : storage->mesh_surface_get_index_count(shadow, level));
 				for (uint32_t word = 1; word < 5; word++) {
 					p_scenario.commands.push_back(0);
 				}
 				p_scenario.command_levels.push_back(0);
 				p_scenario.command_depth.push_back(UINT32_MAX - 1);
-				p_scenario.command_depth[bucket.command + level] = bucket.depth_command + level;
+				p_scenario.command_depth[bucket.command + command] = bucket.depth_command + command;
 			}
 		}
 		for (uint32_t lod = 0; lod < lod_count; lod++) {
@@ -422,10 +429,10 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	if (!gpu_instances_active || !p_render_data->gpu_instances || p_render_data->gpu_scenario == 0) {
 		return false;
 	}
-	// Views the first version leaves to the CPU list: probes, mirrors, XR,
-	// temporal upscaling (motion list) and debug draw modes.
+	// Views the first version leaves to the CPU list: probes, mirrors, XR and
+	// debug draw modes.
 	const RenderSceneDataRD *scene = p_render_data->scene_data;
-	if (p_render_data->reflection_probe.is_valid() || scene->view_count != 1 || scene->mirror_pass || p_using_motion_pass ||
+	if (p_render_data->reflection_probe.is_valid() || scene->view_count != 1 || scene->mirror_pass ||
 			get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_DISABLED) {
 		return false;
 	}
@@ -518,7 +525,13 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	// and both the count check and an image comparison must notice.
 	params.member_count = validate == 2 ? scenario->buckets[scenario->buckets.size() - 1].first : scenario->member_count;
 	params.visible_layers = p_render_data->gpu_visible_layers;
-	params.view_flags = (p_using_opaque_gi ? GPU_INSTANCE_VIEW_USE_GI_BUFFERS : 0) | (p_using_sdfgi ? GPU_INSTANCE_VIEW_USE_SDFGI : 0) | (scene->cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0);
+	// Members can have moved only if an instance moved in this or the last
+	// frame; otherwise the motion pass gets no GPU path draws (and the
+	// validation reports moved members drawn without it).
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	gpu_instances_view_motion = p_using_motion_pass && gpu_instances_moved_frame + 1 >= frame;
+	params.view_flags = (p_using_opaque_gi ? GPU_INSTANCE_VIEW_USE_GI_BUFFERS : 0) | (p_using_sdfgi ? GPU_INSTANCE_VIEW_USE_SDFGI : 0) | (scene->cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0) |
+			(gpu_instances_view_motion ? GPU_INSTANCE_VIEW_MOTION : 0);
 	// The LOD inputs of _fill_render_list().
 	params.lod_threshold = scene->screen_mesh_lod_threshold;
 	const Vector3 lod_camera = scene->main_cam_transform.origin;
@@ -548,12 +561,12 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	rd->compute_list_end();
 
 	if (validate > 0) {
-		const uint64_t frame = RSG::rasterizer->get_frame_number();
 		if (!gpu_instances_check_pending && frame % 30 == 0 && frame != gpu_instances_check_frame) {
 			// What the CPU cull found visible: the surfaces of the listed instances.
 			// Per index LOD as _fill_render_list() would choose it.
 			RendererRD::MeshStorage *storage = RendererRD::MeshStorage::get_singleton();
 			uint32_t expected = 0;
+			uint32_t moved = 0;
 			for (uint32_t &count : gpu_instances_check_levels) {
 				count = 0;
 			}
@@ -563,6 +576,9 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 					continue;
 				}
 				expected += instance->gpu_surface_count;
+				if (p_using_motion_pass && instance->transform_status == GeometryInstanceForwardClustered::TransformStatus::MOVED) {
+					moved += instance->gpu_surface_count;
+				}
 				float lod_distance = 1.0;
 				if (!scene->cam_orthogonal) {
 					const Vector3 aabb_min = instance->transformed_aabb.position;
@@ -578,6 +594,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 					gpu_instances_check_levels[MIN(lod, 7u)]++;
 				}
 			}
+			gpu_instances_check_moved = moved;
 			gpu_instances_check_command_levels = scenario->command_levels;
 			gpu_instances_check_command_depth = scenario->command_depth;
 			gpu_instances_check_frame = frame;
@@ -602,6 +619,7 @@ void RenderForwardClustered::_gpu_instances_check_received(const Vector<uint8_t>
 	const uint32_t *words = reinterpret_cast<const uint32_t *>(p_data.ptr());
 	const uint32_t word_count = p_data.size() / sizeof(uint32_t);
 	uint32_t drawn = 0;
+	uint32_t moved = 0;
 	uint32_t levels[8] = {};
 	// The depth pre-pass commands of buckets with a shadow mesh must draw as
 	// many instances as their twins.
@@ -619,7 +637,11 @@ void RenderForwardClustered::_gpu_instances_check_received(const Vector<uint8_t>
 			depth_mismatches++;
 		}
 		drawn += words[i];
-		levels[command < self->gpu_instances_check_command_levels.size() ? self->gpu_instances_check_command_levels[command] : 0] += words[i];
+		const uint8_t level = command < self->gpu_instances_check_command_levels.size() ? self->gpu_instances_check_command_levels[command] : 0;
+		levels[level & 7] += words[i];
+		if (level & GPU_INSTANCE_MOVED_COMMAND) {
+			moved += words[i];
+		}
 	}
 	String drawn_lods;
 	String expected_lods;
@@ -632,14 +654,16 @@ void RenderForwardClustered::_gpu_instances_check_received(const Vector<uint8_t>
 			expected_lods += vformat("%s%d:%d", expected_lods.is_empty() ? "" : ",", level, expected);
 		}
 	}
-	if (depth_mismatches > 0) {
+	if (moved != self->gpu_instances_check_moved) {
+		ERR_PRINT(vformat("GPU instances check (frame %d): the GPU path drew %d moved instance surfaces in the motion pass, the CPU list would draw %d.", self->gpu_instances_check_frame, moved, self->gpu_instances_check_moved));
+	} else if (depth_mismatches > 0) {
 		ERR_PRINT(vformat("GPU instances check (frame %d): %d depth pre-pass commands of shadow meshes draw other instance counts than their buckets.", self->gpu_instances_check_frame, depth_mismatches));
 	} else if (drawn != self->gpu_instances_check_expected) {
 		ERR_PRINT(vformat("GPU instances check (frame %d): the GPU path drew %d instance surfaces, the CPU cull found %d visible.", self->gpu_instances_check_frame, drawn, self->gpu_instances_check_expected));
 	} else if (!same_lods) {
 		ERR_PRINT(vformat("GPU instances check (frame %d): instance surfaces per index LOD %s, the CPU choice gives %s.", self->gpu_instances_check_frame, drawn_lods, expected_lods));
 	} else {
-		print_line(vformat("GPU_INSTANCES_CHECK: ok frame=%d buckets=%d members=%d drawn=%d lods=%s shadow_meshes=%d", self->gpu_instances_check_frame, self->gpu_instances_check_buckets, self->gpu_instances_check_members, drawn, drawn_lods, depth_drawn));
+		print_line(vformat("GPU_INSTANCES_CHECK: ok frame=%d buckets=%d members=%d drawn=%d lods=%s shadow_meshes=%d moved=%d", self->gpu_instances_check_frame, self->gpu_instances_check_buckets, self->gpu_instances_check_members, drawn, drawn_lods, depth_drawn, moved));
 	}
 }
 
@@ -648,30 +672,40 @@ void RenderForwardClustered::_gpu_instances_append(int *p_render_info, float p_l
 		return;
 	}
 	RenderList &list = render_list[RENDER_LIST_OPAQUE];
+	RenderList &motion_list = render_list[RENDER_LIST_MOTION];
 	uint32_t draws = 0;
 	for (uint32_t i = 0; i < gpu_instances_view->buckets.size(); i++) {
 		const GPUInstanceBucket &bucket = gpu_instances_view->buckets[i];
 		GeometryInstanceSurfaceDataCache *surface = bucket.surface;
-		// The CPU list did not visit the surface in this view.
-		surface->color_pass_inclusion_mask = 0;
 		// One element per index LOD; a view without LODs fills level 0 only.
+		// Moved members: the depth pre-pass draws them from the opaque list,
+		// the motion pass from the motion list.
 		const uint32_t levels = p_lod_threshold > 0.0f ? bucket.levels : 1;
-		for (uint32_t level = 0; level < levels; level++) {
-			list.elements.push_back(surface);
-			RenderElementInfo info;
-			info.value = uint32_t(surface->sort.sort_key1 & 0x300); // Soft shadow and projector bits; no lightmap or forward GI.
-			info.lod_index = level;
-			info.repeat = 1;
-			info.multimesh_cull_draw = UINT32_MAX;
-			info.multimesh_cull_lod = 0;
-			info.multimesh_cull_last_lod = 0;
-			info.mesh_clod_offset = UINT32_MAX;
-			info.gpu_bucket = bucket.command + level;
-			info.gpu_depth_bucket = (bucket.depth_command == UINT32_MAX ? bucket.command : bucket.depth_command) + level;
-			info.gpu_first = bucket.ids_first + level * bucket.count;
-			list.element_info.push_back(info);
+		for (uint32_t moved = 0; moved < (gpu_instances_view_motion ? 2u : 1u); moved++) {
+			for (uint32_t level = 0; level < levels; level++) {
+				RenderElementInfo info;
+				info.value = uint32_t(surface->sort.sort_key1 & 0x300); // Soft shadow and projector bits; no lightmap or forward GI.
+				info.lod_index = level;
+				info.gpu_motion = moved;
+				info.repeat = 1;
+				info.multimesh_cull_draw = UINT32_MAX;
+				info.multimesh_cull_lod = 0;
+				info.multimesh_cull_last_lod = 0;
+				info.mesh_clod_offset = UINT32_MAX;
+				const uint32_t command = moved * bucket.levels + level;
+				info.gpu_bucket = bucket.command + command;
+				info.gpu_depth_bucket = (bucket.depth_command == UINT32_MAX ? bucket.command : bucket.depth_command) + command;
+				info.gpu_first = bucket.ids_first + command * bucket.count;
+				list.elements.push_back(surface);
+				list.element_info.push_back(info);
+				draws++;
+				if (moved) {
+					motion_list.elements.push_back(surface);
+					motion_list.element_info.push_back(info);
+					draws++;
+				}
+			}
 		}
-		draws += levels;
 	}
 	if (p_render_info) {
 		p_render_info[RSE::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME] += draws;

@@ -731,6 +731,8 @@ protected:
 
 				// This value is not part of the sort key as there are no more available bits.
 				uint32_t uses_lightmap_specular : 1;
+				// GPU path: draws the members that moved; the color pass skips it unless it writes motion vectors.
+				uint32_t gpu_motion : 1;
 			};
 			uint32_t value;
 		};
@@ -964,9 +966,12 @@ protected:
 		uint32_t first = 0; // First member.
 		uint32_t count = 0;
 		uint32_t levels = 1; // Index LODs of the surface, including the full mesh.
-		uint32_t command = 0; // Indirect command of level 0; one per level follows.
+		// Indirect commands, one per level for members that did not move, then
+		// one per level for those that moved (drawn by the motion pass in views
+		// with one; the others put every member in the first set).
+		uint32_t command = 0;
 		uint32_t depth_command = UINT32_MAX; // Same for the depth pre-pass when it draws a separate shadow mesh.
-		uint32_t ids_first = 0; // Visible IDs of level 0; count are reserved per level.
+		uint32_t ids_first = 0; // Visible IDs, count reserved per command, in the same order.
 	};
 	// Bucket in gpu_instance_cull.glsl.
 	struct GPUInstanceBucketData {
@@ -990,7 +995,7 @@ protected:
 		LocalVector<GPUInstanceBucketData> bucket_data;
 		LocalVector<uint32_t> members; // Table slot and bucket per drawn instance surface.
 		LocalVector<uint32_t> commands; // Five words per bucket level, zero instances.
-		LocalVector<uint8_t> command_levels; // Index LOD of each command (validation).
+		LocalVector<uint8_t> command_levels; // Index LOD of each command, plus GPU_INSTANCE_MOVED_COMMAND (validation).
 		LocalVector<uint32_t> command_depth; // Per command, its depth pre-pass twin or UINT32_MAX (UINT32_MAX - 1 for the twins).
 		LocalVector<float> lod_edges; // Screen-space edge length per reduced LOD.
 		uint32_t member_count = 0;
@@ -1028,6 +1033,7 @@ protected:
 	uint32_t gpu_instances_check_buckets = 0;
 	uint32_t gpu_instances_check_members = 0;
 	uint32_t gpu_instances_check_levels[8] = {}; // Expected surfaces per index LOD (the last counts the rest).
+	uint32_t gpu_instances_check_moved = 0; // Expected surfaces drawn by the motion pass.
 	LocalVector<uint8_t> gpu_instances_check_command_levels;
 	LocalVector<uint32_t> gpu_instances_check_command_depth;
 	static void _gpu_instances_check_received(const Vector<uint8_t> &p_data);
@@ -1043,6 +1049,8 @@ protected:
 	// After the CPU elements are prepared: one element per bucket.
 	void _gpu_instances_append(int *p_render_info, float p_lod_threshold);
 	GPUInstanceScenario *gpu_instances_view = nullptr; // Drawn by the current camera render.
+	bool gpu_instances_view_motion = false; // The view has a motion pass, and members may have moved.
+	uint64_t gpu_instances_moved_frame = 0; // Last frame an instance moved (stays moved for one more frame).
 	void _gpu_instances_free();
 	PagedAllocator<GeometryInstanceSurfaceDataCache> geometry_instance_surface_alloc;
 	PagedAllocator<GeometryInstanceLightmapSH> geometry_instance_lightmap_sh;

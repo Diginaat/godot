@@ -24,6 +24,13 @@
 * **Implemented**: meshes with a separate shadow mesh on the GPU path: the
   depth pre-pass draws through twin indirect commands with the shadow
   mesh's index counts.
+* **Implemented**: views with a motion pass (FSR 2, DLSS, MetalFX) on the GPU
+  path (D030); `gpu_instances.ps1` compares TAA and FSR 2 motion vectors
+  with the CPU path through a velocity readback.
+* **Finding**: motion vectors of the same draws can differ only in the sign
+  of a zero between pipeline specializations on D3D12; compare them as
+  numbers. Equal depths of a moving and a resting instance let the draw
+  order pick the vector, so such tests keep movers clear of other geometry.
 
 ## 2026-11-08 (release 0.9.1)
 

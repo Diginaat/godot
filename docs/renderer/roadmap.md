@@ -121,7 +121,10 @@ the CPU path.
   Separate shadow meshes done 2026-11-10: the depth pre-pass draws them
   through a twin command per bucket level with the shadow mesh's index
   counts (the kernel counts into both); a shadow mesh with fewer index LODs
-  than the mesh stays on the CPU path. Next: views with a motion list;
+  than the mesh stays on the CPU path. Views with a motion pass (FSR 2,
+  DLSS, MetalFX) done 2026-11-10 (D030): moved members get their own
+  commands, drawn by the depth pre-pass and the motion pass; motion vectors
+  equal to the CPU path under TAA and FSR 2 on Vulkan and D3D12. Next:
   incremental bucket updates instead of full rebuilds; the `gpu_drawn` bit
   in the cull's packed data; viewport render info (objects, primitives) for
   GPU-drawn instances; occlusion culling (`OccluderInstance3D` today, HZB

@@ -3,7 +3,8 @@ extends Node3D
 ## rendering/geometry/gpu_instances with its validation, then changes the
 ## scene in phases: moves, layers the camera does not see, hidden nodes,
 ## materials that leave the path (transparent) and come back, transparency,
-## visibility ranges, meshes with index LODs and LOD biases, frees and adds, a second view of the same world and a
+## visibility ranges, meshes with index LODs and LOD biases, frees and adds,
+## TAA and FSR 2 (a motion pass), compared through their motion vectors, a second view of the same world and a
 ## view of another world. Every 30 frames the engine compares what the GPU
 ## path drew with what the CPU cull found visible (GPU_INSTANCES_CHECK). After
 ## each phase the image with the GPU path is compared with the image without
@@ -17,6 +18,11 @@ var _meshes: Array[Mesh] = []
 var _materials: Array[StandardMaterial3D] = []
 var _transparent := StandardMaterial3D.new()
 var _moving := 0
+var _flipping := 0 # Nodes that alternate between two positions every frame.
+var _camera: Camera3D
+var _velocity := VelocityGrab.new()
+
+
 var _frame := 0
 var _ab_failures := 0
 
@@ -55,6 +61,7 @@ func _ready() -> void:
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
 	camera.current = true
+	_camera = camera
 	_run.call_deferred(self_test)
 
 
@@ -76,6 +83,14 @@ func _process(_delta: float) -> void:
 	for i in mini(_moving, _nodes.size()):
 		var node := _nodes[i * 7 % _nodes.size()]
 		node.position.y = 0.5 + 0.5 * sin(float(_frame) * 0.1 + float(i))
+	# Positions that depend only on the frame's parity, so that motion vectors
+	# repeat exactly. Lifted clear of the grid: where a moving and a resting
+	# node of one draw bucket intersect, equal depths let the draw order pick
+	# the motion vector, and the GPU path orders a bucket differently.
+	var shift := 0.25 if Engine.get_process_frames() % 2 == 0 else 0.0
+	for i in mini(_flipping, _nodes.size()):
+		var index := i * 3 % _nodes.size()
+		_nodes[index].position = Vector3(float(index % 60) - 30.0 + shift, 3.0, float(index / 60) - 30.0)
 
 
 func _wait(frames: int) -> void:
@@ -175,12 +190,85 @@ func _run(self_test: bool) -> void:
 	await _wait(PHASE_FRAMES)
 	print("GPU_INSTANCES_PHASE: freed 300, added 600, %d" % _nodes.size())
 	await _compare("freed and added")
+	await _compare_motion(false)
+	await _compare_motion(true)
 	_add_views()
 	await _wait(PHASE_FRAMES)
 	print("GPU_INSTANCES_PHASE: second view and second world")
 	await _compare("more views")
 	print("GPU_INSTANCES_TEST_DONE: %d nodes, %d image differences" % [_nodes.size(), _ab_failures])
 	get_tree().quit(0)
+
+
+# TAA writes motion vectors in the opaque pass; FSR 2 gives the view a motion
+# pass, where moved instances are drawn with motion vectors. Nodes alternate
+# between two positions each frame; the velocity buffers of four frames, with
+# the same jitter phase, must be equal with and without the GPU path.
+func _compare_motion(motion_pass: bool) -> void:
+	var label := "FSR 2" if motion_pass else "TAA"
+	_moving = 0
+	_flipping = 300
+	_camera.compositor = Compositor.new()
+	_camera.compositor.compositor_effects = [_velocity]
+	if motion_pass:
+		get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR2
+	else:
+		get_viewport().use_taa = true
+	await _wait(PHASE_FRAMES)
+	print("GPU_INSTANCES_PHASE: %s with %d nodes moving every frame" % [label, _flipping])
+	var with_gpu := await _grab_velocity()
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", false)
+	await _wait(6)
+	var without_gpu := await _grab_velocity()
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", true)
+	await _wait(6)
+	get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+	get_viewport().use_taa = false
+	_camera.compositor = null
+	for i in mini(_flipping, _nodes.size()):
+		var index := i * 3 % _nodes.size()
+		_nodes[index].position = Vector3(float(index % 60) - 30.0, 0.5, float(index / 60) - 30.0)
+	_flipping = 0
+	await _wait(3)
+	_velocity.free_resources()
+	var moving_pixels := 0
+	if not with_gpu.is_empty():
+		var data := with_gpu[0]
+		for offset in range(0, data.size(), 4):
+			var x := data.decode_half(offset)
+			var y := data.decode_half(offset + 2)
+			if (x != -1.0 and x != 0.0) or (y != -1.0 and y != 0.0):
+				moving_pixels += 1
+	# Compared as numbers: the GPU path's pipelines are other specializations,
+	# and a compiler may give a zero vector the other sign (D3D12 does).
+	var pixels: Array[int] = []
+	for frame in mini(with_gpu.size(), without_gpu.size()):
+		var count := 0
+		var a := with_gpu[frame]
+		var b := without_gpu[frame]
+		if a != b:
+			for offset in range(0, mini(a.size(), b.size()), 2):
+				if a.decode_u16(offset) != b.decode_u16(offset) and a.decode_half(offset) != b.decode_half(offset):
+					if count == 0:
+						var pixel := offset / 4
+						var width := int(get_viewport().get_visible_rect().size.x)
+						printerr("GPU_INSTANCES_MV: %s frame %d pixel (%d, %d): %.6f with, %.6f without the GPU path" % [label, frame, pixel % width, pixel / width, a.decode_half(offset), b.decode_half(offset)])
+					count += 1
+		pixels.append(count)
+	if with_gpu.size() == 4 and without_gpu.size() == 4 and pixels.max() == 0 and moving_pixels > 0:
+		print("GPU_INSTANCES_MV: equal %s, 4 frames, %d pixels with motion" % [label, moving_pixels])
+		return
+	_ab_failures += 1
+	printerr("GPU_INSTANCES_MV: differ %s: %d and %d frames read, differing values per frame %s, %d pixels with motion" % [label, with_gpu.size(), without_gpu.size(), str(pixels), moving_pixels])
+
+
+func _grab_velocity() -> Array[PackedByteArray]:
+	while Engine.get_frames_drawn() % 16 != 0:
+		await RenderingServer.frame_post_draw
+	_velocity.take()
+	_velocity.remaining = 4
+	await _wait(10)
+	return _velocity.take()
 
 
 # A dense sphere with generated index LODs, so that the LOD chosen per instance
@@ -247,3 +335,100 @@ func _add_views() -> void:
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-60, 20, 0)
 	other.add_child(light)
+
+
+# Copies the velocity buffer after the opaque and motion passes (it cannot be
+# read back directly) and reads the copy back.
+class VelocityGrab extends CompositorEffect:
+	const COPY := """
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D velocity;
+layout(set = 0, binding = 1, std430) restrict writeonly buffer Copy {
+	uint data[];
+} copy;
+layout(push_constant, std430) uniform Params {
+	ivec2 size;
+	ivec2 pad;
+} params;
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, params.size))) {
+		return;
+	}
+	copy.data[pixel.y * params.size.x + pixel.x] = packHalf2x16(texelFetch(velocity, pixel, 0).xy);
+}
+"""
+	var remaining := 0
+	var _results: Array[PackedByteArray] = []
+	var _mutex := Mutex.new()
+	var _rd: RenderingDevice
+	var _shader: RID
+	var _pipeline: RID
+	var _sampler: RID
+	var _buffer: RID
+	var _buffer_size := Vector2i()
+
+	func _init() -> void:
+		effect_callback_type = EFFECT_CALLBACK_TYPE_POST_OPAQUE
+		needs_motion_vectors = true
+
+	func _render_callback(_type: int, render_data: RenderData) -> void:
+		if remaining <= 0:
+			return
+		remaining -= 1
+		if not _rd:
+			_rd = RenderingServer.get_rendering_device()
+			var source := RDShaderSource.new()
+			source.source_compute = COPY
+			_shader = _rd.shader_create_from_spirv(_rd.shader_compile_spirv_from_source(source))
+			_pipeline = _rd.compute_pipeline_create(_shader)
+			_sampler = _rd.sampler_create(RDSamplerState.new())
+		var buffers := render_data.get_render_scene_buffers() as RenderSceneBuffersRD
+		var size := buffers.get_internal_size()
+		if size != _buffer_size:
+			if _buffer.is_valid():
+				_rd.free_rid(_buffer)
+			_buffer = _rd.storage_buffer_create(size.x * size.y * 4)
+			_buffer_size = size
+		var velocity := RDUniform.new()
+		velocity.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
+		velocity.binding = 0
+		velocity.add_id(_sampler)
+		velocity.add_id(buffers.get_velocity_texture())
+		var copy := RDUniform.new()
+		copy.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+		copy.binding = 1
+		copy.add_id(_buffer)
+		var uniform_set := _rd.uniform_set_create([velocity, copy], _shader, 0)
+		var params := PackedInt32Array([size.x, size.y, 0, 0]).to_byte_array()
+		var list := _rd.compute_list_begin()
+		_rd.compute_list_bind_compute_pipeline(list, _pipeline)
+		_rd.compute_list_bind_uniform_set(list, uniform_set, 0)
+		_rd.compute_list_set_push_constant(list, params, params.size())
+		_rd.compute_list_dispatch(list, (size.x + 7) / 8, (size.y + 7) / 8, 1)
+		_rd.compute_list_end()
+		_rd.free_rid(uniform_set)
+		_rd.buffer_get_data_async(_buffer, _received)
+
+	func _received(data: PackedByteArray) -> void:
+		_mutex.lock()
+		_results.append(data)
+		_mutex.unlock()
+
+	func take() -> Array[PackedByteArray]:
+		_mutex.lock()
+		var taken := _results.duplicate()
+		_results.clear()
+		_mutex.unlock()
+		return taken
+
+	func free_resources() -> void:
+		if not _rd:
+			return
+		for resource in [_buffer, _sampler, _pipeline, _shader]:
+			if resource.is_valid():
+				_rd.free_rid(resource)
+		_buffer = RID()
+		_buffer_size = Vector2i()
+		_rd = null

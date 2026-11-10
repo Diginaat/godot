@@ -17,12 +17,12 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs and shadow meshes done (2026-11-10); Phase 1 done except 1.8 |
+| Phase | 2, GPU path for eligible instances: 2.1-2.4, 2.5 index LODs, shadow meshes and motion-pass views done (2026-11-10); Phase 1 done except 1.8 |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | Phase 2.5 rest: motion-list views, incremental buckets, render info, occlusion (roadmap.md) |
+| Next | Phase 2.5 rest: incremental buckets, render info, `gpu_drawn` in the cull's packed data, occlusion (roadmap.md) |
 | Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (19 count checks, 8 with index LODs and 8 with shadow meshes, 8 of 8 images equal to the CPU path, self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
+| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (24 count checks, with index LODs, shadow meshes and a motion pass; 8 of 8 images and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), `instance_table.ps1` on both, Vulkan large-world suite, standard smoke, 2026-11-10 |
 
 ## Phase 2 in one line
 
@@ -74,6 +74,9 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
 - D029: index LODs on the GPU path: instance data at each member's own
   index plus a visible-ID list per bucket level (binding 48), because D3D12
   has no base instance; the kernel uses the CPU's LOD rule.
+- D030: views with a motion pass: moved members get their own commands per
+  bucket level, marked per element (`gpu_motion`), drawn by the depth
+  pre-pass and the motion pass.
 - Earlier geometry decisions D001-D024 still hold (compute + indirect before
   mesh shaders, stable source IDs, opt-in settings, conventional fallback).
 

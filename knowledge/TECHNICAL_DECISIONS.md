@@ -583,3 +583,28 @@ Also decided here:
 - One render element per bucket level, `lod_index` set, so the draw loop
   binds the level's index array as for CPU elements. A view with LODs off
   (threshold 0) appends level 0 only.
+
+## D030 — GPU path in views with a motion pass
+
+2026-11-10, Phase 2.5.
+Problem: with FSR 2, DLSS or MetalFX the CPU list puts moved instances in a
+motion list: the depth pre-pass draws them from the opaque list, the opaque
+color pass skips them (the surface's inclusion mask) and a motion pass draws
+them with motion vectors. GPU path elements share their bucket's surface, so
+the mask on the surface cannot tell moved from resting members.
+Decision: every bucket level has a second command and ID range for members
+that moved; in such a view the kernel puts moved members there (and does not
+set the dynamic flag, as the CPU list does not). Those elements are in the
+opaque list, marked `gpu_motion` in the element info (the draw loop takes the
+inclusion mask from it for GPU path elements), and again in the motion list;
+the motion pass binds the GPU path's buffers. Only if an instance moved in
+this or the last frame does the view get them (otherwise no empty motion
+pass); the kernel then also files nothing as moved, so a wrong guess draws
+the members in the opaque pass and the validation reports it.
+Test: `gpu_instances.ps1` reads the velocity buffer back (a compositor effect
+copies it through a compute shader) under TAA and FSR 2, with nodes that
+alternate between two positions, four frames at one jitter phase. Values are
+compared as numbers: D3D12 gave one zero vector the other sign in the GPU
+path's pipeline. Moving nodes are kept clear of resting ones, since equal
+depths let the draw order choose the vector and the GPU path orders a bucket
+differently.

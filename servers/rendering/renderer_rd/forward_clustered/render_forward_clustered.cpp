@@ -395,7 +395,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			continue;
 		}
 
-		if (p_pass_mode == PASS_MODE_COLOR && surf->color_pass_inclusion_mask && (p_color_pass_flags & surf->color_pass_inclusion_mask) == 0) {
+		// GPU path elements share their bucket's surface: the inclusion mask is theirs.
+		const uint32_t color_pass_inclusion_mask = gpu_bucket ? (element_info.gpu_motion ? uint32_t(COLOR_PASS_FLAG_MOTION_VECTORS) : 0u) : surf->color_pass_inclusion_mask;
+		if (p_pass_mode == PASS_MODE_COLOR && color_pass_inclusion_mask && (p_color_pass_flags & color_pass_inclusion_mask) == 0) {
 			// Some surfaces can be repeated in multiple render lists. We exclude them from being rendered on the color pass based on the
 			// features supported by the pass compared to the exclusion mask.
 			continue;
@@ -3004,11 +3006,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 			RENDER_TIMESTAMP("Render Motion Pass");
 
-			rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_MOTION, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true, multimesh_visible_ids);
+			rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_MOTION, p_render_data, is_multiview, radiance_texture, samplers, opaque_pass_uniform_buffer_index, true, multimesh_visible_ids, gpu_instance_data, gpu_instance_ids);
 
 			RenderListParameters render_list_params(render_list[RENDER_LIST_MOTION].elements.ptr(), render_list[RENDER_LIST_MOTION].element_info.ptr(), render_list[RENDER_LIST_MOTION].elements.size(), reverse_cull, PASS_MODE_COLOR, color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 			render_list_params.multimesh_cull_commands = multimesh_cull_commands;
 			render_list_params.mesh_clod_commands = mesh_clod_commands;
+			render_list_params.gpu_instance_commands = gpu_instance_commands;
 			_render_list_with_draw_list(&render_list_params, color_framebuffer);
 
 			RD::get_singleton()->draw_command_end_label();
@@ -5788,6 +5791,7 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::set_transform(con
 		prev_transform = transform;
 		prev_transform_change_frame = frame;
 		transform_status = TransformStatus::MOVED;
+		RenderForwardClustered::get_singleton()->gpu_instances_moved_frame = frame;
 	} else if (unlikely(transform_status == TransformStatus::TELEPORTED)) {
 		prev_transform = transform;
 	}

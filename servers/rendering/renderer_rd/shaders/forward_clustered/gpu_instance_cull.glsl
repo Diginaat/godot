@@ -6,7 +6,8 @@
 
 // GPU path for eligible instances (docs/renderer, Phase 2). One thread per
 // bucket member (an instance surface): frustum and layer test from the GPU
-// instance table, the index LOD as the CPU render list chooses it, then the
+// instance table, the index LOD as the CPU render list chooses it, whether
+// the motion pass draws it, then the
 // instance data Forward+ draws with, at the member's own index, and the
 // member's index appended to its bucket level's draw. The CPU zeroed each
 // level's instance count.
@@ -95,6 +96,7 @@ lod_edges;
 #define VIEW_FLAG_USE_GI_BUFFERS 1
 #define VIEW_FLAG_USE_SDFGI 2
 #define VIEW_FLAG_ORTHOGONAL 4
+#define VIEW_FLAG_MOTION 8
 
 #define GPU_FLAG_MOVED 1
 #define GPU_FLAG_CAN_SDFGI 2
@@ -158,18 +160,23 @@ void main() {
 			level = i + 1;
 		}
 	}
-	uint rank = atomicAdd(commands.data[(bucket.command + level) * 5 + 1], 1);
-	ids.data[bucket.ids_first + level * bucket.count + rank] = index;
+	// In a view with a motion pass, members that moved have their own
+	// commands, after the others' (as the CPU list's motion list).
+	bool moved = bool(record.gpu_flags & GPU_FLAG_MOVED);
+	bool motion_pass = bool(params.view_flags & VIEW_FLAG_MOTION);
+	uint command = (motion_pass && moved ? bucket.lod_count + 1 : 0) + level;
+	uint rank = atomicAdd(commands.data[(bucket.command + command) * 5 + 1], 1);
+	ids.data[bucket.ids_first + command * bucket.count + rank] = index;
 	if (bucket.depth_command != 0xFFFFFFFFu) {
 		// A separate shadow mesh: the depth pre-pass draws as many instances.
-		atomicAdd(commands.data[(bucket.depth_command + level) * 5 + 1], 1);
+		atomicAdd(commands.data[(bucket.depth_command + command) * 5 + 1], 1);
 	}
 
 	// What _fill_render_list() and _fill_instance_data() write for an opaque
 	// instance without lightmap, VoxelGI, fade or motion pass.
 	uint flags = (record.flags & ~INSTANCE_FLAGS_FADE_MASK) | (255u << INSTANCE_FLAGS_FADE_SHIFT);
-	if (bool(record.gpu_flags & GPU_FLAG_MOVED)) {
-		flags |= INSTANCE_FLAGS_DYNAMIC;
+	if (moved && !motion_pass) {
+		flags |= INSTANCE_FLAGS_DYNAMIC; // The motion pass computes motion vectors instead.
 	}
 	if (bool(params.view_flags & VIEW_FLAG_USE_GI_BUFFERS)) {
 		flags |= INSTANCE_FLAGS_USE_GI_BUFFERS;
