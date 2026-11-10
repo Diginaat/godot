@@ -1182,8 +1182,8 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 				}
 			}
 
-			// Age-out is handled in the pre-pass (_age_out_motion_vectors) which
-			// covers both raster-only and RT-only instances before this loop runs.
+			// Age-out is handled in the pre-pass (_age_out_motion_vectors), which
+			// visits every instance with motion before this loop runs.
 
 			// Alpha-only (RT path): skip instances with no transparent/fading
 			// surfaces; opaque geometry is in the TLAS. Uses rt_pass_flags so
@@ -1294,7 +1294,7 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 		}
 
 		// Motion-vector age-out is handled in the pre-pass (_age_out_motion_vectors),
-		// which covers both raster-only and RT-only instances before this loop runs.
+		// which visits every instance with motion before this loop runs.
 
 		while (surf) {
 			surf->sort.uses_forward_gi = 0;
@@ -5804,6 +5804,7 @@ RenderGeometryInstance *RenderForwardClustered::geometry_instance_create(RID p_b
 	ginstance->data = memnew(GeometryInstanceForwardClustered::Data);
 	ginstance->gpu_slot = gpu_instance_slots.allocate();
 	ginstance->gpu_cull_slot = ginstance->gpu_slot;
+	_motion_instance_add(ginstance); // New instances start as moved.
 	if (gpu_instance_owners.size() <= ginstance->gpu_slot) {
 		gpu_instance_owners.resize(ginstance->gpu_slot + 1);
 	}
@@ -5828,6 +5829,7 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::set_transform(con
 		prev_transform_change_frame = frame;
 		transform_status = TransformStatus::MOVED;
 		RenderForwardClustered::get_singleton()->gpu_instances_moved_frame = frame;
+		RenderForwardClustered::get_singleton()->_motion_instance_add(this);
 	} else if (unlikely(transform_status == TransformStatus::TELEPORTED)) {
 		prev_transform = transform;
 	}
@@ -5854,11 +5856,12 @@ void RenderForwardClustered::GeometryInstanceForwardClustered::reset_motion_vect
 	prev_transform = transform;
 	transform_status = TransformStatus::TELEPORTED;
 	RenderForwardClustered::get_singleton()->_gpu_instance_table_mark(gpu_slot);
+	RenderForwardClustered::get_singleton()->_motion_instance_add(this);
 }
 
 void RenderForwardClustered::GeometryInstanceForwardClustered::age_out_motion(uint64_t p_frame) {
 	if (last_aged_frame == p_frame) {
-		return; // Already processed this frame (e.g. appears in both raster and RT lists).
+		return; // Already processed this frame (several views render per frame).
 	}
 	last_aged_frame = p_frame;
 	if (transform_status != TransformStatus::NONE && p_frame > prev_transform_change_frame + 1 && prev_transform_change_frame) {
@@ -5955,6 +5958,7 @@ void RenderForwardClustered::geometry_instance_free(RenderGeometryInstance *p_ge
 	}
 	memdelete(ginstance->data);
 	gpu_instance_owners[ginstance->gpu_slot] = nullptr;
+	_motion_instance_remove(ginstance);
 	_gpu_instance_table_mark(ginstance->gpu_slot);
 	gpu_instance_slots.free(ginstance->gpu_slot);
 	geometry_instance_alloc.free(ginstance);

@@ -538,32 +538,14 @@ void RenderForwardClusteredPT::_age_out_motion_vectors(const RenderDataRD *p_ren
 	}
 	const uint64_t frame = RSG::rasterizer->get_frame_number();
 
-	// Process RT-only instances
-	if (p_render_data->rt_instances) {
-		for (uint32_t i = 0; i < (uint32_t)p_render_data->rt_instances->size(); i++) {
-			GeometryInstanceForwardClustered *inst =
-					static_cast<GeometryInstanceForwardClustered *>((*p_render_data->rt_instances)[i]);
-			if (inst) {
-				inst->age_out_motion(frame);
-			}
-		}
-	}
-
-	// Instances the camera cull listed for the GPU path.
-	if (p_render_data->gpu_instances) {
-		for (uint32_t i = 0; i < (uint32_t)p_render_data->gpu_instances->size(); i++) {
-			static_cast<GeometryInstanceForwardClustered *>((*p_render_data->gpu_instances)[i])->age_out_motion(frame);
-		}
-	}
-
-	// Process raster instances
-	if (p_render_data->instances) {
-		for (uint32_t i = 0; i < (uint32_t)p_render_data->instances->size(); i++) {
-			GeometryInstanceForwardClustered *inst =
-					static_cast<GeometryInstanceForwardClustered *>((*p_render_data->instances)[i]);
-			if (inst) {
-				inst->age_out_motion(frame);
-			}
+	// Only instances whose motion status is not NONE need aging, and every
+	// one of them is in this list (the CPU, RT and GPU paths alike). Those
+	// that age out leave it.
+	for (uint32_t i = motion_instances.size(); i > 0; i--) {
+		GeometryInstanceForwardClustered *inst = motion_instances[i - 1];
+		inst->age_out_motion(frame);
+		if (inst->transform_status == GeometryInstanceForwardClustered::TransformStatus::NONE) {
+			_motion_instance_remove(inst);
 		}
 	}
 }

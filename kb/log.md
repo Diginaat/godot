@@ -58,6 +58,10 @@
 * **Implemented**: shadow render info for GPU-drawn casters (Phase 6.3).
 * **Changed**: shadow passes draw from the camera view's instance data (the
   camera kernel writes every live member): buffers at 100k 147.5 to 125.5 MiB.
+* **Changed**: the motion age-out visits a list of instances with motion
+  instead of every listed instance (camera, RT and GPU path):
+  `massive_100k` render CPU 2.8-3.2 to 1.5-1.6 ms on the GPU path, about
+  1 ms lower on the CPU path.
 
 ## 2026-11-08 (release 0.9.1)
 

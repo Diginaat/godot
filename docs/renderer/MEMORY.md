@@ -26,8 +26,8 @@ PhysX, CLOD, weather) or the CPU fallback.
 
 ## Shadows in one line
 
-D033: with directional casters on the GPU path, `massive_100k` render CPU
-is 2.8 ms (CPU path 21 ms), `shared_20k` 0.7-0.8 ms. Details:
+D033 and the motion list: `massive_100k` render CPU 1.5-1.6 ms (CPU path
+19.3-19.7 ms; frame 1.9-2.0 ms, GPU 1.3 ms), `shared_20k` 0.57 ms. Details:
 [benchmarks.md](benchmarks.md).
 
 ## Phase 2 in one line

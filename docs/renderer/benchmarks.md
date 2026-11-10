@@ -223,6 +223,17 @@ p50 static view, two repeats (before / after D033): `small_1k` 0.31-0.34 /
 unchanged (1.26 ms at 100k). Before the used-bucket filter `unique_10k` had
 30,003 shadow draws and a 17-18 ms frame.
 
+Motion age-out over moving instances only (2026-11-10): before, every
+render visited each instance the camera listed for the GPU path (84k
+pointer chases at 100k, about 1.1 ms). Now a list holds the instances
+whose motion status is not NONE. Render CPU p50, Vulkan, GPU path:
+`massive_100k` 2.8-3.2 to 1.68 ms (frame 2.1 ms, GPU 1.30 ms),
+`shared_20k` 0.63 ms, `churn_100k` 2.28 ms, `dynamic_20k` 1.88 ms.
+The CPU and RT list walks went too (every status change adds to the list):
+GPU path `massive_100k` 1.51-1.59 ms, `shared_20k` 0.57 ms, `small_1k`
+0.23-0.24 ms; CPU path `massive_100k` 19.3-19.7 ms (baseline 20.4-21),
+`shared_20k` 6.3-7.0 ms.
+
 D3D12, same protocol, render CPU p50 (CPU path / GPU path): `small_1k`
 0.40-0.54 / 0.29-0.40, `shared_20k` 7.7-10.1 / 3.2-6.2, `unique_10k`
 8.2-9.2 / 7.9-8.9, `massive_100k` 20.7-22.3 / 5.5-5.9, `dynamic_20k`

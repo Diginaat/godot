@@ -885,6 +885,7 @@ protected:
 		uint32_t gpu_join_index = UINT32_MAX; // In GPUInstanceScenario::joins until its surfaces are placed in buckets.
 		uint64_t prev_transform_change_frame = 0xFFFFFFFF;
 		uint64_t last_aged_frame = 0;
+		uint32_t motion_index = UINT32_MAX; // In RenderForwardClustered::motion_instances while its motion status is not NONE.
 		enum TransformStatus {
 			NONE,
 			MOVED,
@@ -939,6 +940,26 @@ protected:
 	SelfList<GeometryInstanceSurfaceDataCache>::List geometry_surface_compilation_all_list;
 
 	PagedAllocator<GeometryInstanceForwardClustered> geometry_instance_alloc;
+	// Instances that moved or teleported and have not aged out yet: the
+	// motion age-out visits these, not every instance the GPU path draws.
+	LocalVector<GeometryInstanceForwardClustered *> motion_instances;
+	_FORCE_INLINE_ void _motion_instance_add(GeometryInstanceForwardClustered *p_instance) {
+		if (p_instance->motion_index == UINT32_MAX) {
+			p_instance->motion_index = motion_instances.size();
+			motion_instances.push_back(p_instance);
+		}
+	}
+	void _motion_instance_remove(GeometryInstanceForwardClustered *p_instance) {
+		const uint32_t index = p_instance->motion_index;
+		if (index == UINT32_MAX) {
+			return;
+		}
+		GeometryInstanceForwardClustered *last = motion_instances[motion_instances.size() - 1];
+		motion_instances[index] = last;
+		last->motion_index = index;
+		motion_instances.resize(motion_instances.size() - 1);
+		p_instance->motion_index = UINT32_MAX;
+	}
 	GPUInstanceSlots gpu_instance_slots;
 
 	/* GPU instance table (rendering/geometry/gpu_instance_table/*) */
