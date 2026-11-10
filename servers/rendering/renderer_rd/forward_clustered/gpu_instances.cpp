@@ -637,6 +637,11 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 			"Update the instance flags in gpu_instance_cull.glsl.");
 	gpu_instances_view = nullptr;
 	gpu_instances_left_view.clear();
+	// Every shadow pass of this render (cube faces too) gets its own buffers.
+	if (gpu_instances_shadow_views_used > 0) {
+		gpu_instances_shadow_views_last = gpu_instances_shadow_views_used;
+	}
+	gpu_instances_shadow_views_used = 0;
 	p_render_data->gpu_instances_drawn = false;
 	if (!gpu_instances_active || !p_render_data->gpu_instances || p_render_data->gpu_scenario == 0) {
 		return false;
@@ -1121,7 +1126,10 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	// Validation: what the pass drew against what the scene cull listed.
 	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instances/validate");
 	const uint64_t frame = RSG::rasterizer->get_frame_number();
-	if (validate > 0 && !gpu_instances_shadow_check_pending && frame % 30 == 0 && frame != gpu_instances_shadow_check_frame) {
+	// One pass per check, a different one each time (cascades, then spot
+	// and omni passes).
+	const bool check_pass = gpu_instances_shadow_views_used - 1 == (frame / 30) % MAX(gpu_instances_shadow_views_last, 1u);
+	if (validate > 0 && check_pass && !gpu_instances_shadow_check_pending && frame % 30 == 0 && frame != gpu_instances_shadow_check_frame) {
 		uint32_t expected = 0;
 		for (uint32_t i = 0; i < p_shadow_data->gpu_instances.size(); i++) {
 			const GeometryInstanceForwardClustered *instance = static_cast<const GeometryInstanceForwardClustered *>(p_shadow_data->gpu_instances[i]);

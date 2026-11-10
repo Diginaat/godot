@@ -1122,7 +1122,8 @@ protected:
 	// so that a view skips empty draws; false: every bucket is drawn.
 	bool _gpu_instances_used_buckets(const GPUInstanceScenario &p_scenario, const LocalVector<uint32_t> *p_slots, LocalVector<uint8_t> &r_used) const;
 	LocalVector<uint8_t> gpu_instances_used_buckets;
-	uint32_t gpu_instances_shadow_views_used = 0; // This frame.
+	uint32_t gpu_instances_shadow_views_used = 0; // This render.
+	uint32_t gpu_instances_shadow_views_last = 0; // In the last render that had shadow passes.
 	// Shadow validation (one pass every 30 frames).
 	bool gpu_instances_shadow_check_pending = false;
 	uint64_t gpu_instances_shadow_check_frame = UINT64_MAX;

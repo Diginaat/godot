@@ -931,8 +931,12 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 	// If p_offset == 0, grow_instance_buffer resets and increment the buffer.
 	// If this behavior ever changes, _render_shadow_begin may need to change.
 	scene_state.grow_instance_buffer(p_render_list, p_offset + element_total, p_offset != 0u);
+	// Elements before this are from earlier calls (shadow passes); a copy from
+	// scratch keeps the GPU path's elements among them as they are.
+	uint32_t earlier_elements = 0;
 	if (!scene_state.curr_gpu_ptr[p_render_list] && element_total > 0u) {
 		// The old buffer was replaced for another larger one. We must start copying from scratch.
+		earlier_elements = p_offset;
 		element_total += p_offset;
 		p_offset = 0u;
 		scene_state.curr_gpu_ptr[p_render_list] = reinterpret_cast<SceneState::InstanceData *>(scene_state.instance_buffer[p_render_list].map_raw_for_upload(0u));
@@ -945,6 +949,16 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 	uint32_t repeats = 0;
 	GeometryInstanceSurfaceDataCache *prev_surface = nullptr;
 	for (uint32_t i = 0; i < element_total; i++) {
+		if (unlikely(i < earlier_elements && rl->element_info[i].gpu_bucket != UINT32_MAX)) {
+			// A GPU path draw of an earlier pass: it has no instance data here
+			// and ends a run of repeats.
+			for (uint32_t j = 1; j <= repeats; j++) {
+				rl->element_info[p_offset + i - j].repeat = j;
+			}
+			repeats = 0;
+			prev_surface = nullptr;
+			continue;
+		}
 		GeometryInstanceSurfaceDataCache *surface = rl->elements[i + p_offset];
 		GeometryInstanceForwardClustered *inst = surface->owner;
 
@@ -1901,7 +1915,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 			RENDER_TIMESTAMP("Render OmniLight Shadows");
 			// Cube shadows are rendered in their own way.
 			for (const int &index : p_render_data->cube_shadows) {
-				_render_shadow_pass(p_render_data->render_shadows[index].light, p_render_data->shadow_atlas, p_render_data->render_shadows[index].pass, p_render_data->render_shadows[index].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, true, true, true, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform);
+				_render_shadow_pass(p_render_data->render_shadows[index].light, p_render_data->shadow_atlas, p_render_data->render_shadows[index].pass, p_render_data->render_shadows[index].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, true, true, true, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform, &p_render_data->render_shadows[index]);
 			}
 		}
 
@@ -1935,7 +1949,7 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 		}
 		//render positional shadows
 		for (uint32_t i = 0; i < p_render_data->shadows.size(); i++) {
-			_render_shadow_pass(p_render_data->render_shadows[p_render_data->shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->shadows[i]].pass, p_render_data->render_shadows[p_render_data->shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, i == 0, i == p_render_data->shadows.size() - 1, true, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform);
+			_render_shadow_pass(p_render_data->render_shadows[p_render_data->shadows[i]].light, p_render_data->shadow_atlas, p_render_data->render_shadows[p_render_data->shadows[i]].pass, p_render_data->render_shadows[p_render_data->shadows[i]].instances, lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, i == 0, i == p_render_data->shadows.size() - 1, true, p_render_data->render_info, viewport_size, p_render_data->scene_data->cam_transform, &p_render_data->render_shadows[p_render_data->shadows[i]]);
 		}
 
 		_render_shadow_process(rb_data.ptr());
@@ -3498,7 +3512,6 @@ void RenderForwardClustered::_render_shadow_pass(RID p_light, RID p_shadow_atlas
 
 void RenderForwardClustered::_render_shadow_begin() {
 	scene_state.shadow_passes.clear();
-	gpu_instances_shadow_views_used = 0;
 	RD::get_singleton()->draw_command_begin_label("Shadow Setup");
 	_update_render_base_uniform_set();
 

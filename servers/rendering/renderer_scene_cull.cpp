@@ -2704,7 +2704,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 							}
 						}
 
-						shadow_data.instances.push_back(static_cast<InstanceGeometryData *>(instance->base_data)->geometry_instance);
+						_push_shadow_caster(shadow_data, static_cast<InstanceGeometryData *>(instance->base_data)->geometry_instance);
 					}
 
 					RSG::mesh_storage->update_mesh_instances();
@@ -2787,7 +2787,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 							}
 						}
 
-						shadow_data.instances.push_back(static_cast<InstanceGeometryData *>(instance->base_data)->geometry_instance);
+						_push_shadow_caster(shadow_data, static_cast<InstanceGeometryData *>(instance->base_data)->geometry_instance);
 					}
 
 					RSG::mesh_storage->update_mesh_instances();
@@ -2856,7 +2856,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 						RSG::mesh_storage->mesh_instance_check_for_update(instance->mesh_instance);
 					}
 				}
-				shadow_data.instances.push_back(static_cast<InstanceGeometryData *>(instance->base_data)->geometry_instance);
+				_push_shadow_caster(shadow_data, static_cast<InstanceGeometryData *>(instance->base_data)->geometry_instance);
 			}
 
 			RSG::mesh_storage->update_mesh_instances();
@@ -2924,7 +2924,7 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 					}
 				}
 
-				shadow_data.instances.push_back(static_cast<InstanceGeometryData *>(instance->base_data)->geometry_instance);
+				_push_shadow_caster(shadow_data, static_cast<InstanceGeometryData *>(instance->base_data)->geometry_instance);
 			}
 
 			RSG::mesh_storage->update_mesh_instances();
@@ -4128,6 +4128,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 
 	scene_cull_result.clear();
 	const bool gpu_split = scene_render->gpu_instances_begin_cull();
+	gpu_split_active = gpu_split; // Positional shadow culls below split their casters too.
 
 	{
 		uint64_t cull_from = 0;

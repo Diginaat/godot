@@ -47,6 +47,14 @@
   D033): `massive_100k` render CPU 5.2 to 2.8 ms, `shared_20k` 4.3-5.5 to
   0.7-0.8 ms. A view with many buckets and few listed instances skips the
   empty buckets (`unique_10k` shadow draws 30,003 back to the CPU count).
+* **Implemented**: spot, dual paraboloid and cube omni casters on the GPU
+  path (Phase 6.2).
+* **Finding**: when the shadow list's instance buffer grows mid-frame,
+  `_fill_instance_data` copies all elements again from the first, which
+  turned earlier passes' GPU path elements into CPU draws (only seen with
+  enough passes: a dual paraboloid omni light made it show). The copy now
+  keeps them. Found by isolating the light type, then looking at where the
+  images differed (the sun's shadows everywhere, not near the omni light).
 
 ## 2026-11-08 (release 0.9.1)
 

@@ -670,7 +670,9 @@ camera's; each pass has its own commands, visible IDs and bits. Views the
 GPU path does not draw (no camera GPU view in this render) put the casters
 back into the CPU list; instances that left during the render go to every
 cascade's CPU list, clipped where they do not belong. Positional lights
-keep the CPU lists for now.
+(spot, dual paraboloid and cube omni) followed the same day (6.2): their
+shadow culls split the casters the same way, and every shadow pass of a
+render has its own commands and IDs.
 Also: with many buckets for few listed instances (one per material), a
 view marks the buckets its listed instances use and skips the others
 (`unique_10k`: 30,003 shadow draws, mostly empty, down to the CPU path's

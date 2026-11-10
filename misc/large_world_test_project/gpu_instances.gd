@@ -6,7 +6,8 @@ extends Node3D
 ## visibility ranges, meshes with index LODs and LOD biases, frees and adds,
 ## nodes replaced and materials swapped every frame (no bucket rebuilds),
 ## an occluder (the GPU path draws what the scene cull found visible),
-## casters behind the camera (drawn only by the shadow passes),
+## spot and omni shadows, casters behind the camera (drawn only by the
+## shadow passes),
 ## TAA and FSR 2 (a motion pass), compared through their motion vectors, a second view of the same world and a
 ## view of another world. Every 30 frames the engine compares what the GPU
 ## path drew with what the CPU cull found visible (GPU_INSTANCES_CHECK). After
@@ -23,6 +24,8 @@ var _transparent := StandardMaterial3D.new()
 var _moving := 0
 var _flipping := 0 # Nodes that alternate between two positions every frame.
 var _churn := 0 # Nodes replaced, and materials swapped, every frame.
+var _shadow_lights: Array[Light3D] = [] # Moved a little every frame, so their shadows are drawn again.
+var _shadow_light_bases: PackedVector3Array
 var _camera: Camera3D
 var _velocity := VelocityGrab.new()
 
@@ -87,6 +90,8 @@ func _process(_delta: float) -> void:
 	for i in mini(_moving, _nodes.size()):
 		var node := _nodes[i * 7 % _nodes.size()]
 		node.position.y = 0.5 + 0.5 * sin(float(_frame) * 0.1 + float(i))
+	for i in _shadow_lights.size():
+		_shadow_lights[i].position = _shadow_light_bases[i] + Vector3(0.0, 0.002 * float(Engine.get_process_frames() % 3), 0.0)
 	for k in _churn:
 		var index := (_frame * 7 + k * 131) % _nodes.size()
 		var old := _nodes[index]
@@ -235,6 +240,37 @@ func _run(self_test: bool) -> void:
 	await _compare("occluder")
 	occluder.queue_free()
 	get_viewport().use_occlusion_culling = false
+	# Positional shadows: a spot light, a cube omni light and a dual paraboloid
+	# omni light cast from GPU-drawn casters. The lights move in a three-frame
+	# cycle, so their shadows are drawn again in every frame, and the two
+	# captures of a comparison (three frames apart) see the same positions.
+	var spot := SpotLight3D.new()
+	spot.shadow_enabled = true
+	spot.spot_range = 30.0
+	spot.spot_angle = 35.0
+	spot.position = Vector3(-8.0, 10.0, 8.0)
+	add_child(spot)
+	spot.look_at(Vector3(-8.0, 0.0, 3.0))
+	var omni_cube := OmniLight3D.new()
+	omni_cube.shadow_enabled = true
+	omni_cube.omni_range = 15.0
+	omni_cube.omni_shadow_mode = OmniLight3D.SHADOW_CUBE
+	omni_cube.position = Vector3(8.0, 4.0, 8.0)
+	add_child(omni_cube)
+	var omni_dp := OmniLight3D.new()
+	omni_dp.shadow_enabled = true
+	omni_dp.omni_range = 15.0
+	omni_dp.omni_shadow_mode = OmniLight3D.SHADOW_DUAL_PARABOLOID
+	omni_dp.position = Vector3(0.0, 4.0, -4.0)
+	add_child(omni_dp)
+	_shadow_lights = [spot, omni_cube, omni_dp]
+	_shadow_light_bases = PackedVector3Array([spot.position, omni_cube.position, omni_dp.position])
+	await _wait(PHASE_FRAMES)
+	print("GPU_INSTANCES_PHASE: spot and omni shadows")
+	await _compare("positional shadows")
+	for light in _shadow_lights:
+		light.queue_free()
+	_shadow_lights = []
 	# Casters behind the camera: only the shadow passes draw them, and their
 	# shadows fall into the view.
 	var casters: Array[MeshInstance3D] = []

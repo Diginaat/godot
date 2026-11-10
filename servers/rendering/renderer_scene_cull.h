@@ -1140,6 +1140,17 @@ public:
 
 	RendererSceneRender::RenderShadowData render_shadow_data[MAX_UPDATE_SHADOWS];
 	uint32_t max_shadows_used = 0;
+	// The camera cull of this render lists the renderer's GPU path instances
+	// apart; positional shadow culls then do the same with their casters.
+	bool gpu_split_active = false;
+	_FORCE_INLINE_ void _push_shadow_caster(RendererSceneRender::RenderShadowData &r_shadow_data, RenderGeometryInstance *p_instance) {
+		if (gpu_split_active && p_instance->gpu_drawn) {
+			r_shadow_data.gpu_instances.push_back(p_instance);
+			r_shadow_data.gpu_slots.push_back(p_instance->gpu_cull_slot);
+		} else {
+			r_shadow_data.instances.push_back(p_instance);
+		}
+	}
 
 	RendererSceneRender::RenderSDFGIData render_sdfgi_data[SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE];
 	RendererSceneRender::RenderSDFGIUpdateData sdfgi_update_data;

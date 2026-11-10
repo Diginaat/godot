@@ -201,8 +201,13 @@ render CPU down.
   commands and IDs; buckets without listed casters skipped when buckets are
   many. `massive_100k` render CPU 5.2 to 2.8 ms, `shared_20k` 4.3-5.5 to
   0.7-0.8 ms; images equal, casters behind the camera cast.
-- 6.2 Next: spot and omni (atlas) shadows, cube omni shadows; shadow render
-  info (objects, primitives) for GPU-drawn casters.
+- 6.2 Spot, dual paraboloid and cube omni shadows done 2026-11-10: the
+  positional shadow culls split their casters the same way; every pass of
+  a render has its own commands and IDs (cube faces too). Fixed on the way:
+  when the shadow instance buffer grew mid-frame, the copy from scratch
+  turned earlier passes' GPU path elements into CPU draws.
+- 6.3 Next: shadow render info (objects, primitives) for GPU-drawn casters;
+  HZB or caster culling against the camera for cascades.
 
 ## Phase 7 - lighting and GI scheduling (P2)
 
