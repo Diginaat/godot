@@ -151,3 +151,22 @@ Artifacts: `devtools/out/unique_array_bench/boundary/copy/paired_results.json`,
 remains 279 passed; no full engine rebuild was needed for this tools-only change.
 Next: inspect codegen and representative call sites, then decide whether to
 retain, revise or explicitly roll back the policy. No silent retuning applied.
+
+# Follow-up: specialized copy-only build (2026-11-10, recorded 2026-11-15)
+
+`unique_array_bench.py --boundary --specialize-copy` compiles the other
+workloads' control flow out of both executables (`ARRAY_BENCH_SPECIALIZE_COPY`),
+same committed header (`ee5973f764`), same sizes and pairing:
+
+| Integers | 0 | 1 | 16 | 64 | 128 | 255 | 256 | 257 | 512 | 4,096 | 32,768 | 1,048,576 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Candidate/original | 1.50 | 0.99 | 0.97 | 0.99 | 0.99 | 0.99 | 0.38 | 0.34 | 0.28 | 0.27 | 0.20 | 0.82 |
+
+The 1-255 element "regressions" of the generic boundary sweep disappear when
+the harness's own branches are gone, so they came from the harness's code
+layout, not from the header. The size-0 ratio is 0.96 vs 1.43 ns, at the
+timer's resolution. Decision: keep the 256-element bulk copy as committed.
+Two other candidates (`local_vector_copy_candidate.py`: `std::uninitialized_copy_n`
+for every size, and a single-element special case) were 7-15% slower at 1-16
+elements in the generic harness and are not used.
+

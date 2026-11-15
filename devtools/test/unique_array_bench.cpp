@@ -187,6 +187,10 @@ void pop(LocalVector<T> &a) {
 
 template <typename Array>
 void sample(const char *variant, int operation, size_t n, int index) {
+#if ARRAY_BENCH_SPECIALIZE_COPY
+	// Diagnostic mode: remove unrelated workload control flow from both builds.
+	operation = 3;
+#endif
 	const char *names[] = { "append", "reserve_append", "resize_initialized", "copy", "copy_then_move", "iterate", "random_access", "copy_then_pop_all" };
 	Array original;
 	if (operation >= 3) {

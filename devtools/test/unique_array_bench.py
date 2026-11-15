@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Baseline-only LocalVector/STL allocator experiment. No engine files edited."""
+"""Isolated LocalVector/STL allocator experiment. No engine files edited."""
 import argparse
 import csv
 import hashlib
@@ -27,10 +27,17 @@ def checked(args, **kwargs):
     return result.stdout
 
 
-def compare_copy(boundary=False):
+def compare_copy(args):
+    boundary = args.boundary
     sizes = BOUNDARY_SIZES if boundary else MATRIX_SIZES
     for extra in ([], ["--candidate-local"]):
         options = ["--boundary"] if boundary else []
+        if args.specialize_copy:
+            options += ["--specialize-copy"]
+        if args.output_dir:
+            options += ["--output-dir", str(args.output_dir.resolve())]
+        if args.candidate_header and extra:
+            options += ["--candidate-header", str(args.candidate_header.resolve())]
         print(checked([sys.executable, str(Path(__file__).resolve()), "--copy-only", "--samples", "1", *options, *extra]), end="")
     directory = OUT / "copy"
     metrics = ("allocations", "reallocations", "frees", "crt_peak_delta", "live_requested_bytes", "capacity")
@@ -84,14 +91,27 @@ def main():
     parser.add_argument("--copy-only", action="store_true")
     parser.add_argument("--compare-copy", action="store_true")
     parser.add_argument("--boundary", action="store_true", help="Copy-only threshold-neighborhood sweep in a separate output directory")
+    parser.add_argument("--specialize-copy", action="store_true", help="Diagnostic: compile out unrelated workload branches (requires --output-dir)")
+    parser.add_argument("--candidate-header", type=Path, help="Experimental local_vector.h overlay; requires --output-dir")
+    parser.add_argument("--output-dir", type=Path, help="Separate artifact root for an isolated experiment")
     parser.add_argument("--samples", type=int, default=11)
     args = parser.parse_args()
     if args.boundary and not (args.copy_only or args.compare_copy):
         parser.error("--boundary requires --copy-only or --compare-copy (non-power-of-two inputs are copy-only)")
+    if (args.specialize_copy or args.candidate_header) and not args.output_dir:
+        parser.error("Experimental codegen/header modes require --output-dir to preserve historical results")
+    if args.specialize_copy and not (args.copy_only or args.compare_copy):
+        parser.error("--specialize-copy requires --copy-only or --compare-copy")
+    if args.candidate_header and not (args.candidate_local or args.compare_copy):
+        parser.error("--candidate-header requires --candidate-local or --compare-copy")
+    if args.candidate_header and not args.candidate_header.is_file():
+        parser.error("--candidate-header must name an existing file")
+    if args.output_dir:
+        OUT = args.output_dir.resolve()
     if args.boundary:
         OUT = OUT / "boundary"
     if args.compare_copy:
-        compare_copy(args.boundary)
+        compare_copy(args)
         return
     if args.samples < 1:
         parser.error("At least one sample required")
@@ -110,8 +130,11 @@ def main():
     if not generated.is_file():
         raise RuntimeError("Configure Godot via SCons first: profiling.gen.h is required")
     (baseline / "core/profiling/profiling.gen.h").write_bytes(generated.read_bytes())
+    local_header = baseline / "core/templates/local_vector.h"
+    # Always reset this overlay: reusing an output root must not retain a prior candidate.
+    local_header.write_bytes(subprocess.check_output(["git", "show", f"{BASELINE}:core/templates/local_vector.h"], cwd=ROOT))
     if args.candidate_local:
-        (baseline / "core/templates/local_vector.h").write_bytes((ROOT / "core/templates/local_vector.h").read_bytes())
+        local_header.write_bytes((args.candidate_header or ROOT / "core/templates/local_vector.h").read_bytes())
     vswhere = Path(os.environ["ProgramFiles(x86)"]) / "Microsoft Visual Studio/Installer/vswhere.exe"
     installation = checked([str(vswhere), "-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"]).strip()
     vcvars = Path(installation) / "VC/Auxiliary/Build/vcvars64.bat"
@@ -125,7 +148,7 @@ def main():
         flags = ["cl", "/nologo", "/O2", "/MT", "/std:c++17", "/Zc:__cplusplus", "/DDEBUG_ENABLED", "/DWINDOWS_ENABLED", f"/I{baseline}", f"/I{baseline / 'platform/windows'}"]
         commands = [
             flags + ["/c", f"/FI{header}", f"/DARRAY_BENCH_HOOKS={int(mode == 'counts')}", f"/Fo{directory / 'memory.obj'}", str(baseline / "core/os/memory.cpp")],
-            flags + [f"/DARRAY_BENCH_COPY_ONLY={int(args.copy_only)}", f"/DARRAY_BENCH_BOUNDARY={int(args.boundary)}", f"/DARRAY_BENCH_COUNT_RUN={int(mode == 'counts')}", f"/DARRAY_BENCH_SAMPLES={1 if mode == 'counts' else args.samples}", f"/Fo{directory / 'bench.obj'}", f"/Fe{directory / 'bench.exe'}", str(source), str(directory / "memory.obj")],
+            flags + [f"/DARRAY_BENCH_COPY_ONLY={int(args.copy_only)}", f"/DARRAY_BENCH_SPECIALIZE_COPY={int(args.specialize_copy)}", f"/DARRAY_BENCH_BOUNDARY={int(args.boundary)}", f"/DARRAY_BENCH_COUNT_RUN={int(mode == 'counts')}", f"/DARRAY_BENCH_SAMPLES={1 if mode == 'counts' else args.samples}", f"/Fo{directory / 'bench.obj'}", f"/Fe{directory / 'bench.exe'}", str(source), str(directory / "memory.obj")],
         ]
         script = directory / "build.cmd"
         text = f'@call "{vcvars}" >nul\n@if errorlevel 1 exit /b %errorlevel%\n'
@@ -161,7 +184,9 @@ def main():
             row["ratio"] = row["stl"]["p50_ns"] / row["local"]["p50_ns"]
             summary.append(row)
     inputs = [source, header, baseline / "core/os/memory.cpp", baseline / "core/templates/local_vector.h", baseline / "core/templates/vector.h", baseline / "core/templates/cowdata.h", generated]
-    metadata = {"baseline": BASELINE, "candidate_local": args.candidate_local, "samples": args.samples, "copy_only": args.copy_only, "warmups": 1, "compiler_flags": "MSVC /O2 /MT C++17 DEBUG_ENABLED; no LTO; uninstrumented timing, separate CRT-hook counts", "cpu": checked(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"]).strip(), "sources": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}, "memory": "live_requested_bytes from Godot; crt_peak_delta is CRT _msize usable bytes including engine allocation headers; counts exclude prepared fixtures and include all repeated cycles"}
+    metadata = {"baseline": BASELINE, "candidate_local": args.candidate_local, "samples": args.samples, "copy_only": args.copy_only, "warmups": 1, "compiler_flags": "MSVC /O2 /MT C++17 DEBUG_ENABLED; no LTO; uninstrumented timing, separate CRT-hook counts", "cpu": checked(["powershell", "-NoProfile", "-Command", "(Get-CimInstance Win32_Processor).Name"]).strip(), "sources": {os.path.relpath(p, ROOT): hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}, "memory": "live_requested_bytes from Godot; crt_peak_delta is CRT _msize usable bytes including engine allocation headers; counts exclude prepared fixtures and include all repeated cycles"}
+    metadata["specialize_copy"] = args.specialize_copy
+    metadata["candidate_header_sha256"] = hashlib.sha256(local_header.read_bytes()).hexdigest()
     (OUT / "results.json").write_text(json.dumps({"metadata": metadata, "summary": summary}, indent=2), encoding="utf-8")
     for row in summary:
         if row["n"] in (16, 32768, 1048576):
