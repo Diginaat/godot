@@ -185,6 +185,9 @@ straight.
     with the release store of `max_alloc` in `_allocate_rid()`. Upstream
     reverted its own version (godotengine/godot#114900); if upstream lands
     a fixed lock-free `owns()`, take theirs and drop this.
+  - `HashSet` (`core/templates/hash_set.h`) allocates one block per table
+    (`_allocate_block()`, `_free_block()`; D013). Upstream changes to its
+    allocation, resize or copy code must be ported to the block layout.
   - `RenderingServerDefault::finish()` makes the main RenderingDevice
     current on the main thread again after the separate render thread
     ends, so its `finalize()` runs at exit (without it the guard skipped

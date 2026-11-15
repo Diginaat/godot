@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-16 (core: one allocation per HashSet, D013)
+
+* **Implemented**: `HashSet` keeps its index arrays and keys in one block
+  (one allocation per table and resize instead of four);
+  `DependencyTracker::update_end()` uses a `LocalVector`. Scene instancing
+  12.58 to 11.69 ms per frame, node churn 14.84 to 14.59 ms; large-set
+  microbench neutral. docs/core-modernization/phases/02-hashing.md.
+
 ## 2026-11-16 (core: CPU profiles, lock-free RID ownership checks, D012)
 
 * **Added**: `devtools/profile/`, a user-mode stack sampler (no elevation)

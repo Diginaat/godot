@@ -63,6 +63,35 @@ private:
 	uint32_t _capacity_idx = 0;
 	uint32_t _size = 0;
 
+	// The three index arrays and the keys share one allocation (one block per
+	// table and resize instead of four): hashes, key to hash index, hash to key
+	// index, then the keys at their alignment. _hashes is the block.
+	// (In the functions, not the class: a HashSet member may name an incomplete key type.)
+	_FORCE_INLINE_ static size_t _keys_offset(uint32_t p_capacity) {
+		static_assert(alignof(TKey) <= alignof(std::max_align_t), "HashSet keys cannot be over-aligned.");
+		constexpr size_t keys_align = alignof(TKey) > alignof(uint32_t) ? alignof(TKey) : alignof(uint32_t);
+		return (sizeof(uint32_t) * 3 * size_t(p_capacity) + keys_align - 1) & ~(keys_align - 1);
+	}
+
+	// Points the four arrays into a new block; hashes zeroed (EMPTY_HASH).
+	void _allocate_block(uint32_t p_capacity) {
+		static_assert(EMPTY_HASH == 0, "Assuming EMPTY_HASH = 0 for the memset below.");
+		uint8_t *block = reinterpret_cast<uint8_t *>(Memory::alloc_static(_keys_offset(p_capacity) + sizeof(TKey) * size_t(p_capacity)));
+		_hashes = reinterpret_cast<uint32_t *>(block);
+		_key_idx_to_hash_idx = _hashes + p_capacity;
+		_hash_idx_to_key_idx = _key_idx_to_hash_idx + p_capacity;
+		_keys = reinterpret_cast<TKey *>(block + _keys_offset(p_capacity));
+		memset(_hashes, EMPTY_HASH, sizeof(uint32_t) * p_capacity);
+	}
+
+	void _free_block() {
+		Memory::free_static(_hashes);
+		_keys = nullptr;
+		_hashes = nullptr;
+		_hash_idx_to_key_idx = nullptr;
+		_key_idx_to_hash_idx = nullptr;
+	}
+
 	_FORCE_INLINE_ uint32_t _hash(const TKey &p_key) const {
 		uint32_t hash = hash_table_key<Hasher>(p_key);
 
@@ -156,12 +185,13 @@ private:
 
 		uint32_t *old_hashes = _hashes;
 		uint32_t *old_key_to_hash = _key_idx_to_hash_idx;
+		TKey *old_keys = _keys;
 
-		static_assert(EMPTY_HASH == 0, "Assuming EMPTY_HASH = 0 for alloc_static_zeroed call");
-		_hashes = reinterpret_cast<uint32_t *>(Memory::alloc_static_zeroed(sizeof(uint32_t) * capacity));
-		_keys = reinterpret_cast<TKey *>(Memory::realloc_static(_keys, sizeof(TKey) * capacity));
-		_key_idx_to_hash_idx = reinterpret_cast<uint32_t *>(Memory::alloc_static(sizeof(uint32_t) * capacity));
-		_hash_idx_to_key_idx = reinterpret_cast<uint32_t *>(Memory::realloc_static(_hash_idx_to_key_idx, sizeof(uint32_t) * capacity));
+		_allocate_block(capacity);
+		// Keys move by memory copy, as the class requires (see above).
+		if (_size > 0) {
+			memcpy(static_cast<void *>(_keys), static_cast<const void *>(old_keys), sizeof(TKey) * _size);
+		}
 
 		for (uint32_t i = 0; i < _size; i++) {
 			uint32_t h = old_hashes[old_key_to_hash[i]];
@@ -169,7 +199,6 @@ private:
 		}
 
 		Memory::free_static(old_hashes);
-		Memory::free_static(old_key_to_hash);
 	}
 
 	// Returns key index.
@@ -177,12 +206,7 @@ private:
 		uint32_t capacity = hash_table_size_primes[_capacity_idx];
 		if (unlikely(_keys == nullptr)) {
 			// Allocate on demand to save memory.
-
-			static_assert(EMPTY_HASH == 0, "Assuming EMPTY_HASH = 0 for alloc_static_zeroed call");
-			_hashes = reinterpret_cast<uint32_t *>(Memory::alloc_static_zeroed(sizeof(uint32_t) * capacity));
-			_keys = reinterpret_cast<TKey *>(Memory::alloc_static(sizeof(TKey) * capacity));
-			_key_idx_to_hash_idx = reinterpret_cast<uint32_t *>(Memory::alloc_static(sizeof(uint32_t) * capacity));
-			_hash_idx_to_key_idx = reinterpret_cast<uint32_t *>(Memory::alloc_static(sizeof(uint32_t) * capacity));
+			_allocate_block(capacity);
 		}
 
 		uint32_t key_idx = 0;
@@ -214,10 +238,7 @@ private:
 
 		uint32_t capacity = hash_table_size_primes[_capacity_idx];
 
-		_hashes = reinterpret_cast<uint32_t *>(Memory::alloc_static(sizeof(uint32_t) * capacity));
-		_keys = reinterpret_cast<TKey *>(Memory::alloc_static(sizeof(TKey) * capacity));
-		_key_idx_to_hash_idx = reinterpret_cast<uint32_t *>(Memory::alloc_static(sizeof(uint32_t) * capacity));
-		_hash_idx_to_key_idx = reinterpret_cast<uint32_t *>(Memory::alloc_static(sizeof(uint32_t) * capacity));
+		_allocate_block(capacity);
 
 		for (uint32_t i = 0; i < _size; i++) {
 			memnew_placement(&_keys[i], TKey(p_other._keys[i]));
@@ -449,14 +470,7 @@ public:
 		clear();
 
 		if (_keys != nullptr) {
-			Memory::free_static(_keys);
-			Memory::free_static(_key_idx_to_hash_idx);
-			Memory::free_static(_hash_idx_to_key_idx);
-			Memory::free_static(_hashes);
-			_keys = nullptr;
-			_hashes = nullptr;
-			_hash_idx_to_key_idx = nullptr;
-			_key_idx_to_hash_idx = nullptr;
+			_free_block();
 		}
 
 		_init_from(p_other);
@@ -510,14 +524,7 @@ public:
 		clear();
 
 		if (_keys != nullptr) {
-			Memory::free_static(_keys);
-			Memory::free_static(_key_idx_to_hash_idx);
-			Memory::free_static(_hash_idx_to_key_idx);
-			Memory::free_static(_hashes);
-			_keys = nullptr;
-			_hashes = nullptr;
-			_hash_idx_to_key_idx = nullptr;
-			_key_idx_to_hash_idx = nullptr;
+			_free_block();
 		}
 		_capacity_idx = MIN_CAPACITY_INDEX;
 	}
@@ -526,9 +533,6 @@ public:
 		clear();
 
 		if (_keys != nullptr) {
-			Memory::free_static(_keys);
-			Memory::free_static(_key_idx_to_hash_idx);
-			Memory::free_static(_hash_idx_to_key_idx);
 			Memory::free_static(_hashes);
 		}
 	}

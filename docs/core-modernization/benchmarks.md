@@ -11,6 +11,14 @@ where the time goes: [KB](../../kb/project/core-cpu-profiles.md).
 | --- | --- | --- | --- |
 | D012 lock-free `RID_Alloc::owns()` on x86-64 | `instance` | 13.83 ms (13.40-15.51) | 12.37 ms (12.14-14.78) |
 | D012 | `nodes` | 14.95 ms (14.62-15.60) | 14.91 ms (14.72-14.96) |
+| D013 one-block `HashSet`, `DependencyTracker::update_end()` | `instance` | 12.58 ms (12.50-12.73) | 11.69 ms (11.61-11.77) |
+| D013 | `nodes` | 14.84 ms (14.80-14.98) | 14.59 ms (14.48-14.66) |
+
+The baselines of D013 are the D012 build. Large-set microbench for D013
+(`core_templates_bench.py --baseline HEAD`, 11 samples): HashSet insert /
+hit / churn 51.47 / 15.34 / 41.50 to 52.64 / 15.80 / 40.30 ns, live bytes
+equal; unchanged code within 0.95-1.04x except String copy/detach (1.14x,
+the standalone harness effect recorded earlier).
 
 ## Recorded exploratory evidence (before Phase 0 commit)
 

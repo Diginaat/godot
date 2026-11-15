@@ -32,6 +32,8 @@
 
 TEST_FORCE_LINK(test_hash_set)
 
+#include "core/math/vector3.h"
+#include "core/string/ustring.h"
 #include "core/templates/hash_set.h"
 
 namespace TestHashSet {
@@ -253,6 +255,45 @@ TEST_CASE("[HashSet] Equality") {
 	CHECK(HashSet<int>{ 1, 2, 3 } == HashSet<int>{ 1, 2, 3 });
 	CHECK(HashSet<int>{ 1, 2, 3 } == HashSet<int>{ 3, 2, 1 });
 	CHECK(HashSet<int>{ 1, 2, 3 } != HashSet<int>{ 1, 2, 8 });
+}
+
+// The keys share one block with the index arrays, at their own alignment
+// (1, 4, 8 bytes, a non-trivial String); every capacity step relocates them.
+template <typename T>
+static void test_hash_set_keys_through_growth(T (*p_key)(int)) {
+	HashSet<T> set;
+	const int count = 200;
+	for (int i = 0; i < count; i++) {
+		set.insert(p_key(i));
+		CHECK(set.has(p_key(i)));
+	}
+	CHECK(set.size() == uint32_t(count));
+	CHECK(uintptr_t(&*set.begin()) % alignof(T) == 0);
+	for (int i = 0; i < count; i += 2) {
+		CHECK(set.erase(p_key(i)));
+	}
+	HashSet<T> copy(set);
+	for (int i = 0; i < count; i++) {
+		CHECK(set.has(p_key(i)) == (i % 2 == 1));
+		CHECK(copy.has(p_key(i)) == (i % 2 == 1));
+	}
+	copy.reset();
+	CHECK(copy.is_empty());
+	copy.reserve(1000);
+	for (int i = 0; i < count; i++) {
+		copy.insert(p_key(i));
+	}
+	CHECK(copy.size() == uint32_t(count));
+	HashSet<T> moved(std::move(copy));
+	CHECK(moved.size() == uint32_t(count));
+	CHECK(moved.has(p_key(count - 1)));
+}
+
+TEST_CASE("[HashSet] Keys of different sizes and alignments through growth") {
+	test_hash_set_keys_through_growth<uint8_t>([](int i) { return uint8_t(i); });
+	test_hash_set_keys_through_growth<uint64_t>([](int i) { return uint64_t(i) * 0x100000001ull; });
+	test_hash_set_keys_through_growth<Vector3>([](int i) { return Vector3(i, -i, i * 0.5); });
+	test_hash_set_keys_through_growth<String>([](int i) { return String::num_int64(i) + " key"; });
 }
 
 } // namespace TestHashSet

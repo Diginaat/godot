@@ -61,7 +61,10 @@ M4, no root cause was found, nobody reproduced it on x86. This fork does
 not target macOS. D012 ([decisions](../../docs/core-modernization/decisions.md))
 makes `owns()` lock-free on x86-64 only: the `instance` workload went from
 13.83 to 12.37 ms per frame (median of 5 alternating rounds, every round
-lower), RID checks and locks from 12.6% to 7.0% of its main thread.
+lower), RID checks and locks from 12.6% to 7.0% of its main thread. D013
+keeps `HashSet`'s four arrays in one allocation and makes
+`DependencyTracker::update_end()` collect into a `LocalVector`: 12.58 to
+11.69 ms, heap calls 16.0% to 14.6% of the main thread.
 
 # What it means
 

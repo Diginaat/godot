@@ -31,10 +31,15 @@ committed. Branch creation preserved every existing change.
   [findings](../../kb/project/core-cpu-profiles.md)) gave the frame-time
   reason asked for below: container internals are not the main cost, their
   callers' patterns are. D012: lock-free `RID_Alloc::owns()` on x86-64,
-  scene instancing 13.83 to 12.37 ms per frame.
-- Next candidates, by measured share on scene instancing: heap calls 13.9%
-  (renderer `DependencyTracker` HashMap/HashSet node inserts about 4.7%,
-  signal connect/disconnect about 2.5%); hash lookups from signals and
+  scene instancing 13.83 to 12.37 ms per frame. D013: one-block `HashSet`
+  and a `LocalVector` in `DependencyTracker::update_end()`, 12.58 to 11.69
+  ms (node churn 14.84 to 14.59).
+- Next candidates, by measured share on scene instancing (after D013): heap
+  calls 14.6%, largest `Object::connect` 2.45% and `_disconnect` 0.77%
+  (signal connections), `DependencyTracker::update_dependency` 1.48%
+  (the HashMap node of `Dependency::instances`; an `AHashMap` there is not
+  safe: `deleted_notify()` callbacks erase other trackers while it
+  iterates), `ClassDB::creator`; hash lookups from signals and
   dependency tracking; StringName construction 3.4%; on node churn the
   children cache walk (LocalVector 7%) and `SceneTree::add_to_group`'s
   linear `find` (2%); editor startup Theme lookups.
