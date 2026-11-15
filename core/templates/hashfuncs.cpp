@@ -30,6 +30,33 @@
 
 #include "hashfuncs.h"
 
+#include "thirdparty/wyhash/wyhash.h"
+
+#include "core/error/error_macros.h"
+#include "core/string/ustring.h"
+
+// Use a private header-only XXH3 implementation: independent of whether zstd is
+// enabled, and no exported symbols that could collide with a module's xxHash.
+#define XXH_INLINE_ALL
+#include "thirdparty/xxhash/xxhash.h"
+#undef XXH_INLINE_ALL
+
+uint64_t hash_buffer64(const void *p_data, size_t p_size, uint64_t p_seed) {
+	ERR_FAIL_COND_V(p_data == nullptr && p_size != 0, 0);
+	static constexpr uint8_t empty = 0;
+	const void *data = p_data ? p_data : &empty;
+	return p_size < HASH_XXH3_THRESHOLD ? wyhash(data, p_size, p_seed, _wyp) : XXH3_64bits_withSeed(data, p_size, p_seed);
+}
+
+uint32_t hash_buffer(const void *p_data, size_t p_size, uint64_t p_seed) {
+	const uint64_t hash = hash_buffer64(p_data, p_size, p_seed);
+	return uint32_t(hash) ^ uint32_t(hash >> 32);
+}
+
+uint32_t hash_table_string(const String &p_string) {
+	return hash_buffer(p_string.ptr(), size_t(p_string.length()) * sizeof(char32_t));
+}
+
 uint32_t hash_murmur3_one_float(float p_in, uint32_t p_seed) {
 	union {
 		float f;

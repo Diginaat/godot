@@ -40,10 +40,20 @@
 
 template <typename F, typename S>
 struct Pair;
+class String;
+template <typename T>
+class CharStringT;
 
 /**
  * Hashing functions
  */
+
+// General-purpose byte hashing. Short keys use wyhash; larger buffers use XXH3.
+// The 256-byte boundary is a policy, not a measured optimum. The named DJB2 and
+// Murmur functions below keep their outputs for persisted and public hashes.
+inline constexpr size_t HASH_XXH3_THRESHOLD = 256;
+uint64_t hash_buffer64(const void *p_data, size_t p_size, uint64_t p_seed = 0);
+uint32_t hash_buffer(const void *p_data, size_t p_size, uint64_t p_seed = 0);
 
 /**
  * DJB2 Hash function
@@ -283,6 +293,29 @@ struct HashMapHasherDefaultImpl<Pair<F, S>> {
 		return hash_one_uint64((h1 << 32) | h2);
 	}
 };
+
+// Hash used inside HashMap, AHashMap and HashSet for String and CharString keys
+// with the default hasher. It hashes the characters as bytes (wyhash/XXH3)
+// instead of String::hash()'s per-character DJB2. Only the table's slot choice
+// depends on it: iteration order stays insertion order. HashMapHasherDefault and
+// String::hash() keep their outputs (API fingerprints, Dictionary, NodePath).
+template <typename T>
+struct is_char_string : std::false_type {};
+template <typename T>
+struct is_char_string<CharStringT<T>> : std::true_type {};
+
+uint32_t hash_table_string(const String &p_string);
+
+template <typename Hasher, typename T>
+_FORCE_INLINE_ uint32_t hash_table_key(const T &p_value) {
+	if constexpr (std::is_same_v<Hasher, HashMapHasherDefault> && std::is_same_v<T, String>) {
+		return hash_table_string(p_value);
+	} else if constexpr (std::is_same_v<Hasher, HashMapHasherDefault> && is_char_string<T>::value) {
+		return hash_buffer(p_value.ptr(), size_t(p_value.length()) * sizeof(*p_value.ptr()));
+	} else {
+		return Hasher::hash(p_value);
+	}
+}
 
 template <typename, typename = std::void_t<>>
 struct has_is_same_method : std::false_type {};

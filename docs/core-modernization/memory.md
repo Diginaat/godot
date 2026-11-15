@@ -23,13 +23,15 @@ committed. Branch creation preserved every existing change.
 
 ## Current state
 
-- Phase 0 committed as `ad1573b0e4`; Phase 1 infrastructure `ce25718574`.
-  First LocalVector copy slice passes the Windows build/test gate; Phase 1 remains open.
-- Follow-up boundary sweep blocks performance acceptance: small copies regress
-  ~9–33% in the extended harness; large-copy gains remain. Do not promote the
-  copy policy or retune its threshold without investigating codegen/callers.
-- Existing COW/STL-algorithm and robin-hood adapter prototype: builds and passes
-  focused correctness, but **fails numeric-container performance/memory goals**.
+- 2026-11-15: the COW/STL-algorithm storage and robin-hood index prototype was
+  dropped (numeric hash tables 1.3-2.6x slower, 50-57% bigger); saved on a
+  local backup branch. Kept as patches: LocalVector bulk copy from 256
+  elements (`ee5973f764`; the small-copy "regression" was the harness, see
+  [unique-array evaluation](../../kb/project/unique-array-evaluation.md)) and
+  the wyhash/XXH3 byte hash for String/CharString table keys
+  ([numbers](../../kb/project/core-template-benchmarks.md)).
+- Next core work needs a frame-time reason first: the renderer work (GPU-driven
+  Forward+, `docs/renderer/`) gains more per hour than core containers.
 - No engine math modification. Explicit SSE dot/cross candidates lost locally.
 - Production engine uses SCons; C++17. Local configured SDKs enable PhysX GPU,
   Blast and Flow; machine-specific SDK paths must not enter public docs.

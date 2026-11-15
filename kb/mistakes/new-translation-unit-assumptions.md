@@ -25,6 +25,14 @@ Scene import options are a HashMap, not a Dictionary: optional defaults require
 `has()` plus indexed access, not Dictionary's two-argument `get()`. Check the
 containing function signature as well as local dictionary examples.
 
+For the core-container standalone benchmark, linking all of `ustring.cpp`
+pulled unresolved Variant, crypto, translation and OS dependencies, even with
+function sections and dead stripping. The harness now extracts only the exact
+`String::operator==(const String &)` and `String::hash()` method definitions
+from each variant, records source fingerprints and compiles those verbatim.
+It does not substitute a different String implementation or stub measured work.
+The real container headers, `memory.cpp` and `hashfuncs.cpp` remain in use.
+
 # Rule
 
 Check declarations and exact helper signatures in this fork before introducing

@@ -1312,6 +1312,22 @@ Patches:
 - `0001-msvc-build-fix.patch` ([GH-30263](https://github.com/godotengine/godot/pull/30263))
 
 
+## wyhash
+
+- Upstream: https://github.com/wangyi-fudan/wyhash
+- Version: final v4.3 (e4764a0b637d34d3421a7760affada9288b625a8)
+- License: Unlicense
+
+Files extracted from upstream source:
+
+- `wyhash.h`
+- `LICENSE`
+
+Used by `hash_buffer()` in `core/templates/hashfuncs.cpp` for buffers below
+256 bytes (XXH3 above). `tests/core/templates/test_hash_buffer.cpp` checks it
+against this header.
+
+
 ## xatlas
 
 - Upstream: https://github.com/jpcy/xatlas
@@ -1322,6 +1338,21 @@ Files extracted from upstream source:
 
 - `source/xatlas/xatlas.{cpp,h}`
 - `LICENSE`
+
+
+## xxhash
+
+- Upstream: https://github.com/Cyan4973/xxHash
+- Version: 0.8.3 (e626a72bc2321cd320e953a0ccf1584cad60f363)
+- License: BSD-2-Clause
+
+Files extracted from upstream source:
+
+- `xxhash.h`
+- `LICENSE`
+
+Used header-only for XXH3. The separate copy is necessary because the
+Zstandard copy disables XXH3 unconditionally.
 
 
 ## zlib

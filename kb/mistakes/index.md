@@ -4,6 +4,8 @@
 
 * [Benchmark snapshot dependencies](/mistakes/benchmark-snapshot-dependencies.md) - validate infrastructure against original sources; declare generated prerequisites and optional dependency fingerprints
 
+* [Bundled xxHash without XXH3](/mistakes/bundled-xxhash-without-xxh3.md) - inspect local feature defines; compare constexpr mixers against upstream references
+
 Mistakes agents made in this project: what went wrong, why, and the rule
 that prevents it. Read these before testing or measuring. Add one whenever
 something goes wrong: a false claim, a wasted rebuild, a test that

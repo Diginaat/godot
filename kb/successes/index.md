@@ -1,5 +1,7 @@
 # Successes
 
+* [Actual-container A/B without checkout switches](/successes/actual-container-ab-bench.md) - isolated HEAD snapshots, correctness and allocation checks, alternating samples; caught numeric-container regressions before publication
+
 Approaches that worked in this project and are worth reusing: what was
 done, why it worked, and when to use it again. Add one whenever something
 works clearly better than what came before. Mistakes are in

@@ -9,7 +9,7 @@ call-site/lifetime audit or a profile of every engine workload.
 | Layer | Sources | Required properties / opportunities |
 | --- | --- | --- |
 | Allocation | `core/os/memory.h`, `.cpp`, `safe_refcount.h` | Godot accounting, header alignment, placement lifecycle, OOM behavior |
-| Shared arrays | original `cowdata.h`, `vector.h`; current `flat_shared_buffer.h` | COW, contiguous pointers, signed sizes, explicit initialized/uninitialized resize, one-pointer storage handle |
+| Shared arrays | `cowdata.h`, `vector.h` (a packed `flat_shared_buffer.h` replacement was tried and dropped) | COW, contiguous pointers, signed sizes, explicit initialized/uninitialized resize, one-pointer storage handle |
 | Unique arrays | `local_vector.h`, `fixed_vector.h`, `paged_array.h` | Reuse existing unique-ownership storage before introducing another abstraction; candidate for STL/allocator evaluation |
 | Stable-node containers | `list.h`, `hash_map.h`, `rb_map.h`, `rb_set.h` | Stable identity; HashMap insertion order; ordered containers require comparator-only keys |
 | Packed hash containers | `a_hash_map.h`, `hash_set.h` | Dense iteration, indices stable until removal, swap-last erase |

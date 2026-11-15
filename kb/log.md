@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-11-15 (core templates: keep only the measured wins)
+
+* Dropped the packed storage and robin-hood index migration (numeric hash
+  tables 1.3-2.6x slower, 50-57% more live bytes); the working tree was
+  saved on a local backup branch first. [Decision](/project/core-template-storage.md).
+* Kept the byte hash for String/CharString keys inside HashMap, AHashMap and
+  HashSet: String-key hits 0.62x (16 characters) and 0.55x (128) of the old
+  time, integer tables and memory unchanged, full unit suite passes.
+  [Numbers](/project/core-template-benchmarks.md).
+* Recorded the specialized copy-only LocalVector run: small copies neutral,
+  256+ elements 2.6-5x faster; the earlier small-copy regression was the
+  harness. Bulk copy stays. [Evaluation](/project/unique-array-evaluation.md).
+
 ## 2026-11-10 (LocalVector threshold boundary follow-up)
 
 * Tools-only extension: copy-only 64/128/255/257/512 neighborhoods, independent
@@ -53,6 +66,45 @@
   reproduce slower explicit SSE dot/cross. No engine implementation accepted.
 * Existing prototype implementation, vendor changes and prior KB records remain
   outside the Phase 0 commit. See [audit](/project/core-modernization-audit.md).
+
+## 2026-11-10 (core template storage migration)
+
+* Replaced former shared buffer implementation with packed `FlatSharedBuffer`;
+  preserved String/Vector handle layout and COW, used STL lifecycle/algorithms
+  and character traits. Mono reads shared layout constants instead of copies.
+* Migrated HashMap/AHashMap/HashSet lookup to a pinned robin-hood index, retaining
+  stable nodes or dense indices as required and handling full hash collisions.
+* Added internal wyhash/XXH3 policy; preserved public legacy hash helpers and
+  default-hasher outputs because API fingerprints and public type hashes use them.
+* Regression tests added; MSVC C++17 syntax check passed. Isolated editor build
+  and runtime tests pending. No speed/memory claims. See
+  [compatibility boundary and validation](/project/core-template-storage.md).
+* Standalone MSVC integer-mixer check matched pinned upstream `wyhash64` for
+  1,000,000 deterministic value/seed pairs.
+* Added 24-case actual-container A/B benchmark, baseline read from `HEAD`
+  without checkout changes. Both executables pass correctness/allocation-cleanup
+  checks. Timing collection correctly refused while the editor rebuild runs;
+  contended probe timings discarded. Controlled samples pending.
+* Narrowed standalone String linking to verbatim required methods after the
+  full translation unit pulled unrelated engine services; updated the
+  [translation-unit lesson](/mistakes/new-translation-unit-assumptions.md).
+* **Bench completed:** 24 cases, 11 alternating baseline/candidate pairs on Ryzen
+  5 3600, MSVC C++17 `/O2 /MT`, no overlapping compiler load. Integer AHashMap hit
+  8.76 -> 22.67 ns (2.59x slower), churn 2.64x slower; numeric hash-container live
+  allocations +50–57%. UTF-32 String-key lookup at 128 characters 182.54 ->
+  111.56 ns; 64 KiB byte hash 19.74 -> 2.29 us. This is a microbenchmark, not a
+  frame-time result. [Full conditions, p50/p95 and memory](/project/core-template-benchmarks.md).
+* **Correctness:** isolated production editor build passes. Fixed duplicate
+  upstream wyhash prime-helper symbols by namespacing only the reference-test
+  copy; production benchmark code unchanged. Migration tests: 9 / 3,749,785
+  assertions; focused core selection: 269 / 3,801,958 assertions, all passed.
+  Full suite/rendering/.NET/sanitizers not run. Do not publish as a performance
+  upgrade; container indexing needs redesign.
+* Recorded [actual-container A/B workflow](/successes/actual-container-ab-bench.md)
+  and the reference-header ODR lesson; no production performance fixes or
+  benchmark-driven tuning applied during this measurement task.
+* Focused compilation caught Zstandard's disabled XXH3 and a wrong constexpr
+  expected value; recorded [thirdparty configuration lesson](/mistakes/bundled-xxhash-without-xxh3.md).
 
 ## 2026-11-10 (GPU-first renderer, Phase 0)
 

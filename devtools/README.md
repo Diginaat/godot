@@ -14,6 +14,7 @@ versioning) are in [CUSTOM_BUILD.md](../CUSTOM_BUILD.md). Feature notes:
 | `setup/` | `setup_dev_windows.ps1` | Sets up a new PC in one go (below) |
 | `build/` | `build.ps1` | Builds the editor, the .NET editor, the export templates or a whole release |
 | `test/` | `smoke.ps1` | The smoke tests every merge and release must pass |
+| `test/` | `core_templates_bench.py` | Actual HEAD versus working-tree Vector/String/hash-container microbenchmarks; alternating samples, correctness checks and live allocation bytes |
 | `test/` | `large_world.ps1` | Real scene import, GPU culling/CLOD commands, native materials/shadows and lifetime regressions |
 | `test/` | `forest.ps1` | Dense lit forest: source versus GPU culling/CLOD/HZB pixel A/B with light and shadow controls |
 | `test/` | `gpu_intervals.ps1` | Whole-frame GPU time per timestamp interval, including work recorded before the viewport; `-FixedFps` for moving cameras, `-ExtraArgs --view-time=T` for one valley view |
@@ -90,6 +91,33 @@ The PhysX tests use Wild Ox Studios' example project; clone it next to this
 repository (`git clone https://github.com/uno1982/godot-physx-example`) or
 pass `-PhysXExample <folder>`. Without it they are skipped. Logs and the
 screenshot are in `devtools\out\smoke`.
+
+Core container microbenchmarks (Windows, MSVC, Python 3.9+):
+
+```powershell
+python devtools/test/core_templates_bench.py --build-only
+# Once all engine builds have stopped:
+python devtools/test/core_templates_bench.py --skip-build --samples 11
+```
+
+Baseline defaults to `HEAD`; `--baseline <commit>` selects another compatible
+revision. Files are read with `git show` into isolated output directories; no
+checkout or reset occurs. Both variants compile actual container headers,
+`memory.cpp`, `hashfuncs.cpp` and the two required String method definitions
+extracted verbatim from their own `ustring.cpp`. Only diagnostic handlers are
+stubbed, and any diagnostic fails the run. This is **not** an engine/frame-time
+benchmark. Insertion timings include destruction; lookup setup is untimed.
+Allocation figures are live requested Godot bytes, excluding CRT heap overhead
+and input fixtures; they are not RSS or peak usage. Each vector/String detach
+case includes its original and detached buffers.
+
+The runner rejects measurement while a compiler/linker or SCons is active.
+One warmup pair is excluded; 11 pairs alternate baseline/candidate order.
+Checksums and allocation cleanup must pass, with matching container results
+across variants. Output: `devtools/out/core_templates_bench/` contains source
+fingerprints, build logs, raw samples, p50/p95, median absolute deviation and
+allocation sizes. A ratio above 1 means the migration is slower. Byte-hash
+checksums intentionally differ because the algorithms differ.
 
 Native indirect foundation checks (requires real GPU rendering, not headless):
 

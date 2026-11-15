@@ -103,6 +103,22 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 - The `large_world` fixtures draw a few marker pixels on black and quit; their
   windows look black by design.
 
+## Core containers
+
+- The packed storage and robin-hood index migration was dropped
+  ([why](kb/project/core-template-storage.md)): integer-keyed hash tables got
+  1.3-2.6x slower and 50-57% bigger. Kept: `hash_buffer()` (wyhash/XXH3) for
+  String and CharString keys inside HashMap/AHashMap/HashSet only
+  (`hash_table_key()`), and the LocalVector bulk copy from 256 elements.
+- `HashMapHasherDefault` and `String::hash()` feed API fingerprints,
+  Dictionary and NodePath hashes: never change their outputs.
+- Zstandard's bundled xxHash header disables XXH3; use the pinned
+  `thirdparty/xxhash` copy. The wyhash reference in tests goes in its own
+  namespace (upstream defines non-inline helpers).
+- Standalone microbenchmarks move by 10% from code layout alone (a branch
+  elsewhere, a different include). Before calling a change a regression,
+  check that the measured code changed at all.
+
 ## Class reference
 
 - Every fork class, property, method, constant and project setting needs a

@@ -80,7 +80,7 @@ private:
 	uint32_t _size = 0;
 
 	uint32_t _hash(const TKey &p_key) const {
-		uint32_t hash = Hasher::hash(p_key);
+		uint32_t hash = hash_table_key<Hasher>(p_key);
 
 		if (unlikely(hash == EMPTY_HASH)) {
 			hash = EMPTY_HASH + 1;

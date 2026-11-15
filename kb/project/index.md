@@ -4,6 +4,9 @@
 
 * [Core modernization phase-zero checkpoint](/project/core-modernization-audit.md) - baseline/branch, compatibility gates, benchmark tools, native-map direction and resumable phase plan
 
+* [Packed core containers and compatible hashing](/project/core-template-storage.md) - dropped 2026-11-15: packed storage and robin-hood indices made numeric hash tables slower and bigger; only the String-key byte hash was kept
+* [Core template migration benchmarks](/project/core-template-benchmarks.md) - 24-case controlled A/B: the dropped migration, and the kept String-key byte hash (integer tables unchanged, String hits 0.55-0.62x)
+
 * [Project overview](/project/overview.md) - what this fork is, its sources, branches and release flow
 * [Modern compact editor theme](/project/modern-compact-editor-theme.md) - neutral charcoal native theme with compact spacing and restrained interaction accents
 * [Native indirect foundation](/project/native-indirect-foundation.md) - existing GPU submission seam, sentinel defect and per-view culling constraints
