@@ -823,6 +823,11 @@ Decision:
 - `rendering/geometry/gpu_instances/shadow_min_casters` (256): a shadow pass
   with fewer GPU path casters draws them from the CPU list, which the
   scene cull already lists them for.
+- The shadow passes of a render are culled together at
+  `_render_shadow_process()`: one upload of every pass's commands and
+  visible bits, one dispatch (`MODE_SHADOW_BATCH`, a workgroup row per
+  pass with its LOD inputs and offsets), one stats readback. The passes get
+  the shared buffers there, before they are drawn.
 
 Measured: see benchmarks.md, "A game level: many meshes, few copies".
 Loss 0.27-0.30 to 0.05-0.12 ms on the level; `unique_lod_2k` render CPU
@@ -831,6 +836,6 @@ Loss 0.27-0.30 to 0.05-0.12 ms on the level; `unique_lod_2k` render CPU
 copies, shadow passes on the CPU list) passes on Vulkan and D3D12; with
 the level mask forced to level 0 it fails by images, motion vectors and
 the new check.
-Not done: one upload and one dispatch for all shadow passes of a render
-(the rest of the per-pass cost); the camera view's own cost (about
-0.05 ms on the level).
+With the batch the level is +0.04-0.08 ms (A/A floor 0.06 ms).
+Not done: the camera view's own cost (about 0.05 ms on the level); small
+shadow passes are still cheaper on the CPU list.

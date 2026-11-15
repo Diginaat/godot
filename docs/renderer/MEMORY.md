@@ -17,12 +17,12 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | GPU path on game levels (2026-11-15, D038: commands only where a member can land, small shadow passes on the CPU list); material parameter tables done (D036); 5.1 HZB occlusion done (D034); 6.1-6.3 shadow casters on the GPU path done; Phases 1 and 2 done |
+| Phase | GPU path on game levels (2026-11-15, D038: commands only where a member can land, small shadow passes on the CPU list, one shadow cull per render); material parameter tables done (D036); 5.1 HZB occlusion done (D034); 6.1-6.3 shadow casters on the GPU path done; Phases 1 and 2 done |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | One upload and one dispatch for all shadow passes of a render (the rest of D038's per-pass cost, about 0.05 ms on the game level), then the camera view's own cost; the scene cull of GPU path members (up to 1.1 ms at 100k, benchmarks.md "Where render CPU goes after D036"): experiment D037 on branch `dev-gpu-cull` (GPU-culled per-frame cascades work, gain within spread; cached far cascades gave an unexplained A/B difference; read D037 there before continuing); moved instances: render side down 9% (benchmarks.md "Moved instances"), next is the main thread's share (node propagation, notifications, physics sync); bindless textures; multi-draw has little left to merge (2-11 buckets in the bench) |
+| Next | The camera view's own cost on game levels (about 0.05 ms, D038); the scene cull of GPU path members (up to 1.1 ms at 100k, benchmarks.md "Where render CPU goes after D036"): experiment D037 on branch `dev-gpu-cull` (GPU-culled per-frame cascades work, gain within spread; cached far cascades gave an unexplained A/B difference; read D037 there before continuing); moved instances: render side down 9% (benchmarks.md "Moved instances"), next is the main thread's share (node propagation, notifications, physics sync); bindless textures; multi-draw has little left to merge (2-11 buckets in the bench) |
 | Last verified build | Production editor, 2026-11-15 |
-| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (42 camera and 42 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, HZB occlusion behind a wall, spot and omni shadows, casters behind the camera and per-frame churn without rebuilds; 13 of 13 images, shadow render info over 12 frames and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), large-world suites on Vulkan and D3D12, standard smoke, 2026-11-10; after D036 (2026-11-15): `gpu_instances.ps1` Vulkan and D3D12, large-world Vulkan, standard smoke, instance bench Vulkan and D3D12; after D038 (2026-11-15): `gpu_instances.ps1` Vulkan and D3D12 (15 of 15 images, a 150-mesh LOD phase with a motion pass, shadow passes on the CPU list; a forced level-0 mask fails it), standard smoke, large-world Vulkan, instance bench Vulkan (both paths) |
+| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (42 camera and 42 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, HZB occlusion behind a wall, spot and omni shadows, casters behind the camera and per-frame churn without rebuilds; 13 of 13 images, shadow render info over 12 frames and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), large-world suites on Vulkan and D3D12, standard smoke, 2026-11-10; after D036 (2026-11-15): `gpu_instances.ps1` Vulkan and D3D12, large-world Vulkan, standard smoke, instance bench Vulkan and D3D12; after D038 (2026-11-15): `gpu_instances.ps1` Vulkan and D3D12 (15 of 15 images, a 150-mesh LOD phase with a motion pass, shadow passes on the CPU list; a forced level-0 mask fails it), standard smoke, large-world Vulkan, instance bench Vulkan (both paths); after the batched shadow cull: `gpu_instances.ps1` Vulkan and D3D12, instance bench Vulkan, standard smoke |
 
 ## Material tables in one line
 
@@ -64,10 +64,11 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   of GPU-drawn instances is a few frames late (read back from the cull).
 - GPU path on a game level with many meshes and few copies (public
   Overgrown Subway demo): 0.27-0.30 ms slower than the CPU path, cut to
-  0.05-0.12 ms by D038 (commands only where a member can land, per-pass
-  stats, small shadow passes on the CPU list). The cause was the shadow
-  passes' fixed cost, not the empty draws. Left: the cascades' per-pass
-  cost and the camera view's own (benchmarks.md, "A game level").
+  +0.04-0.08 ms (A/A floor 0.06) by D038 (commands only where a member
+  can land, small shadow passes on the CPU list, one cull dispatch for all
+  shadow passes of a render). The cause was the shadow passes' fixed cost,
+  not the empty draws. Left: the camera view's own cost; small passes on
+  the GPU path still lose (benchmarks.md, "A game level").
 - GPU path memory: +69 MiB of buffers at 100k nodes (125.5 vs 56.9 MiB):
   table 21 MB, instance data 23 MB at power-of-two capacity (shared by the
   camera and shadow passes since 2026-11-10; it was +90 MiB with a second

@@ -18,6 +18,11 @@
 // member's world box against the depth pyramid built from that pre-pass,
 // and appends the members it cannot prove hidden to a second set of
 // commands and IDs (same layout), which the colour passes draw.
+//
+// MODE_SHADOW_BATCH culls all shadow passes of a render in one dispatch: a
+// workgroup row per pass, whose LOD inputs and offsets into the commands,
+// IDs and visible bits come from ShadowPasses. It writes no instance data
+// (the camera run did).
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -85,7 +90,7 @@ layout(set = 0, binding = 3, std430) restrict buffer Commands {
 }
 commands;
 
-#ifndef MODE_OCCLUDE
+#if !defined(MODE_OCCLUDE) && !defined(MODE_SHADOW_BATCH)
 layout(set = 0, binding = 4, std430) restrict writeonly buffer Output {
 	InstanceData data[]; // One per member.
 }
@@ -140,6 +145,26 @@ layout(set = 0, binding = 9, std430) restrict readonly buffer Visible {
 }
 visible;
 
+#ifdef MODE_SHADOW_BATCH
+struct ShadowPass { // RenderForwardClustered::GPUInstanceShadowPassData, 48 bytes.
+	vec3 lod_camera;
+	float lod_threshold;
+	float lod_distance_multiplier;
+	uint view_flags;
+	uint command_offset; // Added to the bucket's command.
+	uint ids_offset; // Added to the bucket's first visible ID.
+	uint visible_offset; // Words of the visible bits before the pass's.
+	uint pad0;
+	uint pad1;
+	uint pad2;
+};
+
+layout(set = 0, binding = 10, std430) restrict readonly buffer ShadowPasses {
+	ShadowPass data[];
+}
+shadow_passes;
+#endif
+
 #ifdef MODE_OCCLUDE
 layout(set = 0, binding = 10, std430) restrict readonly buffer Occlusion {
 	mat4 world_to_clip; // Jittered, as the colour passes rasterize.
@@ -167,7 +192,7 @@ layout(push_constant, std430) uniform Params {
 	float lod_threshold; // Screen mesh LOD threshold; 0 or less: no LODs.
 	float lod_distance_multiplier;
 	vec3 lod_camera;
-	uint pad;
+	uint pass_first; // MODE_SHADOW_BATCH: the pass of workgroup row 0.
 }
 params;
 
@@ -175,26 +200,26 @@ params;
 // as mesh_surface_get_lod() chooses it for the CPU list and, in a view with
 // a motion pass, the moved members' own commands after the others' (as the
 // CPU list's motion list).
-uint member_command(Record record, Bucket bucket) {
+uint member_command(Record record, Bucket bucket, float p_lod_threshold, float p_lod_distance_multiplier, vec3 p_lod_camera, uint p_view_flags) {
 	vec3 aabb_min = record.aabb_position;
 	vec3 aabb_max = record.aabb_position + record.aabb_size;
 	uint level = 0;
-	if (bucket.lod_count > 0 && params.lod_threshold > 0.0) {
+	if (bucket.lod_count > 0 && p_lod_threshold > 0.0) {
 		float distance = 1.0;
-		if (!bool(params.view_flags & VIEW_FLAG_ORTHOGONAL)) {
-			distance = length(max(max(vec3(0.0), aabb_min - params.lod_camera), params.lod_camera - aabb_max));
+		if (!bool(p_view_flags & VIEW_FLAG_ORTHOGONAL)) {
+			distance = length(max(max(vec3(0.0), aabb_min - p_lod_camera), p_lod_camera - aabb_max));
 		}
-		float distance_threshold = distance * params.lod_distance_multiplier;
+		float distance_threshold = distance * p_lod_distance_multiplier;
 		for (uint i = 0; i < bucket.lod_count; i++) {
 			float screen_size = lod_edges.data[bucket.lod_edges_first + i] * record.lod_scale / distance_threshold;
-			if (screen_size > params.lod_threshold) {
+			if (screen_size > p_lod_threshold) {
 				break;
 			}
 			level = i + 1;
 		}
 	}
 	bool moved = bool(record.gpu_flags & GPU_FLAG_MOVED);
-	bool motion_pass = bool(params.view_flags & VIEW_FLAG_MOTION);
+	bool motion_pass = bool(p_view_flags & VIEW_FLAG_MOTION);
 	return (motion_pass && moved ? bucket.lod_count + 1 : 0) + level;
 }
 
@@ -211,7 +236,7 @@ void main() {
 	}
 	Record record = table.records[member.x];
 	Bucket bucket = buckets.data[member.y];
-	uint command = member_command(record, bucket);
+	uint command = member_command(record, bucket, params.lod_threshold, params.lod_distance_multiplier, params.lod_camera, params.view_flags);
 	// Rounding bound: the CPU matrix bound times the largest world magnitude
 	// of the box (as the MultiMesh test).
 	vec3 magnitude = max(abs(record.aabb_position), abs(record.aabb_position + record.aabb_size)) + 1.0;
@@ -238,23 +263,42 @@ uint cull_member(uint index, out uint r_primitives) {
 	}
 	Record record = table.records[member.x];
 	Bucket bucket = buckets.data[member.y];
+#ifdef MODE_SHADOW_BATCH
+	ShadowPass pass = shadow_passes.data[params.pass_first + gl_WorkGroupID.y];
+	uint view_flags = pass.view_flags;
+	float lod_threshold = pass.lod_threshold;
+	float lod_distance_multiplier = pass.lod_distance_multiplier;
+	vec3 lod_camera = pass.lod_camera;
+	uint command_offset = pass.command_offset;
+	uint ids_offset = pass.ids_offset;
+	uint visible_offset = pass.visible_offset;
+#else
+	uint view_flags = params.view_flags;
+	float lod_threshold = params.lod_threshold;
+	float lod_distance_multiplier = params.lod_distance_multiplier;
+	vec3 lod_camera = params.lod_camera;
+	uint command_offset = 0;
+	uint ids_offset = 0;
+	uint visible_offset = 0;
+#endif
 	bool moved = bool(record.gpu_flags & GPU_FLAG_MOVED);
-	bool motion_pass = bool(params.view_flags & VIEW_FLAG_MOTION);
+	bool motion_pass = bool(view_flags & VIEW_FLAG_MOTION);
 
+#ifndef MODE_SHADOW_BATCH
 	// A camera view writes every live member's instance data, visible or not:
 	// the shadow passes after it draw from the same data (they read none of
 	// the view-dependent flags) and write none.
-	if (!bool(params.view_flags & VIEW_FLAG_SHADOW)) {
+	if (!bool(view_flags & VIEW_FLAG_SHADOW)) {
 		// What _fill_render_list() and _fill_instance_data() write for an
 		// opaque instance without lightmap, VoxelGI, fade or motion pass.
 		uint flags = (record.flags & ~INSTANCE_FLAGS_FADE_MASK) | (255u << INSTANCE_FLAGS_FADE_SHIFT);
 		if (moved && !motion_pass) {
 			flags |= INSTANCE_FLAGS_DYNAMIC; // The motion pass computes motion vectors instead.
 		}
-		if (bool(params.view_flags & VIEW_FLAG_USE_GI_BUFFERS)) {
+		if (bool(view_flags & VIEW_FLAG_USE_GI_BUFFERS)) {
 			flags |= INSTANCE_FLAGS_USE_GI_BUFFERS;
 		}
-		if (bool(params.view_flags & VIEW_FLAG_USE_SDFGI) && bool(record.gpu_flags & GPU_FLAG_CAN_SDFGI)) {
+		if (bool(view_flags & VIEW_FLAG_USE_SDFGI) && bool(record.gpu_flags & GPU_FLAG_CAN_SDFGI)) {
 			flags |= INSTANCE_FLAGS_USE_SDFGI;
 		}
 		InstanceData data;
@@ -271,17 +315,18 @@ uint cull_member(uint index, out uint r_primitives) {
 		data.lightmap_uv_scale = record.lightmap_uv_scale;
 		output_instances.data[index] = data;
 	}
+#endif
 
 	// The scene cull's answer: frustum, layers, occluders.
-	if ((visible.bits[member.x >> 5] & (1u << (member.x & 31u))) == 0) {
+	if ((visible.bits[visible_offset + (member.x >> 5)] & (1u << (member.x & 31u))) == 0) {
 		return 0;
 	}
-	uint command = member_command(record, bucket);
-	uint rank = atomicAdd(commands.data[(bucket.command + command) * 5 + 1], 1);
-	ids.data[bucket.ids_first + command * bucket.capacity + rank] = index;
+	uint command = member_command(record, bucket, lod_threshold, lod_distance_multiplier, lod_camera, view_flags);
+	uint rank = atomicAdd(commands.data[(command_offset + bucket.command + command) * 5 + 1], 1);
+	ids.data[ids_offset + bucket.ids_first + command * bucket.capacity + rank] = index;
 	if (bucket.depth_command != 0xFFFFFFFFu) {
 		// A separate shadow mesh: the depth pre-pass draws as many instances.
-		atomicAdd(commands.data[(bucket.depth_command + command) * 5 + 1], 1);
+		atomicAdd(commands.data[(command_offset + bucket.depth_command + command) * 5 + 1], 1);
 	}
 	r_primitives = command_primitives.data[bucket.command + command];
 	return motion_pass && moved ? 2 : 1;

@@ -713,6 +713,7 @@ protected:
 			RID gpu_commands;
 			RID gpu_ids;
 			RID gpu_instances;
+			uint32_t gpu_batch_pass = UINT32_MAX; // Its slot in the shadow batch, until _gpu_instances_shadow_flush() sets the buffers.
 		};
 
 		LocalVector<ShadowPass> shadow_passes;
@@ -1073,18 +1074,19 @@ protected:
 		uint32_t visible_capacity = 0; // Words.
 		// Shadow passes draw from the camera view's instance data; per pass
 		// they have their own commands, visible IDs and bits.
-		struct ShadowView {
-			RID commands;
-			RID ids;
-			RID visible;
-			// Objects and primitives the pass drew (render info). One per pass,
-			// so that the passes' culls do not wait for each other.
-			RID stats;
-			uint32_t command_capacity = 0;
+		// The shadow passes of a render, culled together (D038): commands, IDs
+		// and visible bits of each pass at its own offset.
+		struct ShadowBatch {
+			RID commands; // Commands per pass.
+			RID ids; // id_count per pass.
+			RID visible; // Visible bits per pass.
+			RID passes; // GPUInstanceShadowPassData per pass.
+			RID stats; // Objects and primitives of all passes (render info).
+			uint32_t command_capacity = 0; // In commands.
 			uint32_t id_capacity = 0;
-			uint32_t visible_capacity = 0;
-		};
-		LocalVector<ShadowView> shadow_views;
+			uint32_t visible_capacity = 0; // In words.
+			uint32_t pass_capacity = 0;
+		} shadow_batch;
 		RID output_buffer; // InstanceData per member, written per view.
 		RID ids_buffer; // Members drawn per bucket level, written per view.
 		// HZB occlusion: the colour passes' commands and IDs (same layout as
@@ -1115,7 +1117,29 @@ protected:
 		RID version;
 		RID pipeline;
 		RID occlude_pipeline; // MODE_OCCLUDE.
+		RID shadow_pipeline; // MODE_SHADOW_BATCH.
 	} gpu_instance_cull;
+	// Matches ShadowPass in gpu_instance_cull.glsl (MODE_SHADOW_BATCH).
+	struct GPUInstanceShadowPassData {
+		float lod_camera[3];
+		float lod_threshold;
+		float lod_distance_multiplier;
+		uint32_t view_flags;
+		uint32_t command_offset;
+		uint32_t ids_offset;
+		uint32_t visible_offset;
+		uint32_t pad[3];
+	};
+	// The GPU path's shadow passes since the last _render_shadow_process():
+	// their LOD inputs and offsets, and their visible bits.
+	LocalVector<GPUInstanceShadowPassData> gpu_instances_shadow_batch;
+	LocalVector<uint32_t> gpu_instances_shadow_batch_bits;
+	LocalVector<uint32_t> gpu_instances_shadow_batch_commands; // Upload staging.
+	uint32_t gpu_instances_shadow_batch_words = 0; // Visible words per pass.
+	GPUInstanceScenario *gpu_instances_shadow_batch_scenario = nullptr;
+	uint32_t gpu_instances_shadow_check_batch_pass = UINT32_MAX; // The pass whose commands the shadow check reads back.
+	// Culls every pass of the batch in one dispatch and gives the passes their buffers.
+	void _gpu_instances_shadow_flush();
 	uint32_t gpu_instances_view_params[8] = {}; // The camera run's push constant (GPUInstanceCullParams), for the occlusion run.
 	// Validation (rendering/geometry/gpu_instances/validate).
 	uint64_t gpu_instances_check_frame = UINT64_MAX;

@@ -338,9 +338,15 @@ LOD draws doubled the draw count but cost little GPU time: with them gone
 | Before | +0.29 ms | +0.27 ms | +0.30 ms |
 | Commands only where a member can land, per-pass stats, passes under 256 casters on the CPU list | +0.05 ms | +0.12 ms | +0.08 ms |
 | Same, every shadow pass on the CPU list (1 run) | +0.06 ms | +0.05 ms | +0.00 ms |
+| All shadow passes of a render culled in one dispatch (3 runs, median) | +0.04 ms | +0.08 ms | +0.04 ms |
+| Same, every shadow pass on the GPU path (`shadow_min_casters` 0; 3 runs) | +0.14 ms | +0.15 ms | +0.22 ms |
 
-The rest is the camera view's own cull and the cascades' fixed cost; the
-next step is one upload and one dispatch for all shadow passes of a render.
+With one dispatch per render the level is within the A/A floor (0.06 ms).
+Small passes still do not pay for themselves on the GPU path (about +0.25
+ms with every pass on it before the batch, +0.15-0.22 after), so the
+cutoff stays at 256 casters. The batch gained a little in the bench too:
+`lights_20k` (8 shadowed spots) GPU 1.60-1.67 to 1.57-1.62 ms,
+`unique_lod_2k` 0.46-0.48 to 0.44-0.46 ms.
 
 `unique_lod_2k` (new bench case: 2,000 nodes, 500 distinct spheres with
 generated index LODs, 4 copies each; Vulkan, p50): GPU path render CPU

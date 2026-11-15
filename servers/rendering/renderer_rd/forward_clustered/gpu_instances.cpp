@@ -59,7 +59,7 @@ struct GPUInstanceCullParams {
 	float lod_threshold;
 	float lod_distance_multiplier;
 	float lod_camera[3];
-	uint32_t pad;
+	uint32_t pass_first; // MODE_SHADOW_BATCH: the pass of workgroup row 0.
 };
 static_assert(sizeof(GPUInstanceCullParams) == 32);
 
@@ -305,12 +305,15 @@ void RenderForwardClustered::_gpu_instances_free_scenario(GPUInstanceScenario *p
 	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->output_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->stats_buffer, &p_scenario->visible_buffer,
 		&p_scenario->occluded_commands_buffer, &p_scenario->occluded_ids_buffer, &p_scenario->occlusion_buffer });
 	RD *rd = RD::get_singleton();
-	for (const GPUInstanceScenario::ShadowView &view : p_scenario->shadow_views) {
-		for (RID buffer : { view.commands, view.ids, view.visible, view.stats }) {
-			if (buffer.is_valid()) {
-				rd->free_rid(buffer);
-			}
+	const GPUInstanceScenario::ShadowBatch &batch = p_scenario->shadow_batch;
+	for (RID buffer : { batch.commands, batch.ids, batch.visible, batch.passes, batch.stats }) {
+		if (buffer.is_valid()) {
+			rd->free_rid(buffer);
 		}
+	}
+	if (gpu_instances_shadow_batch_scenario == p_scenario) {
+		gpu_instances_shadow_batch_scenario = nullptr;
+		gpu_instances_shadow_batch.clear();
 	}
 	memdelete(p_scenario);
 }
@@ -679,6 +682,9 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		gpu_instances_shadow_views_last = gpu_instances_shadow_views_used;
 	}
 	gpu_instances_shadow_views_used = 0;
+	// A batch never flushed (no shadow processing followed) is dropped.
+	gpu_instances_shadow_batch.clear();
+	gpu_instances_shadow_batch_scenario = nullptr;
 	p_render_data->gpu_instances_drawn = false;
 	if (!gpu_instances_active || !p_render_data->gpu_instances || p_render_data->gpu_scenario == 0) {
 		return false;
@@ -698,10 +704,12 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		Vector<String> modes;
 		modes.push_back("");
 		modes.push_back("\n#define MODE_OCCLUDE\n");
+		modes.push_back("\n#define MODE_SHADOW_BATCH\n");
 		gpu_instance_cull.shader.initialize(modes);
 		gpu_instance_cull.version = gpu_instance_cull.shader.version_create();
 		gpu_instance_cull.pipeline = rd->compute_pipeline_create(gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0));
 		gpu_instance_cull.occlude_pipeline = rd->compute_pipeline_create(gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 1));
+		gpu_instance_cull.shadow_pipeline = rd->compute_pipeline_create(gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 2));
 	}
 	if (gpu_instance_cull.pipeline.is_null()) {
 		return false;
@@ -1074,58 +1082,36 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	// Runs after the camera view (_gpu_instances_begin_view) placed this
 	// render's members; draws the casters the scene cull listed for the pass.
 	GPUInstanceScenario *scenario = gpu_instances_view;
-	if (!scenario || scenario->member_count == 0 || gpu_instance_cull.pipeline.is_null()) {
+	if (!scenario || scenario->member_count == 0 || gpu_instance_cull.shadow_pipeline.is_null()) {
 		return true; // Nothing placed: the listed casters have no members.
 	}
-	RD *rd = RD::get_singleton();
-	if (gpu_instances_shadow_views_used >= scenario->shadow_views.size()) {
-		scenario->shadow_views.resize(gpu_instances_shadow_views_used + 1);
+	// The pass's slot in this render's batch: its commands, IDs and visible
+	// bits at its own offsets. _gpu_instances_shadow_flush() culls every pass
+	// of the batch in one dispatch, before the passes are drawn: one upload
+	// and no barriers between passes.
+	if (gpu_instances_shadow_batch_scenario != scenario) {
+		gpu_instances_shadow_batch.clear();
+		gpu_instances_shadow_batch_scenario = scenario;
 	}
-	GPUInstanceScenario::ShadowView &view = scenario->shadow_views[gpu_instances_shadow_views_used++];
-
+	const uint32_t pass = gpu_instances_shadow_batch.size();
+	gpu_instances_shadow_views_used++;
 	const uint32_t command_count = scenario->commands.size() / 5;
-	if (view.command_capacity < command_count || view.commands.is_null()) {
-		if (view.commands.is_valid()) {
-			rd->free_rid(view.commands);
-		}
-		view.command_capacity = Math::next_power_of_2(MAX(command_count, 16u));
-		BitField<RD::StorageBufferUsage> usage = {};
-		usage.set_flag(RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
-		view.commands = rd->storage_buffer_create(view.command_capacity * 5 * sizeof(uint32_t), {}, usage);
-	}
-	if (view.id_capacity < scenario->id_count || view.ids.is_null()) {
-		if (view.ids.is_valid()) {
-			rd->free_rid(view.ids);
-		}
-		view.id_capacity = Math::next_power_of_2(MAX(scenario->id_count, 64u));
-		view.ids = rd->storage_buffer_create(view.id_capacity * sizeof(uint32_t));
-	}
 	const uint32_t words = MAX((gpu_instance_slots.get_capacity() + 31) / 32, 1u);
-	if (view.visible_capacity < words || view.visible.is_null()) {
-		if (view.visible.is_valid()) {
-			rd->free_rid(view.visible);
-		}
-		view.visible_capacity = Math::next_power_of_2(MAX(words, 64u));
-		view.visible = rd->storage_buffer_create(view.visible_capacity * sizeof(uint32_t));
+	if (pass == 0) {
+		gpu_instances_shadow_batch_words = words;
 	}
-	if (view.stats.is_null()) {
-		view.stats = rd->storage_buffer_create(4 * sizeof(uint32_t));
-	}
-
-	LocalVector<uint32_t> &bits = gpu_instances_visible_bits;
-	bits.resize(words);
-	memset(bits.ptr(), 0, words * sizeof(uint32_t));
+	ERR_FAIL_COND_V_MSG(words != gpu_instances_shadow_batch_words, true, "GPU instance slots grew during a render.");
+	LocalVector<uint32_t> &bits = gpu_instances_shadow_batch_bits;
+	bits.resize((pass + 1) * words);
+	uint32_t *pass_bits = bits.ptr() + pass * words;
+	memset(pass_bits, 0, words * sizeof(uint32_t));
 	for (uint32_t slot : p_shadow_data->gpu_slots) {
 		if (slot < words * 32) {
-			bits[slot >> 5] |= 1u << (slot & 31);
+			pass_bits[slot >> 5] |= 1u << (slot & 31);
 		}
 	}
-	rd->buffer_update(view.visible, 0, words * sizeof(uint32_t), bits.ptr());
-	rd->buffer_update(view.commands, 0, scenario->commands.size() * sizeof(uint32_t), scenario->commands.ptr());
 	// Render info: the passes of a render add up their casters; what the
 	// view's last render drew goes into this one (read back a few frames late).
-	const uint32_t zero_stats[4] = {};
-	rd->buffer_update(view.stats, 0, sizeof(zero_stats), zero_stats);
 	if (gpu_instances_shadow_views_used == 1) {
 		const GPUInstanceViewInfo *info = gpu_instances_view_info.getptr(gpu_instances_view_key);
 		if (info && p_render_info) {
@@ -1136,49 +1122,30 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 
 	// The camera view wrote every member's instance data; the shadow passes
 	// draw from it and write none.
-	GPUInstanceCullParams params = {};
-	params.member_count = scenario->member_count;
-	params.view_flags = GPU_INSTANCE_VIEW_SHADOW | (p_scene_data.cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0);
-	params.lod_threshold = p_scene_data.screen_mesh_lod_threshold;
-	params.lod_distance_multiplier = p_scene_data.lod_distance_multiplier;
 	const Vector3 lod_camera = p_scene_data.main_cam_transform.origin;
-	params.lod_camera[0] = lod_camera.x;
-	params.lod_camera[1] = lod_camera.y;
-	params.lod_camera[2] = lod_camera.z;
-
-	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0);
-	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, view.commands, scenario->output_buffer, view.ids, scenario->lod_edges_buffer,
-		scenario->command_primitives_buffer, view.stats, view.visible };
-	LocalVector<RD::Uniform> uniforms;
-	for (uint32_t binding = 0; binding < 10; binding++) {
-		RD::Uniform uniform;
-		uniform.binding = binding;
-		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
-		uniform.append_id(resources[binding]);
-		uniforms.push_back(uniform);
-	}
-	RD::ComputeListID compute_list = rd->compute_list_begin();
-	rd->compute_list_bind_compute_pipeline(compute_list, gpu_instance_cull.pipeline);
-	rd->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
-	rd->compute_list_set_push_constant(compute_list, &params, sizeof(params));
-	rd->compute_list_dispatch(compute_list, (params.member_count + 63) / 64, 1, 1);
-	rd->compute_list_end();
-	if (gpu_instances_view_key != 0) {
-		// Added up per frame as the passes' readbacks arrive.
-		rd->buffer_get_data_async(view.stats, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_stats_received).bind(gpu_instances_view_key, RSG::rasterizer->get_frame_number()), 0, 2 * sizeof(uint32_t));
-	}
+	GPUInstanceShadowPassData data = {};
+	data.lod_camera[0] = lod_camera.x;
+	data.lod_camera[1] = lod_camera.y;
+	data.lod_camera[2] = lod_camera.z;
+	data.lod_threshold = p_scene_data.screen_mesh_lod_threshold;
+	data.lod_distance_multiplier = p_scene_data.lod_distance_multiplier;
+	data.view_flags = GPU_INSTANCE_VIEW_SHADOW | (p_scene_data.cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0);
+	data.command_offset = pass * command_count;
+	data.ids_offset = pass * scenario->id_count;
+	data.visible_offset = pass * words;
+	gpu_instances_shadow_batch.push_back(data);
 
 	// One element per bucket level in the pass's range that the cull can fill.
 	RenderList &list = render_list[RENDER_LIST_SECONDARY];
 	ERR_FAIL_COND_V(list.elements.size() != p_render_list_from || list.element_info.size() != p_render_list_from, true);
 	uint32_t draws = 0;
 	GPUInstanceLODView lod;
-	lod.threshold = params.lod_threshold;
-	lod.distance_multiplier = params.lod_distance_multiplier;
+	lod.threshold = data.lod_threshold;
+	lod.distance_multiplier = data.lod_distance_multiplier;
 	lod.camera = lod_camera;
 	lod.orthogonal = p_scene_data.cam_orthogonal;
 	const bool filtered = _gpu_instances_used_levels(*scenario, &p_shadow_data->gpu_slots, lod, gpu_instances_used_levels);
-	LocalVector<uint8_t> &emitted = gpu_instances_shadow_check_emitted;
+	LocalVector<uint8_t> &emitted = gpu_instances_shadow_check_emitted; // Relative to the pass's commands.
 	emitted.resize(command_count);
 	memset(emitted.ptr(), 0, emitted.size());
 	for (uint32_t b = 0; b < scenario->buckets.size(); b++) {
@@ -1187,11 +1154,13 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 		if (!bucket.surface || used == 0) {
 			continue;
 		}
-		const uint32_t levels = params.lod_threshold > 0.0f ? bucket.levels : 1;
+		const uint32_t levels = data.lod_threshold > 0.0f ? bucket.levels : 1;
 		for (uint32_t level = 0; level < levels; level++) {
 			if (level < 32 && !(used & (uint64_t(1) << level))) {
 				continue; // Empty: no member chooses this level.
 			}
+			const uint32_t command = bucket.command + level;
+			const uint32_t depth_command = (bucket.depth_command == UINT32_MAX ? bucket.command : bucket.depth_command) + level;
 			RenderElementInfo info;
 			info.value = 0;
 			info.lod_index = level;
@@ -1200,24 +1169,24 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 			info.multimesh_cull_lod = 0;
 			info.multimesh_cull_last_lod = 0;
 			info.mesh_clod_offset = UINT32_MAX;
-			info.gpu_bucket = bucket.command + level;
-			info.gpu_depth_bucket = (bucket.depth_command == UINT32_MAX ? bucket.command : bucket.depth_command) + level;
-			info.gpu_first = bucket.ids_first + level * bucket.capacity;
+			info.gpu_bucket = data.command_offset + command;
+			info.gpu_depth_bucket = data.command_offset + depth_command;
+			info.gpu_first = data.ids_offset + bucket.ids_first + level * bucket.capacity;
 			list.elements.push_back(bucket.surface);
 			list.element_info.push_back(info);
-			emitted[info.gpu_bucket] = 1;
-			emitted[info.gpu_depth_bucket] = 1;
+			emitted[command] = 1;
+			emitted[depth_command] = 1;
 			draws++;
 		}
 	}
 	if (p_render_info) {
 		p_render_info[RSE::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME] += draws;
 	}
-	r_pass.gpu_commands = view.commands;
-	r_pass.gpu_ids = view.ids;
+	r_pass.gpu_batch_pass = pass;
 	r_pass.gpu_instances = scenario->output_buffer;
 
-	// Validation: what the pass drew against what the scene cull listed.
+	// Validation: what the pass drew against what the scene cull listed
+	// (read back by the flush, after the cull).
 	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instances/validate");
 	const uint64_t frame = RSG::rasterizer->get_frame_number();
 	// One pass per check, a different one each time (cascades, then spot
@@ -1236,9 +1205,117 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 		gpu_instances_shadow_check_expected = expected;
 		gpu_instances_shadow_check_command_depth = scenario->command_depth;
 		gpu_instances_shadow_check_emitted_copy = emitted;
-		rd->buffer_get_data_async(view.commands, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_check_received), 0, scenario->commands.size() * sizeof(uint32_t));
+		gpu_instances_shadow_check_batch_pass = pass;
 	}
 	return true;
+}
+
+void RenderForwardClustered::_gpu_instances_shadow_flush() {
+	GPUInstanceScenario *scenario = gpu_instances_shadow_batch_scenario;
+	const uint32_t passes = gpu_instances_shadow_batch.size();
+	const uint32_t check_pass = gpu_instances_shadow_check_batch_pass;
+	gpu_instances_shadow_batch_scenario = nullptr;
+	gpu_instances_shadow_check_batch_pass = UINT32_MAX;
+	if (!scenario || passes == 0 || scenario != gpu_instances_view) {
+		// Nothing listed, or the batch's scenario is not the current view's
+		// any more: its passes keep no GPU path buffers and draw no casters.
+		gpu_instances_shadow_batch.clear();
+		if (check_pass != UINT32_MAX) {
+			gpu_instances_shadow_check_pending = false;
+		}
+		return;
+	}
+	RD *rd = RD::get_singleton();
+	GPUInstanceScenario::ShadowBatch &batch = scenario->shadow_batch;
+	const uint32_t command_words = scenario->commands.size();
+	const uint32_t words = gpu_instances_shadow_batch_words;
+	struct Grow {
+		RID *buffer;
+		uint32_t *capacity;
+		uint32_t needed;
+		uint32_t minimum;
+		uint32_t element_size;
+		bool indirect;
+	};
+	const Grow grows[] = {
+		{ &batch.commands, &batch.command_capacity, passes * (command_words / 5), 16, 5 * sizeof(uint32_t), true },
+		{ &batch.ids, &batch.id_capacity, passes * scenario->id_count, 64, sizeof(uint32_t), false },
+		{ &batch.visible, &batch.visible_capacity, passes * words, 64, sizeof(uint32_t), false },
+		{ &batch.passes, &batch.pass_capacity, passes, 8, sizeof(GPUInstanceShadowPassData), false },
+	};
+	for (const Grow &grow : grows) {
+		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
+			continue;
+		}
+		if (grow.buffer->is_valid()) {
+			rd->free_rid(*grow.buffer);
+		}
+		*grow.capacity = Math::next_power_of_2(MAX(grow.needed, grow.minimum));
+		BitField<RD::StorageBufferUsage> usage = {};
+		if (grow.indirect) {
+			usage.set_flag(RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		}
+		*grow.buffer = rd->storage_buffer_create(*grow.capacity * grow.element_size, {}, usage);
+	}
+	if (batch.stats.is_null()) {
+		batch.stats = rd->storage_buffer_create(4 * sizeof(uint32_t));
+	}
+
+	// Every pass starts from the commands with zero instances.
+	LocalVector<uint32_t> &staging = gpu_instances_shadow_batch_commands;
+	staging.resize(passes * command_words);
+	for (uint32_t pass = 0; pass < passes; pass++) {
+		memcpy(staging.ptr() + pass * command_words, scenario->commands.ptr(), command_words * sizeof(uint32_t));
+	}
+	rd->buffer_update(batch.commands, 0, staging.size() * sizeof(uint32_t), staging.ptr());
+	rd->buffer_update(batch.visible, 0, passes * words * sizeof(uint32_t), gpu_instances_shadow_batch_bits.ptr());
+	rd->buffer_update(batch.passes, 0, passes * sizeof(GPUInstanceShadowPassData), gpu_instances_shadow_batch.ptr());
+	const uint32_t zero_stats[4] = {};
+	rd->buffer_update(batch.stats, 0, sizeof(zero_stats), zero_stats);
+
+	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 2);
+	const RID resources[11] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, batch.commands, RID(), batch.ids, scenario->lod_edges_buffer,
+		scenario->command_primitives_buffer, batch.stats, batch.visible, batch.passes };
+	LocalVector<RD::Uniform> uniforms;
+	for (uint32_t binding = 0; binding < 11; binding++) {
+		if (resources[binding].is_null()) {
+			continue; // Binding 4 (instance data): not in MODE_SHADOW_BATCH.
+		}
+		RD::Uniform uniform;
+		uniform.binding = binding;
+		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		uniform.append_id(resources[binding]);
+		uniforms.push_back(uniform);
+	}
+	GPUInstanceCullParams params = {};
+	params.member_count = scenario->member_count;
+	params.view_flags = GPU_INSTANCE_VIEW_SHADOW;
+	const uint32_t max_rows = MAX(uint32_t(rd->limit_get(RD::LIMIT_MAX_COMPUTE_WORKGROUP_COUNT_Y)), 1u);
+	RENDER_TIMESTAMP("GPU Instances Shadow Cull");
+	RD::ComputeListID compute_list = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(compute_list, gpu_instance_cull.shadow_pipeline);
+	rd->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
+	for (uint32_t first = 0; first < passes; first += max_rows) {
+		params.pass_first = first;
+		rd->compute_list_set_push_constant(compute_list, &params, sizeof(params));
+		rd->compute_list_dispatch(compute_list, (params.member_count + 63) / 64, MIN(max_rows, passes - first), 1);
+	}
+	rd->compute_list_end();
+	if (gpu_instances_view_key != 0) {
+		rd->buffer_get_data_async(batch.stats, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_stats_received).bind(gpu_instances_view_key, RSG::rasterizer->get_frame_number()), 0, 2 * sizeof(uint32_t));
+	}
+	if (check_pass < passes) {
+		rd->buffer_get_data_async(batch.commands, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_check_received), check_pass * command_words * sizeof(uint32_t), command_words * sizeof(uint32_t));
+	}
+
+	for (SceneState::ShadowPass &shadow_pass : scene_state.shadow_passes) {
+		if (shadow_pass.gpu_batch_pass != UINT32_MAX) {
+			shadow_pass.gpu_commands = batch.commands;
+			shadow_pass.gpu_ids = batch.ids;
+			shadow_pass.gpu_batch_pass = UINT32_MAX;
+		}
+	}
+	gpu_instances_shadow_batch.clear();
 }
 
 void RenderForwardClustered::_gpu_instances_shadow_check_received(const Vector<uint8_t> &p_data) {

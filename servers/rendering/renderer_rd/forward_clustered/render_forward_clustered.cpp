@@ -3592,7 +3592,6 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	RENDER_TIMESTAMP("Fill Shadow Instance Data");
 	_fill_instance_data(RENDER_LIST_SECONDARY, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr, render_list_from, render_list_size, false);
 	if (gpu_casters && render_data.gpu_instances_drawn) {
-		RENDER_TIMESTAMP("GPU Instances Shadow Cull");
 		_gpu_instances_shadow_pass(p_shadow_data, scene_data, render_list_from + render_list_size, shadow_pass, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr);
 		render_list_size = render_list[RENDER_LIST_SECONDARY].elements.size() - render_list_from;
 	}
@@ -3633,6 +3632,7 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 
 void RenderForwardClustered::_render_shadow_process(RenderBufferDataForwardClustered *p_cull_buffers) {
 	RenderingDevice *rd = RenderingDevice::get_singleton();
+	_gpu_instances_shadow_flush(); // The GPU path's passes, culled together; sets their buffers.
 	if (scene_state.instance_buffer[RENDER_LIST_SECONDARY].get_size(0u) > 0u) {
 		rd->buffer_flush(scene_state.instance_buffer[RENDER_LIST_SECONDARY]._get(0u));
 	}

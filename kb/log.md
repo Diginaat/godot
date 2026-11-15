@@ -8,6 +8,8 @@
   `gpu_instances/shadow_min_casters` (small shadow passes on the CPU list).
   Game level loss 0.27-0.30 to 0.05-0.12 ms; new bench case
   `unique_lod_2k`. docs/renderer/benchmarks.md, D038.
+* **Implemented**: all shadow passes of a render culled in one dispatch
+  (`MODE_SHADOW_BATCH`); the level is +0.04-0.08 ms, inside the A/A floor.
 * **Finding**: the loss was the shadow passes' fixed cost (omni cube
   faces), not the empty draws the earlier entry suspected.
   [Mistake](/mistakes/separate-runs-order-bias.md).
