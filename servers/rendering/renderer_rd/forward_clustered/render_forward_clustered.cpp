@@ -1011,6 +1011,7 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 #endif
 
 		instance_data.set_compressed_aabb(surface_aabb);
+		memcpy(&instance_data.compressed_aabb_position[3], &surface->material_slot, sizeof(uint32_t));
 		instance_data.material_feedback_index = material_feedback_index;
 		instance_data.set_uv_scale(uv_scale);
 
@@ -3557,7 +3558,11 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	if (gpu_casters) {
 		render_data.gpu_instances = &p_shadow_data->gpu_instances;
 		render_data.gpu_slots = &p_shadow_data->gpu_slots;
-		render_data.gpu_instances_drawn = gpu_instances_view != nullptr;
+		// A pass with few casters draws them from the CPU list: the GPU path's
+		// cost per pass (a cull over every member) and per draw is more than
+		// theirs (omni cube faces of a game level).
+		render_data.gpu_instances_drawn = gpu_instances_view != nullptr &&
+				int64_t(p_shadow_data->gpu_instances.size()) >= GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instances/shadow_min_casters");
 	}
 
 	RENDER_TIMESTAMP("Setup Shadow Pass");
@@ -3587,7 +3592,6 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	RENDER_TIMESTAMP("Fill Shadow Instance Data");
 	_fill_instance_data(RENDER_LIST_SECONDARY, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr, render_list_from, render_list_size, false);
 	if (gpu_casters && render_data.gpu_instances_drawn) {
-		RENDER_TIMESTAMP("GPU Instances Shadow Cull");
 		_gpu_instances_shadow_pass(p_shadow_data, scene_data, render_list_from + render_list_size, shadow_pass, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr);
 		render_list_size = render_list[RENDER_LIST_SECONDARY].elements.size() - render_list_from;
 	}
@@ -3628,6 +3632,7 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 
 void RenderForwardClustered::_render_shadow_process(RenderBufferDataForwardClustered *p_cull_buffers) {
 	RenderingDevice *rd = RenderingDevice::get_singleton();
+	_gpu_instances_shadow_flush(); // The GPU path's passes, culled together; sets their buffers.
 	if (scene_state.instance_buffer[RENDER_LIST_SECONDARY].get_size(0u) > 0u) {
 		rd->buffer_flush(scene_state.instance_buffer[RENDER_LIST_SECONDARY]._get(0u));
 	}
@@ -5043,7 +5048,7 @@ void RenderForwardClustered::_update_global_pipeline_data_requirements_from_ligh
 	global_pipeline_data_required.use_shadow_dual_paraboloid = light_storage->get_shadow_dual_paraboloid_used();
 }
 
-void RenderForwardClustered::_geometry_instance_add_surface_with_material(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, uint32_t p_material_id, uint32_t p_shader_id, RID p_mesh) {
+void RenderForwardClustered::_geometry_instance_add_surface_with_material(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, uint32_t p_shader_id, RID p_mesh) {
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 	uint32_t flags = 0;
 
@@ -5144,6 +5149,7 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 	sdcache->shader = p_material->shader_data;
 	sdcache->material = p_material;
 	sdcache->material_uniform_set = p_material->uniform_set;
+	sdcache->material_slot = p_material->table_slot;
 	sdcache->surface = mesh_storage->mesh_get_surface(p_mesh, p_surface);
 	sdcache->primitive = mesh_storage->mesh_surface_get_primitive(sdcache->surface);
 	sdcache->surface_index = p_surface;
@@ -5169,8 +5175,11 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 	sdcache->sort.sort_key2 = 0;
 
 	sdcache->sort.surface_index = p_surface;
-	sdcache->sort.material_id_hi = (p_material_id & 0xFF000000) >> 24;
-	sdcache->sort.material_id_lo = (p_material_id & 0x00FFFFFF);
+	// Materials of a shader whose parameters share a table page and whose
+	// textures are the same draw alike (D036): the group, not the material.
+	const uint32_t material_id = p_material->get_group_id();
+	sdcache->sort.material_id_hi = (material_id & 0xFF000000) >> 24;
+	sdcache->sort.material_id_lo = (material_id & 0x00FFFFFF);
 	sdcache->sort.shader_id = p_shader_id;
 	sdcache->sort.geometry_id = p_mesh.get_local_index(); //only meshes can repeat anyway
 	sdcache->sort.uses_forward_gi = ginstance->can_sdfgi;
@@ -5200,7 +5209,7 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material_chain(
 	SceneShaderForwardClustered::MaterialData *material = p_material;
 	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
 
-	_geometry_instance_add_surface_with_material(ginstance, p_surface, material, p_mat_src.get_local_index(), material_storage->material_get_shader_id(p_mat_src), p_mesh);
+	_geometry_instance_add_surface_with_material(ginstance, p_surface, material, material_storage->material_get_shader_id(p_mat_src), p_mesh);
 
 	while (material->next_pass.is_valid()) {
 		RID next_pass = material->next_pass;
@@ -5211,7 +5220,7 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material_chain(
 		if (ginstance->data->dirty_dependencies) {
 			material_storage->material_update_dependency(next_pass, &ginstance->data->dependency_tracker);
 		}
-		_geometry_instance_add_surface_with_material(ginstance, p_surface, material, next_pass.get_local_index(), material_storage->material_get_shader_id(next_pass), p_mesh);
+		_geometry_instance_add_surface_with_material(ginstance, p_surface, material, material_storage->material_get_shader_id(next_pass), p_mesh);
 	}
 }
 
@@ -6129,6 +6138,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
 	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/shadow_min_casters", PROPERTY_HINT_RANGE, "0,4096,1,or_greater"), 256);
 	singleton = this;
 	gpu_instances_readbacks_alive = true;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);

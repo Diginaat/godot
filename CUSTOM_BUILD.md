@@ -168,6 +168,13 @@ straight.
     directional shadow passes that clear only their own atlas region in
     Forward+ and Mobile (no whole-atlas clear). See
     [kb/project/directional-cascade-cache.md](kb/project/directional-cascade-cache.md).
+  - Forward+ material parameter tables (D036 in
+    [knowledge/TECHNICAL_DECISIONS.md](knowledge/TECHNICAL_DECISIONS.md)):
+    `MaterialUniforms` as a storage-buffer struct array in
+    `scene_forward_clustered.glsl`, `SceneShaderForwardClustered::MaterialTable`
+    and its `MaterialData::update_parameters()`, the group id in the sort
+    key, the slot in `compressed_aabb_position_pad.w`. Upstream changes to
+    the material UBO path must be ported there.
   - Shadow passes multiply the mesh LOD threshold
     (`mesh_lod/lod_change/shadow_threshold_scale`, in `_render_shadow_append()`
     of Forward+ and Mobile). See

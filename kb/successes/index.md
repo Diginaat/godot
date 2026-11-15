@@ -7,6 +7,7 @@ done, why it worked, and when to use it again. Add one whenever something
 works clearly better than what came before. Mistakes are in
 [mistakes](/mistakes/).
 
+* [Locate a crash in a production build without symbols](/successes/map-file-crash-location.md) - relink with /MAP, resolve offsets, dumpbin the faulting instruction, absolute-path checkpoint logs
 * [Inspect indirect commands before drawing](/successes/inspect-indirect-before-draw.md) - reproduce invalid GPU counts safely, then prove material pixels on real backends
 
 * [Reflection atlas layers on demand](/successes/reflection-atlas-on-demand.md) - 512 MB to 47 MB for one probe, growth copies layers

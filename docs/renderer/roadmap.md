@@ -149,6 +149,11 @@ the CPU path.
 
 Needs P2 (which already draws its buckets indirectly).
 
+- 3.0 Material parameter tables done 2026-11-15 (D036): materials of one
+  shader share uniform sets per table page and texture set, so many-material
+  scenes form few buckets (`unique_10k` 8,776 draws to 11) before any
+  multi-draw.
+
 - 3.1 Multi-draw per pipeline group where `SUPPORTS_MULTI_DRAW_INDIRECT`
   (Phase 2 starts with one indirect draw per bucket).
 - 3.2 RD: `draw_list_draw_indirect_count` (Vulkan `drawIndirectCount`

@@ -13,6 +13,62 @@
   256+ elements 2.6-5x faster; the earlier small-copy regression was the
   harness. Bulk copy stays. [Evaluation](/project/unique-array-evaluation.md).
 
+## 2026-11-15 (GPU path: no command uploads, D039)
+
+* **Implemented**: the GPU instance path clears its indirect commands on
+  the GPU and the cull writes each filled command's index count; bucket
+  data is uploaded only when it changes; shadow rows test visibility first.
+  No GPU change on the game level beyond the spread; `unique_lod_2k` GPU
+  0.44-0.46 to 0.41-0.43 ms. docs/renderer/benchmarks.md, D039.
+* **Finding**: stage timestamps put the GPU path's remaining cost on the
+  level in its draws (about 50-60 ns more per draw in depth-only passes),
+  not in the culls (camera below 0.01 ms, a shadow batch about 7 us). Not
+  the indirect draw either: direct draws with read-back counts (temporary
+  build) gained at most 0.03 ms. HZB occlusion does not run on the level
+  (MSAA 2x).
+* **Updated**: [D3D12 copy mistake](/mistakes/d3d12-buffer-copy-then-compute-write.md):
+  a GPU clear before compute writes works there.
+  [Mistake](/mistakes/fix-before-locating-the-cost.md): built the fix
+  before timing the stages.
+
+## 2026-11-15 (GPU path on game levels, D038)
+
+* **Implemented**: the GPU path draws only the commands a listed member can
+  fill (CPU copy of the cull's LOD choice, walked when the instances are
+  not many more than the commands), per-pass shadow stats, and
+  `gpu_instances/shadow_min_casters` (small shadow passes on the CPU list).
+  Game level loss 0.27-0.30 to 0.05-0.12 ms; new bench case
+  `unique_lod_2k`. docs/renderer/benchmarks.md, D038.
+* **Implemented**: all shadow passes of a render culled in one dispatch
+  (`MODE_SHADOW_BATCH`); the level is +0.04-0.08 ms, inside the A/A floor.
+* **Finding**: the loss was the shadow passes' fixed cost (omni cube
+  faces), not the empty draws the earlier entry suspected.
+  [Mistake](/mistakes/separate-runs-order-bias.md).
+
+## 2026-11-15 (GPU path on a real level)
+
+* **Finding**: in a game level with many unique meshes and few copies each,
+  the GPU instance path doubles the draw count and costs 0.15-0.3 ms of GPU
+  time against the CPU path (3 alternating pairs). Recorded under known
+  problems in docs/renderer/MEMORY.md; the level now sets
+  `gpu_instances/enabled=false`.
+
+## 2026-11-15 (moved instances)
+
+* Render-side cost of a moved instance measured at about 510 ns (dirty
+  loop, `dynamic_20k`); quantizing from the float exponent and no AABB
+  recompute on transform-only changes cut it 9%. Rest is memory-bound; the
+  main thread's share is larger and next. See docs/renderer/benchmarks.md.
+
+## 2026-11-15 (GPU-first renderer: material parameter tables, D036)
+
+* Forward+ material parameters moved from one UBO per material to per-shader
+  storage-buffer tables with shared uniform sets; `unique_10k` render CPU
+  7.5-8.1 to 0.42-0.47 ms, draws 8,776 to 11, D3D12 video memory 734-822 to
+  130.7 MiB. [Finding](/project/material-parameter-tables.md).
+* Startup crash during the work found with a map file and dumpbin, no
+  symbol build. [Success](/successes/map-file-crash-location.md).
+
 ## 2026-11-10 (LocalVector threshold boundary follow-up)
 
 * Tools-only extension: copy-only 64/128/255/257/512 neighborhoods, independent
@@ -105,6 +161,7 @@
   benchmark-driven tuning applied during this measurement task.
 * Focused compilation caught Zstandard's disabled XXH3 and a wrong constexpr
   expected value; recorded [thirdparty configuration lesson](/mistakes/bundled-xxhash-without-xxh3.md).
+
 
 ## 2026-11-10 (GPU-first renderer, Phase 0)
 

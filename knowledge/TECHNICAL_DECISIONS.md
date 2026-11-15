@@ -748,3 +748,130 @@ is slightly slower: render CPU +0.02 to +0.19 ms, GPU about +0.1 ms, mostly
 the HZB and the occlusion tests without anything to occlude.
 Not done: the editor's own viewports were checked only by the smoke test;
 `unique_10k` (one bucket per material) gains little.
+
+## D036 — Material parameter tables for Forward+ scene shaders
+
+2026-11-15. `unique_10k` (10,000 `StandardMaterial3D`s of one shader that
+differ only in `albedo_color`) drew one bucket per material: 8,776 draws,
+each with its own pipeline lookup, material uniform set bind and push
+constant, render CPU 7.5-8.1 ms and a 12.8-13.7 ms frame on the GPU path.
+Every material also owned a UBO; D3D12 reported 734-822 MiB of video
+memory in that case.
+
+Decision: in Forward+ the std140 `MaterialUniforms` block of a scene shader
+is a struct array in a storage buffer, one slot per material, and the
+shader reads `material_table.data[material_slot]` (`#define material`, so
+the compiler's generated code is unchanged). The slot travels in the spare
+word of the instance data (`compressed_aabb_position_pad.w`): written per
+element by `_fill_instance_data()` and per member by the GPU path's cull
+pass (members are four words now: table slot, bucket, material slot,
+unused). Slots live in pages per shader (`SceneShaderForwardClustered::
+MaterialTable`): 16 slots, doubling to 4,096, never resized, so their
+uniform sets stay valid. Materials of one page whose textures are the same
+share one uniform set (a group). The group id replaces the material id in
+the render sort key, so the CPU list merges them into instanced repeats
+and the GPU path into one bucket.
+
+Rules: a material with texture streaming feedback keeps a group of its own
+(feedback is per material and the GPU path takes it per bucket). The shared
+shadow material and the debug draw materials have no parameters, so the
+slot they get (the surface material's) is never read. Material storage
+outside Forward+ (Mobile, canvas, sky, fog, the path
+tracer's own pool) is unchanged. A group's uniform set that RD erases (a
+texture freed, the shader recompiled) requeues all of its members; new
+shader code with another parameter size gets a new table and the materials
+move at their next update.
+
+Measured (RTX 3060, Vulkan, instance bench, p50): `unique_10k` render CPU
+7.5-8.1 to 0.42-0.47 ms, frame 12.8-13.7 to 0.84-0.86 ms, GPU 1.05 to
+0.49 ms, draws 8,776 to 11, shadow draws about 10.5k to 12-23, video
+memory in that case 241.6 to 124.0 MiB; D3D12 render CPU 0.38-0.41 ms,
+130.7 MiB. `shared_20k` draws 17 to 5 (its four materials merge). Other
+cases within run-to-run spread. `gpu_instances.ps1` (13 of 13 images and
+the motion vectors equal to the CPU path) on Vulkan and D3D12, the
+large-world suite and the standard smoke pass.
+Not done: GPU time of storage-buffer against UBO reads in heavy fragment
+shaders was not measured on its own (it did not show in these cases);
+materials that differ in textures still draw separately (bindless textures
+would be the next step); Mobile keeps per-material UBOs.
+
+## D038 — The GPU path draws only commands a member can fill, and leaves small shadow passes to the CPU list
+
+Date: 2026-11-15. Branch: `dev-gpu-renderer`.
+
+A game level with many meshes and few copies each was 0.27-0.30 ms of GPU
+time slower on the GPU path than on the CPU path. Two causes: every bucket
+drew one indirect command per index LOD (twice with a motion pass), most of
+them empty; and every shadow pass paid a fixed cost (command upload, a cull
+over every member, a readback, barriers) that small passes such as omni
+cube faces do not recover. The shadow passes also shared one stats buffer,
+so their culls waited for each other.
+
+Decision:
+- When a view lists not more than eight times as many instances as its
+  buckets have commands, the CPU walks the listed instances and marks per
+  bucket the commands the cull can fill: the level `member_command()`
+  chooses from the same inputs (the table record holds `transformed_aabb`
+  and `lod_model_scale * lod_bias`), both levels within 0.1% of a threshold,
+  and the moved set only for members that moved in a view with a motion
+  pass. Only those commands get an element. Above that ratio a bucket's
+  commands are cheap next to its instances and all are drawn.
+- Validation reads back the commands and reports members culled into a
+  command that got no element, in camera views and shadow passes.
+- Each shadow view has its own stats buffer; the readbacks of a frame are
+  added up.
+- `rendering/geometry/gpu_instances/shadow_min_casters` (256): a shadow pass
+  with fewer GPU path casters draws them from the CPU list, which the
+  scene cull already lists them for.
+- The shadow passes of a render are culled together at
+  `_render_shadow_process()`: one upload of every pass's commands and
+  visible bits, one dispatch (`MODE_SHADOW_BATCH`, a workgroup row per
+  pass with its LOD inputs and offsets), one stats readback. The passes get
+  the shared buffers there, before they are drawn.
+
+Measured: see benchmarks.md, "A game level: many meshes, few copies".
+Loss 0.27-0.30 to 0.05-0.12 ms on the level; `unique_lod_2k` render CPU
+1.40-1.68 to 1.07-1.34 ms against the CPU path. `gpu_instances.ps1` (15 of
+15 images, the motion vectors, a phase of 150 LOD meshes with about 20
+copies, shadow passes on the CPU list) passes on Vulkan and D3D12; with
+the level mask forced to level 0 it fails by images, motion vectors and
+the new check.
+With the batch the level is +0.04-0.08 ms (A/A floor 0.06 ms).
+Not done: the camera view's own cost (about 0.05 ms on the level); small
+shadow passes are still cheaper on the CPU list.
+
+## D039 — The GPU instance path clears its indirect commands on the GPU; the cull writes their index counts
+
+Date: 2026-11-15. Branch: `dev-gpu-renderer`.
+
+Every view of the GPU path (the camera, its occlusion run, each shadow
+batch) reset its indirect commands by uploading the scenario's whole
+command array from the CPU: about 80 KB per camera view and per shadow
+pass on a game level, more with many buckets. The bucket data (80 bytes
+per bucket) was uploaded every frame too. A GPU `buffer_copy` from a
+template would avoid the upload, but a copy followed by compute writes to
+the same buffer breaks D3D12 (kb mistakes).
+
+Decision:
+- Views zero their commands with `buffer_clear` (a UAV clear on D3D12, the
+  state the compute list writes in). The cull's first member of a command
+  writes the command's index count (word 0) from a per-command buffer
+  (`command_indices`, binding 13, uploaded at a rebuild); the other words
+  stay 0. Commands no member lands in draw nothing (index and instance
+  count 0).
+- Bucket data is uploaded only for the range of buckets whose values
+  changed (after a rebuild, all).
+- Shadow batch rows test the pass's visible bit before they read the
+  member's table record and bucket.
+- Validation also reports commands with instances whose index count is not
+  their level's, in camera views and shadow passes.
+
+Measured: no GPU change beyond the spread on the Overgrown Subway level
+(12 alternating runs, GPU path minus CPU path +0.05/+0.11/+0.06 ms against
++0.06/+0.03/+0.09 before with the default cutoff, +0.10/+0.11/+0.19
+against +0.13/+0.16/+0.19 with every shadow pass on the GPU path);
+`unique_lod_2k` GPU 0.44-0.46 to 0.41-0.43 ms, the other bench cases
+within spread. Less CPU work per view (no copies into the staging buffer).
+`gpu_instances.ps1` passes on Vulkan and D3D12. The upload was not the
+game level's cost: stage timestamps put it in the GPU path's draws
+(benchmarks.md, "A game level").

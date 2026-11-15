@@ -713,6 +713,7 @@ protected:
 			RID gpu_commands;
 			RID gpu_ids;
 			RID gpu_instances;
+			uint32_t gpu_batch_pass = UINT32_MAX; // Its slot in the shadow batch, until _gpu_instances_shadow_flush() sets the buffers.
 		};
 
 		LocalVector<ShadowPass> shadow_passes;
@@ -833,6 +834,7 @@ protected:
 
 		void *surface = nullptr;
 		RID material_uniform_set;
+		uint32_t material_slot = 0; // Parameter slot in the material table page (D036).
 		SceneShaderForwardClustered::ShaderData *shader = nullptr;
 		SceneShaderForwardClustered::MaterialData *material = nullptr;
 
@@ -1013,6 +1015,7 @@ protected:
 		uint32_t command = 0;
 		uint32_t depth_command = UINT32_MAX; // Same for the depth pre-pass when it draws a separate shadow mesh.
 		uint32_t ids_first = 0; // Visible IDs, capacity reserved per command, in the same order.
+		uint32_t lod_edges_first = 0; // In GPUInstanceScenario::lod_edges, levels - 1 of them.
 	};
 	struct GPUInstanceBucketKey {
 		uint64_t key1 = 0;
@@ -1051,35 +1054,45 @@ protected:
 		uint32_t live_members = 0;
 		uint32_t free_members = 0; // Used slots that are free (left gaps).
 		bool reps_dirty = false;
-		LocalVector<GPUInstanceBucketData> bucket_data;
-		LocalVector<uint32_t> members; // Table slot (UINT32_MAX: free) and bucket per member slot.
+		LocalVector<GPUInstanceBucketData> bucket_data; // As last uploaded.
+		bool bucket_data_uploaded = false; // False after a rebuild: upload all of it.
+		LocalVector<uint32_t> members; // Per member slot: table slot (UINT32_MAX: free), bucket, material slot, unused.
 		LocalVector<uint32_t> commands; // Five words per bucket level, zero instances.
+		// Index count (word 0) of each command. The views clear their commands
+		// on the GPU and the cull writes word 0 of each command it fills, so no
+		// command array is uploaded per view.
+		LocalVector<uint32_t> command_indices;
 		LocalVector<uint8_t> command_levels; // Index LOD of each command, plus GPU_INSTANCE_MOVED_COMMAND (validation).
 		LocalVector<uint32_t> command_depth; // Per command, its depth pre-pass twin or UINT32_MAX (UINT32_MAX - 1 for the twins).
 		LocalVector<float> lod_edges; // Screen-space edge length per reduced LOD.
 		LocalVector<uint32_t> command_primitives; // Primitives per instance of each command, 0 for depth pre-pass ones (render info).
 		uint32_t member_count = 0;
 		uint32_t id_count = 0;
+		uint32_t level_total = 0; // Index LODs summed over the buckets: the elements of a view without a motion pass.
 		RID members_buffer;
 		RID buckets_buffer;
 		RID commands_buffer;
 		RID lod_edges_buffer;
 		RID command_primitives_buffer;
+		RID command_indices_buffer;
 		RID stats_buffer; // Objects and primitives the cull pass drew, per view (render info).
 		RID visible_buffer; // A bit per table slot: visible in the view (from the scene cull).
 		uint32_t visible_capacity = 0; // Words.
 		// Shadow passes draw from the camera view's instance data; per pass
 		// they have their own commands, visible IDs and bits.
-		RID shadow_stats_buffer;
-		struct ShadowView {
-			RID commands;
-			RID ids;
-			RID visible;
-			uint32_t command_capacity = 0;
+		// The shadow passes of a render, culled together (D038): commands, IDs
+		// and visible bits of each pass at its own offset.
+		struct ShadowBatch {
+			RID commands; // Commands per pass.
+			RID ids; // id_count per pass.
+			RID visible; // Visible bits per pass.
+			RID passes; // GPUInstanceShadowPassData per pass.
+			RID stats; // Objects and primitives of all passes (render info).
+			uint32_t command_capacity = 0; // In commands.
 			uint32_t id_capacity = 0;
-			uint32_t visible_capacity = 0;
-		};
-		LocalVector<ShadowView> shadow_views;
+			uint32_t visible_capacity = 0; // In words.
+			uint32_t pass_capacity = 0;
+		} shadow_batch;
 		RID output_buffer; // InstanceData per member, written per view.
 		RID ids_buffer; // Members drawn per bucket level, written per view.
 		// HZB occlusion: the colour passes' commands and IDs (same layout as
@@ -1093,6 +1106,7 @@ protected:
 		uint32_t bucket_capacity = 0;
 		uint32_t command_capacity = 0;
 		uint32_t command_primitive_capacity = 0;
+		uint32_t command_index_capacity = 0;
 		uint32_t id_capacity = 0;
 		uint32_t lod_edge_capacity = 0;
 	};
@@ -1110,7 +1124,28 @@ protected:
 		RID version;
 		RID pipeline;
 		RID occlude_pipeline; // MODE_OCCLUDE.
+		RID shadow_pipeline; // MODE_SHADOW_BATCH.
 	} gpu_instance_cull;
+	// Matches ShadowPass in gpu_instance_cull.glsl (MODE_SHADOW_BATCH).
+	struct GPUInstanceShadowPassData {
+		float lod_camera[3];
+		float lod_threshold;
+		float lod_distance_multiplier;
+		uint32_t view_flags;
+		uint32_t command_offset;
+		uint32_t ids_offset;
+		uint32_t visible_offset;
+		uint32_t pad[3];
+	};
+	// The GPU path's shadow passes since the last _render_shadow_process():
+	// their LOD inputs and offsets, and their visible bits.
+	LocalVector<GPUInstanceShadowPassData> gpu_instances_shadow_batch;
+	LocalVector<uint32_t> gpu_instances_shadow_batch_bits;
+	uint32_t gpu_instances_shadow_batch_words = 0; // Visible words per pass.
+	GPUInstanceScenario *gpu_instances_shadow_batch_scenario = nullptr;
+	uint32_t gpu_instances_shadow_check_batch_pass = UINT32_MAX; // The pass whose commands the shadow check reads back.
+	// Culls every pass of the batch in one dispatch and gives the passes their buffers.
+	void _gpu_instances_shadow_flush();
 	uint32_t gpu_instances_view_params[8] = {}; // The camera run's push constant (GPUInstanceCullParams), for the occlusion run.
 	// Validation (rendering/geometry/gpu_instances/validate).
 	uint64_t gpu_instances_check_frame = UINT64_MAX;
@@ -1124,6 +1159,11 @@ protected:
 	uint32_t gpu_instances_check_primitives = 0;
 	LocalVector<uint8_t> gpu_instances_check_command_levels;
 	LocalVector<uint32_t> gpu_instances_check_command_depth;
+	LocalVector<uint32_t> gpu_instances_check_command_indices;
+	// Commands the checked view drew (an element each, depth twins too):
+	// members culled into any other command would not be drawn.
+	LocalVector<uint8_t> gpu_instances_check_emitted;
+	bool gpu_instances_check_emitting = false; // The checked view's elements are still to come.
 	static void _gpu_instances_check_received(const Vector<uint8_t> &p_data);
 	// Cleared when the renderer is destroyed: readbacks still in flight then
 	// complete during the RenderingDevice shutdown and must not touch it.
@@ -1150,10 +1190,22 @@ protected:
 	// the CPU list must draw them.
 	bool _gpu_instances_shadow_pass(const RenderShadowData *p_shadow_data, const RenderSceneDataRD &p_scene_data, uint32_t p_render_list_from, SceneState::ShadowPass &r_pass, int *p_render_info);
 	void _gpu_instances_free_scenario(GPUInstanceScenario *p_scenario);
-	// With many buckets for the listed instances, marks the buckets they use,
-	// so that a view skips empty draws; false: every bucket is drawn.
-	bool _gpu_instances_used_buckets(const GPUInstanceScenario &p_scenario, const LocalVector<uint32_t> *p_slots, LocalVector<uint8_t> &r_used) const;
-	LocalVector<uint8_t> gpu_instances_used_buckets;
+	// The LOD inputs of a cull run (GPUInstanceCullParams), for the CPU's
+	// copy of its level choice.
+	struct GPUInstanceLODView {
+		float threshold = 0.0; // 0 or less: level 0 only.
+		float distance_multiplier = 1.0;
+		Vector3 camera;
+		bool orthogonal = false;
+		bool motion = false; // Moved members go to the second set of commands.
+	};
+	GPUInstanceLODView gpu_instances_view_lod;
+	// When walking the listed instances costs less than the elements it can
+	// leave out, marks per bucket the commands the cull can fill (bits 0-31:
+	// levels, 32-63: the moved members' levels), so that a view draws no empty
+	// commands; false: every command of every bucket is drawn.
+	bool _gpu_instances_used_levels(const GPUInstanceScenario &p_scenario, const LocalVector<uint32_t> *p_slots, const GPUInstanceLODView &p_lod, LocalVector<uint64_t> &r_used) const;
+	LocalVector<uint64_t> gpu_instances_used_levels;
 	uint32_t gpu_instances_shadow_views_used = 0; // This render.
 	uint32_t gpu_instances_shadow_views_last = 0; // In the last render that had shadow passes.
 	// Shadow validation (one pass every 30 frames).
@@ -1161,6 +1213,9 @@ protected:
 	uint64_t gpu_instances_shadow_check_frame = UINT64_MAX;
 	uint32_t gpu_instances_shadow_check_expected = 0;
 	LocalVector<uint32_t> gpu_instances_shadow_check_command_depth;
+	LocalVector<uint32_t> gpu_instances_shadow_check_command_indices;
+	LocalVector<uint8_t> gpu_instances_shadow_check_emitted; // Commands the current pass drew (an element each).
+	LocalVector<uint8_t> gpu_instances_shadow_check_emitted_copy; // Those of the checked pass.
 	static void _gpu_instances_shadow_check_received(const Vector<uint8_t> &p_data);
 	GPUInstanceScenario *gpu_instances_view = nullptr; // Drawn by the current camera render.
 	bool gpu_instances_view_motion = false; // The view has a motion pass, and members may have moved.
@@ -1172,12 +1227,13 @@ protected:
 		uint32_t primitives = 0;
 		uint32_t shadow_objects = 0; // Summed over the view's shadow passes.
 		uint32_t shadow_primitives = 0;
+		uint64_t shadow_frame = UINT64_MAX; // The frame the shadow sums are of.
 		uint64_t frame = 0;
 	};
 	HashMap<uint64_t, GPUInstanceViewInfo> gpu_instances_view_info;
 	uint64_t gpu_instances_view_key = 0;
 	static void _gpu_instances_stats_received(const Vector<uint8_t> &p_data, uint64_t p_view, bool p_check);
-	static void _gpu_instances_shadow_stats_received(const Vector<uint8_t> &p_data, uint64_t p_view);
+	static void _gpu_instances_shadow_stats_received(const Vector<uint8_t> &p_data, uint64_t p_view, uint64_t p_frame);
 	uint64_t gpu_instances_moved_frame = 0; // Last frame an instance moved (stays moved for one more frame).
 	void _gpu_instances_free();
 	PagedAllocator<GeometryInstanceSurfaceDataCache> geometry_instance_surface_alloc;
@@ -1224,7 +1280,7 @@ protected:
 
 	void _update_global_pipeline_data_requirements_from_project();
 	void _update_global_pipeline_data_requirements_from_light_storage();
-	void _geometry_instance_add_surface_with_material(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, uint32_t p_material_id, uint32_t p_shader_id, RID p_mesh);
+	void _geometry_instance_add_surface_with_material(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, uint32_t p_shader_id, RID p_mesh);
 	void _geometry_instance_add_surface_with_material_chain(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, RID p_mat_src, RID p_mesh);
 	void _geometry_instance_add_surface(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, RID p_material, RID p_mesh);
 	void _geometry_instance_update(RenderGeometryInstance *p_geometry_instance);

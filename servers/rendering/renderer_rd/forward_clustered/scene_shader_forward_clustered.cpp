@@ -243,6 +243,14 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 	ubo_size = gen_code.uniform_total_size;
 	ubo_offsets = gen_code.uniform_offsets;
 	texture_uniforms = gen_code.texture_uniforms;
+	if (!material_table || material_table->stride != ubo_size) {
+		// Materials move to the new table at their next update (set_code
+		// queues them all).
+		MutexLock lock(SceneShaderForwardClustered::singleton_mutex);
+		MaterialTable::unref(material_table);
+		material_table = memnew(MaterialTable);
+		material_table->stride = ubo_size;
+	}
 
 	// If any form of Alpha Antialiasing is enabled, set the blend mode to alpha to coverage.
 	if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF) {
@@ -682,6 +690,11 @@ SceneShaderForwardClustered::ShaderData::ShaderData() :
 
 SceneShaderForwardClustered::ShaderData::~ShaderData() {
 	pipeline_hash_map.clear_pipelines();
+	{
+		MutexLock lock(SceneShaderForwardClustered::singleton_mutex);
+		MaterialTable::unref(material_table);
+		material_table = nullptr;
+	}
 
 	if (version.is_valid()) {
 		ERR_FAIL_NULL(SceneShaderForwardClustered::singleton);
@@ -709,19 +722,241 @@ void SceneShaderForwardClustered::MaterialData::set_next_pass(RID p_pass) {
 	next_pass = p_pass;
 }
 
-bool SceneShaderForwardClustered::MaterialData::update_parameters(const HashMap<StringName, Variant> &p_parameters, bool p_uniform_dirty, bool p_textures_dirty) {
-	if (shader_data->version.is_valid()) {
-		RID shader_rid = SceneShaderForwardClustered::singleton->shader.version_get_shader(shader_data->version, 0);
+/* Material table (D036) */
 
-		MutexLock lock(SceneShaderForwardClustered::singleton_mutex);
-		return update_parameters_uniform_set(p_parameters, p_uniform_dirty, p_textures_dirty, shader_data->uniforms, shader_data->ubo_offsets.ptr(), shader_data->texture_uniforms, shader_data->default_texture_params, shader_data->ubo_size, uniform_set, shader_rid, RenderForwardClustered::MATERIAL_UNIFORM_SET, true, true);
-	} else {
-		return false;
+uint32_t SceneShaderForwardClustered::MaterialTable::GroupKey::hash() const {
+	uint32_t h = hash_murmur3_one_64(material_feedback.get_id(), hash_murmur3_one_32(page));
+	for (const RID &texture : textures) {
+		h = hash_murmur3_one_64(texture.get_id(), h);
+	}
+	return hash_fmix32(h);
+}
+
+void SceneShaderForwardClustered::MaterialTable::allocate_slot(uint32_t &r_page, uint32_t &r_slot) {
+	// Fill the first pages first, so that materials share as few groups as possible.
+	for (uint32_t i = 0; i < pages.size(); i++) {
+		Page &page = pages[i];
+		if (!page.free_slots.is_empty()) {
+			r_page = i;
+			r_slot = page.free_slots[page.free_slots.size() - 1];
+			page.free_slots.resize(page.free_slots.size() - 1);
+			return;
+		}
+		if (page.used < page.capacity) {
+			r_page = i;
+			r_slot = page.used++;
+			return;
+		}
+	}
+	// Pages grow (16, 32, ... 4096 slots) and never move: their uniform sets stay valid.
+	Page page;
+	page.capacity = pages.is_empty() ? FIRST_PAGE_SLOTS : MIN(pages[pages.size() - 1].capacity * 2, MAX_PAGE_SLOTS);
+	page.buffer = RD::get_singleton()->storage_buffer_create(page.capacity * stride);
+	page.used = 1;
+	r_page = pages.size();
+	r_slot = 0;
+	pages.push_back(page);
+}
+
+void SceneShaderForwardClustered::MaterialTable::free_slot(uint32_t p_page, uint32_t p_slot) {
+	ERR_FAIL_UNSIGNED_INDEX(p_page, pages.size());
+	pages[p_page].free_slots.push_back(p_slot);
+}
+
+void SceneShaderForwardClustered::MaterialTable::unref(MaterialTable *p_table) {
+	if (!p_table) {
+		return;
+	}
+	ERR_FAIL_COND(p_table->refcount == 0);
+	p_table->refcount--;
+	if (p_table->refcount > 0) {
+		return;
+	}
+	// Every material left already, so no groups remain.
+	DEV_ASSERT(p_table->groups.is_empty());
+	for (Page &page : p_table->pages) {
+		if (page.buffer.is_valid()) {
+			RD::get_singleton()->free_rid(page.buffer);
+		}
+	}
+	memdelete(p_table);
+}
+
+void SceneShaderForwardClustered::MaterialTable::_group_uniform_set_erased(void *p_group) {
+	// A texture of the group was freed (or the shader changed): each member
+	// finds or makes a new uniform set at its next update.
+	Group *group = static_cast<Group *>(p_group);
+	group->uniform_set = RID();
+	for (MaterialData *member : group->members) {
+		member->notify_uniform_set_erased();
 	}
 }
 
+void SceneShaderForwardClustered::MaterialData::_table_leave_group() {
+	if (!group) {
+		return;
+	}
+	MaterialTable::Group *g = group;
+	group = nullptr;
+	uniform_set = RID();
+	MaterialData *last = g->members[g->members.size() - 1];
+	g->members[group_member] = last;
+	last->group_member = group_member;
+	g->members.resize(g->members.size() - 1);
+	if (!g->members.is_empty()) {
+		return;
+	}
+	if (g->uniform_set.is_valid() && RD::get_singleton()->uniform_set_is_valid(g->uniform_set)) {
+		RD::get_singleton()->uniform_set_set_invalidation_callback(g->uniform_set, nullptr, nullptr);
+		RD::get_singleton()->free_rid(g->uniform_set);
+	}
+	table->groups.erase(g->key);
+	memdelete(g);
+}
+
+void SceneShaderForwardClustered::MaterialData::_table_release() {
+	if (!table) {
+		return;
+	}
+	_table_leave_group();
+	if (table_page != UINT32_MAX) {
+		table->free_slot(table_page, table_slot);
+		table_page = UINT32_MAX;
+		table_slot = 0;
+	}
+	MaterialTable::unref(table);
+	table = nullptr;
+}
+
+bool SceneShaderForwardClustered::MaterialData::update_parameters(const HashMap<StringName, Variant> &p_parameters, bool p_uniform_dirty, bool p_textures_dirty) {
+	if (!shader_data->version.is_valid()) {
+		return false;
+	}
+	RID shader_rid = SceneShaderForwardClustered::singleton->shader.version_get_shader(shader_data->version, 0);
+
+	MutexLock lock(SceneShaderForwardClustered::singleton_mutex);
+	RD *rd = RD::get_singleton();
+	// True when the uniform set or the slot changed: surface caches hold both.
+	bool changed = false;
+	if (table != shader_data->material_table) {
+		// New shader code with another parameter size.
+		_table_release();
+		changed = true;
+		if (!shader_data->material_table) {
+			return changed; // No code compiled yet.
+		}
+		table = shader_data->material_table;
+		table->refcount++;
+		p_uniform_dirty = true;
+		p_textures_dirty = true;
+	}
+	if (!table) {
+		return changed;
+	}
+
+	const uint32_t stride = table->stride;
+	if (stride > 0 && table_page == UINT32_MAX) {
+		table->allocate_slot(table_page, table_slot);
+		p_uniform_dirty = true;
+		p_textures_dirty = true; // The group depends on the page.
+		changed = true;
+	}
+	if (uint32_t(table_ubo.size()) != stride) {
+		table_ubo.resize(stride);
+		if (stride > 0) {
+			memset(table_ubo.ptrw(), 0, stride);
+		}
+		p_uniform_dirty = true;
+	}
+	if (p_uniform_dirty && stride > 0) {
+		update_uniform_buffer(shader_data->uniforms, shader_data->ubo_offsets.ptr(), p_parameters, table_ubo.ptrw(), stride, true);
+		rd->buffer_update(table->pages[table_page].buffer, table_slot * stride, stride, table_ubo.ptr());
+	}
+
+	uint32_t texture_count = 0;
+	for (const ShaderCompiler::GeneratedCode::Texture &texture : shader_data->texture_uniforms) {
+		texture_count += uint32_t(texture.array_size > 0 ? texture.array_size : 1);
+	}
+	if (uint32_t(table_textures.size()) != texture_count || p_textures_dirty) {
+		table_textures.resize(texture_count);
+		render_target_cache.clear();
+		p_textures_dirty = true;
+	}
+	if (p_textures_dirty && texture_count > 0) {
+		update_textures(p_parameters, shader_data->default_texture_params, shader_data->texture_uniforms, table_textures.ptrw(), true, true);
+	}
+
+	if (stride == 0 && shader_data->texture_uniforms.is_empty()) {
+		// No uniform set needed.
+		if (group) {
+			_table_leave_group();
+			changed = true;
+		}
+		return changed;
+	}
+
+	if (!p_textures_dirty && group && group->uniform_set.is_valid() && rd->uniform_set_is_valid(group->uniform_set)) {
+		return changed; // Only the parameters changed, in place.
+	}
+
+	MaterialTable::GroupKey key;
+	key.page = table_page == UINT32_MAX ? 0 : table_page;
+	key.textures = table_textures;
+	key.material_feedback = material_feedback_rid;
+	MaterialTable::Group *found = nullptr;
+	if (MaterialTable::Group **existing = table->groups.getptr(key)) {
+		found = *existing;
+	}
+	if (!found || found != group) {
+		_table_leave_group();
+		if (!found) {
+			found = memnew(MaterialTable::Group);
+			found->id = ++SceneShaderForwardClustered::singleton->material_group_last_id;
+			found->key = key;
+			table->groups.insert(key, found);
+		}
+		group = found;
+		group_member = found->members.size();
+		found->members.push_back(this);
+		changed = true;
+	}
+	if (group->uniform_set.is_null() || !rd->uniform_set_is_valid(group->uniform_set)) {
+		Vector<RD::Uniform> uniforms;
+		if (stride > 0) {
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.binding = 0;
+			u.append_id(table->pages[table_page].buffer);
+			uniforms.push_back(u);
+		}
+		const RID *textures = table_textures.ptr();
+		for (int i = 0, k = 0; i < shader_data->texture_uniforms.size(); i++) {
+			const int array_size = shader_data->texture_uniforms[i].array_size;
+			RD::Uniform u;
+			u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
+			u.binding = 1 + k;
+			if (array_size > 0) {
+				for (int j = 0; j < array_size; j++) {
+					u.append_id(textures[k++]);
+				}
+			} else {
+				u.append_id(textures[k++]);
+			}
+			uniforms.push_back(u);
+		}
+		group->uniform_set = rd->uniform_set_create(uniforms, shader_rid, RenderForwardClustered::MATERIAL_UNIFORM_SET);
+		rd->uniform_set_set_invalidation_callback(group->uniform_set, MaterialTable::_group_uniform_set_erased, group);
+	}
+	if (uniform_set != group->uniform_set) {
+		uniform_set = group->uniform_set;
+		changed = true;
+	}
+	return changed;
+}
+
 SceneShaderForwardClustered::MaterialData::~MaterialData() {
-	free_parameters_uniform_set(uniform_set);
+	MutexLock lock(SceneShaderForwardClustered::singleton_mutex);
+	_table_release();
 }
 
 RendererRD::MaterialStorage::MaterialData *SceneShaderForwardClustered::_create_material_func(ShaderData *p_shader) {

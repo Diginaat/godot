@@ -24,6 +24,10 @@ two together failed.
 
 For a buffer that a compute list writes afterwards, upload its initial
 contents with `buffer_update` from CPU data (the pattern the culling kernels
-already use) instead of a GPU `buffer_copy`. Run every new GPU path on D3D12
+already use) instead of a GPU `buffer_copy`. A GPU `buffer_clear` is fine:
+on D3D12 it is a UAV clear, the same state the compute list writes in. The
+GPU instance path clears its indirect commands that way and lets the cull
+write each command's index count (D039); `gpu_instances.ps1` passes on
+D3D12 with it. Run every new GPU path on D3D12
 as well as Vulkan before calling it done. When validation is silent,
 bisect with runtime switches in one build instead of one rebuild per guess.

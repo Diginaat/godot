@@ -37,7 +37,7 @@ $code = $LASTEXITCODE
 $kind = $(if ($Stages) { "stages" } else { "timing" }) + $(if ($Table) { "_table" } else { "" }) + $(if ($GpuInstances) { "_gpu" } else { "" })
 $lines | Set-Content (Join-Path $logs "instance_bench_${Label}_${Driver}_${RenderThread}_$kind.log")
 $rows = @($lines | Where-Object { $_ -match $(if ($Stages) { "^INSTANCE_BENCH_STAGES:" } else { "^INSTANCE_BENCH:" }) })
-$expected = if ($Stages) { 14 } else { 28 }
+$expected = if ($Stages) { 16 } else { 32 }
 $lines | Where-Object { $_ -match "^INSTANCE_BENCH_(SCENE|BUILD):" } | Write-Output
 $rows | Write-Output
 if ($code -ne 0 -or $rows.Count -ne $expected -or @($lines | Where-Object { $_ -match "ERROR:|SCRIPT ERROR:|INSTANCE_BENCH_FAIL" }).Count -gt 0) {

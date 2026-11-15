@@ -2,9 +2,9 @@ extends Node3D
 ## Many-instance CPU benchmark (devtools/test/instance_bench.ps1). Baseline for
 ## the GPU-driven renderer work (docs/renderer/). Separate MeshInstance3D nodes,
 ## not MultiMesh, so every instance goes through scene culling, shadow culling,
-## render-list building and draw submission on the CPU. Six cases, from a
-## small-scene regression guard to 100k nodes, with moving instances and many
-## lights. Each case has a static and an orbiting view; each is measured twice.
+## render-list building and draw submission on the CPU. Eight cases, from a
+## small-scene regression guard and many meshes with index LODs and few copies
+## each to 100k nodes, with moving instances and many lights. Each case has a static and an orbiting view; each is measured twice.
 ## Prints wall frame time, render CPU (viewport + frame setup), GPU time and
 ## draw counts as p50/p95/p99. With `--gpu-profile -- --stages` it instead
 ## prints the CPU time of each renderer stage (RENDER_TIMESTAMP markers).
@@ -16,9 +16,10 @@ const PROFILE_FRAMES := 60
 const SPACING := 2.0
 
 # name, nodes, meshes, materials (0 = one per node), moving nodes per frame, omni lights, shadowed spot lights,
-# nodes that change material per frame
+# nodes that change material per frame, meshes with generated index LODs (distinct spheres)
 const CASES := [
 	["small_1k", 1000, 1, 1, 0, 0, 0, 0],
+	["unique_lod_2k", 2000, 500, 4, 0, 0, 0, 0, true],
 	["shared_20k", 20000, 4, 4, 0, 0, 0, 0],
 	["unique_10k", 10000, 1, 0, 0, 0, 0, 0],
 	["massive_100k", 100000, 1, 1, 0, 0, 0, 0],
@@ -67,8 +68,21 @@ func _ready() -> void:
 	_run.call_deferred()
 
 
-func _meshes(count: int) -> Array[Mesh]:
+func _meshes(count: int, lods := false) -> Array[Mesh]:
 	var meshes: Array[Mesh] = []
+	if lods:
+		# A game level's props: many meshes, few copies each.
+		for i in count:
+			var sphere := SphereMesh.new()
+			sphere.radius = 0.6
+			sphere.height = 1.2
+			sphere.radial_segments = 24 + (i % 10) * 2
+			sphere.rings = 12 + (i / 10) % 50
+			var importer := ImporterMesh.new()
+			importer.add_surface(Mesh.PRIMITIVE_TRIANGLES, sphere.get_mesh_arrays())
+			importer.generate_lods(25.0, 60.0, [])
+			meshes.append(importer.get_mesh())
+		return meshes
 	for i in count:
 		match i % 4:
 			0:
@@ -111,7 +125,7 @@ func _build(spec: Array) -> void:
 	_root = Node3D.new()
 	add_child(_root)
 	var count: int = spec[1]
-	var meshes := _meshes(spec[2])
+	var meshes := _meshes(spec[2], spec.size() > 8 and spec[8])
 	var materials: Array[StandardMaterial3D] = []
 	for i in maxi(int(spec[3]), 1):
 		materials.append(_material(i))
