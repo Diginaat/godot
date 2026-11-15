@@ -390,7 +390,7 @@ implementation_data_block;
 
 struct InstanceData {
 	mat3x4 transform;
-	vec4 compressed_aabb_position_pad; // Only .xyz is used. .w is padding.
+	vec4 compressed_aabb_position_pad; // .xyz: compressed AABB position. .w: material table slot (uint bits).
 	vec3 compressed_aabb_size_pad; // Only .xyz is used. .w is padding.
 	uint material_feedback_index; // Index into the material feedback buffer.
 	vec4 uv_scale;

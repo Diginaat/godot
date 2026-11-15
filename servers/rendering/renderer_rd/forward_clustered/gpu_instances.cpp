@@ -78,6 +78,10 @@ uint32_t gpu_instance_indices_to_primitives(RSE::PrimitiveType p_primitive, uint
 	return (p_indices - subtractor[p_primitive]) / divisor[p_primitive];
 }
 
+// Words per member in GPUInstanceScenario::members (uvec4 in gpu_instance_cull.glsl):
+// table slot (UINT32_MAX: free), bucket, material table slot (D036), unused.
+constexpr uint32_t GPU_INSTANCE_MEMBER_WORDS = 4;
+
 // Marks the commands of moved members in GPUInstanceScenario::command_levels.
 constexpr uint8_t GPU_INSTANCE_MOVED_COMMAND = 0x80;
 
@@ -333,10 +337,10 @@ void RenderForwardClustered::_gpu_instances_unplace(GPUInstanceScenario &p_scena
 	p_instance->gpu_member_head = UINT32_MAX;
 	while (member != UINT32_MAX) {
 		const uint32_t next = p_scenario.member_next[member];
-		GPUInstanceBucket &bucket = p_scenario.buckets[p_scenario.members[member * 2 + 1]];
+		GPUInstanceBucket &bucket = p_scenario.buckets[p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 1]];
 		p_scenario.member_owner[member] = nullptr;
 		p_scenario.member_surface[member] = nullptr;
-		p_scenario.members[member * 2 + 0] = UINT32_MAX;
+		p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 0] = UINT32_MAX;
 		p_scenario.member_next[member] = bucket.free_head;
 		bucket.free_head = member;
 		bucket.live--;
@@ -383,8 +387,9 @@ bool RenderForwardClustered::_gpu_instances_place(GPUInstanceScenario &p_scenari
 		}
 		p_scenario.member_owner[member] = p_instance;
 		p_scenario.member_surface[member] = surface;
-		p_scenario.members[member * 2 + 0] = p_instance->gpu_slot;
-		p_scenario.members[member * 2 + 1] = index;
+		p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 0] = p_instance->gpu_slot;
+		p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 1] = index;
+		p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 2] = surface->material_slot;
 		p_scenario.member_next[member] = p_instance->gpu_member_head;
 		p_instance->gpu_member_head = member;
 		bucket.live++;
@@ -420,7 +425,7 @@ void RenderForwardClustered::_gpu_instances_update_members(GPUInstanceScenario &
 			if (i == changed.size() || changed[i] > changed[i - 1] + 1) {
 				const uint32_t from = changed[start];
 				const uint32_t to = changed[i - 1];
-				rd->buffer_update(p_scenario.members_buffer, from * 2 * sizeof(uint32_t), (to - from + 1) * 2 * sizeof(uint32_t), p_scenario.members.ptr() + from * 2);
+				rd->buffer_update(p_scenario.members_buffer, from * GPU_INSTANCE_MEMBER_WORDS * sizeof(uint32_t), (to - from + 1) * GPU_INSTANCE_MEMBER_WORDS * sizeof(uint32_t), p_scenario.members.ptr() + from * GPU_INSTANCE_MEMBER_WORDS);
 				start = i;
 			}
 		}
@@ -495,15 +500,17 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		bucket.live = bucket.count;
 		slots += bucket.capacity;
 	}
-	p_scenario.members.resize(slots * 2);
+	p_scenario.members.resize(slots * GPU_INSTANCE_MEMBER_WORDS);
 	p_scenario.member_owner.resize(slots);
 	p_scenario.member_surface.resize(slots);
 	p_scenario.member_next.resize(slots);
 	for (uint32_t b = 0; b < p_scenario.buckets.size(); b++) {
 		const GPUInstanceBucket &bucket = p_scenario.buckets[b];
 		for (uint32_t member = bucket.first; member < bucket.first + bucket.capacity; member++) {
-			p_scenario.members[member * 2 + 0] = UINT32_MAX;
-			p_scenario.members[member * 2 + 1] = b;
+			p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 0] = UINT32_MAX;
+			p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 1] = b;
+			p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 2] = 0;
+			p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 3] = 0;
 			p_scenario.member_owner[member] = nullptr;
 			p_scenario.member_surface[member] = nullptr;
 			p_scenario.member_next[member] = UINT32_MAX;
@@ -519,7 +526,8 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		GPUInstanceBucket &bucket = p_scenario.buckets[bucket_index];
 		const uint32_t member = bucket.first + in_bucket++;
 		GeometryInstanceForwardClustered *owner = static_cast<GeometryInstanceForwardClustered *>(entries[i].surface->owner);
-		p_scenario.members[member * 2 + 0] = entries[i].slot;
+		p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 0] = entries[i].slot;
+		p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 2] = entries[i].surface->material_slot;
 		p_scenario.member_owner[member] = owner;
 		p_scenario.member_surface[member] = entries[i].surface;
 		p_scenario.member_next[member] = owner->gpu_member_head;
@@ -592,7 +600,7 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		bool indirect;
 	};
 	const Grow grows[] = {
-		{ &p_scenario.members_buffer, &p_scenario.member_capacity, p_scenario.member_count, 64, 2 * sizeof(uint32_t), false },
+		{ &p_scenario.members_buffer, &p_scenario.member_capacity, p_scenario.member_count, 64, GPU_INSTANCE_MEMBER_WORDS * sizeof(uint32_t), false },
 		{ &p_scenario.buckets_buffer, &p_scenario.bucket_capacity, p_scenario.buckets.size(), 16, sizeof(GPUInstanceBucketData), false },
 		{ &p_scenario.commands_buffer, &p_scenario.command_capacity, p_scenario.commands.size() / 5, 16, 5 * sizeof(uint32_t), true },
 		{ &p_scenario.lod_edges_buffer, &p_scenario.lod_edge_capacity, p_scenario.lod_edges.size(), 16, sizeof(float), false },
@@ -997,7 +1005,7 @@ bool RenderForwardClustered::_gpu_instances_used_buckets(const GPUInstanceScenar
 			continue; // Not placed in this scenario.
 		}
 		for (; member != UINT32_MAX; member = p_scenario.member_next[member]) {
-			r_used[p_scenario.members[member * 2 + 1]] = 1;
+			r_used[p_scenario.members[member * GPU_INSTANCE_MEMBER_WORDS + 1]] = 1;
 		}
 	}
 	return true;

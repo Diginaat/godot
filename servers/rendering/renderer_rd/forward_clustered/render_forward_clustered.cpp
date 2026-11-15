@@ -1011,6 +1011,7 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 #endif
 
 		instance_data.set_compressed_aabb(surface_aabb);
+		memcpy(&instance_data.compressed_aabb_position[3], &surface->material_slot, sizeof(uint32_t));
 		instance_data.material_feedback_index = material_feedback_index;
 		instance_data.set_uv_scale(uv_scale);
 
@@ -5043,7 +5044,7 @@ void RenderForwardClustered::_update_global_pipeline_data_requirements_from_ligh
 	global_pipeline_data_required.use_shadow_dual_paraboloid = light_storage->get_shadow_dual_paraboloid_used();
 }
 
-void RenderForwardClustered::_geometry_instance_add_surface_with_material(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, uint32_t p_material_id, uint32_t p_shader_id, RID p_mesh) {
+void RenderForwardClustered::_geometry_instance_add_surface_with_material(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, uint32_t p_shader_id, RID p_mesh) {
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
 	uint32_t flags = 0;
 
@@ -5144,6 +5145,7 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 	sdcache->shader = p_material->shader_data;
 	sdcache->material = p_material;
 	sdcache->material_uniform_set = p_material->uniform_set;
+	sdcache->material_slot = p_material->table_slot;
 	sdcache->surface = mesh_storage->mesh_get_surface(p_mesh, p_surface);
 	sdcache->primitive = mesh_storage->mesh_surface_get_primitive(sdcache->surface);
 	sdcache->surface_index = p_surface;
@@ -5169,8 +5171,11 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material(Geomet
 	sdcache->sort.sort_key2 = 0;
 
 	sdcache->sort.surface_index = p_surface;
-	sdcache->sort.material_id_hi = (p_material_id & 0xFF000000) >> 24;
-	sdcache->sort.material_id_lo = (p_material_id & 0x00FFFFFF);
+	// Materials of a shader whose parameters share a table page and whose
+	// textures are the same draw alike (D036): the group, not the material.
+	const uint32_t material_id = p_material->get_group_id();
+	sdcache->sort.material_id_hi = (material_id & 0xFF000000) >> 24;
+	sdcache->sort.material_id_lo = (material_id & 0x00FFFFFF);
 	sdcache->sort.shader_id = p_shader_id;
 	sdcache->sort.geometry_id = p_mesh.get_local_index(); //only meshes can repeat anyway
 	sdcache->sort.uses_forward_gi = ginstance->can_sdfgi;
@@ -5200,7 +5205,7 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material_chain(
 	SceneShaderForwardClustered::MaterialData *material = p_material;
 	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
 
-	_geometry_instance_add_surface_with_material(ginstance, p_surface, material, p_mat_src.get_local_index(), material_storage->material_get_shader_id(p_mat_src), p_mesh);
+	_geometry_instance_add_surface_with_material(ginstance, p_surface, material, material_storage->material_get_shader_id(p_mat_src), p_mesh);
 
 	while (material->next_pass.is_valid()) {
 		RID next_pass = material->next_pass;
@@ -5211,7 +5216,7 @@ void RenderForwardClustered::_geometry_instance_add_surface_with_material_chain(
 		if (ginstance->data->dirty_dependencies) {
 			material_storage->material_update_dependency(next_pass, &ginstance->data->dependency_tracker);
 		}
-		_geometry_instance_add_surface_with_material(ginstance, p_surface, material, next_pass.get_local_index(), material_storage->material_get_shader_id(next_pass), p_mesh);
+		_geometry_instance_add_surface_with_material(ginstance, p_surface, material, material_storage->material_get_shader_id(next_pass), p_mesh);
 	}
 }
 

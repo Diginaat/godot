@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-15 (GPU-first renderer: material parameter tables, D036)
+
+* Forward+ material parameters moved from one UBO per material to per-shader
+  storage-buffer tables with shared uniform sets; `unique_10k` render CPU
+  7.5-8.1 to 0.42-0.47 ms, draws 8,776 to 11, D3D12 video memory 734-822 to
+  130.7 MiB. [Finding](/project/material-parameter-tables.md).
+* Startup crash during the work found with a map file and dumpbin, no
+  symbol build. [Success](/successes/map-file-crash-location.md).
+
 ## 2026-11-10 (GPU-first renderer, Phase 0)
 
 * **Started**: GPU-driven Forward+ work on `dev-gpu-renderer`, tracked in

@@ -748,3 +748,49 @@ is slightly slower: render CPU +0.02 to +0.19 ms, GPU about +0.1 ms, mostly
 the HZB and the occlusion tests without anything to occlude.
 Not done: the editor's own viewports were checked only by the smoke test;
 `unique_10k` (one bucket per material) gains little.
+
+## D036 — Material parameter tables for Forward+ scene shaders
+
+2026-11-15. `unique_10k` (10,000 `StandardMaterial3D`s of one shader that
+differ only in `albedo_color`) drew one bucket per material: 8,776 draws,
+each with its own pipeline lookup, material uniform set bind and push
+constant, render CPU 7.5-8.1 ms and a 12.8-13.7 ms frame on the GPU path.
+Every material also owned a UBO; D3D12 reported 734-822 MiB of video
+memory in that case.
+
+Decision: in Forward+ the std140 `MaterialUniforms` block of a scene shader
+is a struct array in a storage buffer, one slot per material, and the
+shader reads `material_table.data[material_slot]` (`#define material`, so
+the compiler's generated code is unchanged). The slot travels in the spare
+word of the instance data (`compressed_aabb_position_pad.w`): written per
+element by `_fill_instance_data()` and per member by the GPU path's cull
+pass (members are four words now: table slot, bucket, material slot,
+unused). Slots live in pages per shader (`SceneShaderForwardClustered::
+MaterialTable`): 16 slots, doubling to 4,096, never resized, so their
+uniform sets stay valid. Materials of one page whose textures are the same
+share one uniform set (a group). The group id replaces the material id in
+the render sort key, so the CPU list merges them into instanced repeats
+and the GPU path into one bucket.
+
+Rules: a material with texture streaming feedback keeps a group of its own
+(feedback is per material and the GPU path takes it per bucket). The shared
+shadow material and the debug draw materials have no parameters, so the
+slot they get (the surface material's) is never read. Material storage
+outside Forward+ (Mobile, canvas, sky, fog, the path
+tracer's own pool) is unchanged. A group's uniform set that RD erases (a
+texture freed, the shader recompiled) requeues all of its members; new
+shader code with another parameter size gets a new table and the materials
+move at their next update.
+
+Measured (RTX 3060, Vulkan, instance bench, p50): `unique_10k` render CPU
+7.5-8.1 to 0.42-0.47 ms, frame 12.8-13.7 to 0.84-0.86 ms, GPU 1.05 to
+0.49 ms, draws 8,776 to 11, shadow draws about 10.5k to 12-23, video
+memory in that case 241.6 to 124.0 MiB; D3D12 render CPU 0.38-0.41 ms,
+130.7 MiB. `shared_20k` draws 17 to 5 (its four materials merge). Other
+cases within run-to-run spread. `gpu_instances.ps1` (13 of 13 images and
+the motion vectors equal to the CPU path) on Vulkan and D3D12, the
+large-world suite and the standard smoke pass.
+Not done: GPU time of storage-buffer against UBO reads in heavy fragment
+shaders was not measured on its own (it did not show in these cases);
+materials that differ in textures still draw separately (bindless textures
+would be the next step); Mobile keeps per-material UBOs.

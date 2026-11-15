@@ -71,7 +71,7 @@ layout(set = 0, binding = 0, std430) restrict readonly buffer Table {
 table;
 
 layout(set = 0, binding = 1, std430) restrict readonly buffer Members {
-	uvec2 data[]; // Table slot, bucket.
+	uvec4 data[]; // Table slot, bucket, material table slot, unused.
 }
 members;
 
@@ -205,7 +205,7 @@ void main() {
 	if (index >= params.member_count) {
 		return;
 	}
-	uvec2 member = members.data[index];
+	uvec4 member = members.data[index];
 	if (member.x == 0xFFFFFFFFu || (visible.bits[member.x >> 5] & (1u << (member.x & 31u))) == 0) {
 		return; // A free member slot, or not drawn in this view.
 	}
@@ -232,7 +232,7 @@ uint cull_member(uint index, out uint r_primitives) {
 	if (index >= params.member_count) {
 		return 0;
 	}
-	uvec2 member = members.data[index];
+	uvec4 member = members.data[index];
 	if (member.x == 0xFFFFFFFFu) {
 		return 0; // A free member slot.
 	}
@@ -259,7 +259,7 @@ uint cull_member(uint index, out uint r_primitives) {
 		}
 		InstanceData data;
 		data.transform = record.transform;
-		data.compressed_aabb_position_pad = vec4(bucket.compressed_aabb_position, 0.0);
+		data.compressed_aabb_position_pad = vec4(bucket.compressed_aabb_position, uintBitsToFloat(member.z)); // .w: material table slot (D036).
 		data.compressed_aabb_size = bucket.compressed_aabb_size;
 		data.material_feedback_index = bucket.material_feedback_index;
 		data.uv_scale = bucket.uv_scale;

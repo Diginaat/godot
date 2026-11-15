@@ -17,12 +17,19 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Item | Value |
 | --- | --- |
 | Branch | `dev-gpu-renderer` (from `dev` at `4bc2a22774`) |
-| Phase | 5.1 HZB occlusion of GPU path instances for the colour passes done (2026-11-10, D034); 6.1-6.3 shadow casters on the GPU path done; Phases 1 and 2 done |
+| Phase | Material parameter tables done (2026-11-15, D036: `unique_10k` one bucket per table page instead of per material); 5.1 HZB occlusion done (D034); 6.1-6.3 shadow casters on the GPU path done; Phases 1 and 2 done |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | `unique_10k` (many materials: one bucket each, almost no gain; the maintainer's priority); 5.2 depth-pass savings and an occluder bench; Phase 3 multi-draw (roadmap.md) |
-| Last verified build | Production editor and the separate tests build (`extra_suffix=tests`), 2026-11-10 |
-| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (42 camera and 42 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, HZB occlusion behind a wall, spot and omni shadows, casters behind the camera and per-frame churn without rebuilds; 13 of 13 images, shadow render info over 12 frames and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), large-world suites on Vulkan and D3D12, standard smoke, 2026-11-10 |
+| Next | Phase 3 multi-draw (buckets of one pipeline, e.g. `shared_20k`'s 4 meshes); materials with different textures still draw apart (bindless textures); a heavy-fragment GPU check of D036's storage-buffer reads; 5.2 depth-pass savings |
+| Last verified build | Production editor, 2026-11-15 |
+| Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (42 camera and 42 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, HZB occlusion behind a wall, spot and omni shadows, casters behind the camera and per-frame churn without rebuilds; 13 of 13 images, shadow render info over 12 frames and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), large-world suites on Vulkan and D3D12, standard smoke, 2026-11-10; after D036 (2026-11-15): `gpu_instances.ps1` Vulkan and D3D12, large-world Vulkan, standard smoke, instance bench Vulkan and D3D12 |
+
+## Material tables in one line
+
+D036: one storage-buffer slot per material, uniform sets shared per page
+and texture set, group id in the sort key: `unique_10k` render CPU 7.5-8.1
+to 0.42-0.47 ms, frame 13 to 0.85 ms, draws 8,776 to 11. Details:
+[benchmarks.md](benchmarks.md).
 
 ## Shadows in one line
 

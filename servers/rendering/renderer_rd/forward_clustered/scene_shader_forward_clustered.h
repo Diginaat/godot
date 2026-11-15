@@ -151,6 +151,50 @@ public:
 		};
 	};
 
+	struct MaterialData;
+
+	// D036: the parameters (the std140 MaterialUniforms block) of all materials
+	// of one shader, one slot each, in pages of storage buffers that never
+	// move. Materials of one page with the same textures share a uniform set
+	// (a group); its id replaces the material id in the render sort key, so
+	// they draw together and the instance data says which slot to read.
+	// Shared by the shader and its materials: the shader can go first.
+	struct MaterialTable {
+		static constexpr uint32_t FIRST_PAGE_SLOTS = 16;
+		static constexpr uint32_t MAX_PAGE_SLOTS = 4096;
+
+		struct Page {
+			RID buffer;
+			uint32_t capacity = 0;
+			uint32_t used = 0; // Slots handed out at least once.
+			LocalVector<uint32_t> free_slots;
+		};
+		struct GroupKey {
+			uint32_t page = 0;
+			Vector<RID> textures;
+			// Texture streaming feedback is per material: such materials keep a group of their own.
+			RID material_feedback;
+			bool operator==(const GroupKey &p_other) const { return page == p_other.page && material_feedback == p_other.material_feedback && textures == p_other.textures; }
+			uint32_t hash() const;
+		};
+		struct Group {
+			uint32_t id = 0;
+			GroupKey key;
+			RID uniform_set;
+			LocalVector<MaterialData *> members;
+		};
+
+		uint32_t refcount = 1;
+		uint32_t stride = 0; // ShaderData::ubo_size.
+		LocalVector<Page> pages;
+		HashMap<GroupKey, Group *> groups;
+
+		void allocate_slot(uint32_t &r_page, uint32_t &r_slot);
+		void free_slot(uint32_t p_page, uint32_t p_slot);
+		static void unref(MaterialTable *p_table);
+		static void _group_uniform_set_erased(void *p_group);
+	};
+
 	struct ShaderData : public RendererRD::MaterialStorage::ShaderData {
 		enum DepthDraw {
 			DEPTH_DRAW_DISABLED,
@@ -234,6 +278,7 @@ public:
 
 		Vector<uint32_t> ubo_offsets;
 		uint32_t ubo_size = 0;
+		MaterialTable *material_table = nullptr; // Slots of ubo_size bytes.
 
 		String code;
 
@@ -404,7 +449,19 @@ public:
 
 	struct MaterialData : public RendererRD::MaterialStorage::MaterialData {
 		ShaderData *shader_data = nullptr;
-		RID uniform_set;
+		RID uniform_set; // The group's.
+		// Material table (D036): this material's parameter slot and group.
+		MaterialTable *table = nullptr;
+		uint32_t table_page = UINT32_MAX;
+		uint32_t table_slot = 0; // In the page; what the instance data carries.
+		MaterialTable::Group *group = nullptr;
+		uint32_t group_member = 0; // Index in group->members.
+		Vector<uint8_t> table_ubo;
+		Vector<RID> table_textures;
+		// Sort key id: materials with the same id draw alike (0: no uniform set).
+		uint32_t get_group_id() const { return group ? group->id : 0; }
+		void _table_leave_group();
+		void _table_release();
 		uint64_t last_pass = 0;
 		uint32_t index = 0;
 		RID next_pass;
@@ -422,6 +479,7 @@ public:
 
 	SceneForwardClusteredShaderRD shader;
 	ShaderCompiler compiler;
+	uint32_t material_group_last_id = 0;
 	bool emulate_point_size = false;
 	bool depth_prepass_enabled = false;
 

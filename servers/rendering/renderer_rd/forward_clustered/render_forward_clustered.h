@@ -833,6 +833,7 @@ protected:
 
 		void *surface = nullptr;
 		RID material_uniform_set;
+		uint32_t material_slot = 0; // Parameter slot in the material table page (D036).
 		SceneShaderForwardClustered::ShaderData *shader = nullptr;
 		SceneShaderForwardClustered::MaterialData *material = nullptr;
 
@@ -1052,7 +1053,7 @@ protected:
 		uint32_t free_members = 0; // Used slots that are free (left gaps).
 		bool reps_dirty = false;
 		LocalVector<GPUInstanceBucketData> bucket_data;
-		LocalVector<uint32_t> members; // Table slot (UINT32_MAX: free) and bucket per member slot.
+		LocalVector<uint32_t> members; // Per member slot: table slot (UINT32_MAX: free), bucket, material slot, unused.
 		LocalVector<uint32_t> commands; // Five words per bucket level, zero instances.
 		LocalVector<uint8_t> command_levels; // Index LOD of each command, plus GPU_INSTANCE_MOVED_COMMAND (validation).
 		LocalVector<uint32_t> command_depth; // Per command, its depth pre-pass twin or UINT32_MAX (UINT32_MAX - 1 for the twins).
@@ -1224,7 +1225,7 @@ protected:
 
 	void _update_global_pipeline_data_requirements_from_project();
 	void _update_global_pipeline_data_requirements_from_light_storage();
-	void _geometry_instance_add_surface_with_material(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, uint32_t p_material_id, uint32_t p_shader_id, RID p_mesh);
+	void _geometry_instance_add_surface_with_material(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, uint32_t p_shader_id, RID p_mesh);
 	void _geometry_instance_add_surface_with_material_chain(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, SceneShaderForwardClustered::MaterialData *p_material, RID p_mat_src, RID p_mesh);
 	void _geometry_instance_add_surface(GeometryInstanceForwardClustered *ginstance, uint32_t p_surface, RID p_material, RID p_mesh);
 	void _geometry_instance_update(RenderGeometryInstance *p_geometry_instance);

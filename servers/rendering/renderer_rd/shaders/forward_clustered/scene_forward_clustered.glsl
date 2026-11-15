@@ -117,11 +117,19 @@ layout(location = 8) out vec4 prev_screen_position;
 #endif
 
 #ifdef MATERIAL_UNIFORMS_USED
+// The parameters of all materials of this shader, one std140 block per
+// material slot (D036). The draw's instance data holds the slot.
 /* clang-format off */
-layout(set = MATERIAL_UNIFORM_SET, binding = 0, std140) uniform MaterialUniforms {
+struct MaterialUniforms {
 #MATERIAL_UNIFORMS
-} material;
+};
 /* clang-format on */
+layout(set = MATERIAL_UNIFORM_SET, binding = 0, std140) restrict readonly buffer MaterialTable {
+	MaterialUniforms data[];
+}
+material_table;
+uint material_slot;
+#define material material_table.data[material_slot]
 #endif
 
 float global_time;
@@ -779,6 +787,9 @@ void main() {
 	}
 
 	instance_index_interp = instance_index;
+#ifdef MATERIAL_UNIFORMS_USED
+	material_slot = floatBitsToUint(SCENE_INSTANCE(compressed_aabb_position_pad).w);
+#endif
 
 #ifdef MOTION_VECTORS
 	// Previous vertex.
@@ -1000,11 +1011,19 @@ layout(location = 14) in vec2 point_coord_interp;
 #endif
 
 #ifdef MATERIAL_UNIFORMS_USED
+// The parameters of all materials of this shader, one std140 block per
+// material slot (D036). The draw's instance data holds the slot.
 /* clang-format off */
-layout(set = MATERIAL_UNIFORM_SET, binding = 0, std140) uniform MaterialUniforms {
+struct MaterialUniforms {
 #MATERIAL_UNIFORMS
-} material;
+};
 /* clang-format on */
+layout(set = MATERIAL_UNIFORM_SET, binding = 0, std140) restrict readonly buffer MaterialTable {
+	MaterialUniforms data[];
+}
+material_table;
+uint material_slot;
+#define material material_table.data[material_slot]
 #endif
 
 #GLOBALS
@@ -1144,6 +1163,9 @@ vec3 encode24(vec3 v) {
 
 void fragment_shader(in SceneData scene_data) {
 	uint instance_index = instance_index_interp;
+#ifdef MATERIAL_UNIFORMS_USED
+	material_slot = floatBitsToUint(SCENE_INSTANCE(compressed_aabb_position_pad).w);
+#endif
 
 #ifdef PREMUL_ALPHA_USED
 	float premul_alpha = 1.0;

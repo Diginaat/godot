@@ -109,6 +109,9 @@ public:
 		//to be used internally by update_parameters, in the most common configuration of material parameters
 		bool update_parameters_uniform_set(const HashMap<StringName, Variant> &p_parameters, bool p_uniform_dirty, bool p_textures_dirty, const HashMap<StringName, ShaderLanguage::ShaderNode::Uniform> &p_uniforms, const uint32_t *p_uniform_offsets, const Vector<ShaderCompiler::GeneratedCode::Texture> &p_texture_uniforms, const HashMap<StringName, HashMap<int, RID>> &p_default_texture_params, uint32_t p_ubo_size, RID &r_uniform_set, RID p_shader, uint32_t p_shader_uniform_set, bool p_use_linear_color, bool p_3d_material);
 		void free_parameters_uniform_set(RID p_uniform_set);
+		// For uniform sets shared by several materials: what the erase callback
+		// of a material's own set does (queue an update, notify dependents).
+		void notify_uniform_set_erased() { MaterialStorage::_material_uniform_set_erased(&self); }
 		RID material_feedback_rid;
 
 	private:

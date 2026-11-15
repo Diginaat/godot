@@ -3,6 +3,7 @@
 * [Project overview](/project/overview.md) - what this fork is, its sources, branches and release flow
 * [Modern compact editor theme](/project/modern-compact-editor-theme.md) - neutral charcoal native theme with compact spacing and restrained interaction accents
 * [Native indirect foundation](/project/native-indirect-foundation.md) - existing GPU submission seam, sentinel defect and per-view culling constraints
+* [Forward+ material parameter tables](/project/material-parameter-tables.md) - one storage-buffer slot per material, shared uniform sets; unique_10k 8,776 draws to 11, render CPU 7.5-8.1 to 0.42-0.47 ms
 * [Native GPU geometry statistics](/project/gpu-geometry-statistics.md) - async per-viewport culling/CLOD/HZB counters, only while polled
 * [Native MultiMesh culling](/project/native-multimesh-culling.md) - opt-in GPU frustum tests, stable IDs, viewport-owned commands and fallback
 * [Cluster hierarchy cooker](/project/cluster-hierarchy-cooker.md) - source-index LOD trees, boundary locks, checked resource and complete reference cuts
