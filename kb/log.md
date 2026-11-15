@@ -1,5 +1,17 @@
 # Update log
 
+## 2026-11-15 (GPU path on game levels, D038)
+
+* **Implemented**: the GPU path draws only the commands a listed member can
+  fill (CPU copy of the cull's LOD choice, walked when the instances are
+  not many more than the commands), per-pass shadow stats, and
+  `gpu_instances/shadow_min_casters` (small shadow passes on the CPU list).
+  Game level loss 0.27-0.30 to 0.05-0.12 ms; new bench case
+  `unique_lod_2k`. docs/renderer/benchmarks.md, D038.
+* **Finding**: the loss was the shadow passes' fixed cost (omni cube
+  faces), not the empty draws the earlier entry suspected.
+  [Mistake](/mistakes/separate-runs-order-bias.md).
+
 ## 2026-11-15 (GPU path on a real level)
 
 * **Finding**: in a game level with many unique meshes and few copies each,

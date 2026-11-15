@@ -7,8 +7,9 @@ extends Node3D
 ## nodes replaced and materials swapped every frame (no bucket rebuilds),
 ## an occluder (the GPU path draws what the scene cull found visible),
 ## HZB occlusion behind a wall (left out of the colour passes, on from then on),
-## spot and omni shadows, casters behind the camera (drawn only by the
-## shadow passes),
+## many meshes with few copies each (also with a motion pass), spot and
+## omni shadows (also drawn from the CPU list), casters behind the camera
+## (drawn only by the shadow passes),
 ## TAA and FSR 2 (a motion pass), compared through their motion vectors, a second view of the same world and a
 ## view of another world. Every 30 frames the engine compares what the GPU
 ## path drew with what the CPU cull found visible (GPU_INSTANCES_CHECK). After
@@ -40,6 +41,8 @@ func _ready() -> void:
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", true)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/validate", 2 if self_test else 1)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", false) # On from the HZB phase.
+	# Every shadow pass on the GPU path, small ones too, so that the checks see them.
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/shadow_min_casters", 0)
 	_meshes.append(BoxMesh.new())
 	var sphere := SphereMesh.new()
 	sphere.radial_segments = 16
@@ -145,8 +148,13 @@ func _statistics() -> Dictionary:
 # Shadow casters drawn in 12 frames, as the render info counts them. Which
 # shadow passes a frame draws repeats (moving lights, cached far cascades),
 # and the GPU path's count arrives a few frames late, so single frames of
-# the two paths do not match; sums over whole cycles do.
+# the two paths do not match; sums over whole cycles do. The capture before
+# it stalls for its readback, which changes that delay by a frame: 12 frames
+# first, so that the window starts with a steady delay (12, so that the
+# three-frame light cycle and the four-frame cascade cycle stay in step).
 func _shadow_objects() -> int:
+	for frame in 12:
+		await RenderingServer.frame_post_draw
 	var total := 0
 	for frame in 12:
 		await RenderingServer.frame_post_draw
@@ -233,7 +241,30 @@ func _run(self_test: bool) -> void:
 	await _wait(PHASE_FRAMES)
 	print("GPU_INSTANCES_PHASE: index LODs and shadow meshes")
 	await _compare("index LODs and shadow meshes")
+	# Many meshes with few copies each (the props of a game level): the views
+	# walk their listed instances and draw only the commands a surface chooses,
+	# which the count checks (per index LOD, and nothing culled into a command
+	# without a draw), the image and the motion vectors must confirm.
+	# Put back afterwards (meshes and transforms, taken once the nodes stop
+	# moving, as they would here), so that the later phases see the same scene
+	# as without this one.
 	_moving = 0
+	var before: Array[Mesh] = []
+	var before_transforms: Array[Transform3D] = []
+	for node in _nodes:
+		before.append(node.mesh)
+		before_transforms.append(node.transform)
+	var unique := _unique_lod_meshes(150)
+	for i in _nodes.size():
+		_nodes[i].mesh = unique[i % unique.size()]
+	await _wait(PHASE_FRAMES)
+	print("GPU_INSTANCES_PHASE: %d meshes with index LODs, about %d copies each" % [unique.size(), _nodes.size() / unique.size()])
+	await _compare("many meshes, few copies")
+	await _compare_motion(true)
+	for i in _nodes.size():
+		_nodes[i].mesh = before[i]
+		_nodes[i].transform = before_transforms[i]
+	await _wait(PHASE_FRAMES)
 	for i in 300:
 		var node: MeshInstance3D = _nodes.pop_back()
 		node.queue_free()
@@ -315,6 +346,13 @@ func _run(self_test: bool) -> void:
 	await _wait(PHASE_FRAMES)
 	print("GPU_INSTANCES_PHASE: spot and omni shadows")
 	await _compare("positional shadows")
+	# The same passes from the CPU list (fewer casters than the setting), with
+	# the camera view still on the GPU path.
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/shadow_min_casters", 1000000)
+	await _wait(PHASE_FRAMES)
+	print("GPU_INSTANCES_PHASE: shadow passes on the CPU list")
+	await _compare("shadow passes on the CPU list")
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/shadow_min_casters", 0)
 	for light in _shadow_lights:
 		light.queue_free()
 	_shadow_lights = []
@@ -436,6 +474,20 @@ func _lod_mesh() -> Mesh:
 	importer.generate_lods(25.0, 60.0, [])
 	print("GPU_INSTANCES_PHASE: LOD mesh with %d index LODs" % importer.get_surface_lod_count(0))
 	return importer.get_mesh()
+
+
+# Distinct small spheres with generated index LODs.
+func _unique_lod_meshes(p_count: int) -> Array[Mesh]:
+	var meshes: Array[Mesh] = []
+	for i in p_count:
+		var sphere := SphereMesh.new()
+		sphere.radial_segments = 24 + (i % 10) * 2
+		sphere.rings = 12 + (i / 10) % 15
+		var importer := ImporterMesh.new()
+		importer.add_surface(Mesh.PRIMITIVE_TRIANGLES, sphere.get_mesh_arrays())
+		importer.generate_lods(25.0, 60.0, [])
+		meshes.append(importer.get_mesh())
+	return meshes
 
 
 # Meshes with a separate shadow mesh: one whose shadow mesh has other index

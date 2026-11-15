@@ -41,3 +41,4 @@ What worked is in [successes](/successes/).
 * [A single-frame render info comparison passed by timing luck](/mistakes/single-frame-render-info-comparison.md) - compare late or cyclic counters as sums over whole cycles; isolate parts with switches in one build
 * [The viewport's GPU time missed work recorded before the viewport](/mistakes/viewport-time-misses-pre-viewport-work.md) - measure whole-frame GPU time for features that record work outside the viewport; never one GPU timestamp per object
 * [A benchmark ran with the feature it measures inactive](/mistakes/bench-without-the-feature-active.md) - check counters and timings are nonzero before printing numbers; shared mesh+material batches CLOD objects out of CLOD
+* [Separate runs had an order bias; a draw count was taken for the cost](/mistakes/separate-runs-order-bias.md) - alternate A/B settings inside one process with an A/A floor; remove the suspected counter and measure again before naming a cause

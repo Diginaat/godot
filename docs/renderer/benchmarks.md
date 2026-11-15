@@ -313,6 +313,42 @@ the scene update, all upstream paths without a single large cost. Bigger
 gains need fewer calls per moved object (MultiMesh, or physics writing
 render transforms in bulk), not faster ones.
 
+### A game level: many meshes, few copies (D038), 2026-11-15
+
+The public Overgrown Subway demo (1,555 mesh instances, 354 meshes, 35
+materials, imported with index LODs and shadow meshes; 1080p, MSAA 2x,
+DDGI; RTX 3060, Vulkan) was 0.27-0.30 ms slower on the GPU path than on the
+CPU path, with 873 against 413 draws. Measured in one process, the setting
+flipped every 30 frames (20 measured), 40 blocks per view, so that slow
+drift (clocks, the scene's flickering lights) falls on both sides; an A/A
+run of a setting that does nothing gives up to 0.06 ms. Separate runs were
+useless at this size: the second run of a pair was 0.2-0.3 ms slower
+whichever came first.
+
+Where the 0.3 ms went (whole-frame GPU timestamps, safe render thread):
+the shadow passes. Without the two omni lights' shadows the paths were
+within noise; with them, about 12 small cube-face passes each paid the GPU
+path's fixed cost per pass (an 80 KB command upload, the visible bits, a
+cull over every member, a readback, the barriers between them). The empty
+LOD draws doubled the draw count but cost little GPU time: with them gone
+(main draws 413, as the CPU path) the loss was still 0.25-0.3 ms.
+
+| GPU path minus CPU path, GPU p50 (5 runs, median) | start | middle | far end |
+| --- | --- | --- | --- |
+| Before | +0.29 ms | +0.27 ms | +0.30 ms |
+| Commands only where a member can land, per-pass stats, passes under 256 casters on the CPU list | +0.05 ms | +0.12 ms | +0.08 ms |
+| Same, every shadow pass on the CPU list (1 run) | +0.06 ms | +0.05 ms | +0.00 ms |
+
+The rest is the camera view's own cull and the cascades' fixed cost; the
+next step is one upload and one dispatch for all shadow passes of a render.
+
+`unique_lod_2k` (new bench case: 2,000 nodes, 500 distinct spheres with
+generated index LODs, 4 copies each; Vulkan, p50): GPU path render CPU
+1.07-1.34 ms against 1.40-1.68 ms on the CPU path, frame 2.12-2.66 against
+2.25-2.89 ms, GPU 0.45-0.48 ms on both, draws 974-1,075 against 1,172-1,378.
+The other cases are within their spread of the D036 numbers (`unique_10k`
+render CPU 0.41-0.42 ms, `massive_100k` 1.34-1.67 ms).
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

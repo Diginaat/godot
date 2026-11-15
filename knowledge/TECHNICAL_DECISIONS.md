@@ -794,3 +794,43 @@ Not done: GPU time of storage-buffer against UBO reads in heavy fragment
 shaders was not measured on its own (it did not show in these cases);
 materials that differ in textures still draw separately (bindless textures
 would be the next step); Mobile keeps per-material UBOs.
+
+## D038 — The GPU path draws only commands a member can fill, and leaves small shadow passes to the CPU list
+
+Date: 2026-11-15. Branch: `dev-gpu-renderer`.
+
+A game level with many meshes and few copies each was 0.27-0.30 ms of GPU
+time slower on the GPU path than on the CPU path. Two causes: every bucket
+drew one indirect command per index LOD (twice with a motion pass), most of
+them empty; and every shadow pass paid a fixed cost (command upload, a cull
+over every member, a readback, barriers) that small passes such as omni
+cube faces do not recover. The shadow passes also shared one stats buffer,
+so their culls waited for each other.
+
+Decision:
+- When a view lists not more than eight times as many instances as its
+  buckets have commands, the CPU walks the listed instances and marks per
+  bucket the commands the cull can fill: the level `member_command()`
+  chooses from the same inputs (the table record holds `transformed_aabb`
+  and `lod_model_scale * lod_bias`), both levels within 0.1% of a threshold,
+  and the moved set only for members that moved in a view with a motion
+  pass. Only those commands get an element. Above that ratio a bucket's
+  commands are cheap next to its instances and all are drawn.
+- Validation reads back the commands and reports members culled into a
+  command that got no element, in camera views and shadow passes.
+- Each shadow view has its own stats buffer; the readbacks of a frame are
+  added up.
+- `rendering/geometry/gpu_instances/shadow_min_casters` (256): a shadow pass
+  with fewer GPU path casters draws them from the CPU list, which the
+  scene cull already lists them for.
+
+Measured: see benchmarks.md, "A game level: many meshes, few copies".
+Loss 0.27-0.30 to 0.05-0.12 ms on the level; `unique_lod_2k` render CPU
+1.40-1.68 to 1.07-1.34 ms against the CPU path. `gpu_instances.ps1` (15 of
+15 images, the motion vectors, a phase of 150 LOD meshes with about 20
+copies, shadow passes on the CPU list) passes on Vulkan and D3D12; with
+the level mask forced to level 0 it fails by images, motion vectors and
+the new check.
+Not done: one upload and one dispatch for all shadow passes of a render
+(the rest of the per-pass cost); the camera view's own cost (about
+0.05 ms on the level).

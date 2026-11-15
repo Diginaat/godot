@@ -18,7 +18,7 @@ $logs = Join-Path $Out "large_world"
 New-Item -ItemType Directory -Force $logs | Out-Null
 $ErrorActionPreference = "Continue"
 
-$lines = & $editor --path $project --rendering-driver $Driver --quit-after 4200 res://gpu_instances.tscn 2>&1 | ForEach-Object { "$_" }
+$lines = & $editor --path $project --rendering-driver $Driver --quit-after 5200 res://gpu_instances.tscn 2>&1 | ForEach-Object { "$_" }
 $code = $LASTEXITCODE
 $lines | Set-Content (Join-Path $logs "gpu_instances_$Driver.log")
 # Counts must have compared real draws.
@@ -56,12 +56,12 @@ $shadowPairs = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_SHADOW_INFO: 
 $shadowInfo = @($shadowPairs | Where-Object { $_.Gpu -eq $_.Cpu })
 $done = @($lines | Where-Object { $_ -match "^GPU_INSTANCES_TEST_DONE: .* 0 image differences" })
 # Thirteen phases with an image comparison each, two count checks per phase.
-if ($code -ne 0 -or $errors.Count -gt 0 -or $done.Count -ne 1 -or $equal.Count -ne 13 -or $hzb.Count -ne 1 -or $checks.Count -lt 24 -or $shadowChecks.Count -lt 10 -or $shadowInfo.Count -lt 6 -or $shadowInfo.Count -ne $shadowPairs.Count -or $casters.Count -ne 1 -or -not $incremental -or $occluded.Count -ne 1 -or $lods.Count -eq 0 -or $shadows.Count -eq 0 -or $moved.Count -eq 0 -or $vectors.Count -ne 2 -or $info.Count -lt 8) {
+if ($code -ne 0 -or $errors.Count -gt 0 -or $done.Count -ne 1 -or $equal.Count -ne 15 -or $hzb.Count -ne 1 -or $checks.Count -lt 24 -or $shadowChecks.Count -lt 10 -or $shadowInfo.Count -lt 6 -or $shadowInfo.Count -ne $shadowPairs.Count -or $casters.Count -ne 1 -or -not $incremental -or $occluded.Count -ne 1 -or $lods.Count -eq 0 -or $shadows.Count -eq 0 -or $moved.Count -eq 0 -or $vectors.Count -ne 3 -or $info.Count -lt 8) {
 	$lines | Where-Object { $_ -match "ERROR|GPU_INSTANCES" } | Write-Output
-	Write-Result "GPU instances ($Driver)" $false "exit $code, $($checks.Count) count checks, $($equal.Count) of 13 images equal, HZB occlusion $($hzb.Count), $($shadowChecks.Count) shadow checks, $($shadowInfo.Count) shadow render info matches, offscreen casters cast $($casters.Count) times, occluder hid objects $($occluded.Count) times, churn rebuilds $($churn -join '/'), $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($vectors.Count) motion vector comparisons equal, $($info.Count) render info checks; see devtools/out/large_world"
+	Write-Result "GPU instances ($Driver)" $false "exit $code, $($checks.Count) count checks, $($equal.Count) of 15 images equal, HZB occlusion $($hzb.Count), $($shadowChecks.Count) shadow checks, $($shadowInfo.Count) shadow render info matches, offscreen casters cast $($casters.Count) times, occluder hid objects $($occluded.Count) times, churn rebuilds $($churn -join '/'), $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($vectors.Count) motion vector comparisons equal, $($info.Count) render info checks; see devtools/out/large_world"
 	exit 1
 }
-Write-Result "GPU instances ($Driver)" $true "$($checks.Count) count checks ($($shadowChecks.Count) shadow checks, $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($info.Count) render info checks), $($hzb[0] -replace '^GPU_INSTANCES_HZB: ', 'HZB '), 13 of 13 images and the TAA and FSR 2 motion vectors equal to the CPU path, no rebuild while $($churn.Count) checks ran during churn: moves, layers, hidden, ineligible and back, index LODs and shadow meshes, free and add, churn, occluder, HZB occlusion, spot and omni shadows, casters behind the camera, TAA, FSR 2 motion pass, more views"
+Write-Result "GPU instances ($Driver)" $true "$($checks.Count) count checks ($($shadowChecks.Count) shadow checks, $($lods.Count) with index LODs, $($shadows.Count) with shadow meshes, $($moved.Count) with a motion pass, $($info.Count) render info checks), $($hzb[0] -replace '^GPU_INSTANCES_HZB: ', 'HZB '), 15 of 15 images and the TAA and FSR 2 (twice) motion vectors equal to the CPU path, no rebuild while $($churn.Count) checks ran during churn: moves, layers, hidden, ineligible and back, index LODs and shadow meshes, many meshes with few copies, free and add, churn, occluder, HZB occlusion, spot and omni shadows, shadow passes on the CPU list, casters behind the camera, TAA, FSR 2 motion pass, more views"
 
 $lines = & $editor --path $project --rendering-driver $Driver --quit-after 1000 res://gpu_instances.tscn -- --self-test 2>&1 | ForEach-Object { "$_" }
 $lines | Set-Content (Join-Path $logs "gpu_instances_selftest_$Driver.log")

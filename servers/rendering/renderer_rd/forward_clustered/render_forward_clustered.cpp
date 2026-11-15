@@ -3558,7 +3558,11 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	if (gpu_casters) {
 		render_data.gpu_instances = &p_shadow_data->gpu_instances;
 		render_data.gpu_slots = &p_shadow_data->gpu_slots;
-		render_data.gpu_instances_drawn = gpu_instances_view != nullptr;
+		// A pass with few casters draws them from the CPU list: the GPU path's
+		// fixed cost per pass (command upload, a cull over every member, barriers)
+		// is more than theirs (omni cube faces of a game level).
+		render_data.gpu_instances_drawn = gpu_instances_view != nullptr &&
+				int64_t(p_shadow_data->gpu_instances.size()) >= GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instances/shadow_min_casters");
 	}
 
 	RENDER_TIMESTAMP("Setup Shadow Pass");
@@ -6134,6 +6138,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
 	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/shadow_min_casters", PROPERTY_HINT_RANGE, "0,4096,1,or_greater"), 256);
 	singleton = this;
 	gpu_instances_readbacks_alive = true;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);
