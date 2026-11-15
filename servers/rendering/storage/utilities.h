@@ -36,6 +36,7 @@
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 #include "core/templates/list.h"
+#include "core/templates/local_vector.h"
 #include "core/templates/pair.h"
 #include "core/templates/rid.h"
 #include "core/variant/callable.h"
@@ -92,24 +93,20 @@ public:
 	}
 
 	void update_end() { //call after updating dependencies
-		List<Pair<Dependency *, DependencyTracker *>> to_clean_up;
+		// One allocation at most (a List allocated per stale dependency).
+		LocalVector<Dependency *> to_clean_up;
 
-		for (Dependency *E : dependencies) {
-			Dependency *dep = E;
+		for (Dependency *dep : dependencies) {
 			HashMap<DependencyTracker *, uint32_t>::Iterator F = dep->instances.find(this);
 			ERR_CONTINUE(!F);
 			if (F->value != instance_version) {
-				Pair<Dependency *, DependencyTracker *> p;
-				p.first = dep;
-				p.second = F->key;
-				to_clean_up.push_back(p);
+				to_clean_up.push_back(dep);
 			}
 		}
 
-		while (to_clean_up.size()) {
-			to_clean_up.front()->get().first->instances.erase(to_clean_up.front()->get().second);
-			dependencies.erase(to_clean_up.front()->get().first);
-			to_clean_up.pop_front();
+		for (Dependency *dep : to_clean_up) {
+			dep->instances.erase(this);
+			dependencies.erase(dep);
 		}
 	}
 
