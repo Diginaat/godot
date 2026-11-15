@@ -13,7 +13,7 @@ uncommitted work preserved. No push authorized by this checkpoint.
 | 1 Containers | LocalVector bulk copy kept; `RID_Alloc::owns()` lock-free on x86-64 (D012, scene instancing -11%) | [01](phases/01-containers.md) |
 | 2 Hashing | String-key byte hash kept; `HashSet` one allocation per table (D013, scene instancing -7%); backend selection open | [02](phases/02-hashing.md) |
 | 3 Strings | Preliminary copy/key-hash results only | [03](phases/03-strings.md) |
-| 4 x86 SIMD | Exploratory dot/cross candidates rejected | [04](phases/04-x86-simd.md) |
+| 4 x86 SIMD | Packed Vector3 dot/cross rejected; `DynamicBVH` volumes in SSE (D014, node churn -2.6%) | [04](phases/04-x86-simd.md) |
 | 5 ARM NEON | Blocked until x86 acceptance | [05](phases/05-arm-neon.md) |
 | 6 Integration | Not started; no production acceptance | [compatibility](compatibility.md) |
 

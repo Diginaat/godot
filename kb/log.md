@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-16 (core: DynamicBVH volumes in SSE, D014)
+
+* **Implemented**: `DynamicBVH::Volume` in aligned 16-byte corners with
+  SSE2 kernels on x86-64 single precision, bit-identical to the scalar code;
+  first `DynamicBVH` unit test (brute force). Node churn -2.6% against a
+  scalar control build. docs/core-modernization/phases/04-x86-simd.md.
+* **Success**: [a control build of the same source](/successes/control-build-for-layout-effects.md)
+  showed that a 3% instancing "regression" was code layout, not the change.
+
 ## 2026-11-16 (core: HashMap one block, not kept)
 
 * **Tried**: `HashMap`'s two arrays in one block, as D013 did for

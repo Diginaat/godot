@@ -36,6 +36,15 @@
 #include "core/templates/paged_allocator.h"
 #include "core/typedefs.h"
 
+// x86-64 single precision: the volumes keep each corner in an aligned
+// 16-byte slot and the hot tests use SSE2 (docs/core-modernization, D014).
+// Every kernel does the scalar operations in the same order, so results and
+// the tree's shape are bit for bit those of the scalar code.
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(REAL_T_IS_DOUBLE)
+#define DYNAMIC_BVH_SSE
+#include <emmintrin.h>
+#endif
+
 // Based on bullet Dbvh
 
 /*
@@ -68,23 +77,46 @@ public:
 	};
 
 private:
+#ifdef DYNAMIC_BVH_SSE
+	struct alignas(16) Volume {
+		Vector3 min;
+		float min_pad = 0.0f; // Fourth lane of the aligned loads of min.
+		Vector3 max;
+		float max_pad = 0.0f;
+
+		_FORCE_INLINE_ __m128 _min4() const { return _mm_load_ps(&min.x); }
+		_FORCE_INLINE_ __m128 _max4() const { return _mm_load_ps(&max.x); }
+		_FORCE_INLINE_ static __m128 _sign_mask() { return _mm_castsi128_ps(_mm_set1_epi32(int32_t(0x80000000u))); }
+#else
 	struct Volume {
 		Vector3 min, max;
+#endif
 
 		_FORCE_INLINE_ Vector3 get_center() const { return ((min + max) / 2); }
 		_FORCE_INLINE_ Vector3 get_length() const { return (max - min); }
 
 		_FORCE_INLINE_ bool contains(const Volume &p_a) const {
+#ifdef DYNAMIC_BVH_SSE
+			const int lower = _mm_movemask_ps(_mm_cmple_ps(_min4(), p_a._min4()));
+			const int upper = _mm_movemask_ps(_mm_cmpge_ps(_max4(), p_a._max4()));
+			return (lower & upper & 7) == 7;
+#else
 			return ((min.x <= p_a.min.x) &&
 					(min.y <= p_a.min.y) &&
 					(min.z <= p_a.min.z) &&
 					(max.x >= p_a.max.x) &&
 					(max.y >= p_a.max.y) &&
 					(max.z >= p_a.max.z));
+#endif
 		}
 
 		_FORCE_INLINE_ Volume merge(const Volume &p_b) const {
 			Volume r;
+#ifdef DYNAMIC_BVH_SSE
+			// minps/maxps return the second operand for NaN and equal values, as `a < b ? a : b`.
+			_mm_store_ps(&r.min.x, _mm_min_ps(_min4(), p_b._min4()));
+			_mm_store_ps(&r.max.x, _mm_max_ps(_max4(), p_b._max4()));
+#else
 			for (int i = 0; i < 3; ++i) {
 				if (min[i] < p_b.min[i]) {
 					r.min[i] = min[i];
@@ -97,6 +129,7 @@ private:
 					r.max[i] = p_b.max[i];
 				}
 			}
+#endif
 			return r;
 		}
 
@@ -107,17 +140,29 @@ private:
 		}
 
 		_FORCE_INLINE_ bool is_not_equal_to(const Volume &p_b) const {
+#ifdef DYNAMIC_BVH_SSE
+			return (_mm_movemask_ps(_mm_or_ps(_mm_cmpneq_ps(_min4(), p_b._min4()), _mm_cmpneq_ps(_max4(), p_b._max4()))) & 7) != 0;
+#else
 			return ((min.x != p_b.min.x) ||
 					(min.y != p_b.min.y) ||
 					(min.z != p_b.min.z) ||
 					(max.x != p_b.max.x) ||
 					(max.y != p_b.max.y) ||
 					(max.z != p_b.max.z));
+#endif
 		}
 
 		_FORCE_INLINE_ real_t get_proximity_to(const Volume &p_b) const {
+#ifdef DYNAMIC_BVH_SSE
+			const __m128 d = _mm_sub_ps(_mm_add_ps(_min4(), _max4()), _mm_add_ps(p_b._min4(), p_b._max4()));
+			const __m128 a = _mm_andnot_ps(_sign_mask(), d);
+			// (|x| + |y|) + |z|, the scalar order (ties choose the branch).
+			const __m128 xy = _mm_add_ss(a, _mm_shuffle_ps(a, a, _MM_SHUFFLE(1, 1, 1, 1)));
+			return _mm_cvtss_f32(_mm_add_ss(xy, _mm_movehl_ps(a, a)));
+#else
 			const Vector3 d = (min + max) - (p_b.min + p_b.max);
 			return (Math::abs(d.x) + Math::abs(d.y) + Math::abs(d.z));
+#endif
 		}
 
 		_FORCE_INLINE_ int select_by_proximity(const Volume &p_a, const Volume &p_b, uint32_t &tiebreaker) const {
@@ -132,13 +177,61 @@ private:
 
 		//
 		_FORCE_INLINE_ bool intersects(const Volume &p_b) const {
+#ifdef DYNAMIC_BVH_SSE
+			const int lower = _mm_movemask_ps(_mm_cmple_ps(_min4(), p_b._max4()));
+			const int upper = _mm_movemask_ps(_mm_cmpge_ps(_max4(), p_b._min4()));
+			return (lower & upper & 7) == 7;
+#else
 			return ((min.x <= p_b.max.x) &&
 					(max.x >= p_b.min.x) &&
 					(min.y <= p_b.max.y) &&
 					(max.y >= p_b.min.y) &&
 					(min.z <= p_b.max.z) &&
 					(max.z >= p_b.min.z));
+#endif
 		}
+
+#ifdef DYNAMIC_BVH_SSE
+		// intersects_convex() with the planes already in registers: normals as
+		// (x, y, z, 0), distances apart. The same operations in the same order.
+		_FORCE_INLINE_ bool intersects_convex_sse(const __m128 *p_normals, const float *p_distances, int p_plane_count, const Vector3 *p_points, int p_point_count) const {
+			const __m128 half_extents = _mm_mul_ps(_mm_sub_ps(_max4(), _min4()), _mm_set1_ps(0.5f));
+			const __m128 ofs = _mm_add_ps(_min4(), half_extents);
+			const __m128 negated_half_extents = _mm_xor_ps(half_extents, _sign_mask()); // -x, also for zeros.
+			for (int i = 0; i < p_plane_count; i++) {
+				const __m128 normal = p_normals[i];
+				const __m128 positive = _mm_cmpgt_ps(normal, _mm_setzero_ps());
+				const __m128 point = _mm_add_ps(_mm_or_ps(_mm_and_ps(positive, negated_half_extents), _mm_andnot_ps(positive, half_extents)), ofs);
+				const __m128 product = _mm_mul_ps(normal, point);
+				// Plane::is_point_over(): (x + y) + z > d.
+				const __m128 dot = _mm_add_ss(_mm_add_ss(product, _mm_shuffle_ps(product, product, _MM_SHUFFLE(1, 1, 1, 1))), _mm_movehl_ps(product, product));
+				if (_mm_ucomigt_ss(dot, _mm_load_ss(&p_distances[i]))) {
+					return false;
+				}
+			}
+
+			alignas(16) float ofs_array[4];
+			alignas(16) float half_array[4];
+			_mm_store_ps(ofs_array, ofs);
+			_mm_store_ps(half_array, half_extents);
+			for (int k = 0; k < 3; k++) {
+				int bad_positive = 0;
+				int bad_negative = 0;
+				for (int i = 0; i < p_point_count; i++) {
+					if (p_points[i][k] > ofs_array[k] + half_array[k]) {
+						bad_positive++;
+					}
+					if (p_points[i][k] < ofs_array[k] - half_array[k]) {
+						bad_negative++;
+					}
+				}
+				if (bad_negative == p_point_count || bad_positive == p_point_count) {
+					return false;
+				}
+			}
+			return true;
+		}
+#endif
 
 		_FORCE_INLINE_ bool intersects_convex(const Plane *p_planes, int p_plane_count, const Vector3 *p_points, int p_point_count) const {
 			Vector3 half_extents = (max - min) * 0.5;
@@ -182,6 +275,9 @@ private:
 			return true;
 		}
 	};
+#ifdef DYNAMIC_BVH_SSE
+	static_assert(sizeof(Volume) == 32 && alignof(Volume) == 16, "Volume: two aligned 16-byte corners.");
+#endif
 
 	struct Node {
 		Volume volume;
@@ -395,10 +491,29 @@ void DynamicBVH::convex_query(const Plane *p_planes, int p_plane_count, const Ve
 
 	LocalVector<const Node *> aux_stack; //only used in rare occasions when you run out of alloca memory because tree is too unbalanced. Should correct itself over time.
 
+#ifdef DYNAMIC_BVH_SSE
+	// The planes once in registers (the caller's array has no alignment to rely on).
+	constexpr int SSE_PLANES_MAX = 32;
+	const bool sse_planes = p_plane_count <= SSE_PLANES_MAX;
+	__m128 normals[SSE_PLANES_MAX];
+	float distances[SSE_PLANES_MAX];
+	if (sse_planes) {
+		for (int i = 0; i < p_plane_count; i++) {
+			normals[i] = _mm_set_ps(0.0f, p_planes[i].normal.z, p_planes[i].normal.y, p_planes[i].normal.x);
+			distances[i] = p_planes[i].d;
+		}
+	}
+#endif
+
 	do {
 		depth--;
 		const Node *n = stack[depth];
-		if (n->volume.intersects(volume) && n->volume.intersects_convex(p_planes, p_plane_count, p_points, p_point_count)) {
+#ifdef DYNAMIC_BVH_SSE
+		const bool inside = n->volume.intersects(volume) && (sse_planes ? n->volume.intersects_convex_sse(normals, distances, p_plane_count, p_points, p_point_count) : n->volume.intersects_convex(p_planes, p_plane_count, p_points, p_point_count));
+#else
+		const bool inside = n->volume.intersects(volume) && n->volume.intersects_convex(p_planes, p_plane_count, p_points, p_point_count);
+#endif
+		if (inside) {
 			if (n->is_internal()) {
 				if (depth > threshold) {
 					if (aux_stack.is_empty()) {

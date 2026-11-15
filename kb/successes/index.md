@@ -1,5 +1,6 @@
 # Successes
 
+* [Control build for code-layout effects](/successes/control-build-for-layout-effects.md) - build the same source with the change switched off; compare against that, not only the old build
 * [Actual-container A/B without checkout switches](/successes/actual-container-ab-bench.md) - isolated HEAD snapshots, correctness and allocation checks, alternating samples; caught numeric-container regressions before publication
 
 Approaches that worked in this project and are worth reusing: what was

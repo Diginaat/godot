@@ -188,6 +188,9 @@ straight.
   - `HashSet` (`core/templates/hash_set.h`) allocates one block per table
     (`_allocate_block()`, `_free_block()`; D013). Upstream changes to its
     allocation, resize or copy code must be ported to the block layout.
+  - `DynamicBVH::Volume` (`core/math/dynamic_bvh.h`) has an SSE layout and
+    kernels on x86-64 single precision (`DYNAMIC_BVH_SSE`; D014). Upstream
+    changes to `Volume` must be made in both the SSE and the scalar code.
   - `RenderingServerDefault::finish()` makes the main RenderingDevice
     current on the main thread again after the separate render thread
     ends, so its `finalize()` runs at exit (without it the guard skipped

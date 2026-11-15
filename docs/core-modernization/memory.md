@@ -33,7 +33,9 @@ committed. Branch creation preserved every existing change.
   callers' patterns are. D012: lock-free `RID_Alloc::owns()` on x86-64,
   scene instancing 13.83 to 12.37 ms per frame. D013: one-block `HashSet`
   and a `LocalVector` in `DependencyTracker::update_end()`, 12.58 to 11.69
-  ms (node churn 14.84 to 14.59).
+  ms (node churn 14.84 to 14.59). D014: `DynamicBVH` volumes in SSE,
+  node churn -2.6% against a scalar control build (code layout alone moves
+  a build by about 1.5%; compare against a control of the same source).
 - Next candidates, by measured share on scene instancing (after D013): heap
   calls 14.6%, largest `Object::connect` 2.45% and `_disconnect` 0.77%
   (signal connections), `DependencyTracker::update_dependency` 1.48%
@@ -52,7 +54,9 @@ committed. Branch creation preserved every existing change.
   ([numbers](../../kb/project/core-template-benchmarks.md)).
 - Next core work needs a frame-time reason first (2026-11-15); the profiles
   of 2026-11-16 provide one per candidate above.
-- No engine math modification. Explicit SSE dot/cross candidates lost locally.
+- Engine math: only `DynamicBVH` (D014). Explicit SSE dot/cross on public
+  packed `Vector3` lost locally (conversion cost); keep SIMD to private
+  resident layouts.
 - Production engine uses SCons; C++17. Local configured SDKs enable PhysX GPU,
   Blast and Flow; machine-specific SDK paths must not enter public docs.
 - Current Windows build interpreter: `py -3.14 -m SCons`; default `python` did
