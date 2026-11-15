@@ -301,8 +301,17 @@ still queue one when the mesh, skeleton or AABB changes). Dirty loop
 (1.87-2.09 before, partly inside spread). The rest is memory-bound pointer
 chasing per instance (Instance, geometry data, renderer instance, BVH
 leaf). The main thread spends more on the same moves (frame 3.4-3.5 ms
-against 1.7-1.8 ms render CPU): script, node transform propagation and
-notifications, not measured apart yet.
+against 1.7-1.8 ms render CPU). Measured apart (temporary timers, 120-frame
+means, 2,000 moves): the bench's script loop 905 us with the `position`
+assignment and 340 us without, so setting `position` costs about 285 ns per
+node (script dispatch, `Node3D::set_position()`, dirty bits, the
+transform-notification list, the physics interpolation hook);
+`SceneTree::flush_transform_notifications()` 330 us, about 165 ns per node
+(`get_global_transform()`, `RenderingServer::instance_set_transform()`).
+Engine cost per moved node: about 450 ns on the main thread and 470 ns in
+the scene update, all upstream paths without a single large cost. Bigger
+gains need fewer calls per moved object (MultiMesh, or physics writing
+render transforms in bulk), not faster ones.
 
 ### Open items found by the baseline
 
