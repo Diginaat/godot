@@ -105,6 +105,48 @@ TEST_CASE("[RID] 'get_local_index'") {
 	CHECK(RID::from_uint64(4'294'967'297).get_local_index() == 1);
 }
 
+template <bool THREAD_SAFE>
+static void test_rid_owner_owns() {
+	RID_Owner<int, THREAD_SAFE> owner;
+	RID_Owner<int, THREAD_SAFE> other;
+	CHECK_FALSE(owner.owns(RID()));
+	RID a = owner.make_rid(1);
+	RID b = owner.make_rid(2);
+	RID foreign = other.make_rid(3);
+	CHECK(owner.owns(a));
+	CHECK(owner.owns(b));
+	CHECK_FALSE(owner.owns(foreign));
+	CHECK_FALSE(other.owns(a));
+	// An index past every allocated chunk, and a stale validator for a live index.
+	CHECK_FALSE(owner.owns(RID::from_uint64((a.get_id() & 0xFFFFFFFF00000000) | 0xFFFFFF)));
+	CHECK_FALSE(owner.owns(RID::from_uint64(a.get_id() ^ (uint64_t(1) << 40))));
+	// Allocated but not initialized counts as owned, as before.
+	RID pending = owner.allocate_rid();
+	CHECK(owner.owns(pending));
+	owner.initialize_rid(pending, 4);
+	CHECK(owner.owns(pending));
+	owner.free(a);
+	CHECK_FALSE(owner.owns(a));
+	CHECK(owner.owns(b));
+	// A slot reused by a new RID: the old one stays unowned.
+	RID c = owner.make_rid(5);
+	CHECK(owner.owns(c));
+	CHECK_FALSE(owner.owns(a));
+	owner.free(b);
+	owner.free(c);
+	owner.free(pending);
+	other.free(foreign);
+}
+
+TEST_CASE("[RID_Owner] owns") {
+	SUBCASE("Not thread-safe") {
+		test_rid_owner_owns<false>();
+	}
+	SUBCASE("Thread-safe") {
+		test_rid_owner_owns<true>();
+	}
+}
+
 #ifdef THREADS_ENABLED
 // This case would let sanitizers realize data races.
 // Additionally, on purely weakly ordered architectures, it would detect synchronization issues
@@ -124,6 +166,7 @@ TEST_CASE("[RID_Owner] Thread safety") {
 		TightLocalVector<std::atomic<uint64_t>> rids;
 		std::atomic<uint32_t> sync[2] = {};
 		std::atomic<uint32_t> correct = 0;
+		std::atomic<uint32_t> owned = 0;
 
 		// A barrier that doesn't introduce memory ordering constraints, only compiler ones.
 		// The idea is not to cause any sync traffic that would make the code we want to test
@@ -184,12 +227,16 @@ TEST_CASE("[RID_Owner] Thread safety") {
 
 							// 3. Each thread verifies all the others.
 							uint32_t local_correct = 0;
+							uint32_t local_owned = 0;
 							for (uint32_t th_idx = 0; th_idx < rot->threads.size(); th_idx++) {
 								if (th_idx == self_th_idx) {
 									continue;
 								}
 								char expected_unique_byte = _compute_thread_unique_byte(th_idx);
 								RID rid = RID::from_uint64(rot->rids[th_idx].load(std::memory_order_relaxed));
+								if (rot->rid_owner.owns(rid)) {
+									local_owned++;
+								}
 								DataHolder *data = rot->rid_owner.get_or_null(rid);
 #ifdef TSAN_ENABLED
 								__tsan_acquire(data); // We know not a race in practice.
@@ -212,6 +259,7 @@ TEST_CASE("[RID_Owner] Thread safety") {
 							rot->lockstep(2);
 
 							rot->correct.fetch_add(local_correct, std::memory_order_acq_rel);
+							rot->owned.fetch_add(local_owned, std::memory_order_acq_rel);
 						},
 						this);
 			}
@@ -221,6 +269,7 @@ TEST_CASE("[RID_Owner] Thread safety") {
 			}
 
 			CHECK_EQ(correct.load(), threads.size() * (threads.size() - 1));
+			CHECK_EQ(owned.load(), threads.size() * (threads.size() - 1));
 		}
 	};
 

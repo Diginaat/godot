@@ -1,5 +1,17 @@
 # Benchmarks
 
+## Engine workloads (2026-11-16)
+
+`devtools/profile/core_workload.gd`, vsync off, editor binary
+(`production=yes debug_symbols=yes`), Ryzen 5 3600, RTX 3060, Vulkan, 15 s
+per run, builds alternating, order reversed every other round. Profiles of
+where the time goes: [KB](../../kb/project/core-cpu-profiles.md).
+
+| Change | Workload | Before | After |
+| --- | --- | --- | --- |
+| D012 lock-free `RID_Alloc::owns()` on x86-64 | `instance` | 13.83 ms (13.40-15.51) | 12.37 ms (12.14-14.78) |
+| D012 | `nodes` | 14.95 ms (14.62-15.60) | 14.91 ms (14.72-14.96) |
+
 ## Recorded exploratory evidence (before Phase 0 commit)
 
 Baseline `172e099b95307708005dafcf719693d20b1e7088`; uncommitted candidate.

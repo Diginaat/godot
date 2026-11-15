@@ -33,6 +33,30 @@ against original sources. Neither result proves publication readiness or a clean
 cross-platform engine build. OOM, over-alignment, full aliasing and general
 element coverage remain open. No global container replacement accepted.
 
+## RID_Alloc::owns() lock-free on x86-64 (D012), 2026-11-16
+
+Sampling profiles of engine workloads ([KB](../../../kb/project/core-cpu-profiles.md),
+`devtools/profile/`) found 12.6% of the scene instancing workload's main
+thread in RID allocator checks and SRW locks: `RenderingServer::free()` asks
+about twenty thread-safe owners in turn, each `owns()` locking the owner's
+mutex, while `get_or_null()` was already lock-free. On x86-64 `owns()` now
+reads `max_alloc` and the slot's validator with acquire loads (the store of
+`max_alloc` in `_allocate_rid()` became a release); other CPUs keep the
+mutex, because upstream's version for every CPU broke GPUParticles3D on
+Apple Silicon (godotengine/godot#114900, reverted, cause not found).
+
+| Workload (ms per frame, median of 5 alternating rounds) | Before | After |
+| --- | --- | --- |
+| `core_workload.gd --mode=instance` (2k-node scene per frame) | 13.83 (13.40-15.51) | 12.37 (12.14-14.78) |
+| `core_workload.gd --mode=nodes` (200 nodes freed per frame) | 14.95 (14.62-15.60) | 14.91 (14.72-14.96) |
+
+Every instancing round was lower (-0.73 to -1.89 ms); node churn is within
+its spread. The profile after: RID checks and locks 7.0% of the main thread
+(SRW lock acquire/release 6.8% to 1.7%). Tests: `[RID_Owner] owns`
+(owned, foreign, freed, reused slot, stale validator, uninitialized) for
+both modes, and the thread-safety test checks `owns()` on RIDs passed with
+relaxed atomics only. Full suite 1,475 cases pass (Windows, MSVC).
+
 Accept only a reproducible benefit with no relevant regression. Keep shared
 Vector/PackedArray/String layouts unchanged until compatible storage is proven.
 Do not remove CowData merely because it is an old implementation.

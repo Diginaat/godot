@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-11-16 (core: CPU profiles, lock-free RID ownership checks, D012)
+
+* **Added**: `devtools/profile/`, a user-mode stack sampler (no elevation)
+  with inlined frames and summaries by directory, type and caller.
+* **Finding**: [where engine CPU time goes in core code](/project/core-cpu-profiles.md):
+  hash lookups 3-16% of the busiest thread; scene instancing 21% in RID
+  checks, locks and refcounts and 14% in heap calls; the callers' patterns
+  cost more than the container internals.
+* **Implemented**: thread-safe `RID_Alloc::owns()` lock-free on x86-64
+  (D012); scene instancing 13.83 to 12.37 ms per frame, node churn
+  unchanged. Upstream's all-CPU version was reverted for an Apple-Silicon
+  bug (godotengine/godot#114900).
+
 ## 2026-11-15 (core templates: keep only the measured wins)
 
 * Dropped the packed storage and robin-hood index migration (numeric hash

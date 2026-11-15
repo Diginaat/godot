@@ -13,6 +13,7 @@
 | D009 | Do not accept a 256-byte boundary as optimal yet | Existing byte tests compare legacy/new dispatch, not wyhash versus XXH3 at equal lengths |
 | D010 | Freeze implementation files during builds | Prior parallel build saw mixed live-header edits; results require matching source snapshots |
 | D011 | Godot-native hashmap is the primary implementation candidate | User requested an engine-owned hashmap; improve/reuse existing native tables where justified, compare libraries as controls, avoid a second full lookup index |
+| D012 | Thread-safe `RID_Alloc::owns()` is lock-free on x86-64 (acquire loads of `max_alloc` and the validator, release store of `max_alloc`); other CPUs keep the mutex | Profiles: `RenderingServer::free()` asks about twenty owners, each locking; scene instancing 13.83 to 12.37 ms per frame (5 alternating rounds, every round lower). Upstream's all-CPU version was reverted for an Apple-Silicon-only bug with no found cause (#114900); this fork does not target macOS |
 
 ## Research provenance
 

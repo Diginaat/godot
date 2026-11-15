@@ -10,7 +10,7 @@ uncommitted work preserved. No push authorized by this checkpoint.
 | Phase | State | Record |
 | --- | --- | --- |
 | 0 Audit/baseline | Initial checkpoint complete; coverage expansion remains | [00](phases/00-audit.md) |
-| 1 Containers | Windows correctness passes; boundary sweep blocks performance acceptance due to small-copy regressions | [01](phases/01-containers.md) |
+| 1 Containers | LocalVector bulk copy kept; `RID_Alloc::owns()` lock-free on x86-64 (D012, scene instancing -11%) | [01](phases/01-containers.md) |
 | 2 Hashing | Primitive gains measured; backend selection open | [02](phases/02-hashing.md) |
 | 3 Strings | Preliminary copy/key-hash results only | [03](phases/03-strings.md) |
 | 4 x86 SIMD | Exploratory dot/cross candidates rejected | [04](phases/04-x86-simd.md) |

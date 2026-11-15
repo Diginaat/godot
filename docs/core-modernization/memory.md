@@ -23,6 +23,21 @@ committed. Branch creation preserved every existing change.
 
 ## Current state
 
+- 2026-11-16: resumed on user direction (continue this branch, not the
+  literal brief; macOS is not a target). Merged `dev-gpu-renderer`
+  (`640dae3f85`); worktree `GodotPhysxDev-core` next to the main checkout,
+  built with `production=yes tests=yes debug_symbols=yes`.
+  Sampling profiles of five workloads (`devtools/profile/`,
+  [findings](../../kb/project/core-cpu-profiles.md)) gave the frame-time
+  reason asked for below: container internals are not the main cost, their
+  callers' patterns are. D012: lock-free `RID_Alloc::owns()` on x86-64,
+  scene instancing 13.83 to 12.37 ms per frame.
+- Next candidates, by measured share on scene instancing: heap calls 13.9%
+  (renderer `DependencyTracker` HashMap/HashSet node inserts about 4.7%,
+  signal connect/disconnect about 2.5%); hash lookups from signals and
+  dependency tracking; StringName construction 3.4%; on node churn the
+  children cache walk (LocalVector 7%) and `SceneTree::add_to_group`'s
+  linear `find` (2%); editor startup Theme lookups.
 - 2026-11-15: the COW/STL-algorithm storage and robin-hood index prototype was
   dropped (numeric hash tables 1.3-2.6x slower, 50-57% bigger); saved on a
   local backup branch. Kept as patches: LocalVector bulk copy from 256
@@ -30,8 +45,8 @@ committed. Branch creation preserved every existing change.
   [unique-array evaluation](../../kb/project/unique-array-evaluation.md)) and
   the wyhash/XXH3 byte hash for String/CharString table keys
   ([numbers](../../kb/project/core-template-benchmarks.md)).
-- Next core work needs a frame-time reason first: the renderer work (GPU-driven
-  Forward+, `docs/renderer/`) gains more per hour than core containers.
+- Next core work needs a frame-time reason first (2026-11-15); the profiles
+  of 2026-11-16 provide one per candidate above.
 - No engine math modification. Explicit SSE dot/cross candidates lost locally.
 - Production engine uses SCons; C++17. Local configured SDKs enable PhysX GPU,
   Blast and Flow; machine-specific SDK paths must not enter public docs.

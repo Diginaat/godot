@@ -179,6 +179,12 @@ straight.
     (`mesh_lod/lod_change/shadow_threshold_scale`, in `_render_shadow_append()`
     of Forward+ and Mobile). See
     [kb/project/shadow-lod-scale.md](kb/project/shadow-lod-scale.md).
+  - Thread-safe `RID_Alloc::owns()` in `core/templates/rid_owner.h` is
+    lock-free on x86-64 (D012 in
+    [docs/core-modernization/decisions.md](docs/core-modernization/decisions.md)),
+    with the release store of `max_alloc` in `_allocate_rid()`. Upstream
+    reverted its own version (godotengine/godot#114900); if upstream lands
+    a fixed lock-free `owns()`, take theirs and drop this.
   - `RenderingServerDefault::finish()` makes the main RenderingDevice
     current on the main thread again after the separate render thread
     ends, so its `finalize()` runs at exit (without it the guard skipped

@@ -143,7 +143,8 @@ class RID_Alloc : public RID_AllocBase {
 
 			if constexpr (THREAD_SAFE) {
 				// Store atomically to avoid data race with the load in get_or_null().
-				((std::atomic<uint32_t> *)&max_alloc)->store(max_alloc + elements_in_chunk, std::memory_order_relaxed);
+				// Release: the lock-free owns() reads the new chunk and its validators after it.
+				((std::atomic<uint32_t> *)&max_alloc)->store(max_alloc + elements_in_chunk, std::memory_order_release);
 			} else {
 				max_alloc += elements_in_chunk;
 			}
@@ -300,6 +301,16 @@ public:
 	}
 
 	_FORCE_INLINE_ bool owns(const RID &p_rid) const {
+#if defined(__x86_64__) || defined(_M_X64)
+		// Lock-free on x86-64 (this fork's targets), as get_or_null(). RenderingServer::free()
+		// asks about twenty thread-safe owners in turn, each taking the mutex here: a large
+		// share of the main thread when many nodes are freed. Upstream made this lock-free for all
+		// CPUs and reverted it (godotengine/godot#114900: GPUParticles3D broke on Apple Silicon
+		// only, cause not found); other CPUs keep the mutex.
+		if constexpr (THREAD_SAFE) {
+			return _owns_lock_free(p_rid);
+		}
+#endif
 		if constexpr (THREAD_SAFE) {
 			mutex.lock();
 		}
@@ -326,6 +337,37 @@ public:
 
 		return owned;
 	}
+
+#if defined(__x86_64__) || defined(_M_X64)
+	// The validator and max_alloc are written under the mutex; acquire loads see a chunk
+	// and its validators complete once max_alloc covers them (x86 orders stores, so these
+	// are plain loads). A RID being freed concurrently may read as owned or not, as with
+	// the mutex, where the answer is also stale once it unlocks.
+	_FORCE_INLINE_ bool _owns_lock_free(const RID &p_rid) const {
+		const uint64_t id = p_rid.get_id();
+		if (id == 0) {
+			return false;
+		}
+		const uint32_t idx = uint32_t(id & 0xFFFFFFFF);
+		const uint32_t ma = ((const std::atomic<uint32_t> *)&max_alloc)->load(std::memory_order_acquire);
+		if (unlikely(idx >= ma)) {
+			return false;
+		}
+#ifdef TSAN_ENABLED
+		__tsan_acquire(&chunks[idx / elements_in_chunk]); // We know not a race in practice.
+#endif
+		const Chunk &c = chunks[idx / elements_in_chunk][idx % elements_in_chunk];
+#ifdef TSAN_ENABLED
+		__tsan_release(&chunks[idx / elements_in_chunk]);
+		__tsan_acquire(&c.validator); // We know not a race in practice.
+#endif
+		const uint32_t validator = ((const std::atomic<uint32_t> *)&c.validator)->load(std::memory_order_acquire);
+#ifdef TSAN_ENABLED
+		__tsan_release(&c.validator);
+#endif
+		return (validator & 0x7FFFFFFF) == uint32_t(id >> 32);
+	}
+#endif
 
 	_FORCE_INLINE_ void free(const RID &p_rid) {
 		if constexpr (THREAD_SAFE) {
