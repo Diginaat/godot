@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-15 (GPU path on a real level)
+
+* **Finding**: in a game level with many unique meshes and few copies each,
+  the GPU instance path doubles the draw count and costs 0.15-0.3 ms of GPU
+  time against the CPU path (3 alternating pairs). Recorded under known
+  problems in docs/renderer/MEMORY.md; the level now sets
+  `gpu_instances/enabled=false`.
+
 ## 2026-11-15 (moved instances)
 
 * Render-side cost of a moved instance measured at about 510 ns (dirty

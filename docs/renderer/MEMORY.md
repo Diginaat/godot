@@ -61,6 +61,13 @@ CPU vs 1.15 ms GPU, of which 16.4 ms is main-pass render-list preparation
   draw each (twice with a shadow mesh); a new bucket key or a full bucket
   still rebuilds the scenario's buckets (7.6 ms at 100k); `unique_10k` gains nothing (one bucket per material); viewport render info
   of GPU-drawn instances is a few frames late (read back from the cull).
+- GPU path loses on a real level with many unique meshes and few copies
+  each (public Overgrown Subway demo: 1,555 mesh instances, 354 meshes,
+  35 materials, imported with LODs and shadow meshes; Vulkan, RTX 3060,
+  1080p, 2026-11-15): draws 873 to 413 and shadow draws 1,588 to 876 with
+  `gpu_instances/enabled` off, GPU 0.15-0.3 ms lower in 3 alternating
+  pairs; the instance table alone costs nothing. Probably the empty
+  per-LOD draws above (not verified). The CPU occluder changed nothing there.
 - GPU path memory: +69 MiB of buffers at 100k nodes (125.5 vs 56.9 MiB):
   table 21 MB, instance data 23 MB at power-of-two capacity (shared by the
   camera and shadow passes since 2026-11-10; it was +90 MiB with a second

@@ -36,3 +36,15 @@ voxel count (171,422) in both modes, where the GPU field has 2,308,891.
 Call a script that takes an array in-process (`& $script -ExtraArgs
 $flags`), not through a child `powershell -File`, and compare a
 mode-specific count in each log before the timings.
+
+# Again, through case-insensitive names (2026-11-15)
+
+A bench runner had a `[string[]]$Override` parameter (settings for a
+temporary `override.cfg`) and later set `$override = Join-Path ...` for the
+file's path. PowerShell variable names ignore case, so the path replaced
+the parameter and every "variant" ran the defaults. The same happened with
+a `$UserArgs` parameter and a local `$userArgs`. The settings line printed
+by the scene (`enabled=true` where `false` was asked) showed it.
+
+Never reuse a parameter's name in another case for a local variable, and
+print the settings the run actually used.
