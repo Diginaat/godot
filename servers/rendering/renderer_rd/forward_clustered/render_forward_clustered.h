@@ -1054,9 +1054,14 @@ protected:
 		uint32_t live_members = 0;
 		uint32_t free_members = 0; // Used slots that are free (left gaps).
 		bool reps_dirty = false;
-		LocalVector<GPUInstanceBucketData> bucket_data;
+		LocalVector<GPUInstanceBucketData> bucket_data; // As last uploaded.
+		bool bucket_data_uploaded = false; // False after a rebuild: upload all of it.
 		LocalVector<uint32_t> members; // Per member slot: table slot (UINT32_MAX: free), bucket, material slot, unused.
 		LocalVector<uint32_t> commands; // Five words per bucket level, zero instances.
+		// Index count (word 0) of each command. The views clear their commands
+		// on the GPU and the cull writes word 0 of each command it fills, so no
+		// command array is uploaded per view.
+		LocalVector<uint32_t> command_indices;
 		LocalVector<uint8_t> command_levels; // Index LOD of each command, plus GPU_INSTANCE_MOVED_COMMAND (validation).
 		LocalVector<uint32_t> command_depth; // Per command, its depth pre-pass twin or UINT32_MAX (UINT32_MAX - 1 for the twins).
 		LocalVector<float> lod_edges; // Screen-space edge length per reduced LOD.
@@ -1069,6 +1074,7 @@ protected:
 		RID commands_buffer;
 		RID lod_edges_buffer;
 		RID command_primitives_buffer;
+		RID command_indices_buffer;
 		RID stats_buffer; // Objects and primitives the cull pass drew, per view (render info).
 		RID visible_buffer; // A bit per table slot: visible in the view (from the scene cull).
 		uint32_t visible_capacity = 0; // Words.
@@ -1100,6 +1106,7 @@ protected:
 		uint32_t bucket_capacity = 0;
 		uint32_t command_capacity = 0;
 		uint32_t command_primitive_capacity = 0;
+		uint32_t command_index_capacity = 0;
 		uint32_t id_capacity = 0;
 		uint32_t lod_edge_capacity = 0;
 	};
@@ -1134,7 +1141,6 @@ protected:
 	// their LOD inputs and offsets, and their visible bits.
 	LocalVector<GPUInstanceShadowPassData> gpu_instances_shadow_batch;
 	LocalVector<uint32_t> gpu_instances_shadow_batch_bits;
-	LocalVector<uint32_t> gpu_instances_shadow_batch_commands; // Upload staging.
 	uint32_t gpu_instances_shadow_batch_words = 0; // Visible words per pass.
 	GPUInstanceScenario *gpu_instances_shadow_batch_scenario = nullptr;
 	uint32_t gpu_instances_shadow_check_batch_pass = UINT32_MAX; // The pass whose commands the shadow check reads back.
@@ -1153,6 +1159,7 @@ protected:
 	uint32_t gpu_instances_check_primitives = 0;
 	LocalVector<uint8_t> gpu_instances_check_command_levels;
 	LocalVector<uint32_t> gpu_instances_check_command_depth;
+	LocalVector<uint32_t> gpu_instances_check_command_indices;
 	// Commands the checked view drew (an element each, depth twins too):
 	// members culled into any other command would not be drawn.
 	LocalVector<uint8_t> gpu_instances_check_emitted;
@@ -1206,6 +1213,7 @@ protected:
 	uint64_t gpu_instances_shadow_check_frame = UINT64_MAX;
 	uint32_t gpu_instances_shadow_check_expected = 0;
 	LocalVector<uint32_t> gpu_instances_shadow_check_command_depth;
+	LocalVector<uint32_t> gpu_instances_shadow_check_command_indices;
 	LocalVector<uint8_t> gpu_instances_shadow_check_emitted; // Commands the current pass drew (an element each).
 	LocalVector<uint8_t> gpu_instances_shadow_check_emitted_copy; // Those of the checked pass.
 	static void _gpu_instances_shadow_check_received(const Vector<uint8_t> &p_data);

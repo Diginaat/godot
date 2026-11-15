@@ -1,5 +1,20 @@
 # Update log
 
+## 2026-11-15 (GPU path: no command uploads, D039)
+
+* **Implemented**: the GPU instance path clears its indirect commands on
+  the GPU and the cull writes each filled command's index count; bucket
+  data is uploaded only when it changes; shadow rows test visibility first.
+  No GPU change on the game level beyond the spread; `unique_lod_2k` GPU
+  0.44-0.46 to 0.41-0.43 ms. docs/renderer/benchmarks.md, D039.
+* **Finding**: stage timestamps put the GPU path's remaining cost on the
+  level in its draws (about 50-60 ns more per draw in depth-only passes),
+  not in the culls (camera below 0.01 ms, a shadow batch about 7 us).
+* **Updated**: [D3D12 copy mistake](/mistakes/d3d12-buffer-copy-then-compute-write.md):
+  a GPU clear before compute writes works there.
+  [Mistake](/mistakes/fix-before-locating-the-cost.md): built the fix
+  before timing the stages.
+
 ## 2026-11-15 (GPU path on game levels, D038)
 
 * **Implemented**: the GPU path draws only the commands a listed member can

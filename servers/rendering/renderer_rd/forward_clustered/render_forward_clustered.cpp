@@ -3559,8 +3559,8 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 		render_data.gpu_instances = &p_shadow_data->gpu_instances;
 		render_data.gpu_slots = &p_shadow_data->gpu_slots;
 		// A pass with few casters draws them from the CPU list: the GPU path's
-		// fixed cost per pass (command upload, a cull over every member, barriers)
-		// is more than theirs (omni cube faces of a game level).
+		// cost per pass (a cull over every member) and per draw is more than
+		// theirs (omni cube faces of a game level).
 		render_data.gpu_instances_drawn = gpu_instances_view != nullptr &&
 				int64_t(p_shadow_data->gpu_instances.size()) >= GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instances/shadow_min_casters");
 	}

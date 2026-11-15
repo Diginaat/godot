@@ -586,9 +586,9 @@ bool RenderForwardClustered::_setup_gpu_instances_occlusion(const RenderDataRD *
 	input.size[0] = size.width;
 	input.size[1] = size.height;
 	rd->buffer_update(scenario->occlusion_buffer, 0, sizeof(input), &input);
-	// Zero instances in every command; uploaded, not copied on the GPU (see
-	// _setup_multimesh_occlusion()).
-	rd->buffer_update(scenario->occluded_commands_buffer, 0, scenario->commands.size() * sizeof(uint32_t), scenario->commands.ptr());
+	// Zeroed on the GPU (a clear, not a copy: see _setup_multimesh_occlusion());
+	// the occlusion run writes the index count of each command it fills.
+	rd->buffer_clear(scenario->occluded_commands_buffer, 0, scenario->commands.size() * sizeof(uint32_t));
 	return true;
 }
 
@@ -614,6 +614,7 @@ void RenderForwardClustered::_occlude_gpu_instances(const RenderDataRD *p_render
 	pyramid.append_id(rb->get_texture_slice(hzb_scope(), hzb_name(), 0, 0, 1, p_buffers->hzb.mipmaps));
 	uniforms.push_back(pyramid);
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, p_buffers->geometry_statistics.buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 13, scenario->command_indices_buffer));
 	rd->capture_timestamp("GPU Instances HZB Occlusion");
 	RD::ComputeListID compute = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(compute, gpu_instance_cull.occlude_pipeline);

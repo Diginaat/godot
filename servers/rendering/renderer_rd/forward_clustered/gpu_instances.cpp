@@ -85,7 +85,8 @@ constexpr uint32_t GPU_INSTANCE_MEMBER_WORDS = 4;
 // Marks the commands of moved members in GPUInstanceScenario::command_levels.
 constexpr uint8_t GPU_INSTANCE_MOVED_COMMAND = 0x80;
 
-void gpu_instances_free_buffers(RID *const (&p_buffers)[12]) {
+template <size_t N>
+void gpu_instances_free_buffers(RID *const (&p_buffers)[N]) {
 	RD *rd = RD::get_singleton();
 	for (RID *buffer : p_buffers) {
 		if (buffer->is_valid()) {
@@ -302,8 +303,8 @@ void RenderForwardClustered::_gpu_instances_free_scenario(GPUInstanceScenario *p
 	if (gpu_instances_view == p_scenario) {
 		gpu_instances_view = nullptr;
 	}
-	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->output_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->stats_buffer, &p_scenario->visible_buffer,
-		&p_scenario->occluded_commands_buffer, &p_scenario->occluded_ids_buffer, &p_scenario->occlusion_buffer });
+	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->output_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->command_indices_buffer, &p_scenario->stats_buffer,
+		&p_scenario->visible_buffer, &p_scenario->occluded_commands_buffer, &p_scenario->occluded_ids_buffer, &p_scenario->occlusion_buffer });
 	RD *rd = RD::get_singleton();
 	const GPUInstanceScenario::ShadowBatch &batch = p_scenario->shadow_batch;
 	for (RID buffer : { batch.commands, batch.ids, batch.visible, batch.passes, batch.stats }) {
@@ -503,6 +504,7 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 	RendererRD::MeshStorage *storage = RendererRD::MeshStorage::get_singleton();
 	p_scenario.buckets.clear();
 	p_scenario.bucket_data.clear();
+	p_scenario.bucket_data_uploaded = false;
 	p_scenario.commands.clear();
 	p_scenario.command_levels.clear();
 	p_scenario.command_depth.clear();
@@ -614,6 +616,10 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 			p_scenario.lod_edges.push_back(storage->mesh_surface_get_lod_edge_length(surface, lod));
 		}
 	}
+	p_scenario.command_indices.resize(p_scenario.commands.size() / 5);
+	for (uint32_t command = 0; command < p_scenario.command_indices.size(); command++) {
+		p_scenario.command_indices[command] = p_scenario.commands[command * 5];
+	}
 	p_scenario.member_count = slots;
 	p_scenario.id_count = id_count;
 	p_scenario.bucket_data.resize(p_scenario.buckets.size());
@@ -637,6 +643,7 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		{ &p_scenario.lod_edges_buffer, &p_scenario.lod_edge_capacity, p_scenario.lod_edges.size(), 16, sizeof(float), false },
 		{ &p_scenario.ids_buffer, &p_scenario.id_capacity, id_count, 64, sizeof(uint32_t), false },
 		{ &p_scenario.command_primitives_buffer, &p_scenario.command_primitive_capacity, p_scenario.commands.size() / 5, 16, sizeof(uint32_t), false },
+		{ &p_scenario.command_indices_buffer, &p_scenario.command_index_capacity, p_scenario.command_indices.size(), 16, sizeof(uint32_t), false },
 	};
 	for (const Grow &grow : grows) {
 		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
@@ -664,6 +671,9 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 	}
 	rd->buffer_update(p_scenario.lod_edges_buffer, 0, p_scenario.lod_edges.size() * sizeof(float), p_scenario.lod_edges.ptr());
 	rd->buffer_update(p_scenario.command_primitives_buffer, 0, p_scenario.command_primitives.size() * sizeof(uint32_t), p_scenario.command_primitives.ptr());
+	if (!p_scenario.command_indices.is_empty()) {
+		rd->buffer_update(p_scenario.command_indices_buffer, 0, p_scenario.command_indices.size() * sizeof(uint32_t), p_scenario.command_indices.ptr());
+	}
 	if (p_scenario.stats_buffer.is_null()) {
 		p_scenario.stats_buffer = rd->storage_buffer_create(4 * sizeof(uint32_t));
 	}
@@ -769,16 +779,18 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	const uint64_t max_members = uint64_t(rd->limit_get(RD::LIMIT_MAX_COMPUTE_WORKGROUP_COUNT_X)) * 64;
 	if (scenario->member_count == 0 || scenario->member_count > max_members || scenario->members_buffer.is_null() || scenario->output_buffer.is_null() ||
 			scenario->buckets_buffer.is_null() || scenario->commands_buffer.is_null() || scenario->ids_buffer.is_null() || scenario->lod_edges_buffer.is_null() ||
-			scenario->command_primitives_buffer.is_null() || scenario->stats_buffer.is_null()) {
+			scenario->command_primitives_buffer.is_null() || scenario->command_indices_buffer.is_null() || scenario->stats_buffer.is_null()) {
 		ERR_FAIL_COND_V_MSG(scenario->member_count > max_members, true, "Too many instance surfaces for the GPU instance path; they are not drawn.");
 		return true;
 	}
 
 	// Per-surface values, as _fill_instance_data() writes them (the material
-	// feedback index can change while streaming runs).
+	// feedback index can change while streaming runs). Uploaded when they change.
+	uint32_t changed_first = UINT32_MAX;
+	uint32_t changed_last = 0;
 	for (uint32_t i = 0; i < scenario->buckets.size(); i++) {
 		const GeometryInstanceSurfaceDataCache *surface = scenario->buckets[i].surface; // Null: no live members.
-		GPUInstanceBucketData &data = scenario->bucket_data[i];
+		GPUInstanceBucketData data = {};
 		AABB surface_aabb = AABB(Vector3(0.0, 0.0, 0.0), Vector3(1.0, 1.0, 1.0));
 		Vector4 uv_scale = Vector4(0.0, 0.0, 0.0, 0.0);
 		if (surface && (RendererRD::MeshStorage::get_singleton()->mesh_surface_get_format(surface->surface) & RSE::ARRAY_FLAG_COMPRESS_ATTRIBUTES)) {
@@ -805,12 +817,21 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		data.lod_count = scenario->buckets[i].levels - 1;
 		data.lod_edges_first = scenario->buckets[i].lod_edges_first;
 		data.depth_command = scenario->buckets[i].depth_command;
+		if (!scenario->bucket_data_uploaded || memcmp(&data, &scenario->bucket_data[i], sizeof(data)) != 0) {
+			scenario->bucket_data[i] = data;
+			changed_first = MIN(changed_first, i);
+			changed_last = i;
+		}
 	}
-	rd->buffer_update(scenario->buckets_buffer, 0, scenario->bucket_data.size() * sizeof(GPUInstanceBucketData), scenario->bucket_data.ptr());
-	// Zero instances in every bucket's command and the view's counts, then cull and append.
-	rd->buffer_update(scenario->commands_buffer, 0, scenario->commands.size() * sizeof(uint32_t), scenario->commands.ptr());
-	const uint32_t zero_stats[4] = {};
-	rd->buffer_update(scenario->stats_buffer, 0, sizeof(zero_stats), zero_stats);
+	if (changed_first != UINT32_MAX) {
+		rd->buffer_update(scenario->buckets_buffer, changed_first * sizeof(GPUInstanceBucketData), (changed_last - changed_first + 1) * sizeof(GPUInstanceBucketData), scenario->bucket_data.ptr() + changed_first);
+	}
+	scenario->bucket_data_uploaded = true;
+	// Zero every command and the view's counts on the GPU (a clear, not a
+	// copy: see kb mistakes, D3D12), then cull and append; the cull writes the
+	// index count of each command it fills.
+	rd->buffer_clear(scenario->commands_buffer, 0, scenario->commands.size() * sizeof(uint32_t));
+	rd->buffer_clear(scenario->stats_buffer, 0, 4 * sizeof(uint32_t));
 
 	// What the scene cull found visible, a bit per table slot: the cull pass
 	// draws exactly those (frustum, layers and occluders as the CPU tested).
@@ -875,6 +896,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		uniform.append_id(resources[binding]);
 		uniforms.push_back(uniform);
 	}
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 13, scenario->command_indices_buffer));
 	RENDER_TIMESTAMP("GPU Instances Cull");
 	RD::ComputeListID compute_list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(compute_list, gpu_instance_cull.pipeline);
@@ -884,6 +906,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		rd->compute_list_dispatch(compute_list, (params.member_count + 63) / 64, 1, 1);
 	}
 	rd->compute_list_end();
+	RENDER_TIMESTAMP("GPU Instances Cull End");
 
 	// Render info: what this view drew, known a few frames later.
 	bool check_stats = false;
@@ -955,6 +978,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 			}
 			gpu_instances_check_command_levels = scenario->command_levels;
 			gpu_instances_check_command_depth = scenario->command_depth;
+			gpu_instances_check_command_indices = scenario->command_indices;
 			gpu_instances_check_emitted.resize(scenario->commands.size() / 5);
 			memset(gpu_instances_check_emitted.ptr(), 0, gpu_instances_check_emitted.size());
 			gpu_instances_check_emitting = true; // _gpu_instances_append() of this view marks them.
@@ -990,10 +1014,15 @@ void RenderForwardClustered::_gpu_instances_check_received(const Vector<uint8_t>
 	const LocalVector<uint32_t> &command_depth = self->gpu_instances_check_command_depth;
 	const LocalVector<uint8_t> &emitted = self->gpu_instances_check_emitted;
 	uint32_t not_drawn = 0; // Culled into a command the view drew no element for.
+	uint32_t wrong_indices = 0; // Commands with instances whose index count is not their level's.
+	const LocalVector<uint32_t> &command_indices = self->gpu_instances_check_command_indices;
 	for (uint32_t i = 1; i < word_count; i += 5) {
 		const uint32_t command = i / 5;
 		if (words[i] > 0 && (command >= emitted.size() || !emitted[command])) {
 			not_drawn += words[i];
+		}
+		if (words[i] > 0 && (command >= command_indices.size() || words[i - 1] != command_indices[command])) {
+			wrong_indices++;
 		}
 		const uint32_t depth = command < command_depth.size() ? command_depth[command] : UINT32_MAX;
 		if (depth == UINT32_MAX - 1) {
@@ -1023,6 +1052,8 @@ void RenderForwardClustered::_gpu_instances_check_received(const Vector<uint8_t>
 	}
 	if (not_drawn > 0) {
 		ERR_PRINT(vformat("GPU instances check (frame %d): %d instance surfaces were culled into commands the view drew no element for.", self->gpu_instances_check_frame, not_drawn));
+	} else if (wrong_indices > 0) {
+		ERR_PRINT(vformat("GPU instances check (frame %d): %d commands with instances draw another index count than their surface level.", self->gpu_instances_check_frame, wrong_indices));
 	} else if (moved != self->gpu_instances_check_moved) {
 		ERR_PRINT(vformat("GPU instances check (frame %d): the GPU path drew %d moved instance surfaces in the motion pass, the CPU list would draw %d.", self->gpu_instances_check_frame, moved, self->gpu_instances_check_moved));
 	} else if (depth_mismatches > 0) {
@@ -1204,6 +1235,7 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 		gpu_instances_shadow_check_pending = true;
 		gpu_instances_shadow_check_expected = expected;
 		gpu_instances_shadow_check_command_depth = scenario->command_depth;
+		gpu_instances_shadow_check_command_indices = scenario->command_indices;
 		gpu_instances_shadow_check_emitted_copy = emitted;
 		gpu_instances_shadow_check_batch_pass = pass;
 	}
@@ -1261,17 +1293,12 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 		batch.stats = rd->storage_buffer_create(4 * sizeof(uint32_t));
 	}
 
-	// Every pass starts from the commands with zero instances.
-	LocalVector<uint32_t> &staging = gpu_instances_shadow_batch_commands;
-	staging.resize(passes * command_words);
-	for (uint32_t pass = 0; pass < passes; pass++) {
-		memcpy(staging.ptr() + pass * command_words, scenario->commands.ptr(), command_words * sizeof(uint32_t));
-	}
-	rd->buffer_update(batch.commands, 0, staging.size() * sizeof(uint32_t), staging.ptr());
+	// Every pass starts from zeroed commands, cleared on the GPU; the cull
+	// writes the index count of each command it fills.
+	rd->buffer_clear(batch.commands, 0, passes * command_words * sizeof(uint32_t));
 	rd->buffer_update(batch.visible, 0, passes * words * sizeof(uint32_t), gpu_instances_shadow_batch_bits.ptr());
 	rd->buffer_update(batch.passes, 0, passes * sizeof(GPUInstanceShadowPassData), gpu_instances_shadow_batch.ptr());
-	const uint32_t zero_stats[4] = {};
-	rd->buffer_update(batch.stats, 0, sizeof(zero_stats), zero_stats);
+	rd->buffer_clear(batch.stats, 0, 4 * sizeof(uint32_t));
 
 	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 2);
 	const RID resources[11] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, batch.commands, RID(), batch.ids, scenario->lod_edges_buffer,
@@ -1287,6 +1314,7 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 		uniform.append_id(resources[binding]);
 		uniforms.push_back(uniform);
 	}
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 13, scenario->command_indices_buffer));
 	GPUInstanceCullParams params = {};
 	params.member_count = scenario->member_count;
 	params.view_flags = GPU_INSTANCE_VIEW_SHADOW;
@@ -1301,6 +1329,7 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 		rd->compute_list_dispatch(compute_list, (params.member_count + 63) / 64, MIN(max_rows, passes - first), 1);
 	}
 	rd->compute_list_end();
+	RENDER_TIMESTAMP("GPU Instances Shadow Cull End");
 	if (gpu_instances_view_key != 0) {
 		rd->buffer_get_data_async(batch.stats, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_stats_received).bind(gpu_instances_view_key, RSG::rasterizer->get_frame_number()), 0, 2 * sizeof(uint32_t));
 	}
@@ -1328,12 +1357,17 @@ void RenderForwardClustered::_gpu_instances_shadow_check_received(const Vector<u
 	const uint32_t word_count = p_data.size() / sizeof(uint32_t);
 	const LocalVector<uint32_t> &command_depth = self->gpu_instances_shadow_check_command_depth;
 	const LocalVector<uint8_t> &emitted = self->gpu_instances_shadow_check_emitted_copy;
+	const LocalVector<uint32_t> &command_indices = self->gpu_instances_shadow_check_command_indices;
 	uint32_t drawn = 0;
 	uint32_t not_drawn = 0;
+	uint32_t wrong_indices = 0;
 	for (uint32_t i = 1; i < word_count; i += 5) {
 		const uint32_t command = i / 5;
 		if (words[i] > 0 && (command >= emitted.size() || !emitted[command])) {
 			not_drawn += words[i];
+		}
+		if (words[i] > 0 && (command >= command_indices.size() || words[i - 1] != command_indices[command])) {
+			wrong_indices++;
 		}
 		if (command < command_depth.size() && command_depth[command] == UINT32_MAX - 1) {
 			continue; // A depth twin: counted with its bucket.
@@ -1342,6 +1376,8 @@ void RenderForwardClustered::_gpu_instances_shadow_check_received(const Vector<u
 	}
 	if (not_drawn > 0) {
 		ERR_PRINT(vformat("GPU instances shadow check (frame %d): %d caster surfaces were culled into commands the pass drew no element for.", self->gpu_instances_shadow_check_frame, not_drawn));
+	} else if (wrong_indices > 0) {
+		ERR_PRINT(vformat("GPU instances shadow check (frame %d): %d commands with casters draw another index count than their surface level.", self->gpu_instances_shadow_check_frame, wrong_indices));
 	} else if (drawn == self->gpu_instances_shadow_check_expected) {
 		print_line(vformat("GPU_INSTANCES_SHADOW_CHECK: ok frame=%d drawn=%d", self->gpu_instances_shadow_check_frame, drawn));
 	} else {

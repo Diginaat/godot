@@ -355,6 +355,47 @@ generated index LODs, 4 copies each; Vulkan, p50): GPU path render CPU
 The other cases are within their spread of the D036 numbers (`unique_10k`
 render CPU 0.41-0.42 ms, `massive_100k` 1.34-1.67 ms).
 
+### A game level: where the GPU path's cost is (D039), 2026-11-15
+
+Same level and setup as above. D039 replaced the per-view command uploads
+(about 80 KB per camera view and per shadow pass) with GPU clears, and the
+per-frame bucket data upload with uploads of changed buckets. GPU path
+minus CPU path, in-process A/B (40 blocks per view), 3 runs per build
+alternating with the build before, median:
+
+| Build | start | middle | far end |
+| --- | --- | --- | --- |
+| Before, default cutoff (256) | +0.06 ms | +0.03 ms | +0.09 ms |
+| D039, default cutoff | +0.05 ms | +0.11 ms | +0.06 ms |
+| Before, every shadow pass on the GPU path | +0.13 ms | +0.16 ms | +0.19 ms |
+| D039, every shadow pass on the GPU path | +0.10 ms | +0.11 ms | +0.19 ms |
+
+Within the spread (single runs vary by about 0.1 ms). Instance bench
+(Vulkan, `-GpuInstances`, 2 rounds alternating with the build before):
+`unique_lod_2k` GPU 0.44-0.46 to 0.41-0.43 ms, the other cases within
+spread. `gpu_instances/occlusion`
+on against off on the GPU path: -0.001 to +0.012 ms (3 runs), so the HZB
+build and test cost what they save here.
+
+Stage intervals (`--gpu-profile`, safe render thread, 300 frames per view,
+mean of 2 runs; new timestamps `GPU Instances Cull End` and `GPU Instances
+Shadow Cull End` split each cull from what follows it). Difference to the
+CPU path:
+
+| Stage | Default cutoff | Every shadow pass on the GPU path |
+| --- | --- | --- |
+| Shadow culls (3 batches: 2 omni lights, the directional cascades) | - | +0.020-0.021 ms |
+| Shadow draws (after the cull, against the CPU path's) | +0.002-0.015 ms | +0.029-0.048 ms |
+| Camera cull dispatch | below 0.01 ms | below 0.01 ms |
+| Depth pre-pass | +0.007-0.033 ms | +0.005-0.037 ms |
+| Whole frame (sum of stages) | +0.016-0.048 ms | +0.08-0.21 ms |
+
+The culls are cheap; the GPU path's draws cost more than the CPU path's
+although there are fewer of them in the shadow passes (723-833 against
+862-929): about 50-60 ns more per draw in depth-only passes. The rest of
+the frame differences (DDGI, opaque pass) move with the level's
+flickering lights.
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

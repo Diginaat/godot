@@ -10,8 +10,8 @@
 // slot), the index LOD as the CPU render list chooses it, whether
 // the motion pass draws it, then the
 // instance data Forward+ draws with, at the member's own index, and the
-// member's index appended to its bucket level's draw. The CPU zeroed each
-// level's instance count.
+// member's index appended to its bucket level's draw. The commands were
+// cleared on the GPU; the first member of a command writes its index count.
 //
 // MODE_OCCLUDE runs after the depth pre-pass with the camera run's
 // parameters: it chooses the same command for each drawn member, tests the
@@ -145,6 +145,21 @@ layout(set = 0, binding = 9, std430) restrict readonly buffer Visible {
 }
 visible;
 
+layout(set = 0, binding = 13, std430) restrict readonly buffer CommandIndices {
+	uint data[]; // Index count (word 0) of each command, relative to the first.
+}
+command_indices;
+
+// Appends a member to a command; the first one writes the command's index
+// count (the clear zeroed all five words).
+uint append_member(uint p_command_offset, uint p_command) {
+	uint rank = atomicAdd(commands.data[(p_command_offset + p_command) * 5 + 1], 1);
+	if (rank == 0) {
+		commands.data[(p_command_offset + p_command) * 5] = command_indices.data[p_command];
+	}
+	return rank;
+}
+
 #ifdef MODE_SHADOW_BATCH
 struct ShadowPass { // RenderForwardClustered::GPUInstanceShadowPassData, 48 bytes.
 	vec3 lod_camera;
@@ -245,7 +260,7 @@ void main() {
 		atomicAdd(statistics.data[STAT_GPU_INSTANCES_OCCLUDED], 1u);
 		return;
 	}
-	uint rank = atomicAdd(commands.data[(bucket.command + command) * 5 + 1], 1);
+	uint rank = append_member(0, bucket.command + command);
 	ids.data[bucket.ids_first + command * bucket.capacity + rank] = index;
 }
 
@@ -261,17 +276,22 @@ uint cull_member(uint index, out uint r_primitives) {
 	if (member.x == 0xFFFFFFFFu) {
 		return 0; // A free member slot.
 	}
+#ifdef MODE_SHADOW_BATCH
+	ShadowPass pass = shadow_passes.data[params.pass_first + gl_WorkGroupID.y];
+	// Most members cast into few passes: test before reading the record.
+	if ((visible.bits[pass.visible_offset + (member.x >> 5)] & (1u << (member.x & 31u))) == 0) {
+		return 0;
+	}
+#endif
 	Record record = table.records[member.x];
 	Bucket bucket = buckets.data[member.y];
 #ifdef MODE_SHADOW_BATCH
-	ShadowPass pass = shadow_passes.data[params.pass_first + gl_WorkGroupID.y];
 	uint view_flags = pass.view_flags;
 	float lod_threshold = pass.lod_threshold;
 	float lod_distance_multiplier = pass.lod_distance_multiplier;
 	vec3 lod_camera = pass.lod_camera;
 	uint command_offset = pass.command_offset;
 	uint ids_offset = pass.ids_offset;
-	uint visible_offset = pass.visible_offset;
 #else
 	uint view_flags = params.view_flags;
 	float lod_threshold = params.lod_threshold;
@@ -279,7 +299,6 @@ uint cull_member(uint index, out uint r_primitives) {
 	vec3 lod_camera = params.lod_camera;
 	uint command_offset = 0;
 	uint ids_offset = 0;
-	uint visible_offset = 0;
 #endif
 	bool moved = bool(record.gpu_flags & GPU_FLAG_MOVED);
 	bool motion_pass = bool(view_flags & VIEW_FLAG_MOTION);
@@ -317,16 +336,19 @@ uint cull_member(uint index, out uint r_primitives) {
 	}
 #endif
 
-	// The scene cull's answer: frustum, layers, occluders.
-	if ((visible.bits[visible_offset + (member.x >> 5)] & (1u << (member.x & 31u))) == 0) {
+#ifndef MODE_SHADOW_BATCH
+	// The scene cull's answer: frustum, layers, occluders (shadow passes
+	// tested it above).
+	if ((visible.bits[member.x >> 5] & (1u << (member.x & 31u))) == 0) {
 		return 0;
 	}
+#endif
 	uint command = member_command(record, bucket, lod_threshold, lod_distance_multiplier, lod_camera, view_flags);
-	uint rank = atomicAdd(commands.data[(command_offset + bucket.command + command) * 5 + 1], 1);
+	uint rank = append_member(command_offset, bucket.command + command);
 	ids.data[ids_offset + bucket.ids_first + command * bucket.capacity + rank] = index;
 	if (bucket.depth_command != 0xFFFFFFFFu) {
 		// A separate shadow mesh: the depth pre-pass draws as many instances.
-		atomicAdd(commands.data[(command_offset + bucket.depth_command + command) * 5 + 1], 1);
+		append_member(command_offset, bucket.depth_command + command);
 	}
 	r_primitives = command_primitives.data[bucket.command + command];
 	return motion_pass && moved ? 2 : 1;

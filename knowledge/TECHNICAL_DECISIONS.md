@@ -839,3 +839,39 @@ the new check.
 With the batch the level is +0.04-0.08 ms (A/A floor 0.06 ms).
 Not done: the camera view's own cost (about 0.05 ms on the level); small
 shadow passes are still cheaper on the CPU list.
+
+## D039 — The GPU instance path clears its indirect commands on the GPU; the cull writes their index counts
+
+Date: 2026-11-15. Branch: `dev-gpu-renderer`.
+
+Every view of the GPU path (the camera, its occlusion run, each shadow
+batch) reset its indirect commands by uploading the scenario's whole
+command array from the CPU: about 80 KB per camera view and per shadow
+pass on a game level, more with many buckets. The bucket data (80 bytes
+per bucket) was uploaded every frame too. A GPU `buffer_copy` from a
+template would avoid the upload, but a copy followed by compute writes to
+the same buffer breaks D3D12 (kb mistakes).
+
+Decision:
+- Views zero their commands with `buffer_clear` (a UAV clear on D3D12, the
+  state the compute list writes in). The cull's first member of a command
+  writes the command's index count (word 0) from a per-command buffer
+  (`command_indices`, binding 13, uploaded at a rebuild); the other words
+  stay 0. Commands no member lands in draw nothing (index and instance
+  count 0).
+- Bucket data is uploaded only for the range of buckets whose values
+  changed (after a rebuild, all).
+- Shadow batch rows test the pass's visible bit before they read the
+  member's table record and bucket.
+- Validation also reports commands with instances whose index count is not
+  their level's, in camera views and shadow passes.
+
+Measured: no GPU change beyond the spread on the Overgrown Subway level
+(12 alternating runs, GPU path minus CPU path +0.05/+0.11/+0.06 ms against
++0.06/+0.03/+0.09 before with the default cutoff, +0.10/+0.11/+0.19
+against +0.13/+0.16/+0.19 with every shadow pass on the GPU path);
+`unique_lod_2k` GPU 0.44-0.46 to 0.41-0.43 ms, the other bench cases
+within spread. Less CPU work per view (no copies into the staging buffer).
+`gpu_instances.ps1` passes on Vulkan and D3D12. The upload was not the
+game level's cost: stage timestamps put it in the GPU path's draws
+(benchmarks.md, "A game level").
