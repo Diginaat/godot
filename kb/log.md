@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-16 (core: HashMap one block, not kept)
+
+* **Tried**: `HashMap`'s two arrays in one block, as D013 did for
+  `HashSet`. No measurable change on three workloads (differences of both
+  signs within the spread); reverted. docs/core-modernization/phases/02-hashing.md.
+
 ## 2026-11-16 (core: one allocation per HashSet, D013)
 
 * **Implemented**: `HashSet` keeps its index arrays and keys in one block

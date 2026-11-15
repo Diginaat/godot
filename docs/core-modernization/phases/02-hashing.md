@@ -31,8 +31,13 @@ does not matter. Test `[HashSet] Keys of different sizes and alignments
 through growth` (1, 8 bytes, Vector3, String through growth, erase, copy,
 reset, reserve, move). 1,476 cases pass.
 
-Next here: `HashMap` and `AHashMap` allocate two arrays per table the same
-way (smaller gain: `HashMap`'s cost is its node per element).
+Tried and not kept (2026-11-16): `HashMap`'s two arrays (element pointers
+and hashes) in one block, the same way. Against the D013 build, 5
+alternating rounds, ms per frame: `instance` 11.12 / 11.14, `nodes` 14.42 /
+14.40, `script` 6.82 / 6.89, per-round differences of both signs. Its cost
+is the node per element, not the two arrays; reverted to keep `hash_map.h`
+as upstream has it. `AHashMap` not tried (lookups dominate it in the
+profiles, and its elements grow with `realloc`, which a block would lose).
 
 Existing prototype: faster byte hashes/String keys, slower numeric containers,
 higher live allocation bytes. No library adapter accepted as a default.
