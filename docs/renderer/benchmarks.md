@@ -283,6 +283,27 @@ forest (`gpu_intervals.ps1`, whole-frame GPU): Vulkan 4.88-4.99 ms against
 4.97-5.06 ms before, D3D12 5.36-5.38 against 5.34-5.71: storage-buffer
 material reads cost nothing measurable there.
 
+### Moved instances, 2026-11-15
+
+`dynamic_20k` moves 2,000 nodes per frame. Temporary timers in
+`RendererSceneCull::update()` (Vulkan, 120-frame means): the dirty instance
+loop took 1.005-1.051 ms per frame, about 510 ns per moved instance. Inside
+`_update_instance()` (timers on, so inflated): about 245 ns before the
+renderer call (AABB transform 27 ns, the rest memory access), renderer
+`set_transform()` 100 ns, BVH bounds quantizing (two double logs and a
+pow) 122 ns, BVH update 55 ns, re-pairing 53 ns. Pairing tests the exact
+AABB, so it must run on every move; the BVH update already returns early
+when the quantized bounds did not change.
+Kept: the quantizing step from the float exponent (`frexp`), and no
+local AABB update for a transform-only change (the dependency callbacks
+still queue one when the mesh, skeleton or AABB changes). Dirty loop
+0.921-0.946 ms (-9%); timing bench render CPU `dynamic_20k` 1.73-1.82 ms
+(1.87-2.09 before, partly inside spread). The rest is memory-bound pointer
+chasing per instance (Instance, geometry data, renderer instance, BVH
+leaf). The main thread spends more on the same moves (frame 3.4-3.5 ms
+against 1.7-1.8 ms render CPU): script, node transform propagation and
+notifications, not measured apart yet.
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

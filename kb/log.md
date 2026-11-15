@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-15 (moved instances)
+
+* Render-side cost of a moved instance measured at about 510 ns (dirty
+  loop, `dynamic_20k`); quantizing from the float exponent and no AABB
+  recompute on transform-only changes cut it 9%. Rest is memory-bound; the
+  main thread's share is larger and next. See docs/renderer/benchmarks.md.
+
 ## 2026-11-15 (GPU-first renderer: material parameter tables, D036)
 
 * Forward+ material parameters moved from one UBO per material to per-shader

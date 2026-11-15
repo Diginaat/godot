@@ -44,6 +44,8 @@
 #include "servers/xr/xr_interface.h"
 #endif
 
+#include <cmath>
+
 //#define DEBUG_CULL_TIME
 #ifdef DEBUG_CULL_TIME
 #include "core/os/os.h"
@@ -1130,7 +1132,9 @@ void RendererSceneCull::instance_set_transform(RID p_instance, const Transform3D
 
 #endif
 	instance->transform = p_transform;
-	_instance_queue_update(instance, true);
+	// The local AABB does not depend on the transform: no AABB update (a mesh
+	// storage lookup per moved instance).
+	_instance_queue_update(instance, false);
 }
 
 void RendererSceneCull::instance_attach_object_instance_id(RID p_instance, ObjectID p_id) {
@@ -1924,7 +1928,11 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 
 		if (motion_longest_axis < longest_axis * 2) {
 			//moved but not a lot, use motion aabb quantizing
-			float quantize_size = Math::pow(2.0, Math::ceil(Math::log(motion_longest_axis) / Math::log(2.0))) * 0.5; //one fifth
+			// 2^ceil(log2(motion)) / 2, from the exponent instead of two logs and a pow
+			// (motion > 0 here: it is at least the longest axis, and less than twice it).
+			int exponent;
+			const float mantissa = std::frexp(motion_longest_axis, &exponent);
+			const float quantize_size = std::ldexp(1.0f, mantissa == 0.5f ? exponent - 2 : exponent - 1);
 			bvh_aabb.quantize(quantize_size);
 		}
 	}
