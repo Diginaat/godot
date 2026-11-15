@@ -256,6 +256,33 @@ render CPU 0.38-0.41 ms, 130.7 MiB (before about 750 MiB, from the
 baseline below). The frame gap of `unique_10k` (frame 3.6-5.5 ms above
 render CPU) is gone with it. Other cases unchanged within spread.
 
+### Where render CPU goes after D036, 2026-11-15
+
+Stage profile (`instance_bench.ps1 -Stages -GpuInstances`, static view,
+Vulkan): the scene cull marker (`Cull DirectionalLight, Split #`: cascade
+setup plus the threaded instance cull) is now the largest stage: 1.36 ms
+at `massive_100k`, 0.39-0.40 ms at 20k. `dynamic_20k` adds 1.12 ms of
+`Prepare Render Frame` for its 2,000 moved nodes. Draw submission no
+longer shows. Probes (temporary builds, not committed), same stage:
+
+| Probe | `massive_100k` | `shared_20k` | `dynamic_20k` |
+| --- | --- | --- | --- |
+| As committed (D036) | 1.356 | 0.388 | 0.400 |
+| GPU path instances skip the whole CPU cull | 0.226 | 0.094 | 0.123 |
+| They skip only the cascade tests | 0.663 | 0.204 | 0.223 |
+| Cascade frustum tested before the light culler (kept) | 1.171 | 0.357 | 0.440 |
+
+So a GPU-side cull of the GPU path's members could save up to about
+1.1 ms at 100k (half of it in the cascades), but the CPU lists are also
+the fallback of views and shadow passes that do not take the GPU path, and
+D032 relies on them for exact occluder results. The kept reorder (exact,
+also helps the CPU path): timing bench render CPU `massive_100k` 1.30-1.60
+ms (1.43-1.90 before), `churn_100k` 2.16-2.37 (2.37-2.48), `shared_20k`
+0.54-0.60 (0.58-0.62), within spread for the rest. GPU A/B of D036 on the
+forest (`gpu_intervals.ps1`, whole-frame GPU): Vulkan 4.88-4.99 ms against
+4.97-5.06 ms before, D3D12 5.36-5.38 against 5.34-5.71: storage-buffer
+material reads cost nothing measurable there.
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

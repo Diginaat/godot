@@ -3866,10 +3866,15 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 					if (cull_data.cull->shadows[j].cascades[k].reused) {
 						continue; // Kept from an earlier frame.
 					}
+					// The cascade frustum first: it is cheap and rejects most
+					// instances, so few reach the light culler's planes.
+					if (!IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum)) {
+						continue;
+					}
 					if (!light_culler->cull_directional_light(cull_data.scenario->instance_aabbs[i], j, k)) { // pass the cascade index
 						continue;
 					}
-					if (IN_FRUSTUM(cull_data.cull->shadows[j].cascades[k].frustum) && VIS_CHECK) {
+					if (VIS_CHECK) {
 						uint32_t base_type = idata.flags & InstanceData::FLAG_BASE_TYPE_MASK;
 
 						const bool is_inactive_particle = (base_type == RSE::INSTANCE_PARTICLES) && RSG::particles_storage->particles_is_inactive(idata.base_rid);
