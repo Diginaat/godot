@@ -1076,9 +1076,12 @@ protected:
 			RID commands;
 			RID ids;
 			RID visible;
+			RID cull_planes; // GPU-culled cascades (D037): the pass's planes.
+			RID cull_exclude; // And a bit per table slot the scene cull decided.
 			uint32_t command_capacity = 0;
 			uint32_t id_capacity = 0;
 			uint32_t visible_capacity = 0;
+			uint32_t exclude_capacity = 0;
 		};
 		LocalVector<ShadowView> shadow_views;
 		RID output_buffer; // InstanceData per member, written per view.
@@ -1111,8 +1114,14 @@ protected:
 		RID version;
 		RID pipeline;
 		RID occlude_pipeline; // MODE_OCCLUDE.
+		RID empty_buffer; // Bindings 10 and 11 of passes without GPU-culled casters.
 	} gpu_instance_cull;
-	uint32_t gpu_instances_view_params[8] = {}; // The camera run's push constant (GPUInstanceCullParams), for the occlusion run.
+	uint32_t gpu_instances_view_params[12] = {}; // The camera run's push constant (GPUInstanceCullParams), for the occlusion run.
+	// GPU-culled cascades (D037): casters a shadow pass tests on the CPU when
+	// the GPU path does not draw this render (_fill_render_list() adds them).
+	LocalVector<GeometryInstanceForwardClustered *> gpu_instances_shadow_cpu_casters;
+	const LocalVector<GeometryInstanceForwardClustered *> *gpu_instances_shadow_extra = nullptr;
+	void _gpu_instances_shadow_cpu_cull(const RenderShadowData *p_shadow_data, LocalVector<GeometryInstanceForwardClustered *> &r_casters) const;
 	// Validation (rendering/geometry/gpu_instances/validate).
 	uint64_t gpu_instances_check_frame = UINT64_MAX;
 	bool gpu_instances_check_pending = false;
@@ -1159,6 +1168,9 @@ protected:
 	uint32_t gpu_instances_shadow_views_last = 0; // In the last render that had shadow passes.
 	// Shadow validation (one pass every 30 frames).
 	bool gpu_instances_shadow_check_pending = false;
+	bool gpu_instances_shadow_check_deferred = false; // The chosen pass expected nothing: the next one checks.
+	uint64_t gpu_instances_shadow_stats_view = 0; // Shadow passes of this render added stats for this view key.
+	void _gpu_instances_shadow_flush_stats();
 	uint64_t gpu_instances_shadow_check_frame = UINT64_MAX;
 	uint32_t gpu_instances_shadow_check_expected = 0;
 	LocalVector<uint32_t> gpu_instances_shadow_check_command_depth;
@@ -1171,7 +1183,9 @@ protected:
 	struct GPUInstanceViewInfo {
 		uint32_t objects = 0;
 		uint32_t primitives = 0;
-		uint32_t shadow_objects = 0; // Summed over the view's shadow passes.
+		// Summed over the view's shadow passes; read backs not reported yet
+		// (each render's sum is reported once, whenever it arrives).
+		uint32_t shadow_objects = 0;
 		uint32_t shadow_primitives = 0;
 		uint64_t frame = 0;
 	};
@@ -1457,6 +1471,7 @@ public:
 	virtual void geometry_instance_free(RenderGeometryInstance *p_geometry_instance) override;
 
 	virtual bool gpu_instances_begin_cull() override;
+	virtual bool gpu_instances_cull_shadows(uint64_t p_scenario) const override;
 
 	virtual uint32_t geometry_instance_get_pair_mask() override;
 

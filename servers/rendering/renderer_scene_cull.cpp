@@ -2405,6 +2405,9 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 		InstanceLightData::DirectionalCascadeCache &cache = light->directional_cascade_cache[i];
 		Cull::Shadow::Cascade &cascade = cull.shadows[p_shadow_index].cascades[i];
 		cascade.reused = false;
+		// Cascades drawn every frame only: GPU-culled cached cascades did not
+		// match the CPU-culled ones in the gpu_instances A/B test (D037).
+		cascade.gpu_cull = !cacheable;
 
 		// setup a camera matrix for that range!
 		Projection camera_matrix;
@@ -3861,10 +3864,24 @@ void RendererSceneCull::_scene_cull(CullData &cull_data, InstanceCullResult &cul
 				}
 			}
 
+			// GPU-culled cascades (D037): the GPU path tests the casters it draws
+			// against each cascade's planes; only those whose casting depends on
+			// more than frustum and layers stay here (and are named to it).
+			bool gpu_caster = false;
+			if (cull_data.gpu_shadow_cull && ((1 << (idata.flags & InstanceData::FLAG_BASE_TYPE_MASK)) & RSE::INSTANCE_GEOMETRY_MASK) && idata.instance_geometry->gpu_drawn) {
+				if (visibility_flags == 0 && (idata.flags & InstanceData::FLAG_CAST_SHADOWS)) {
+					gpu_caster = true;
+				} else {
+					cull_result.gpu_shadow_exclude_slots.push_back(idata.instance_geometry->gpu_cull_slot);
+				}
+			}
 			for (uint32_t j = 0; j < cull_data.cull->shadow_count; j++) {
 				for (uint32_t k = 0; k < cull_data.cull->shadows[j].cascade_count; k++) {
 					if (cull_data.cull->shadows[j].cascades[k].reused) {
 						continue; // Kept from an earlier frame.
+					}
+					if (gpu_caster && cull_data.cull->shadows[j].cascades[k].gpu_cull) {
+						continue; // The GPU path tests it.
 					}
 					// The cascade frustum first: it is cheap and rejects most
 					// instances, so few reach the light culler's planes.
@@ -4134,6 +4151,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 	scene_cull_result.clear();
 	const bool gpu_split = scene_render->gpu_instances_begin_cull();
 	gpu_split_active = gpu_split; // Positional shadow culls below split their casters too.
+	// Not for views the GPU path leaves to the CPU list (probes, mirrors,
+	// XR): their shadow passes would draw from the CPU lists alone.
+	const bool gpu_shadow_cull = gpu_split && p_using_shadows && !p_reflection_probe.is_valid() && p_camera_data->view_count == 1 && !p_camera_data->mirror_pass && scene_render->gpu_instances_cull_shadows(p_scenario.get_id());
 
 	{
 		uint64_t cull_from = 0;
@@ -4154,6 +4174,7 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		cull_data.visibility_viewport_mask = scenario->viewport_visibility_masks.has(p_viewport) ? scenario->viewport_visibility_masks[p_viewport] : 0;
 		cull_data.reflection_probes_enabled = GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probes_enabled");
 		cull_data.gpu_split = gpu_split;
+		cull_data.gpu_shadow_cull = gpu_shadow_cull;
 #ifdef DEBUG_CULL_TIME
 		uint64_t time_from = OS::get_singleton()->get_ticks_usec();
 #endif
@@ -4216,6 +4237,15 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 				render_shadow_data[max_shadows_used].instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_geometry_instances[j]);
 				render_shadow_data[max_shadows_used].gpu_instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_gpu_instances[j]);
 				render_shadow_data[max_shadows_used].gpu_slots = scene_cull_result.directional_shadows[i].cascade_gpu_slots[j];
+				if (gpu_shadow_cull && c.gpu_cull) {
+					LocalVector<Plane> &planes = render_shadow_data[max_shadows_used].gpu_cull_planes;
+					for (uint32_t p = 0; p < c.frustum.plane_count; p++) {
+						planes.push_back(c.frustum.planes_ptr[p]);
+					}
+					light_culler->get_directional_cull_planes(i, j, planes);
+					render_shadow_data[max_shadows_used].gpu_cull_layers = p_visible_layers & cull.shadows[i].caster_mask;
+					render_shadow_data[max_shadows_used].gpu_cull_exclude = &scene_cull_result.gpu_shadow_exclude_slots;
+				}
 				max_shadows_used++;
 			}
 		}
@@ -4466,6 +4496,9 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		render_shadow_data[i].instances.clear();
 		render_shadow_data[i].gpu_instances.clear();
 		render_shadow_data[i].gpu_slots.clear();
+		render_shadow_data[i].gpu_cull_planes.clear();
+		render_shadow_data[i].gpu_cull_layers = 0;
+		render_shadow_data[i].gpu_cull_exclude = nullptr;
 	}
 	max_shadows_used = 0;
 
@@ -5450,6 +5483,7 @@ RendererSceneCull::~RendererSceneCull() {
 		render_shadow_data[i].instances.reset();
 		render_shadow_data[i].gpu_instances.reset();
 		render_shadow_data[i].gpu_slots.reset();
+		render_shadow_data[i].gpu_cull_planes.reset();
 	}
 	for (uint32_t i = 0; i < SDFGI_MAX_CASCADES * SDFGI_MAX_REGIONS_PER_CASCADE; i++) {
 		render_sdfgi_data[i].instances.reset();

@@ -988,6 +988,9 @@ public:
 		// gpu_cull_slot, read here where the instance is in cache anyway.
 		PagedArray<RenderGeometryInstance *> gpu_geometry_instances;
 		LocalVector<uint32_t> gpu_slots;
+		// With GPU-culled cascades (D037): the slots of GPU path instances whose
+		// casting the cull decided itself (visibility ranges or parents, no shadows).
+		LocalVector<uint32_t> gpu_shadow_exclude_slots;
 
 		struct DirectionalShadow {
 			PagedArray<RenderGeometryInstance *> cascade_geometry_instances[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES];
@@ -1013,6 +1016,7 @@ public:
 			rt_light_instances.clear();
 			gpu_geometry_instances.clear();
 			gpu_slots.clear();
+			gpu_shadow_exclude_slots.clear();
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].clear();
@@ -1044,6 +1048,7 @@ public:
 			rt_light_instances.reset();
 			gpu_geometry_instances.reset();
 			gpu_slots.reset();
+			gpu_shadow_exclude_slots.reset();
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
 				for (int j = 0; j < RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES; j++) {
 					directional_shadows[i].cascade_geometry_instances[j].reset();
@@ -1079,6 +1084,12 @@ public:
 				gpu_slots.resize(from + p_cull_result.gpu_slots.size());
 				memcpy(gpu_slots.ptr() + from, p_cull_result.gpu_slots.ptr(), p_cull_result.gpu_slots.size() * sizeof(uint32_t));
 				p_cull_result.gpu_slots.clear();
+			}
+			if (!p_cull_result.gpu_shadow_exclude_slots.is_empty()) {
+				const uint32_t from = gpu_shadow_exclude_slots.size();
+				gpu_shadow_exclude_slots.resize(from + p_cull_result.gpu_shadow_exclude_slots.size());
+				memcpy(gpu_shadow_exclude_slots.ptr() + from, p_cull_result.gpu_shadow_exclude_slots.ptr(), p_cull_result.gpu_shadow_exclude_slots.size() * sizeof(uint32_t));
+				p_cull_result.gpu_shadow_exclude_slots.clear();
 			}
 
 			for (int i = 0; i < RendererSceneRender::MAX_DIRECTIONAL_LIGHTS; i++) {
@@ -1250,6 +1261,8 @@ public:
 				Vector2 uv_scale;
 				// Kept from an earlier frame: not culled, not rendered.
 				bool reused = false;
+				// The GPU path culls the casters it draws (D037, CullData::gpu_shadow_cull).
+				bool gpu_cull = false;
 
 			} cascades[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES]; //max 4 cascades
 			uint32_t cascade_count;
@@ -1303,6 +1316,7 @@ public:
 		uint64_t visibility_viewport_mask;
 		bool reflection_probes_enabled = true; // rendering/global_illumination/reflections/probes_enabled
 		bool gpu_split = false; // List gpu_drawn instances apart (RendererSceneRender::gpu_instances_begin_cull()).
+		bool gpu_shadow_cull = false; // Leave the cascades of gpu_drawn casters to the GPU path (D037).
 	};
 
 	void _scene_cull_threaded(uint32_t p_thread, CullData *cull_data);

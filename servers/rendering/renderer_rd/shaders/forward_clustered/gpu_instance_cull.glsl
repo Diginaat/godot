@@ -123,6 +123,7 @@ shared uint group_primitives;
 #define VIEW_FLAG_ORTHOGONAL 4
 #define VIEW_FLAG_MOTION 8
 #define VIEW_FLAG_SHADOW 16
+#define VIEW_FLAG_GPU_CULL 32
 
 #define GPU_FLAG_MOVED 1
 #define GPU_FLAG_CAN_SDFGI 2
@@ -139,6 +140,20 @@ layout(set = 0, binding = 9, std430) restrict readonly buffer Visible {
 	uint bits[]; // Per table slot: the scene cull found the instance visible in this view.
 }
 visible;
+
+#ifndef MODE_OCCLUDE
+// GPU-culled shadow casters (D037): the members the scene cull did not
+// decide are tested against these planes (xyz normal, w distance).
+layout(set = 0, binding = 10, std430) restrict readonly buffer CullPlanes {
+	vec4 data[];
+}
+cull_planes;
+
+layout(set = 0, binding = 11, std430) restrict readonly buffer CullExclude {
+	uint bits[]; // Per table slot: the scene cull decided (visible holds its answer).
+}
+cull_exclude;
+#endif
 
 #ifdef MODE_OCCLUDE
 layout(set = 0, binding = 10, std430) restrict readonly buffer Occlusion {
@@ -167,7 +182,11 @@ layout(push_constant, std430) uniform Params {
 	float lod_threshold; // Screen mesh LOD threshold; 0 or less: no LODs.
 	float lod_distance_multiplier;
 	vec3 lod_camera;
-	uint pad;
+	uint plane_count; // VIEW_FLAG_GPU_CULL.
+	uint cull_layers;
+	uint pad0;
+	uint pad1;
+	uint pad2;
 }
 params;
 
@@ -273,7 +292,23 @@ uint cull_member(uint index, out uint r_primitives) {
 	}
 
 	// The scene cull's answer: frustum, layers, occluders.
-	if ((visible.bits[member.x >> 5] & (1u << (member.x & 31u))) == 0) {
+	uint slot_bit = 1u << (member.x & 31u);
+	bool drawn = (visible.bits[member.x >> 5] & slot_bit) != 0;
+	if (bool(params.view_flags & VIEW_FLAG_GPU_CULL) && (cull_exclude.bits[member.x >> 5] & slot_bit) == 0) {
+		// Left to the GPU path: the scene cull's box test (the corner nearest
+		// the inside on a plane's positive side is outside), and layers.
+		drawn = (record.layer_mask & params.cull_layers) != 0;
+		vec3 box_min = record.aabb_position;
+		vec3 box_max = record.aabb_position + record.aabb_size;
+		for (uint i = 0; i < params.plane_count && drawn; i++) {
+			vec4 plane = cull_planes.data[i];
+			vec3 corner = mix(box_max, box_min, greaterThan(plane.xyz, vec3(0.0)));
+			if (dot(plane.xyz, corner) - plane.w >= 0.0) {
+				drawn = false;
+			}
+		}
+	}
+	if (!drawn) {
 		return 0;
 	}
 	uint command = member_command(record, bucket);

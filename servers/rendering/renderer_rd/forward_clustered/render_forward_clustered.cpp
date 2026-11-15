@@ -1118,12 +1118,17 @@ void RenderForwardClustered::_fill_render_list(RenderListType p_render_list, con
 		}
 	}
 	const uint32_t listed_count = p_render_data->instances->size();
-	const uint32_t total_count = listed_count + (gpu_listed ? gpu_listed->size() : (gpu_left ? gpu_left->size() : 0u));
+	const uint32_t gpu_count = listed_count + (gpu_listed ? gpu_listed->size() : (gpu_left ? gpu_left->size() : 0u));
+	// GPU-culled casters of a shadow pass the GPU path does not draw (D037).
+	const LocalVector<GeometryInstanceForwardClustered *> *gpu_extra = (gpu_listed && p_render_list == RENDER_LIST_SECONDARY) ? gpu_instances_shadow_extra : nullptr;
+	const uint32_t total_count = gpu_count + (gpu_extra ? gpu_extra->size() : 0u);
 
 	for (uint32_t i = 0; i < total_count; i++) {
 		GeometryInstanceForwardClustered *inst;
 		if (i < listed_count) {
 			inst = static_cast<GeometryInstanceForwardClustered *>((*p_render_data->instances)[i]);
+		} else if (i >= gpu_count) {
+			inst = (*gpu_extra)[i - gpu_count];
 		} else if (gpu_listed) {
 			inst = static_cast<GeometryInstanceForwardClustered *>((*gpu_listed)[i - listed_count]);
 		} else {
@@ -3554,11 +3559,19 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	render_data.render_info = p_render_info;
 	// The GPU path's casters, listed apart by the scene cull: the CPU list
 	// takes them when the GPU path does not draw this pass.
-	const bool gpu_casters = p_shadow_data && p_shadow_data->gpu_instances.size() > 0;
+	// With GPU-culled cascades (D037) the list holds only the casters the
+	// scene cull decided; when the GPU path does not draw, the rest are
+	// tested here with the same planes.
+	const bool gpu_casters = p_shadow_data && (p_shadow_data->gpu_instances.size() > 0 || !p_shadow_data->gpu_cull_planes.is_empty());
+	gpu_instances_shadow_extra = nullptr;
 	if (gpu_casters) {
 		render_data.gpu_instances = &p_shadow_data->gpu_instances;
 		render_data.gpu_slots = &p_shadow_data->gpu_slots;
 		render_data.gpu_instances_drawn = gpu_instances_view != nullptr;
+		if (!render_data.gpu_instances_drawn && !p_shadow_data->gpu_cull_planes.is_empty()) {
+			_gpu_instances_shadow_cpu_cull(p_shadow_data, gpu_instances_shadow_cpu_casters);
+			gpu_instances_shadow_extra = &gpu_instances_shadow_cpu_casters;
+		}
 	}
 
 	RENDER_TIMESTAMP("Setup Shadow Pass");
@@ -3582,6 +3595,7 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	uint32_t render_list_from = render_list[RENDER_LIST_SECONDARY].elements.size();
 	RENDER_TIMESTAMP("Fill Shadow Render List");
 	_fill_render_list(RENDER_LIST_SECONDARY, &render_data, pass_mode, false, false, false, true);
+	gpu_instances_shadow_extra = nullptr;
 	uint32_t render_list_size = render_list[RENDER_LIST_SECONDARY].elements.size() - render_list_from;
 	RENDER_TIMESTAMP("Sort Shadow Render List");
 	render_list[RENDER_LIST_SECONDARY].sort_by_key_range(render_list_from, render_list_size);
@@ -3628,6 +3642,7 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 }
 
 void RenderForwardClustered::_render_shadow_process(RenderBufferDataForwardClustered *p_cull_buffers) {
+	_gpu_instances_shadow_flush_stats();
 	RenderingDevice *rd = RenderingDevice::get_singleton();
 	if (scene_state.instance_buffer[RENDER_LIST_SECONDARY].get_size(0u) > 0u) {
 		rd->buffer_flush(scene_state.instance_buffer[RENDER_LIST_SECONDARY]._get(0u));
@@ -6134,6 +6149,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
 	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", true);
+	GLOBAL_DEF("rendering/geometry/gpu_instances/shadow_culling", true);
 	singleton = this;
 	gpu_instances_readbacks_alive = true;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);
@@ -6313,6 +6329,9 @@ RenderForwardClustered::~RenderForwardClustered() {
 	_gpu_instances_free();
 	if (gpu_instance_cull.version.is_valid()) {
 		gpu_instance_cull.shader.version_free(gpu_instance_cull.version);
+	}
+	if (gpu_instance_cull.empty_buffer.is_valid()) {
+		RD::get_singleton()->free_rid(gpu_instance_cull.empty_buffer);
 	}
 
 	if (ss_effects != nullptr) {

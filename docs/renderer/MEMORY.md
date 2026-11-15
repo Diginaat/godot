@@ -20,7 +20,7 @@ PhysX, CLOD, weather) or the CPU fallback.
 | Phase | Material parameter tables done (2026-11-15, D036: `unique_10k` one bucket per table page instead of per material); 5.1 HZB occlusion done (D034); 6.1-6.3 shadow casters on the GPU path done; Phases 1 and 2 done |
 | Completed | Architecture audit, capability matrix, research notes, roadmap, many-instance bench, baseline (Vulkan, D3D12, safe/separate) |
 | Active task | None |
-| Next | The scene cull of GPU path members (up to 1.1 ms at 100k, benchmarks.md "Where render CPU goes after D036"): a GPU frustum/cascade test with a render-thread fallback for views that decline the GPU path; moved-instance cost (`dynamic_20k` 1.1 ms for 2,000); bindless textures; multi-draw has little left to merge (2-11 buckets in the bench) |
+| Next | D037 GPU-culled cascades on branch `dev-gpu-cull` (works for per-frame cascades, gain within spread; cached far cascades gave an unexplained A/B difference, see D037); then the camera view's cull; moved-instance cost (`dynamic_20k` 1.1 ms for 2,000); bindless textures; multi-draw has little left to merge |
 | Last verified build | Production editor, 2026-11-15 |
 | Last verified tests | `gpu_instances.ps1` on Vulkan and D3D12 (42 camera and 42 shadow count checks, render info, index LODs, shadow meshes, a motion pass, an occluder, HZB occlusion behind a wall, spot and omni shadows, casters behind the camera and per-frame churn without rebuilds; 13 of 13 images, shadow render info over 12 frames and the TAA and FSR 2 motion vectors equal to the CPU path; self-test caught), large-world suites on Vulkan and D3D12, standard smoke, 2026-11-10; after D036 (2026-11-15): `gpu_instances.ps1` Vulkan and D3D12, large-world Vulkan, standard smoke, instance bench Vulkan and D3D12 |
 

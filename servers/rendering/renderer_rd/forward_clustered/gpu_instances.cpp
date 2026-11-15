@@ -59,9 +59,11 @@ struct GPUInstanceCullParams {
 	float lod_threshold;
 	float lod_distance_multiplier;
 	float lod_camera[3];
-	uint32_t pad;
+	uint32_t plane_count; // GPU-culled casters (D037).
+	uint32_t cull_layers;
+	uint32_t pad[3];
 };
-static_assert(sizeof(GPUInstanceCullParams) == 32);
+static_assert(sizeof(GPUInstanceCullParams) == 48);
 
 enum {
 	GPU_INSTANCE_VIEW_USE_GI_BUFFERS = 1,
@@ -69,7 +71,28 @@ enum {
 	GPU_INSTANCE_VIEW_ORTHOGONAL = 4,
 	GPU_INSTANCE_VIEW_MOTION = 8, // Members that moved go to the motion pass's commands.
 	GPU_INSTANCE_VIEW_SHADOW = 16, // A shadow pass: no dynamic flag.
+	GPU_INSTANCE_VIEW_GPU_CULL = 32, // Members the scene cull did not decide: planes and layers (D037).
 };
+
+// The scene cull's box test (InstanceBounds::in_frustum(), the light
+// culler's plane ranges): outside when the corner nearest the inside lies
+// on a plane's positive side. gpu_instance_cull.glsl does the same.
+bool gpu_instance_box_outside(const AABB &p_box, const LocalVector<Plane> &p_planes) {
+	const Vector3 box_min = p_box.position;
+	const Vector3 box_max = p_box.position + p_box.size;
+	for (const Plane &plane : p_planes) {
+		const Vector3 corner(plane.normal.x > 0.0f ? box_min.x : box_max.x, plane.normal.y > 0.0f ? box_min.y : box_max.y, plane.normal.z > 0.0f ? box_min.z : box_max.z);
+		if (plane.distance_to(corner) >= 0.0f) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// At most this many buckets: GPU-culled shadow passes draw every bucket (the
+// CPU does not know which have casters), one indirect draw per level.
+constexpr uint32_t GPU_INSTANCE_SHADOW_CULL_MAX_BUCKETS = 1024;
+constexpr uint32_t GPU_INSTANCE_MAX_CULL_PLANES = 32;
 
 // As in render_forward_clustered.cpp.
 uint32_t gpu_instance_indices_to_primitives(RSE::PrimitiveType p_primitive, uint32_t p_indices) {
@@ -114,6 +137,44 @@ bool RenderForwardClustered::gpu_instances_begin_cull() {
 	gpu_instances_pending.clear();
 	gpu_instances_left.clear();
 	return gpu_instances_active;
+}
+
+bool RenderForwardClustered::gpu_instances_cull_shadows(uint64_t p_scenario) const {
+	if (!gpu_instances_active || !GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/shadow_culling") || get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_DISABLED) {
+		return false;
+	}
+	GPUInstanceScenario *const *scenario = gpu_instance_scenarios.getptr(p_scenario);
+	return !scenario || (*scenario)->buckets.size() <= GPU_INSTANCE_SHADOW_CULL_MAX_BUCKETS;
+}
+
+void RenderForwardClustered::_gpu_instances_shadow_cpu_cull(const RenderShadowData *p_shadow_data, LocalVector<GeometryInstanceForwardClustered *> &r_casters) const {
+	// What the GPU-culled pass draws, tested here: every caster of the
+	// scenario the scene cull left to the GPU path.
+	r_casters.clear();
+	GPUInstanceScenario *const *found = gpu_instance_scenarios.getptr(gpu_view_scenario);
+	if (!found || p_shadow_data->gpu_cull_planes.is_empty()) {
+		return;
+	}
+	thread_local LocalVector<uint32_t> excluded;
+	excluded.resize((gpu_instance_slots.get_capacity() + 31) / 32 + 1);
+	memset(excluded.ptr(), 0, excluded.size() * sizeof(uint32_t));
+	if (p_shadow_data->gpu_cull_exclude) {
+		for (uint32_t slot : *p_shadow_data->gpu_cull_exclude) {
+			if ((slot >> 5) < excluded.size()) {
+				excluded[slot >> 5] |= 1u << (slot & 31);
+			}
+		}
+	}
+	for (GeometryInstanceForwardClustered *instance : (*found)->instances) {
+		const uint32_t slot = instance->gpu_slot;
+		if (!instance->gpu_drawn || slot == GPUInstanceSlots::INVALID || (excluded[slot >> 5] & (1u << (slot & 31)))) {
+			continue;
+		}
+		if (!(instance->layer_mask & p_shadow_data->gpu_cull_layers) || gpu_instance_box_outside(instance->transformed_aabb, p_shadow_data->gpu_cull_planes)) {
+			continue;
+		}
+		r_casters.push_back(instance);
+	}
 }
 
 bool RenderForwardClustered::_gpu_instance_eligible(const GeometryInstanceForwardClustered *p_instance) const {
@@ -281,7 +342,7 @@ void RenderForwardClustered::_gpu_instances_free_scenario(GPUInstanceScenario *p
 		}
 	}
 	for (const GPUInstanceScenario::ShadowView &view : p_scenario->shadow_views) {
-		for (RID buffer : { view.commands, view.ids, view.visible }) {
+		for (RID buffer : { view.commands, view.ids, view.visible, view.cull_planes, view.cull_exclude }) {
 			if (buffer.is_valid()) {
 				rd->free_rid(buffer);
 			}
@@ -651,6 +712,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		gpu_instances_shadow_views_last = gpu_instances_shadow_views_used;
 	}
 	gpu_instances_shadow_views_used = 0;
+	gpu_instances_shadow_check_deferred = false;
 	p_render_data->gpu_instances_drawn = false;
 	if (!gpu_instances_active || !p_render_data->gpu_instances || p_render_data->gpu_scenario == 0) {
 		return false;
@@ -673,6 +735,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		gpu_instance_cull.shader.initialize(modes);
 		gpu_instance_cull.version = gpu_instance_cull.shader.version_create();
 		gpu_instance_cull.pipeline = rd->compute_pipeline_create(gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0));
+		gpu_instance_cull.empty_buffer = rd->storage_buffer_create(16 * sizeof(float));
 		gpu_instance_cull.occlude_pipeline = rd->compute_pipeline_create(gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 1));
 	}
 	if (gpu_instance_cull.pipeline.is_null()) {
@@ -826,10 +889,10 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	memcpy(gpu_instances_view_params, &params, sizeof(params)); // The occlusion run chooses the same commands.
 
 	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0);
-	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer, scenario->ids_buffer, scenario->lod_edges_buffer,
-		scenario->command_primitives_buffer, scenario->stats_buffer, scenario->visible_buffer };
+	const RID resources[12] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer, scenario->ids_buffer, scenario->lod_edges_buffer,
+		scenario->command_primitives_buffer, scenario->stats_buffer, scenario->visible_buffer, gpu_instance_cull.empty_buffer, gpu_instance_cull.empty_buffer };
 	LocalVector<RD::Uniform> uniforms;
-	for (uint32_t binding = 0; binding < 10; binding++) {
+	for (uint32_t binding = 0; binding < 12; binding++) {
 		RD::Uniform uniform;
 		uniform.binding = binding;
 		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -1063,15 +1126,52 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	}
 	rd->buffer_update(view.visible, 0, words * sizeof(uint32_t), bits.ptr());
 	rd->buffer_update(view.commands, 0, scenario->commands.size() * sizeof(uint32_t), scenario->commands.ptr());
-	// Render info: the passes of a render add up their casters; what the
-	// view's last render drew goes into this one (read back a few frames late).
+	// GPU-culled cascades (D037): the kernel tests the members the scene cull
+	// did not decide against the pass's planes.
+	const bool gpu_culled = !p_shadow_data->gpu_cull_planes.is_empty();
+	uint32_t plane_count = 0;
+	if (gpu_culled) {
+		plane_count = MIN(p_shadow_data->gpu_cull_planes.size(), GPU_INSTANCE_MAX_CULL_PLANES);
+		if (view.cull_planes.is_null()) {
+			view.cull_planes = rd->storage_buffer_create(GPU_INSTANCE_MAX_CULL_PLANES * 4 * sizeof(float));
+		}
+		float planes[GPU_INSTANCE_MAX_CULL_PLANES * 4];
+		for (uint32_t p = 0; p < plane_count; p++) {
+			const Plane &plane = p_shadow_data->gpu_cull_planes[p];
+			planes[p * 4 + 0] = plane.normal.x;
+			planes[p * 4 + 1] = plane.normal.y;
+			planes[p * 4 + 2] = plane.normal.z;
+			planes[p * 4 + 3] = plane.d;
+		}
+		rd->buffer_update(view.cull_planes, 0, MAX(plane_count, 1u) * 4 * sizeof(float), planes);
+		if (view.exclude_capacity < words || view.cull_exclude.is_null()) {
+			if (view.cull_exclude.is_valid()) {
+				rd->free_rid(view.cull_exclude);
+			}
+			view.exclude_capacity = Math::next_power_of_2(MAX(words, 64u));
+			view.cull_exclude = rd->storage_buffer_create(view.exclude_capacity * sizeof(uint32_t));
+		}
+		memset(bits.ptr(), 0, words * sizeof(uint32_t));
+		if (p_shadow_data->gpu_cull_exclude) {
+			for (uint32_t slot : *p_shadow_data->gpu_cull_exclude) {
+				if (slot < words * 32) {
+					bits[slot >> 5] |= 1u << (slot & 31);
+				}
+			}
+		}
+		rd->buffer_update(view.cull_exclude, 0, words * sizeof(uint32_t), bits.ptr());
+	}
+	// Render info: the passes of a render add up their casters, read back
+	// once (a few frames late); each read back goes into one later render.
 	if (gpu_instances_shadow_views_used == 1) {
 		const uint32_t zero_stats[4] = {};
 		rd->buffer_update(scenario->shadow_stats_buffer, 0, sizeof(zero_stats), zero_stats);
-		const GPUInstanceViewInfo *info = gpu_instances_view_info.getptr(gpu_instances_view_key);
+		GPUInstanceViewInfo *info = gpu_instances_view_info.getptr(gpu_instances_view_key);
 		if (info && p_render_info) {
 			p_render_info[RSE::VIEWPORT_RENDER_INFO_OBJECTS_IN_FRAME] += info->shadow_objects;
 			p_render_info[RSE::VIEWPORT_RENDER_INFO_PRIMITIVES_IN_FRAME] += info->shadow_primitives;
+			info->shadow_objects = 0;
+			info->shadow_primitives = 0;
 		}
 	}
 
@@ -1079,7 +1179,9 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	// draw from it and write none.
 	GPUInstanceCullParams params = {};
 	params.member_count = scenario->member_count;
-	params.view_flags = GPU_INSTANCE_VIEW_SHADOW | (p_scene_data.cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0);
+	params.view_flags = GPU_INSTANCE_VIEW_SHADOW | (p_scene_data.cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0) | (gpu_culled ? GPU_INSTANCE_VIEW_GPU_CULL : 0);
+	params.plane_count = plane_count;
+	params.cull_layers = p_shadow_data->gpu_cull_layers;
 	params.lod_threshold = p_scene_data.screen_mesh_lod_threshold;
 	params.lod_distance_multiplier = p_scene_data.lod_distance_multiplier;
 	const Vector3 lod_camera = p_scene_data.main_cam_transform.origin;
@@ -1088,10 +1190,10 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	params.lod_camera[2] = lod_camera.z;
 
 	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0);
-	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, view.commands, scenario->output_buffer, view.ids, scenario->lod_edges_buffer,
-		scenario->command_primitives_buffer, scenario->shadow_stats_buffer, view.visible };
+	const RID resources[12] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, view.commands, scenario->output_buffer, view.ids, scenario->lod_edges_buffer,
+		scenario->command_primitives_buffer, scenario->shadow_stats_buffer, view.visible, gpu_culled ? view.cull_planes : gpu_instance_cull.empty_buffer, gpu_culled ? view.cull_exclude : gpu_instance_cull.empty_buffer };
 	LocalVector<RD::Uniform> uniforms;
-	for (uint32_t binding = 0; binding < 10; binding++) {
+	for (uint32_t binding = 0; binding < 12; binding++) {
 		RD::Uniform uniform;
 		uniform.binding = binding;
 		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -1104,16 +1206,16 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	rd->compute_list_set_push_constant(compute_list, &params, sizeof(params));
 	rd->compute_list_dispatch(compute_list, (params.member_count + 63) / 64, 1, 1);
 	rd->compute_list_end();
-	if (gpu_instances_view_key != 0) {
-		// The total so far; the render's last pass reads back the full sum.
-		rd->buffer_get_data_async(scenario->shadow_stats_buffer, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_stats_received).bind(gpu_instances_view_key), 0, 2 * sizeof(uint32_t));
-	}
+	// The render's passes add up their stats; one read back after the last
+	// (_gpu_instances_shadow_flush_stats()), so that no partial sum arrives.
+	gpu_instances_shadow_stats_view = gpu_instances_view_key;
 
 	// One element per bucket level in the pass's range.
 	RenderList &list = render_list[RENDER_LIST_SECONDARY];
 	ERR_FAIL_COND_V(list.elements.size() != p_render_list_from || list.element_info.size() != p_render_list_from, true);
 	uint32_t draws = 0;
-	const bool filtered = _gpu_instances_used_buckets(*scenario, &p_shadow_data->gpu_slots, gpu_instances_used_buckets);
+	// GPU-culled passes draw every bucket: the CPU does not know their casters.
+	const bool filtered = !gpu_culled && _gpu_instances_used_buckets(*scenario, &p_shadow_data->gpu_slots, gpu_instances_used_buckets);
 	for (uint32_t b = 0; b < scenario->buckets.size(); b++) {
 		const GPUInstanceBucket &bucket = scenario->buckets[b];
 		if (!bucket.surface || (filtered && !gpu_instances_used_buckets[b])) {
@@ -1150,13 +1252,29 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	// One pass per check, a different one each time (cascades, then spot
 	// and omni passes).
 	const bool check_pass = gpu_instances_shadow_views_used - 1 == (frame / 30) % MAX(gpu_instances_shadow_views_last, 1u);
-	if (validate > 0 && check_pass && !gpu_instances_shadow_check_pending && frame % 30 == 0 && frame != gpu_instances_shadow_check_frame) {
+	if (validate > 0 && (check_pass || gpu_instances_shadow_check_deferred) && !gpu_instances_shadow_check_pending && frame % 30 == 0 && frame != gpu_instances_shadow_check_frame) {
 		uint32_t expected = 0;
 		for (uint32_t i = 0; i < p_shadow_data->gpu_instances.size(); i++) {
 			const GeometryInstanceForwardClustered *instance = static_cast<const GeometryInstanceForwardClustered *>(p_shadow_data->gpu_instances[i]);
 			if (instance->gpu_drawn && instance->gpu_member_head != UINT32_MAX) {
 				expected += instance->gpu_surface_count;
 			}
+		}
+		if (gpu_culled) {
+			// And those the kernel tested, with the same planes on the CPU.
+			_gpu_instances_shadow_cpu_cull(p_shadow_data, gpu_instances_shadow_cpu_casters);
+			for (const GeometryInstanceForwardClustered *instance : gpu_instances_shadow_cpu_casters) {
+				if (instance->gpu_member_head != UINT32_MAX) {
+					expected += instance->gpu_surface_count;
+				}
+			}
+			gpu_instances_shadow_cpu_casters.clear();
+		}
+		// A pass with nothing to draw (an empty GPU-culled cascade) leaves the
+		// check to the next pass of this render.
+		gpu_instances_shadow_check_deferred = expected == 0;
+		if (gpu_instances_shadow_check_deferred) {
+			return true;
 		}
 		gpu_instances_shadow_check_frame = frame;
 		gpu_instances_shadow_check_pending = true;
@@ -1191,6 +1309,20 @@ void RenderForwardClustered::_gpu_instances_shadow_check_received(const Vector<u
 	}
 }
 
+void RenderForwardClustered::_gpu_instances_shadow_flush_stats() {
+	if (gpu_instances_shadow_stats_view == 0 || !gpu_instances_view || gpu_instances_view->shadow_stats_buffer.is_null()) {
+		gpu_instances_shadow_stats_view = 0;
+		return;
+	}
+	RD *rd = RD::get_singleton();
+	rd->buffer_get_data_async(gpu_instances_view->shadow_stats_buffer, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_stats_received).bind(gpu_instances_shadow_stats_view), 0, 2 * sizeof(uint32_t));
+	// A render may flush more than once (light shadows processed apart): the
+	// next flush reads only the passes after this one.
+	const uint32_t zero_stats[4] = {};
+	rd->buffer_update(gpu_instances_view->shadow_stats_buffer, 0, sizeof(zero_stats), zero_stats);
+	gpu_instances_shadow_stats_view = 0;
+}
+
 void RenderForwardClustered::_gpu_instances_shadow_stats_received(const Vector<uint8_t> &p_data, uint64_t p_view) {
 	RenderForwardClustered *self = get_singleton();
 	if (!self || !gpu_instances_readbacks_alive || p_data.size() < int(2 * sizeof(uint32_t))) {
@@ -1199,8 +1331,8 @@ void RenderForwardClustered::_gpu_instances_shadow_stats_received(const Vector<u
 	const uint32_t *words = reinterpret_cast<const uint32_t *>(p_data.ptr());
 	GPUInstanceViewInfo *info = self->gpu_instances_view_info.getptr(p_view);
 	if (info) {
-		info->shadow_objects = words[0];
-		info->shadow_primitives = words[1];
+		info->shadow_objects += words[0];
+		info->shadow_primitives += words[1];
 	}
 }
 

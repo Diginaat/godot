@@ -794,3 +794,37 @@ Not done: GPU time of storage-buffer against UBO reads in heavy fragment
 shaders was not measured on its own (it did not show in these cases);
 materials that differ in textures still draw separately (bindless textures
 would be the next step); Mobile keeps per-material UBOs.
+
+## D037 — GPU-culled directional cascades for GPU path casters (experimental)
+
+2026-11-15, branch `dev-gpu-cull` (not merged). After D036 the scene cull
+is the largest render-thread stage (1.36 ms at `massive_100k`); probes
+showed up to 0.7 ms of it in the cascade tests of the GPU path's casters.
+Decision under test: in cascades drawn every frame (not the far cascades
+kept between frames), the scene cull skips the GPU path's casters that have
+no visibility range or parent and cast shadows, and names the others to the
+renderer (`gpu_shadow_exclude_slots`). Each such pass gets the cascade
+frustum planes, the light culler's planes (`RenderingLightCuller::
+get_directional_cull_planes()`) and the caster layers; the cull kernel
+tests every member it was not told about the same way the CPU does (the box
+corner nearest the inside on a plane's positive side). Views the GPU path
+leaves to the CPU list (probes, mirrors, XR, debug draw) keep the CPU cull;
+when the GPU path still declines a render, the shadow pass tests the
+scenario's members on the render thread. Setting
+`rendering/geometry/gpu_instances/shadow_culling` (default on); not used
+with more than 1024 buckets (GPU-culled passes draw every bucket).
+Also fixed on the way: shadow render info read back once per shadow flush
+and reported once (a running total read after every pass gave partial
+sums), shadow checks hand over from an empty pass to the next.
+Results: `gpu_instances.ps1` passes on Vulkan and D3D12 (13 of 13 images,
+42 shadow checks, shadow render info equal); smoke passes. With every
+cascade drawn every frame (`far_cascade_update_interval` 1) the GPU-culled
+cascades give the same casters and images as the CPU cull in all phases.
+Open: GPU-culled far cascades that are kept between frames gave a 1,416
+pixel difference (small shading changes in the far half) in two phases of
+the A/B test, even when the kernel drew every member (same counts as the
+CPU list); cause not found, so cached cascades keep the CPU cull. With
+that restriction the gain is within spread (instance bench render CPU
+`massive_100k` 1.19-1.42 ms against 1.30-1.60, `churn_100k` 2.00-2.35
+against 2.16-2.37). Not merged until the cached cascades can be GPU-culled
+too, or the camera view is.

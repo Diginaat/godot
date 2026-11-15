@@ -1,5 +1,16 @@
 # Update log
 
+## 2026-11-15 (GPU-culled cascades, D037, branch dev-gpu-cull)
+
+* GPU path casters culled by the cull kernel in per-frame cascades: exact
+  against the CPU cull, tests pass, gain within spread because the cached
+  far cascades (most casters) keep the CPU cull. Cached cascades culled on
+  the GPU gave a small, unexplained A/B image difference; not merged.
+* Lessons: the gpu_instances suite runs a self-test after the main run, so
+  debug captures written by both overwrite each other; and with the far
+  cascade cache on, A/B images depend on which frame drew each cascade:
+  rerun with `far_cascade_update_interval` 1 to separate culling from cache.
+
 ## 2026-11-15 (GPU-first renderer: material parameter tables, D036)
 
 * Forward+ material parameters moved from one UBO per material to per-shader

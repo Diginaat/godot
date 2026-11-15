@@ -313,6 +313,14 @@ public:
 		// apart like the camera's (set_gpu_instance_view).
 		PagedArray<RenderGeometryInstance *> gpu_instances;
 		LocalVector<uint32_t> gpu_slots;
+		// GPU-culled casters (D037): when not empty, the scene cull did not test
+		// the GPU path's casters; the GPU path tests each member's box against
+		// these planes (the cascade frustum and the light culler's) and its
+		// layers against gpu_cull_layers, except the slots in gpu_cull_exclude,
+		// which the scene cull decided (listed above, or not a caster).
+		LocalVector<Plane> gpu_cull_planes;
+		uint32_t gpu_cull_layers = 0;
+		const LocalVector<uint32_t> *gpu_cull_exclude = nullptr;
 	};
 
 	struct RenderSDFGIData {
@@ -384,6 +392,8 @@ public:
 	// render_scene() (0 and nullptr after it). The renderer draws them on the
 	// GPU, or for a view its GPU path does not cover, with the other instances.
 	virtual bool gpu_instances_begin_cull() { return false; }
+	// The GPU path may cull the directional shadow casters of this scenario itself (D037).
+	virtual bool gpu_instances_cull_shadows(uint64_t p_scenario) const { return false; }
 	virtual void set_gpu_instance_view(uint64_t p_scenario, const PagedArray<RenderGeometryInstance *> *p_instances, const LocalVector<uint32_t> *p_slots, uint32_t p_visible_layers) {}
 
 	virtual void render_scene(const Ref<RenderSceneBuffers> &p_render_buffers, const CameraData *p_camera_data, const CameraData *p_prev_camera_data, const PagedArray<RenderGeometryInstance *> &p_instances, const PagedArray<RID> &p_lights, const PagedArray<RID> &p_reflection_probes, const PagedArray<RID> &p_voxel_gi_instances, const PagedArray<RID> &p_decals, const PagedArray<RID> &p_lightmaps, const PagedArray<RID> &p_fog_volumes, RID p_environment, RID p_camera_attributes, RID p_compositor, RID p_shadow_atlas, RID p_occluder_debug_tex, RID p_reflection_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, const RenderShadowData *p_render_shadows, int p_render_shadow_count, const RenderSDFGIData *p_render_sdfgi_regions, int p_render_sdfgi_region_count, float p_window_output_max_value, const RenderSDFGIUpdateData *p_sdfgi_update_data = nullptr, RenderingServerTypes::RenderInfo *r_render_info = nullptr, const PagedArray<RenderGeometryInstance *> *p_rt_instances = nullptr, const PagedArray<RID> *p_rt_lights = nullptr, const LocalVector<RenderPlanarReflection> *p_planar_reflections = nullptr) = 0;
