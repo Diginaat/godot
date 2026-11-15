@@ -14,6 +14,7 @@ versioning) are in [CUSTOM_BUILD.md](../CUSTOM_BUILD.md). Feature notes:
 | `setup/` | `setup_dev_windows.ps1` | Sets up a new PC in one go (below) |
 | `build/` | `build.ps1` | Builds the editor, the .NET editor, the export templates or a whole release |
 | `test/` | `smoke.ps1` | The smoke tests every merge and release must pass |
+| `profile/` | `profile.ps1`, `analyze.py` | CPU sampling profiles without elevation: a user-mode stack sampler with inlined frames, summaries by source directory, type and caller ([README](profile/README.md)) |
 | `test/` | `core_templates_bench.py` | Actual HEAD versus working-tree Vector/String/hash-container microbenchmarks; alternating samples, correctness checks and live allocation bytes |
 | `test/` | `large_world.ps1` | Real scene import, GPU culling/CLOD commands, native materials/shadows and lifetime regressions |
 | `test/` | `forest.ps1` | Dense lit forest: source versus GPU culling/CLOD/HZB pixel A/B with light and shadow controls |
