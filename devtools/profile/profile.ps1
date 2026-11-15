@@ -6,7 +6,9 @@ param(
 	[double]$Seconds = 15,
 	[int]$IntervalUs = 2000,
 	# Binary with a PDB next to it (build with debug_symbols=yes).
-	[string]$Editor = ""
+	[string]$Editor = "",
+	# Where the PDB of -Editor is, when it is not next to it under the name the exe records.
+	[string]$SymbolPath = ""
 )
 # Starts the console editor, samples its engine process (the console exe is a
 # wrapper that starts it) and writes devtools/out/profile/<Label>.tsv and .log.
@@ -25,7 +27,7 @@ if ($proc.HasExited -or -not $child) {
 	throw "The engine process is not running (see $log)."
 }
 $target = $child.ProcessId
-& $sampler $target $Seconds $IntervalUs (Join-Path $out "$Label.tsv") (Split-Path $Editor)
+& $sampler $target $Seconds $IntervalUs (Join-Path $out "$Label.tsv") $(if ($SymbolPath) { $SymbolPath } else { Split-Path $Editor })
 $proc.WaitForExit(120000) | Out-Null
 if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force; if ($child) { Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue } }
 Join-Path $out "$Label.tsv"
