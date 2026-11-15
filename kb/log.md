@@ -9,7 +9,10 @@
   0.44-0.46 to 0.41-0.43 ms. docs/renderer/benchmarks.md, D039.
 * **Finding**: stage timestamps put the GPU path's remaining cost on the
   level in its draws (about 50-60 ns more per draw in depth-only passes),
-  not in the culls (camera below 0.01 ms, a shadow batch about 7 us).
+  not in the culls (camera below 0.01 ms, a shadow batch about 7 us). Not
+  the indirect draw either: direct draws with read-back counts (temporary
+  build) gained at most 0.03 ms. HZB occlusion does not run on the level
+  (MSAA 2x).
 * **Updated**: [D3D12 copy mistake](/mistakes/d3d12-buffer-copy-then-compute-write.md):
   a GPU clear before compute writes works there.
   [Mistake](/mistakes/fix-before-locating-the-cost.md): built the fix

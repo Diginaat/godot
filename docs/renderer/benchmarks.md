@@ -373,9 +373,9 @@ alternating with the build before, median:
 Within the spread (single runs vary by about 0.1 ms). Instance bench
 (Vulkan, `-GpuInstances`, 2 rounds alternating with the build before):
 `unique_lod_2k` GPU 0.44-0.46 to 0.41-0.43 ms, the other cases within
-spread. `gpu_instances/occlusion`
-on against off on the GPU path: -0.001 to +0.012 ms (3 runs), so the HZB
-build and test cost what they save here.
+spread. `gpu_instances/occlusion` does not run on this level: it uses
+MSAA 2x, which turns HZB occlusion off (`_hzb_possible()`), so its on/off
+A/B (-0.001 to +0.012 ms, 3 runs) is an A/A run.
 
 Stage intervals (`--gpu-profile`, safe render thread, 300 frames per view,
 mean of 2 runs; new timestamps `GPU Instances Cull End` and `GPU Instances
@@ -395,6 +395,16 @@ although there are fewer of them in the shadow passes (723-833 against
 862-929): about 50-60 ns more per draw in depth-only passes. The rest of
 the frame differences (DDGI, opaque pass) move with the level's
 flickering lights.
+
+Not the indirect draw itself: a temporary build drew the GPU path's
+elements as direct draws with the instance counts read back from earlier
+frames (static views; about 1,400 direct draws per frame, none fell back),
+in-process A/B against the indirect draws: direct minus indirect -0.03 /
+-0.00 / -0.00 ms with every shadow pass on the GPU path (3 runs, median),
+-0.00 / -0.02 / -0.01 ms with the default cutoff (2 runs), within the A/A
+floor. Left as suspects: the vertex shader's visible-ID load before the
+instance data (D029; D3D12 has no base instance), and anything per draw
+that only a GPU profiler capture of a cube face would show.
 
 ### Open items found by the baseline
 
