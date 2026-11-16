@@ -14,6 +14,7 @@ versioning) are in [CUSTOM_BUILD.md](../CUSTOM_BUILD.md). Feature notes:
 | `setup/` | `setup_dev_windows.ps1` | Sets up a new PC in one go (below) |
 | `build/` | `build.ps1` | Builds the editor, the .NET editor, the export templates or a whole release |
 | `test/` | `smoke.ps1` | The smoke tests every merge and release must pass |
+| `test/` | `scene_bench.ps1` | SceneTree / Node / transform scenarios (idle, deep, wide, moving parents, sparse and heavy updates, scripts, native processing, churn, reparenting, instancing, 2D/3D), 1k-100k nodes, builds alternated ([numbers](../docs/benchmarks/scene-runtime.md)) |
 | `profile/` | `profile.ps1`, `analyze.py` | CPU sampling profiles without elevation: a user-mode stack sampler with inlined frames, summaries by source directory, type and caller ([README](profile/README.md)) |
 | `test/` | `core_templates_bench.py` | Actual HEAD versus working-tree Vector/String/hash-container microbenchmarks; alternating samples, correctness checks and live allocation bytes |
 | `test/` | `large_world.ps1` | Real scene import, GPU culling/CLOD commands, native materials/shadows and lifetime regressions |

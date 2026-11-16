@@ -1,0 +1,21 @@
+; Empty project for devtools/test/scene_bench.gd (docs/benchmarks/scene-runtime.md).
+
+config_version=5
+
+[application]
+
+config/name="Scene Runtime Benchmark"
+; Without a window that can draw (--headless) the main loop sleeps this long per frame.
+run/low_processor_mode_sleep_usec=0
+config/features=PackedStringArray("4.8", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/vsync/vsync_mode=0
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+rendering_device/driver.windows="vulkan"

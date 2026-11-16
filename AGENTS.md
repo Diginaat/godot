@@ -11,6 +11,10 @@ Path tracer work (test scene, supported features, step plan, findings) is tracke
 [PATHTRACER_TESTING.md](PATHTRACER_TESTING.md). Read it before touching the path
 tracer, and update its step table and findings log as you go.
 
+Scene runtime work (data-oriented Node / SceneTree / Node3D optimization) is
+tracked in [docs/scene-runtime/MEMORY.md](docs/scene-runtime/MEMORY.md):
+architecture, roadmap, benchmarks. Read it before working on it.
+
 Weather and wind (`modules/weather/`) are tracked in [WEATHER.md](WEATHER.md):
 design, step table, tests and findings. Keep it current with each step.
 
