@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-17 (release 0.10.1)
+
+* **Released**: `godot4.8-beta-diginaat-physx-v0.10.1` at `c968713b0b`
+  (GPU-driven instances on by default, scene runtime, core containers,
+  PhysX module `847b2ca459`), editors and export templates, standard and
+  .NET; smoke passed for both.
+* **Mistake**: [an interrupted .NET build](/mistakes/interrupted-mono-build-shared-objects.md)
+  left mono-configured objects that broke the next standard link.
+
 ## 2026-11-16 (PhysX module sync)
 
 * **Synced**: `modules/godot_physx` to uno1982 `847b2ca459` (56 commits:
