@@ -180,7 +180,14 @@ SceneTreeGroup *SceneTree::add_to_group(const StringName &p_group, Node *p_node)
 		E = group_map.insert(p_group, SceneTreeGroup());
 	}
 
+	// Both callers add a node that is not a member yet: Node::add_to_group()
+	// returns early for its own groups, and Node::_propagate_enter_tree()
+	// registers them after _propagate_exit_tree() removed them. The search is
+	// linear in the group's size, for every group of every node entering the
+	// tree, so only development builds check it (docs/implementation/scene-runtime-roadmap.md, M1).
+#ifdef DEV_ENABLED
 	ERR_FAIL_COND_V_MSG(E->value.nodes.has(p_node), &E->value, "Already in group: " + p_group + ".");
+#endif
 	E->value.nodes.push_back(p_node);
 	E->value.changed = true;
 	return &E->value;

@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-11-16 (scene runtime: Phase 0 and M1)
+
+* **Started**: data-oriented SceneTree work on `feat/scene-runtime`:
+  docs/architecture/hybrid-scene-runtime.md (three approaches, targeted
+  fixes chosen), docs/implementation/scene-runtime-roadmap.md,
+  docs/benchmarks/scene-runtime.md, docs/scene-runtime/MEMORY.md; scenario
+  benchmark `devtools/test/scene_bench.ps1` (12 scenarios, 1k-100k nodes).
+* **Finding**: groups make scene instancing and node churn quadratic (a
+  linear duplicate check per added member, a search and shift per removed
+  one); 100k-node trees are memory-bound (about 1.45 KB per Node3D).
+* **Implemented**: M1, the duplicate check only in dev builds: scene
+  instancing of 100k nodes per frame 2,002 to 798 ms, churn 95.5 to 46.4 ms.
+
 ## 2026-11-16 (core: DynamicBVH volumes in SSE, D014)
 
 * **Implemented**: `DynamicBVH::Volume` in aligned 16-byte corners with
