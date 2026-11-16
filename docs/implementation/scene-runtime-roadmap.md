@@ -131,6 +131,28 @@ pinned-properties key, about 1.2% with its hash, table lookup and unref).
 - Not done (smaller in the profile): `children` and `owned` element
   allocations, signal connections.
 
+## M5 rest: researched, not built (2026-11-16)
+
+From the same profile (`instance` 10k, `churn` 100k, release):
+
+- `Node::Data::children` (`HashMap<StringName, Node *>`, one element
+  allocation per child): `instance` 1.5% on add and 0.6% on removal,
+  `churn` 1.2% and 2.3%. `AHashMap` would need no element allocations, but
+  its `erase()` moves the last element into the hole, and the children
+  map's insertion order is the order of child notifications (enter and
+  exit tree in forward and reverse order, `_ready`, deletion from the
+  end): an observable change. Rejected.
+- `Node::Data::owned` (`List<Node *>`, one element per owned node): 1.3%
+  plus 0.5% in `_clean_up_owner()`. An intrusive list would make every
+  node 24 bytes larger (M2 showed node size costs in wide trees).
+- What would keep both orders: a shared, thread-safe pool for both element
+  types (nodes are created on loader threads), with global state and
+  leak reports at exit for leaked nodes. A pool still pays for each
+  allocation, so the expected gain is about 2% on `instance` and `churn`,
+  near the noise floor. Not built.
+- Signals: `Node` already has no signal mutex (`_uses_signal_mutex()` is
+  false); the lock samples in the profile are from resources.
+
 ## M6 as implemented
 
 Profile first (release, `native`: 100k Timers, internal processing, no

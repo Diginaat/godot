@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-16 (scene runtime: M5 rest, not built)
+
+* **Decision**: the remaining per-child allocations (children map
+  elements, owned list elements) are about 2% of instancing and churn;
+  the open-addressing map would change child notification order, a shared
+  pool is not worth its global state. Nodes already have no signal mutex.
+
 ## 2026-11-16 (scene runtime: M7 skipped, M8 no change)
 
 * **Finding**: 2D needs no counterpart of M2-M4: groups and the children
