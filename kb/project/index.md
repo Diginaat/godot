@@ -1,5 +1,7 @@
 # Project
 
+* [Scene runtime optimization](/project/scene-runtime.md) - groups, children cache, transform propagation epoch, group storage, process prefetch: instancing and churn 10-11x faster at 100k nodes, API unchanged
+
 * [Unique array baseline and bulk-copy candidate](/project/unique-array-evaluation.md) - Windows correctness passes; 12-size boundary sweep finds small-copy regressions and blocks performance acceptance
 
 * [Core modernization phase-zero checkpoint](/project/core-modernization-audit.md) - baseline/branch, compatibility gates, benchmark tools, native-map direction and resumable phase plan

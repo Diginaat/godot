@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-16 (scene runtime: M9, complete)
+
+* **Added**: [scene runtime optimization](/project/scene-runtime.md), the
+  finished work's page. Base against final: instancing 2.2x / 10.7x
+  (10k / 100k), churn 2.8x / 11.4x, `heavy` -41% at 100k, 100k processing
+  nodes -44%; extension API identical; large-world suite and smoke pass.
+
 ## 2026-11-16 (scene runtime: M5 rest, not built)
 
 * **Decision**: the remaining per-child allocations (children map

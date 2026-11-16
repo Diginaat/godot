@@ -151,6 +151,31 @@ recomputation (B) is a later experiment for the deep / heavy-update
 scenarios, behind a measured threshold, if their profiles show matrix work
 rather than notifications. No duplicate authoritative state at any stage.
 
+## Final state (M9, 2026-11-16)
+
+Approach A held: every kept change is inside the existing structures, with
+no second copy of hierarchy or transform state and no API change.
+
+| Change | Where | Effect |
+| --- | --- | --- |
+| M1: no duplicate scan when a node joins a group (dev builds still check) | `SceneTree::add_to_group()` | group joins O(1) |
+| M2: removed children leave holes, compacted on the next read | `Node::data.children_cache` | no rebuild and sort per removal |
+| M3: a member's slot recorded, removal leaves a hole | `SceneTreeGroup`, `Node::GroupData::position` | group leaves O(1) |
+| M4: propagation stops at dirty subtrees walked in the current notification epoch | `Node3D::_propagate_transform_changed()`, `SceneTree::xform_change_epoch` | repeated moves of a subtree walk it once per flush |
+| M5: a node's groups in an ordered vector; no `StringName` built per instanced node | `Node::data.grouped`, `SceneState::_instantiate()` | one allocation instead of three; nodes 24 bytes smaller |
+| M6: the process loop prefetches the next nodes | `SceneTree::_process_group()` | overlapping cache misses in large process lists |
+
+Not done, with reasons in the roadmap: a contiguous transform store (B)
+and batched recomputation (M7, skipped), 2D counterparts (M8: 2D already
+has the early stop), pooled child and owner bookkeeping (M5 rest: about
+2%), an ECS beneath the nodes (C).
+
+Totals against the base, release, headless: scene instancing 2.2x (10k)
+and 10.7x (100k), node churn in groups 2.8x and 11.4x, every node moving
+-11% and -41%, 100k processing nodes -44%, GDScript processing -3 to -5%;
+no scenario slower beyond the code layout spread
+([benchmarks](../benchmarks/scene-runtime.md#m9-original-against-final-2026-11-16)).
+
 ## Compatibility constraints (all phases)
 
 - Child order, `get_index()`, internal front/back children, `move_child`.

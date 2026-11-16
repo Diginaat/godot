@@ -38,7 +38,7 @@ Rules for every milestone:
 | M6 | Process lists: incremental priority order, cheaper per-node checks (only if a script-free profile shows them) | `native`, `script` | process order with priorities and pause modes | callback order changes | done: `native` 100k -40%, `script` 100k -5% |
 | M7 | Experiment: breadth-first batched Node3D recomputation for the deep / heavy cases (approach B), behind a measured threshold | `deep`, `heavy`, `parents` at 100k | as M4 | no gain over M4 | skipped (2026-11-16, by request) |
 | M8 | Node2D / CanvasItem counterparts of M2-M4 | `mixed`, 2D variants | as M2-M4 | as M2-M4 | not needed: 2D already has the early-out; see M8 notes |
-| M9 | Integration: full benchmark set, a game level, editor, C#, GDExtension | everything | full suite, smoke, large-world, editor | - | |
+| M9 | Integration: full benchmark set, a game level, editor, C#, GDExtension | everything | full suite, smoke, large-world, editor | - | done 2026-11-16: API identical, large-world and smoke pass, totals in the benchmarks |
 
 Order can change when a profile shows a larger cost elsewhere.
 
@@ -195,3 +195,15 @@ checks' logic costs nothing; sorting and list maintenance do not show.
   need invalidation on mode changes, reparenting and visibility; not worth
   the risk at this share. Upstream detail kept as is: the first call reads
   the origin's transform before it is invalidated.
+
+## M9: integration (2026-11-16)
+
+- Public API: `--dump-extension-api` of the base and the final editor are
+  identical (7,687,022 bytes): GDExtension and the generated C# glue see no
+  change. No C# build was made; nothing it binds changed.
+- Full unit suite (1,482 cases) and the standard smoke (PhysX game and
+  editor, path tracer, DDGI) passed on the final engine code (M6; later
+  commits change only docs and the benchmark script).
+- Large-world suite, Vulkan: all 22 checks pass, including the GPU instance
+  paths fed by Node3D transform notifications (M4).
+- Totals against the base: [benchmarks](../benchmarks/scene-runtime.md#m9-original-against-final-2026-11-16).

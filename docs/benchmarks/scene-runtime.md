@@ -212,3 +212,32 @@ frame, not the prefetches.
 No change was needed (roadmap, M8 findings). M6 release build, headless,
 one run each: `heavy2d` 100k 39.5 ms per frame (op 39.4 ms); `parents2d`
 10k 0.012 ms, 100k 0.10 ms.
+
+### M9: original against final, 2026-11-16
+
+The base of this work (`12cd0e0924`) and the final branch, release builds
+of the same day, headless, alternated, 2 rounds, ms per frame, median. 0
+errors in 112 runs.
+
+| Scenario | 10k | 100k |
+| --- | --- | --- |
+| instance (scene instancing, nodes in a group) | 40.3 to 18.0 (2.2x) | 2,013 to 188 (10.7x) |
+| churn (2% freed and added, in a group) | 1.48 to 0.53 (2.8x) | 97.0 to 8.5 (11.4x) |
+| churn_read (churn plus child reads) | 1.72 to 0.63 (2.7x) | 109.3 to 10.6 (10.3x) |
+| heavy (every node of a tree moves) | 1.65 to 1.47 (-11%) | 51.8 to 30.8 (-41%) |
+| native (Timers, internal processing) | 0.273 / 0.272 | 11.71 to 6.56 (-44%) |
+| parents (rotate parents of 100 children) | 0.071 to 0.038 (-46%) | 4.07 to 1.38 (-66%) |
+| wide (move a parent of N children) | 0.075 to 0.044 (-41%) | 4.17 to 0.97 (-77%) |
+| script (GDScript `_process`) | 3.82 to 3.70 (-3%) | 46.6 to 44.1 (-5%) |
+| heavy2d (every Node2D moves) | 2.90 to 2.26 (-22%, noisy) | 41.8 to 39.6 (-5%) |
+| deep, mixed, parents2d | within 3% | within 4% |
+| sparse | 0.029 / 0.032 (ranges overlap) | 0.635 to 0.587 (-7%) |
+| reparent | 0.133 / 0.135 | 1.953 to 2.016 (+3%) |
+
+`wide`, `parents` and `heavy` here are plain Node3D trees, where no node
+reads its global transform, so M4 stops at the first dirty child across
+frames. With MeshInstance3D (every node notified and read each frame), M4
+leaves `wide` and `parents` unchanged and cuts `heavy`'s own operations by
+32% at 100k (M4 section). `reparent` +3% at 100k: within the code layout
+spread measured for M4 (no change touches reparenting); `sparse` at 10k:
+ranges overlap.
