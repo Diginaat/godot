@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-16 (scene runtime: M6)
+
+* **Implemented**: the process loop prefetches the next nodes' cache
+  lines; 100k processing nodes were about 115 ns each in DRAM misses.
+  `native` (100k Timers) 10.9 to 6.5 ms, `script` 100k -5%.
+
 ## 2026-11-16 (scene runtime: M5)
 
 * **Implemented**: a node's groups in an ordered vector instead of a

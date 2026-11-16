@@ -35,7 +35,7 @@ Rules for every milestone:
 | M3 | `remove_from_group` without a linear search (member index or tree-order rules) | `churn`, `instance` | `get_nodes_in_group` order, `call_group` during removal | group order changes | done: `churn` 100k -81%, `instance` 100k -70%, 10k -17-39% |
 | M4 | Node3D transform propagation stops at subtrees that need nothing more (per-subtree count of nodes that want `TRANSFORM_CHANGED`, plus the dirty invariant) | `deep`, `parents`, `heavy`, `-Visual` | notification counts per frame, global transforms after random moves, top_level, reparent, FTI | any notification lost or delayed | done: `heavy` op 10k -12%, 100k -32%; `wide`, `parents` op within 1.3% |
 | M5 | Allocations per child, group membership and signal connection (pooled or inline storage where the profile shows them) | `instance`, `churn`, allocation counts | lifecycle, ownership, signals | memory up without time down | done (groups part): `instance` -20-24%, `churn` -8-10%; node 24 bytes smaller |
-| M6 | Process lists: incremental priority order, cheaper per-node checks (only if a script-free profile shows them) | `native`, `script` | process order with priorities and pause modes | callback order changes | |
+| M6 | Process lists: incremental priority order, cheaper per-node checks (only if a script-free profile shows them) | `native`, `script` | process order with priorities and pause modes | callback order changes | done: `native` 100k -40%, `script` 100k -5% |
 | M7 | Experiment: breadth-first batched Node3D recomputation for the deep / heavy cases (approach B), behind a measured threshold | `deep`, `heavy`, `parents` at 100k | as M4 | no gain over M4 | |
 | M8 | Node2D / CanvasItem counterparts of M2-M4 | `mixed`, 2D variants | as M2-M4 | as M2-M4 | |
 | M9 | Integration: full benchmark set, a game level, editor, C#, GDExtension | everything | full suite, smoke, large-world, editor | - | |
@@ -130,3 +130,26 @@ pinned-properties key, about 1.2% with its hash, table lookup and unref).
 - `sizeof(Node)` 736 to 712 bytes, `Node3D` 1104 to 1080.
 - Not done (smaller in the profile): `children` and `owned` element
   allocations, signal connections.
+
+## M6 as implemented
+
+Profile first (release, `native`: 100k Timers, internal processing, no
+scripts): 93% of the main thread in `SceneTree::_process_group()`, almost
+all of it the first read of each node's cache lines (`Node::can_process()`
+64.7%, `_can_process()` 13.9%, `Timer::_notification()` 9.9%): about
+115 ns per node, DRAM misses on the six lines the checks and the dispatch
+read (object start, `script_instance`, `data.tree`, `process_owner`, the
+process mode and flags, the Timer's fields; offsets from the PDB). The
+checks' logic costs nothing; sorting and list maintenance do not show.
+
+- `_process_group()` prefetches the object start and the three `Node::Data`
+  lines of the node 8 places ahead (`__builtin_prefetch`, `_mm_prefetch` on
+  MSVC x86, a no-op elsewhere). Only addresses are computed; a prefetch
+  never faults, so a node freed by an earlier callback is safe.
+- Not done: moving the process fields into one line (a layout change for
+  every node, smaller expected effect once the misses overlap); hoisting
+  the tree's paused and suspended state out of the loop (the tree is in the
+  cache, it does not show).
+- A threshold (no prefetch under 4,096 nodes) was tried: the 1k
+  difference stayed (+11%, 3 us), so it is code layout, not the
+  prefetches, and the threshold was dropped.

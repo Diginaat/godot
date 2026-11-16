@@ -188,3 +188,19 @@ Controls (no groups): `heavy` +1.5% / +4.4% / -0.7%, `script` +4.2% / -2.7%
 / -3.0%, `native`, `sparse`, `wide`, `reparent` within -18% to +3% with
 overlapping ranges except `heavy` 10k: within the code layout spread
 measured for M4, and M5 touches no transform code.
+
+### M6: prefetch in the process loop, 2026-11-16
+
+Release builds, M5 and M6 alternated, 3 rounds, headless, ms per frame,
+median (range):
+
+| Scenario | 1k | 10k | 100k |
+| --- | --- | --- | --- |
+| native | 0.027 / 0.029 | 0.277 (0.251-0.309) to 0.265 (0.261-0.270) | 10.89 (10.77-11.11) to 6.48 (6.46-6.84) |
+| script | 0.288 / 0.292 | 4.12 (3.40-4.12) to 3.58 (3.45-3.94) | 45.83 (45.74-46.11) to 43.73 (43.65-43.79) |
+| sparse (control) | 0.005 / 0.005 | 0.033 / 0.031 | 0.592 / 0.595 |
+| churn (control) | 0.045 / 0.047 | 0.534 / 0.538 | 8.23 / 8.31 |
+
+`native` at 1k is 2-3 us slower in both the M6 build and a build that
+skips the prefetches below 4,096 nodes (+11%): code layout on a 27 us
+frame, not the prefetches.
