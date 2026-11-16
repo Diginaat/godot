@@ -81,7 +81,7 @@ reaches them bounces off the sunlit tracks, grass and vines.
 Prebuilt Windows editors and export templates (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
 Each release names the Godot version it's based on and this build's own
-version: `godot4.8-beta-diginaat-physx-v0.9.1` is build 0.9.1, on Godot
+version: `godot4.8-beta-diginaat-physx-v0.10.1` is build 0.10.1, on Godot
 4.8-beta. Releases before 0.9.0 are tagged `...-nvidia-rt-dlss-physx-v...`.
 
 > [!IMPORTANT]
@@ -185,9 +185,18 @@ CPU, rendering without DLSS).
 - **Project backup**: the first time this build opens a project, the project
   manager asks you to back up the project folder.
 
-### Large-world geometry (Forward+, opt-in)
+### Large-world geometry (Forward+)
 
-Off by default; for open worlds with many meshes and instances.
+For open worlds with many meshes and instances. Since 0.10.1 the GPU
+instance path, MultiMesh GPU culling and cluster LOD are on by default
+(`rendering/geometry/*` project settings); the far-field and grass nodes are
+used by adding them.
+
+- **GPU-driven instances**: ordinary `MeshInstance3D` nodes are drawn from a
+  persistent GPU instance table, culled on the GPU into indirect draws,
+  shadow casters included, with HZB occlusion and per-material parameter
+  tables. In the 100k-instance benchmark the render thread's CPU time went
+  from 22 to 1.5 ms; with 10k distinct materials, 8,776 draws became 11.
 
 - **GPU culling for MultiMeshes**: frustum and instance culling, per-instance
   index LOD, distance thinning and optional HZB occlusion.
@@ -221,6 +230,13 @@ Native C++ weather (`modules/weather`). Details: [WEATHER.md](WEATHER.md).
 
 ### Performance
 
+- **Scene tree and nodes**: groups, the children cache, Node3D transform
+  propagation and the process loop were reworked inside the existing node
+  structures, with the same API. At 100k nodes, scene instancing is 10.7x
+  faster, freeing and adding nodes in groups 11.4x, moving every node of a
+  tree 41% faster and 100k processing nodes 44% faster.
+- **Core containers**: lock-free RID ownership checks, one allocation per
+  `HashSet`, a byte hash for String keys and SSE `DynamicBVH` volumes.
 - **Far directional cascades kept between frames**: the far shadow cascades
   of a directional light render every few frames, staggered
   (`rendering/lights_and_shadows/directional_shadow/far_cascade_update_interval`,
