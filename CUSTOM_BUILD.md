@@ -66,6 +66,7 @@ Update this table after every sync.
 | 2026-10-08 | `65e8d16951` | `135dff3887` (no change) | `5681d7519a` (no change) | `4495b586dd` |
 | 2026-10-31 | `95c0fa5fe8` (Godot 4.8-beta) | `135dff3887` (no change) | `97bd583c28` (separate render thread, PXTGI reflections, VS 2026 SDK build) | `7c12c34bed` (on `dev`) |
 | 2026-11-07 | `b47a795aa5` | `135dff3887` (kept; NVIDIA force-pushed `49a825dc52`, not taken) | `92da57bda8` (cloth wind, ragdoll drives, vehicle engine drives, water and PXTGI fixes) | `09fbb8dbfa` (on `dev`) |
+| 2026-11-16 | `b47a795aa5` (no change) | `135dff3887` (kept; NVIDIA still `49a825dc52`, not taken) | `847b2ca459` (groom hair simulation, optional Alembic import with `alembic_sdk`, Blast fracture in the background, XR lens effects, PXTGI fixes, editor icons) | this commit (on `dev`) |
 
 ### History layout
 

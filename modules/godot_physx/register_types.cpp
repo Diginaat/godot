@@ -40,6 +40,9 @@
 #include "blast/physx_destructible_3d.h"
 #endif
 #include "cloth/physx_skinned_cloth_3d.h"
+#include "groom/physx_groom.h"
+#include "groom/physx_groom_3d.h"
+#include "groom/physx_groom_render_effect.h"
 #ifdef GODOT_PHYSX_FLOW
 #include "flow/physx_flow_3d.h"
 #include "flow/physx_flow_emitter_3d.h"
@@ -59,6 +62,7 @@
 #include "nodes/physx_light_shafts_effect.h"
 #include "nodes/physx_particle_fluid_3d.h"
 #include "nodes/pxtgi_3d.h"
+#include "nodes/pxtgi_emission_meter.h"
 #include "vehicle/godot_physx_motorcycle_probe.h"
 #include "vehicle/godot_physx_tank_probe.h"
 #include "vehicle/godot_physx_vehicle_probe.h"
@@ -85,6 +89,10 @@
 #include "editor/physx_cloth_paint_plugin.h"
 #include "editor/physx_editor_plugin.h"
 #include "editor/physx_export_plugin.h"
+#include "editor/pxtgi_emission_dialog.h"
+#ifdef GODOT_PHYSX_ALEMBIC
+#include "groom/alembic/resource_importer_alembic_groom.h"
+#endif
 #include "editor/plugins/editor_plugin.h"
 #endif
 
@@ -105,6 +113,11 @@ static void _physx_editor_init() {
 	Ref<PhysXExportPlugin> export_plugin;
 	export_plugin.instantiate();
 	EditorExport::get_singleton()->add_export_plugin(export_plugin);
+#ifdef GODOT_PHYSX_ALEMBIC
+	Ref<ResourceImporterAlembicGroom> groom_importer;
+	groom_importer.instantiate();
+	ResourceFormatImporter::get_singleton()->add_importer(groom_importer);
+#endif
 }
 #endif
 
@@ -122,9 +135,13 @@ void initialize_godot_physx_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(PhysXCloth3D);
 		GDREGISTER_CLASS(PhysXSkinnedCloth3D);
 		GDREGISTER_CLASS(PhysXChunkEmitter3D);
+		GDREGISTER_CLASS(PhysXGroom);
+		GDREGISTER_CLASS(PhysXGroom3D);
+		GDREGISTER_INTERNAL_CLASS(PhysXGroomRenderEffect);
 		GDREGISTER_CLASS(PhysXLightShafts3D);
 		GDREGISTER_INTERNAL_CLASS(PhysXLightShaftsEffect);
 		GDREGISTER_CLASS(PXTGI3D);
+		GDREGISTER_CLASS(PXTGIEmissionMeter);
 		GDREGISTER_INTERNAL_CLASS(PhysXGIEffect);
 		GDREGISTER_CLASS(PhysXLensDirt3D);
 		GDREGISTER_INTERNAL_CLASS(PhysXLensDirtEffect);
@@ -154,6 +171,7 @@ void initialize_godot_physx_module(ModuleInitializationLevel p_level) {
 		GDREGISTER_CLASS(PhysXDestructible3D);
 		GDREGISTER_CLASS(PhysXBlastAsset);
 		GDREGISTER_CLASS(PhysXBlastAuthoring);
+		GDREGISTER_CLASS(PhysXBlastFractureTask);
 #endif
 #ifdef GODOT_PHYSX_FLOW
 		GDREGISTER_CLASS(PhysXFlow3D);
@@ -164,6 +182,8 @@ void initialize_godot_physx_module(ModuleInitializationLevel p_level) {
 
 #ifdef TOOLS_ENABLED
 	if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR) {
+		GDREGISTER_INTERNAL_CLASS(PXTGIEmissionDialog);
+		GDREGISTER_INTERNAL_CLASS(EditorInspectorPluginPXTGI);
 		EditorPlugins::add_by_type<PhysXEditorPlugin>();
 		EditorPlugins::add_by_type<PhysXClothPaintPlugin>();
 		EditorNode::add_init_callback(_physx_editor_init);
@@ -180,6 +200,8 @@ void uninitialize_godot_physx_module(ModuleInitializationLevel p_level) {
 		PhysXLensFlareEffect::free_shared();
 		PhysXGIEffect::free_shared();
 		PXTGI3D::free_shared();
+		PhysXGroom3D::free_shared();
+		PhysXGroomRenderEffect::free_shared();
 	}
 #ifdef GODOT_PHYSX_FLOW
 	if (p_level == MODULE_INITIALIZATION_LEVEL_SCENE) {

@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-16 (PhysX module sync)
+
+* **Synced**: `modules/godot_physx` to uno1982 `847b2ca459` (56 commits:
+  groom hair simulation with an optional Alembic importer, Blast
+  background fracture, XR lens effects, PXTGI fixes, icons). Five
+  conflicts were the fork's `PS3DE::` enum names and doc wording; one
+  include added for master's `node_3d_editor_viewport.h`. SDK pin
+  unchanged. NVIDIA unchanged since the 2026-11-07 decision.
+
 ## 2026-11-16 (scene runtime: M9, complete)
 
 * **Added**: [scene runtime optimization](/project/scene-runtime.md), the

@@ -53,7 +53,9 @@
 #include "scene/gui/button.h"
 #include "scene/gui/label.h"
 #include "scene/gui/option_button.h"
+#include "scene/gui/slider.h"
 #include "scene/gui/spin_box.h"
+#include "scene/gui/texture_rect.h"
 #include "scene/resources/mesh.h"
 #include "scene/resources/texture.h"
 #include "scene/scene_string_names.h"
@@ -61,6 +63,7 @@
 void PhysXBlastFractureDialog::_start(const Ref<Mesh> &p_mesh) {
 	source_mesh = p_mesh;
 	seed = 1;
+	explode_slider->set_value_no_signal(0.0);
 	_regenerate();
 	popup_centered(Size2(640, 560));
 }
@@ -87,14 +90,74 @@ void PhysXBlastFractureDialog::_regenerate() {
 		cutout_pattern = cutout_pattern_picker->get_edited_resource();
 	}
 
+	// In the background: a large mesh takes seconds, and the editor keeps running meanwhile. A fracture still running
+	// (a new pattern picked, Regenerate pressed) is dropped for this one.
+	_cancel_running();
+	authored_asset.unref();
 	Ref<PhysXBlastAuthoring> authoring;
 	authoring.instantiate();
-	authored_asset = authoring->fracture_mesh(source_mesh, site_count, seed, pattern, cutout_pattern);
+	running_task = authoring->fracture_mesh_async(source_mesh, site_count, seed, pattern, cutout_pattern);
+	running_task->connect(SNAME("stage_changed"), callable_mp(this, &PhysXBlastFractureDialog::_on_stage).bind(running_task));
+	running_task->connect(SNAME("finished"), callable_mp(this, &PhysXBlastFractureDialog::_on_finished).bind(running_task));
+	_show_status(String(), Color());
+	_set_running(true);
+	if (chunk_count_label) {
+		chunk_count_label->set_text(TTR("Starting..."));
+	}
+}
+
+void PhysXBlastFractureDialog::_set_running(bool p_running) {
+	spinner->set_visible(p_running);
+	stop_button->set_visible(p_running);
+	spinner_time = 0.0;
+	set_process_internal(p_running);
+	if (p_running) {
+		get_ok_button()->set_disabled(true);
+		if (preview) {
+			preview->set_visible(false);
+		}
+		explode_row->set_visible(false);
+	}
+}
+
+void PhysXBlastFractureDialog::_cancel_running() {
+	if (running_task.is_valid()) {
+		// Its finished signal still comes, once Blast is through the stage it's on: _on_finished() ignores it.
+		running_task->cancel();
+		running_task.unref();
+	}
+	_set_running(false);
+}
+
+void PhysXBlastFractureDialog::_on_stop() {
+	_cancel_running();
+	if (chunk_count_label) {
+		chunk_count_label->set_text(TTR("Stopped"));
+	}
+	_show_status(TTR("Press Regenerate to fracture again."), get_theme_color(SNAME("font_color"), EditorStringName(Editor)));
+}
+
+void PhysXBlastFractureDialog::_on_stage(int p_stage, int p_stage_count, const String &p_description, const Ref<PhysXBlastFractureTask> &p_task) {
+	if (p_task != running_task || !chunk_count_label) {
+		return;
+	}
+	chunk_count_label->set_text(vformat(TTR("Stage %d of %d: %s"), p_stage, p_stage_count, p_description));
+}
+
+void PhysXBlastFractureDialog::_on_finished(const Ref<PhysXBlastAsset> &p_asset, const Ref<PhysXBlastFractureTask> &p_task) {
+	if (p_task != running_task) {
+		return; // dropped for a newer one, or stopped
+	}
+	running_task.unref();
+	_set_running(false);
+	authored_asset = p_asset;
+	const int pattern_id = pattern_option ? pattern_option->get_selected_id() : 0;
+	const bool cutout = pattern_id == 2;
 
 	if (authored_asset.is_null()) {
 		// Why, in the dialog itself (it was only in the Output panel), and no preview of the last good result.
-		String reason = authoring->get_last_error();
-		if (pattern == PhysXBlastAuthoring::PATTERN_CUTOUT && cutout_pattern.is_null()) {
+		String reason = p_task->get_last_error();
+		if (cutout && (!cutout_pattern_picker || cutout_pattern_picker->get_edited_resource().is_null())) {
 			reason = TTR("Cutout needs a pattern texture -- pick one above.");
 		} else if (reason.is_empty()) {
 			reason = TTR("Check the mesh has real geometry.");
@@ -106,6 +169,7 @@ void PhysXBlastFractureDialog::_regenerate() {
 		if (preview) {
 			preview->set_visible(false);
 		}
+		explode_row->set_visible(false);
 		get_ok_button()->set_disabled(true);
 		return;
 	}
@@ -116,12 +180,22 @@ void PhysXBlastFractureDialog::_regenerate() {
 		chunk_count_label->set_text(vformat(TTR("%d pieces"), piece_count));
 	}
 	// Fractured, but with something worth knowing (the mesh cleaner dropped loose parts, ...).
-	const PackedStringArray warnings = authoring->get_last_warnings();
+	const PackedStringArray warnings = p_task->get_last_warnings();
 	_show_status(String("\n").join(warnings), get_theme_color(SNAME("warning_color"), EditorStringName(Editor)));
 
 	if (preview) {
 		preview->set_visible(true);
-		preview->edit(physx_blast_build_preview_mesh(authored_asset));
+		// Whole first: edit() fits the view to what it's given, so the view doesn't change as the pieces move.
+		preview_mesh = physx_blast_build_preview_mesh(authored_asset);
+		preview->edit(preview_mesh);
+		_update_explode(explode_slider->get_value());
+	}
+	explode_row->set_visible(true);
+}
+
+void PhysXBlastFractureDialog::_update_explode(double p_value) {
+	if (preview_mesh.is_valid() && authored_asset.is_valid()) {
+		physx_blast_update_preview_mesh(preview_mesh, authored_asset, p_value);
 	}
 }
 
@@ -153,6 +227,20 @@ void PhysXBlastFractureDialog::_on_confirmed() {
 		return;
 	}
 
+	// The node's own per-surface materials replace the mesh's in the asset; its material_override moves to the
+	// destructible below, as an override still.
+	if (mode == MODE_SCENE_NODE && target_node) {
+		if (MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(target_node)) {
+			TypedArray<Material> materials = authored_asset->get_surface_materials();
+			for (int s = 0; s < materials.size() && s < mi->get_surface_override_material_count(); s++) {
+				if (mi->get_surface_override_material(s).is_valid()) {
+					materials[s] = mi->get_surface_override_material(s);
+				}
+			}
+			authored_asset->set_surface_materials(materials);
+		}
+	}
+
 	const String asset_path = save_dir.path_join(base_name + "_blast.tres");
 	const Error err = ResourceSaver::save(authored_asset, asset_path);
 	if (err != OK) {
@@ -172,6 +260,9 @@ void PhysXBlastFractureDialog::_on_confirmed() {
 		destructible->set_name(old_node->get_name());
 		destructible->set_transform(old_node->get_transform());
 		destructible->set_blast_asset(authored_asset);
+		if (MeshInstance3D *mi = Object::cast_to<MeshInstance3D>(old_node)) {
+			destructible->set_material_override(mi->get_material_override());
+		}
 
 		EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();
 		ur->create_action(TTR("Fracture Mesh with Blast"));
@@ -241,10 +332,35 @@ PhysXBlastFractureDialog::PhysXBlastFractureDialog() {
 	regenerate_button->connect(SceneStringName(pressed), callable_mp(this, &PhysXBlastFractureDialog::_regenerate));
 	controls->add_child(regenerate_button);
 
+	stop_button = memnew(Button);
+	stop_button->set_text(TTR("Stop"));
+	stop_button->set_tooltip_text(TTR("Stops the fracture once the stage it's on ends (Blast can't stop partway through one)."));
+	stop_button->connect(SceneStringName(pressed), callable_mp(this, &PhysXBlastFractureDialog::_on_stop));
+	stop_button->set_visible(false);
+	controls->add_child(stop_button);
+
+	spinner = memnew(TextureRect);
+	spinner->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
+	spinner->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+	spinner->set_visible(false);
+	controls->add_child(spinner);
+
 	chunk_count_label = memnew(Label);
 	chunk_count_label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 	chunk_count_label->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
 	controls->add_child(chunk_count_label);
+
+	explode_row = memnew(HBoxContainer);
+	root->add_child(explode_row);
+	explode_row->add_child(memnew(Label(TTR("Explode:"))));
+	explode_slider = memnew(HSlider);
+	explode_slider->set_min(0.0);
+	explode_slider->set_max(1.0);
+	explode_slider->set_step(0.01);
+	explode_slider->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+	explode_slider->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+	explode_slider->connect(SceneStringName(value_changed), callable_mp(this, &PhysXBlastFractureDialog::_update_explode));
+	explode_row->add_child(explode_slider);
 
 	// Second row, only relevant (visible) for PATTERN_CUTOUT -- that
 	// pattern doesn't generate its own crack shape the way Voronoi/Slicing
@@ -284,6 +400,22 @@ void PhysXBlastFractureDialog::_notification(int p_what) {
 		} break;
 		case NOTIFICATION_EXIT_TREE: {
 			disconnect(SceneStringName(confirmed), callable_mp(this, &PhysXBlastFractureDialog::_on_confirmed));
+			_cancel_running();
+		} break;
+		case NOTIFICATION_VISIBILITY_CHANGED: {
+			// Closed (Cancel, Accept can't be pressed while it runs) with a fracture still running: it's not wanted.
+			if (!is_visible()) {
+				_cancel_running();
+			}
+		} break;
+		case NOTIFICATION_INTERNAL_PROCESS: {
+			// The editor's own spinner frames, eight to the turn.
+			spinner_time += get_process_delta_time();
+			if (spinner_time >= 0.1 || spinner->get_texture().is_null()) {
+				spinner_time = 0.0;
+				spinner_frame = (spinner_frame + 1) % 8;
+				spinner->set_texture(get_editor_theme_icon(StringName(vformat("Progress%d", spinner_frame + 1))));
+			}
 		} break;
 	}
 }

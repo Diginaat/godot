@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="PhysXGroom3D" inherits="GeometryInstance3D" api_type="core" experimental="Its look, settings, simulation and cost may still change." xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Draws hair strands: a [PhysXGroom].
+	</brief_description>
+	<description>
+		Draws the strands of a [PhysXGroom], one of two ways (see [member render_mode]): as thin ribbons turned toward the camera, an ordinary mesh, or by the module's own compute passes with each strand's exact share of every pixel. Either way the hair casts and receives shadows and takes the scene's lights, and it shades itself with a hair model (see [member shading_model]) and the groom's baked self-shadowing (see [member self_shadow]). A light only stops at the head when its shadows are on.
+		At a distance it draws fewer strands, wider, so the hair keeps its look while it costs less: as many as keep it under about half a strand segment per pixel of its size on screen. [member GeometryInstance3D.lod_bias] keeps more of them (2.0: twice as many), and [member max_strands] caps them. Drawing every strand of a distant groom costs more, not less, than drawing it close up: all of them, a pixel wide each, pile onto the same few pixels.
+		[b]Anti-aliasing:[/b] with [constant RENDER_MODE_MESH], strands thinner than a pixel are dithered in a fine, even pattern, which any anti-aliasing smooths (TAA, SMAA, FXAA, or MSAA with SMAA). [constant RENDER_MODE_SCREEN_SPACE] needs none.
+		In a running game the strands move (see [member simulate]).
+		[b]Note:[/b] [member GeometryInstance3D.material_override], [member GeometryInstance3D.material_overlay] and [member GeometryInstance3D.transparency] aren't used (they're hidden): the hair's own shader is what draws each strand, and its look is this node's ([member root_color], [member tip_color], [member roughness], [member shading_model]). Set from a script, an override hides the hair, and transparency fades only Mesh hair, drawing it without depth (it sorts wrongly against other transparent things).
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="get_drawn_strand_count" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns how many of the groom's strands are drawn now, after the distance and [member max_strands].
+			</description>
+		</method>
+		<method name="reset_simulation">
+			<return type="void" />
+			<description>
+				Starts the strands over from the groomed shape, at rest: after a teleport, say, or a cut in a cutscene. Moving the node further than the hair could swing in a frame does it on its own.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="bend_stiffness" type="float" setter="set_bend_stiffness" getter="get_bend_stiffness" default="0.5">
+			How much each strand keeps its groomed bends: curls stay curls, waves stay waves (each point keeps its groomed distance to the points two and three before it). 0 lets the strands hang straight under gravity; 1 keeps their shape stiffly.
+		</member>
+		<member name="collide_with_head" type="bool" setter="set_collide_with_head" getter="is_colliding_with_head" default="true">
+			Keeps the strands off a sphere fitted to their roots, the head they grow from (in the groom's space, following the node).
+		</member>
+		<member name="colliders" type="NodePath[]" setter="set_colliders" getter="get_colliders" default="[]">
+			Capsule and sphere [CollisionShape3D] nodes the strands stay out of, such as shoulders, neck and hands, as each path finds them: a [CollisionShape3D] itself; a [CollisionObject3D] (its [CollisionShape3D] children); or a [Skeleton3D] (the shapes on its [PhysicalBone3D] nodes, placed where their bones are whether or not the ragdoll is simulating). Disabled shapes and shapes beyond the hair's reach are left out, and at most 16 colliders count, the head's and then the nearest. A moving shape is swept from where it was last frame through the simulation's substeps.
+		</member>
+		<member name="damping" type="float" setter="set_damping" getter="get_damping" default="0.05">
+			How much of its speed the hair loses every 1/60 s: higher settles sooner and moves as if through thicker air.
+		</member>
+		<member name="gravity_scale" type="float" setter="set_gravity_scale" getter="get_gravity_scale" default="1.0">
+			Scales the project's default gravity ([member ProjectSettings.physics/3d/default_gravity]) on the hair. A groom much larger than life falls slowly at its size: scale it up to match.
+		</member>
+		<member name="groom" type="PhysXGroom" setter="set_groom" getter="get_groom">
+			The strands to draw, imported from an Alembic ([code].abc[/code]) file.
+		</member>
+		<member name="max_strands" type="int" setter="set_max_strands" getter="get_max_strands" default="0">
+			The most strands drawn at any distance, 0 for no limit: a quality setting, as games cap grooms at lower settings. The rest of the strands widen to cover the same area.
+		</member>
+		<member name="root_color" type="Color" setter="set_root_color" getter="get_root_color" default="Color(0.09, 0.055, 0.035, 1)">
+			The hair's color at the root; it blends to [member tip_color] along each strand.
+		</member>
+		<member name="render_mode" type="int" setter="set_render_mode" getter="get_render_mode" enum="PhysXGroom3D.RenderMode" default="0">
+			How the strands are drawn. See [enum RenderMode].
+		</member>
+		<member name="roughness" type="float" setter="set_roughness" getter="get_roughness" default="0.35">
+			How far the highlights spread along the strands: lower is sharper and glossier, higher a softer, wider sheen. Both shading models.
+		</member>
+		<member name="self_shadow" type="float" setter="set_self_shadow" getter="get_self_shadow" default="0.6">
+			How much light each strand between a point and a light takes away: the light is scaled by [code]exp(-self_shadow)[/code] per strand in its way, as [member PhysXGroom.self_shadow] counted them. It also darkens ambient light inside the hair. 0 turns self-shadowing off; a groom without the bake has none.
+		</member>
+		<member name="shading_model" type="int" setter="set_shading_model" getter="get_shading_model" enum="PhysXGroom3D.ShadingModel" default="0">
+			How the strands are lit: a choice of look more than of cost. [constant SHADING_MODEL_KAJIYA_KAY] is stylized, bright and saturated with a crisp highlight; [constant SHADING_MODEL_MARSCHNER] is realistic, a softer, more neutral sheen and the glow of backlit hair. With [constant RENDER_MODE_SCREEN_SPACE] they cost the same (drawing the strands is the cost, not lighting them). With [constant RENDER_MODE_MESH], Marschner does more math per light per pixel of hair: on a head filling a 1280×720 view (an RTX 5070), 0.02 ms more GPU time per frame with only the sun, 0.12 ms more with 4 more lights on the hair.
+		</member>
+		<member name="simulate" type="bool" setter="set_simulate" getter="is_simulating" default="true">
+			Moves the strands in a running game: their roots follow the node (put it under a [BoneAttachment3D] on a character's head) and the rest swing, fall and blow in the wind, on the GPU (compute shaders, Forward+ and Mobile). In the editor and with this off, the strands are drawn as groomed. Every strand is simulated: about 0.2 ms of GPU time for 11-22 thousand strands (an RTX 5070).
+		</member>
+		<member name="stiffness" type="float" setter="set_stiffness" getter="get_stiffness" default="0.3">
+			How strongly the strands are pulled back toward the groomed shape: most at the root, none at the tip. Keeps a style (a parting, hair swept back) from collapsing under gravity; 0 lets the hair fall where it will.
+		</member>
+		<member name="tip_color" type="Color" setter="set_tip_color" getter="get_tip_color" default="Color(0.32, 0.2, 0.11, 1)">
+			The hair's color at the tip. See [member root_color].
+		</member>
+		<member name="width_scale" type="float" setter="set_width_scale" getter="get_width_scale" default="1.0">
+			Scales the strands' widths from the groom's: hair drawn a little thicker than real reads fuller, as groomers often do.
+		</member>
+		<member name="wind" type="Vector3" setter="set_wind" getter="get_wind" default="Vector3(0, 0, 0)">
+			Air velocity on the hair, in m/s: the strands catch it side-on.
+		</member>
+		<member name="wind_area" type="NodePath" setter="set_wind_area" getter="get_wind_area" default="NodePath(&quot;&quot;)">
+			An [Area3D] whose wind settings ([member Area3D.wind_force_magnitude], [member Area3D.wind_source_path], [member Area3D.wind_attenuation_factor]) add to [member wind].
+		</member>
+	</members>
+	<constants>
+		<constant name="RENDER_MODE_MESH" value="0" enum="RenderMode">
+			A ribbon per strand, turned to face the camera: an ordinary mesh, in every renderer, with every effect that applies to one. Strands thinner than a pixel are dithered in a fine, even pattern (shifted per strand), which antialiasing (TAA, SMAA, FXAA, or MSAA with SMAA) smooths. The cheaper mode: on a head filling a 1280×720 view (an RTX 5070), 0.7-1.4 ms of GPU time per frame for 11-29 thousand strands.
+		</constant>
+		<constant name="RENDER_MODE_SCREEN_SPACE" value="1" enum="RenderMode">
+			The module's own compute passes draw the strands, each with its exact share of every pixel it crosses (as Indiana Jones and the Great Circle does, SIGGRAPH 2025), and the scene's lights and shadows light the two nearest strands in each pixel. Smooth, thin hair with no antialiasing at all, and hair that stays whole when [member width_scale] makes it very thin. Forward+ and Mobile. Costs more close up (1.8-3.0 ms in the view above) and about the same as [constant RENDER_MODE_MESH] at a distance. The mesh still casts the hair's shadows. The hair writes its depth where it covers at least half a pixel, so what draws after it (transparent objects, [PhysXFlow3D] gas, [PhysXLightShafts3D]) sorts behind it; with MSAA on the Mobile renderer, effects that read depth get none.
+		</constant>
+		<constant name="SHADING_MODEL_KAJIYA_KAY" value="0" enum="ShadingModel">
+			Two highlights along each strand, the second tinted by the hair's color (Kajiya and Kay's model). Warm, and holds the hair's color in dark grooms.
+		</constant>
+		<constant name="SHADING_MODEL_MARSCHNER" value="1" enum="ShadingModel">
+			Light reflected off each strand, passed through it, and reflected inside it (Marschner's model, with Karis's real-time approximations): physically based, with the glow of backlit hair. Dark hair looks darker and glossier than with [constant SHADING_MODEL_KAJIYA_KAY], as it does in life. See [member shading_model] for what it costs.
+		</constant>
+	</constants>
+</class>

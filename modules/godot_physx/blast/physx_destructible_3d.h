@@ -100,6 +100,8 @@ public:
 
 	void set_material_override(const Ref<Material> &p_material);
 	Ref<Material> get_material_override() const { return material_override_res; }
+	void set_interior_material(const Ref<Material> &p_material);
+	Ref<Material> get_interior_material() const { return interior_material_res; }
 
 	// Every piece's RenderingServer instance is created directly via
 	// instance_create2() (see _spawn_piece()), not through a real
@@ -367,6 +369,7 @@ private:
 	String chunks_path;
 	Ref<PhysXBlastAsset> blast_asset;
 	Ref<Material> material_override_res;
+	Ref<Material> interior_material_res;
 	GIMode gi_mode = GI_MODE_STATIC;
 	ShadowCastingSetting cast_shadow = SHADOW_CASTING_SETTING_ON;
 	float transparency = 0.0f;
@@ -428,18 +431,27 @@ private:
 	// split cost ~5 ms per chip on a ~190-chunk wall. Freed with the asset.
 	LocalVector<RID> chunk_shapes;
 	RID _chunk_shape(uint32_t p_chunk);
+	// The asset's pre-cooked hulls, aligned with chunk_points, when this build can load them; else empty.
+	LocalVector<PackedByteArray> chunk_hulls;
 	// Per-chunk render data, by material slot, computed once per load. A
 	// piece's mesh gets ONE surface per slot (not per chunk: an island of
-	// ~190 chunks was ~190 draw calls). Every chunk is slot 0 today -- the
-	// asset keeps positions only; an interior-face slot (Blast's
-	// kMaterialInteriorId) slots in here once authoring keeps it.
+	// ~190 chunks was ~190 draw calls). Slot s < interior_slot holds source
+	// surface s's faces, slot interior_slot the cut ones. An asset from before
+	// surfaces were kept has one source surface; one from before UVs were kept
+	// is all slot 0, without UVs or tangents.
+	int interior_slot = 1;
 	struct ChunkSurface {
 		int slot = 0;
 		PackedVector3Array vertices;
 		PackedVector3Array normals;
+		PackedVector2Array uvs;
+		PackedFloat32Array tangents;
 	};
 	LocalVector<LocalVector<ChunkSurface>> chunk_surfaces;
 	void _compute_chunk_surfaces();
+	struct ChunkVisual;
+	void _apply_piece_materials(RenderingServer *p_rs, const ChunkVisual &p_piece) const;
+	Ref<Material> _slot_material(int p_slot) const;
 	void _free_chunk_cache();
 	// Whether an island made of p_chunks stays STATIC under `anchor`.
 	bool _island_anchored(const LocalVector<uint32_t> &p_chunks) const;
@@ -449,6 +461,9 @@ private:
 		RID body; // its shapes are the shared chunk_shapes[] of chunk_indices, not owned
 		RID mesh;
 		RID instance;
+		// The mesh's surface of each slot (see interior_slot), -1 for none: a piece may lack a source surface, or have
+		// nothing but cut faces.
+		LocalVector<int> surface_of_slot;
 		// Which asset chunks this piece renders/collides, aligned with
 		// `shapes`. One entry while intact (chunk 0, the placeholder) and
 		// for a single-chunk (leaf) split product; an island split product
@@ -512,6 +527,9 @@ private:
 	// i.e. always from a moment before physics has had any chance to
 	// overwrite it.
 	Vector3 spawn_scale = Vector3(1, 1, 1);
+	// A pose read from a body, with that scale back on. A piece spawned from a bare pose collides at scale 1 under a
+	// mesh rendered at spawn_scale, and a damage point mapped through one lands in the wrong place.
+	Transform3D _pose_with_scale(const Transform3D &p_body_pose) const;
 
 	bool _load();
 	bool _load_asset_bytes(const PackedByteArray &p_bytes);

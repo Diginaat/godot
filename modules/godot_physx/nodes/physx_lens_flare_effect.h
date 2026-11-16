@@ -42,7 +42,7 @@ class RenderData;
 
 // Draws PhysXLensFlare3D's flare into the frame: an image-based camera flare, after the light shafts and before the
 // lens dirt (which it lights too). The frame's bright light, softened, is copied back over the screen as ghosts --
-// scaled about the screen's centre, mirrored through it for negative scales, tinted, colour-split -- plus a halo
+// scaled about the screen's center, mirrored through it for negative scales, tinted, colour-split -- plus a halo
 // ring, and added on top. Every bright light flares, wherever it is on screen. Installed like the module's other
 // effects (see PhysXCompositorEffects).
 class PhysXLensFlareEffect : public CompositorEffect {
@@ -86,7 +86,7 @@ private:
 	HashMap<int64_t, RID> composite_pipelines; // per framebuffer format
 	RID linear_sampler;
 	RID border_sampler; // black outside the image: a ghost reaching past the frame adds nothing
-	RID ghost_buffer; // the ghosts' colours and scales
+	RID ghost_buffer; // the ghosts' colors and scales
 	bool failed = false;
 	RID bright; // quarter size: the bright light
 	// Blurred well past the light's own shape on the way down and back up, the way a real lens's reflections are
@@ -106,6 +106,7 @@ private:
 	void _dispatch(RenderingDevice *p_rd, int p_pass, const Vector<RD::Uniform> &p_uniforms, const Size2i &p_size, const void *p_push, uint32_t p_push_size);
 	void _composite(RenderingDevice *p_rd, const RID &p_color, const void *p_push, uint32_t p_push_size);
 	void _render(int p_callback_type, const RenderData *p_render_data);
+	void _render_view(RenderingDevice *p_rd, const Size2i &p_frame, const RID &p_color, const void *p_push, uint32_t p_push_size);
 
 protected:
 	static void _bind_methods() {}

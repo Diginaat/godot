@@ -32,7 +32,9 @@
 
 #include "core/io/resource.h"
 #include "core/variant/array.h"
+#include "core/variant/typed_array.h"
 #include "core/variant/variant.h"
+#include "scene/resources/material.h"
 
 // A fractured Blast asset, saveable/loadable as a normal Godot Resource
 // (.tres/.res) -- the real replacement for the two-file (.asset/.chunks)
@@ -64,7 +66,50 @@ public:
 
 	int get_chunk_count() const { return chunk_points.size(); }
 
+	// Aligned with chunk_points, and empty in an asset fractured before these existed (flat, untextured pieces):
+	// chunk_normals[i] a PackedVector3Array, chunk_uvs[i] a PackedVector2Array.
+	void set_chunk_normals(const Array &p_normals) { chunk_normals = p_normals; }
+	Array get_chunk_normals() const { return chunk_normals; }
+	void set_chunk_uvs(const Array &p_uvs) { chunk_uvs = p_uvs; }
+	Array get_chunk_uvs() const { return chunk_uvs; }
+	// Where each chunk's interior (cut) faces start in its points: the source mesh's faces come first.
+	void set_chunk_interior_starts(const PackedInt32Array &p_starts) { chunk_interior_starts = p_starts; }
+	PackedInt32Array get_chunk_interior_starts() const { return chunk_interior_starts; }
+	// chunk_surface_starts[i] is a PackedInt32Array: where each source surface's faces start in chunk i's points, in
+	// surface order, before its interior ones. Empty in an asset fractured before these existed (one surface).
+	void set_chunk_surface_starts(const Array &p_starts) { chunk_surface_starts = p_starts; }
+	Array get_chunk_surface_starts() const { return chunk_surface_starts; }
+	// The source mesh's surface materials, one per surface (null where it had none).
+	void set_surface_materials(const TypedArray<Material> &p_materials) { surface_materials = p_materials; }
+	TypedArray<Material> get_surface_materials() const { return surface_materials; }
+	int get_surface_count() const { return MAX(1, (int)surface_materials.size()); }
+
+	// chunk_hulls[i] is a PackedByteArray: chunk i's collision hull, cooked from its points ahead of time, so a break
+	// doesn't cook it (empty where a chunk has too few points). hull_format says which PhysX build cooked them: a
+	// destructible cooks its hulls at runtime instead when this build can't load them, or when there are none.
+	enum HullStatus {
+		HULLS_NONE,
+		HULLS_COOKED,
+		HULLS_OUT_OF_DATE,
+	};
+	void set_chunk_hulls(const Array &p_hulls) { chunk_hulls = p_hulls; }
+	Array get_chunk_hulls() const { return chunk_hulls; }
+	void set_hull_format(const String &p_format) { hull_format = p_format; }
+	String get_hull_format() const { return hull_format; }
+	// Cooks every chunk's hull with this build and stores it (the pieces and how they break stay the same).
+	Error cook_hulls();
+	HullStatus get_hull_status() const;
+
 private:
 	PackedByteArray asset_bytes;
 	Array chunk_points;
+	Array chunk_normals;
+	Array chunk_uvs;
+	PackedInt32Array chunk_interior_starts;
+	Array chunk_surface_starts;
+	TypedArray<Material> surface_materials;
+	Array chunk_hulls;
+	String hull_format;
 };
+
+VARIANT_ENUM_CAST(PhysXBlastAsset::HullStatus);

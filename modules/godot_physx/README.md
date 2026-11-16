@@ -186,6 +186,29 @@ Nothing is linked: Flow's loader opens `nvflow.dll` and `nvflowext.dll`
 copies both next to the built binary. Without them the Flow
 nodes show a configuration warning and stay inert.
 
+### Optional — Alembic (`PhysXGroom` importer)
+
+Hair grooms are imported from Alembic (`.abc`) files, which takes the Alembic
+and Imath libraries. Only the **editor** needs them: an imported groom is an
+ordinary resource, so export templates and exported games build and run
+without them. Without `alembic_sdk=` the editor just has no `.abc` importer;
+`PhysXGroom3D` and already-imported grooms still work.
+
+```
+python modules/godot_physx/misc/build_physx.py --gpu --blast --flow --alembic
+```
+
+`--alembic` clones Alembic 1.8.12 and Imath 3.2.3 into an `alembic-sdk`
+directory beside the PhysX checkout, builds both as static libraries (Ogawa
+only, the static CRT on Windows as Godot links it) and adds
+`alembic_sdk=<that directory>/install` to the printed `scons` command. To
+build them by hand, use the same CMake options: see `build_alembic()` in
+`misc/build_physx.py`. Alembic 1.8.12 needs **CMake 3.29 or newer**; Ubuntu
+22.04 ships 3.22, so there install a newer one first (for example
+`python3 -m pip install --user "cmake>=3.29"`, with `~/.local/bin` on `PATH`).
+Both are BSD-3-Clause, and `SCsub` copies their notice,
+`ALEMBIC-LICENSE.md`, next to the editor (see License below).
+
 ## Exporting a game
 
 Godot's downloadable export templates don't contain this module, so a game
@@ -254,6 +277,7 @@ Under `physics/physx_3d/simulation/`:
 | `allow_sleep` | `true` | When off, no rigid body ever sleeps — the same as turning `RigidBody3D.can_sleep` off on every body. Useful for debugging or setups that need every body integrated every step. |
 | `stabilization` | `true` | `PxSceneFlag::eENABLE_STABILIZATION` — damps low-mass stacked bodies toward rest so piles settle and sleep instead of jittering. Turn it off if it causes visible drift on very light bodies. |
 | `max_depenetration_velocity` | `0.0` | The fastest (m/s) overlapping rigid bodies are pushed apart. `0` (the default) = unlimited, PhysX's own default. A cap (around `4`) lets bodies that start inside each other (spawns, a growing shape) ease apart instead of popping, but stacks and piles then sink into each other and slump: tall stacks of loose boxes no longer hold. Applies to `RigidBody3D`-style bodies, not to vehicles, cloth or fluids. |
+| `jointed_position_iterations`, `jointed_velocity_iterations` | `8`, `2` | Solver iterations of a body with joints (ragdoll bones, hinged props); a body without joints runs at 4 and 1. Fewer are cheaper but let joints stretch more: 16 collapsing ragdolls stepped about 34 % faster at 4 and 1 on the GPU path and about 19 % on the CPU path. On the GPU path the highest count of any body applies to the whole scene, so a scene with one jointed body pays for these counts on all of its bodies. |
 | `cpu_worker_threads` | `0` (auto) | Size of the PhysX CPU task pool. `0` picks a value based on the active path: a small pool (2–4) when GPU dynamics is running, since the CPU mostly waits on the GPU each step; most of the machine otherwise. A fixed value overrides this in both cases — setting it high while on the GPU path will usually cost performance, not gain it. |
 
 And `physics/physx_3d/soft_body/mode` — `Auto` / `CPU` / `GPU` for the stock
@@ -337,6 +361,30 @@ multiple bounces.
   `pxtgi_emission` Color in its metadata (or put them on the
   `MeshInstance3D` or the physics body), or it bounces as neutral gray with
   no glow off screen.
+- A `pxtgi_emission` Color must say how bright the material actually draws.
+  It's read as sRGB, like an albedo color; its linear value is the glow's
+  strength in the material's own units (nits with physical light units on):
+  for a glow of `L`, use `Color(L, L, L).linear_to_srgb()`. PXTGI lights the
+  scene from it, but the camera, reflection probes and PXTGI's own screen
+  rays see what the shader draws. If the two differ (a shader that scales its
+  `EMISSION` by a hidden factor, say, as some importers' converted materials
+  do), probes and reflections disagree with PXTGI's light: a probe capturing
+  far brighter lamps than the tag says blows out what it lights.
+- **Find Emissive Materials** (a button on a `PXTGI3D`'s inspector) does the
+  tagging for a scene: it lists the `ShaderMaterial`s that have no
+  `pxtgi_emission` tag (on the material or its mesh), each measured by
+  drawing it with no light (`PXTGIEmissionMeter`), so the glow shown is what
+  the shader really draws, hidden multipliers included. The ones that glow
+  come ticked; edit a value to override it, untick what shouldn't light the
+  scene, and Tag Selected writes the tags (undoable) and saves materials kept
+  in their own files. Double-click a row to go to a mesh using it. A glow
+  that changes over time is tagged with its mean; a material inside an
+  imported file can't be tagged (the tag would be lost on reimport), make it
+  unique or save it to a file first.
+- A material's `AO` output above 1 multiplies all of its indirect light
+  (PXTGI's included) instead of darkening it; keep it within 0–1.
+  Converted materials can carry intensities far above 1 that their source
+  engine clamps.
 - Lights: the sun is the brightest visible `DirectionalLight3D` that lights
   surfaces; of omni and spot lights, the 8 of each Godot draws that come
   nearest the camera, chosen every frame. Nodes added or removed are picked
@@ -593,9 +641,16 @@ pixels the gas covers, worked out at `scattering_resolution` (Quarter by
 default: the glow is soft, and that reads the same as full) and scaled up
 depth-aware — about 0.7 ms at 1080p with one shadowed light over a screen of
 ground fog in the demo (`demo/editor/flow/light_scattering.tscn`, which also
-shows the frame and Flow timings). The directional light still shades the gas
-only through the gas itself; its scene shadows, GI and area lights don't reach
-the gas yet.
+shows the frame and Flow timings).
+
+With `scattering_directional`, a `DirectionalLight3D` scatters too, on top of
+Flow's own sun lighting, which is the same from every side: with
+`scattering_anisotropy` above 0, dust and smoke between the camera and the sun
+glow, brightest at their thin edges (`demo/editor/flow/tornado.tscn`; about
+0.9 ms over a big dust column at quarter resolution). Its `light_volumetric_fog_energy` scales
+that glow (0 leaves it out). Its scene shadows don't reach the gas yet (only
+the gas shades it, `scattering_shadow_reach` toward the sun), nor do GI or
+area lights.
 
 Things worth knowing:
 - `max_blocks` is a GPU memory budget: Flow reserves textures for all of it
@@ -609,6 +664,11 @@ Things worth knowing:
   fog is cheap, a sphere wide enough to cover the same floor is just as tall
   and keeps about three times the blocks. A low `couple_rate` (~0.1-0.3) on a
   wide emitter lets the gas drift and streak instead of being held in place.
+- With `allocate` off, an emitter keeps no blocks of its own: it acts only
+  where there's gas already. A wide box with only a `velocity` (and
+  `temperature` 0, cooling what it carries at `couple_rate`) is a wind over
+  the whole scene at no cost where the air is empty; `force_field.tscn` in the
+  demo uses one to carry a flamethrower's fire around a shield.
 - Heightmap and trimesh terrain isn't a solid for the gas: `floor_enabled`
   keeps it above `floor_height`. Cold gas (`temperature` below 0, with
   `buoyancy`) slumps and spreads along a floor like dry-ice fog.
@@ -738,6 +798,110 @@ A script that draws the garment itself finds the render copy with
 `get_render_instance()`, and the particle each of its vertices is drawn from
 with `get_vertex_particles()`.
 
+## Hair — `PhysXGroom3D` (experimental)
+
+Hair and fur as real strands, from the Alembic grooms Blender, Houdini and
+Maya export (the kind Unreal Engine imports). Experimental: its look,
+settings, simulation and cost may still change.
+
+Drop an Alembic (`.abc`) groom into the project (it imports as a
+`PhysXGroom`, see the Alembic build option above), add a `PhysXGroom3D` and
+set its `groom`. Every open curve in the file becomes a
+strand, with its widths; `scale` and `default_width` in the Import dock cover
+files in other units or without widths.
+
+The importer also bakes the groom's **self-shadowing**: from each point, how
+many of the groom's other strands lie toward every direction (Indiana Jones
+and the Great Circle's approach, SIGGRAPH 2025). Lights and ambient light are
+dimmed by the strands in their way, so the hair is dark inside and near the
+roots and bright on the surface, at no cost per frame. It takes 13-20 seconds
+on import for a full head of hair; `self_shadow/rays` = 0 skips it, and
+`self_shadow` on the node sets how strongly it darkens.
+
+Two ways to draw it (`render_mode`):
+
+- **Mesh** (default): a ribbon per strand, turned toward the camera, at least a
+  pixel wide; an ordinary mesh that works in every renderer and with every
+  effect. Strands thinner than a pixel are dithered in a fine, even pattern
+  (shifted per strand); any antialiasing smooths it (TAA, SMAA, FXAA, or
+  MSAA 2x with SMAA). The cheaper mode: 0.7-1.4 ms of GPU time for
+  a head filling a 1280×720 view (11-29 thousand strands, RTX 5070).
+- **Screen Space**: the module's own compute passes draw each strand with its
+  exact share of every pixel it crosses, and Godot lights the two nearest
+  strands in each pixel with the scene's lights and shadows. Smooth, thin
+  hair with no anti-aliasing at all, and hair that stays whole when
+  `width_scale` makes it very fine. 1.8-3.0 ms in the same view close up,
+  about the same as Mesh at a distance. The mesh still casts the hair's
+  shadows.
+
+Which to use:
+
+- **Mobile renderer** (phones, standalone VR): **Mesh**, with MSAA, SMAA or
+  FXAA (the Mobile renderer has no TAA). Screen Space's compute passes are
+  heavy for mobile GPUs, and with MSAA on the Mobile renderer it gets no
+  depth to test against, so it draws over what's in front of it.
+- **Forward+**: either. **Screen Space** for the smoothest hair without TAA,
+  when the extra GPU time is there (about 1.2-1.5 ms more than Mesh for two
+  heads close up at 1280×720); **Mesh** with TAA, SMAA or FXAA when it has to
+  be cheap.
+
+Two shading models (`shading_model`), a choice of look more than of cost:
+**Kajiya-Kay** (default), stylized, bright and saturated with a crisp
+highlight; **Marschner** (Karis's real-time approximation, as Unreal Engine
+uses), realistic, a softer and more neutral sheen, and the glow of light
+through backlit hair. `roughness` widens the highlights in both,
+`root_color` / `tip_color` color the strands along their length. In Screen
+Space each groom keeps its own look, and the two models cost the same; in
+Mesh, Marschner costs about 0.1 ms more per frame with four lights on a
+close-up head.
+
+Lights only stop at the head if their **shadows are on**: a light without
+shadows reaches every strand, so hair on the far side of the head still
+lights up (with Marschner, it glows).
+
+At a distance the node draws **fewer, wider strands** (about half a segment per
+pixel of the groom on screen), so a far-off head costs a fraction of a close
+one: the importer shuffles the strands so any count drawn is an even sample.
+`GeometryInstance3D.lod_bias` keeps more of them, `max_strands` caps them (a
+quality setting), and `get_drawn_strand_count()` reports the current count.
+
+In a running game the hair **moves** (`simulate`, on by default): every
+strand is simulated on the GPU (similar to AMD's TressFX), in both render modes.
+The roots follow the node, so on a character put the groom under a
+`BoneAttachment3D` on the head bone. The rest of each strand swings with the
+head, falls under gravity (`gravity_scale` times the project's gravity) and
+blows in the `wind` (m/s), or in an `Area3D`'s wind (`wind_area`), while
+`stiffness` pulls it back toward the groomed shape (most at the roots) and
+`bend_stiffness` keeps its curls and waves; `damping` settles it. The strands
+stay off a sphere fitted to their roots (`collide_with_head`) and off the
+capsule and sphere shapes in `colliders`: a `CollisionShape3D`, a body's
+shapes, or a `Skeleton3D`'s physical bones (shoulders, neck, hands; placed
+from the bones' poses, ragdoll simulating or not). A teleport (the node moved
+further than the hair could swing) starts it over from the groomed shape, as
+does `reset_simulation()`. It costs about 0.16 ms of GPU time a frame for
+11 thousand strands and 0.28 ms for 22 thousand (RTX 5070). The grooms must
+be in meters, life size, for gravity and wind to look right (`scale` in the
+Import dock). Hidden grooms and grooms in the editor aren't simulated.
+
+**Hair shadows on skin.** The hair casts shadows like any mesh, but under
+Godot's default light settings (a sun's shadow reaching 100 m, its bias and
+normal bias) a shadow-map texel is about a centimeter, and the shadow test is
+pushed out by about as much. Hair lying 0-2 cm off the scalp and face falls
+inside that, so its shadow on the skin doesn't show; on the shoulders, the
+body or the floor it does.
+
+- **Gameplay** (the default settings): hair shadows the body and the world,
+  not the skin under it.
+- **Close-ups and cinematics:** fit the light's shadow to the shot. The demo's
+  sun uses `directional_shadow_max_distance` 5 m, `shadow_bias` 0.03,
+  `shadow_normal_bias` 0.5 and `shadow_blur` 1.5 (the omni backlight bias
+  0.02 and normal bias 0.5), and the hair shadows the face and neck.
+
+The editor demo `demo/editor/hair/hair_styles.tscn` in the example project
+shows two of Blender's demo hairstyles on heads that turn, nod, tilt and sway
+(keys 1-5), with gusts of wind (G); Tab switches between the two render
+modes.
+
 ## Soft bodies — stock `SoftBody3D`
 
 The stock `SoftBody3D` node works on this backend (the `soft_body_*`
@@ -797,9 +961,10 @@ Real runtime mesh fracture via NVIDIA's [NvBlast](https://github.com/NVIDIA-Omni
 (needs the separate `blast_sdk=` build — see Building above). Right-click a
 `MeshInstance3D` in the Scene tree dock, or a `Mesh` resource in the
 FileSystem dock, and pick **Fracture with Blast...** to open a live
-in-viewport authoring dialog: pick a fracture pattern, tune it, and Accept
-replaces the node with a `PhysXDestructible3D` using the result. (The same
-pipeline is script-callable headless as `PhysXBlastAuthoring.fracture_mesh()`.)
+in-viewport authoring dialog: pick a fracture pattern, tune it, drag **Explode**
+to pull the preview's pieces apart and see their shapes, and Accept replaces the
+node with a `PhysXDestructible3D` using the result. (The same pipeline is
+script-callable headless as `PhysXBlastAuthoring.fracture_mesh()`.)
 
 Three fracture patterns: **Voronoi** (random cells, the default), **Slicing**
 (brick-like, evenly spaced planes per axis), and **Cutout** (a caller-supplied
@@ -834,6 +999,29 @@ static/dynamic baking per piece (defaults to Static, matching a plain
 `MeshInstance3D`'s default — opt into Dynamic per-node, since a single
 fracture can spawn many pieces at once and a VoxelGI's dynamic-object
 tracking cost scales with how many it has to follow).
+
+Every surface of the mesh is fractured, and each piece draws its faces with
+their own surface's material (stored in the asset; the fracture dialog takes the
+`MeshInstance3D`'s surface override materials where it has them). Pieces keep the source mesh's
+UVs and normals through the cuts, and have tangents for normal maps.
+`material_override` replaces all the materials, and `interior_material` gives
+the cut faces their own: rock inside a painted wall, splinters inside a plank. Cut-face UVs are
+in mesh units, 1 UV to 1 unit, so the material's `uv1_scale` sets the tiling. They
+don't stretch, every piece has the same texture density, and the two faces of a
+crack show the same part of the texture, while each flat cut gets its own
+projection, so the pattern doesn't line up from one face of a piece to the next.
+An asset saved before these were kept still works, flat-shaded, without UVs and
+with its first surface only: fracture the mesh again to get them.
+
+Fracturing also cooks each piece's collision hull and stores it in the asset,
+so a break doesn't cook them on the main thread. A destructible whose asset was
+fractured before that shows a warning, and the asset's Inspector has a **Cook
+Hulls** button. Fracturing runs in
+the background: the dialog shows which of its six stages it is on, with a
+**Stop** button, and `PhysXBlastAuthoring.fracture_mesh_async()` does the same
+from a script. Fracturing a detailed mesh takes seconds, most of it cleaning
+the mesh up first (Godot's `SphereMesh` and `TorusMesh` repeat vertices along
+their UV seams, so they always get the cleanup).
 
 ## Vehicles — `PhysXVehicle3D`, `PhysXMotorcycle3D`, `PhysXTank3D`
 
@@ -1162,6 +1350,17 @@ For deterministic lockstep multiplayer, use the Jolt backend.
   canceling the other side's bounce. Friction matches Godot's rule (`rough`
   wins), except that a `rough` material against a higher-friction one gets the
   higher friction.
+- **Hair (`PhysXGroom3D`)** simulation keeps strands off capsules and
+  spheres only (no boxes, meshes or the floor) and off at most 16 of them,
+  and the strands don't collide with each other. Screen Space hair writes its
+  depth before transparent objects are drawn, where it covers at least half a
+  pixel: transparent objects, Flow's gas, the light shafts and depth of field
+  sort against it, but thinner edges and stray strands count as what's behind
+  them, and what's worked out before it (SSAO, SSR, volumetric fog) doesn't
+  see it. On the Mobile renderer with MSAA the effects that read depth (the
+  hair's own test against the scene, Flow, the light shafts) get none, and
+  draw over what's in front of them. Unreal's groom attributes (per-strand
+  colour, root UVs, guide strands) aren't read.
 - **`SeparationRayShape3D`** has no PhysX geometry: it's cast as a ray. In
   `move_and_slide` it lifts a character until its tip sits on what it hits
   (stairs), as on Godot Physics and Jolt. On a rigid body it's applied before
@@ -1282,3 +1481,12 @@ With `flow_sdk=` set, the build loads **NVIDIA Flow**
 (<https://github.com/NVIDIA-Omniverse/PhysX/tree/main/flow>) at run time —
 again the same repository and BSD-3-Clause license. `nvflow.dll` and
 `nvflowext.dll` (`.so` on Linux) must ship next to the Godot binary.
+
+With `alembic_sdk=` set, an **editor** build links **Alembic**
+(<https://github.com/alembic/alembic>) and **Imath**
+(<https://github.com/AcademySoftwareFoundation/Imath>) statically, for
+`PhysXGroom`'s `.abc` importer. Both are BSD-3-Clause; their notices are in
+[`ALEMBIC-LICENSE.md`](ALEMBIC-LICENSE.md), which the build copies to `bin/`
+next to the editor. Ship that file with any editor binary you distribute that
+was built this way. Export templates never link them (a game loads the
+imported groom resource, not the `.abc`), so exported games need nothing extra.

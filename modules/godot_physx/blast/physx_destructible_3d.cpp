@@ -33,6 +33,7 @@
 #include "core/config/engine.h"
 #include "core/io/file_access.h"
 #include "core/math/triangle_mesh.h"
+#include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/templates/hash_set.h"
 #include "scene/resources/3d/world_3d.h"
@@ -84,6 +85,8 @@ void PhysXDestructible3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_blast_asset"), &PhysXDestructible3D::get_blast_asset);
 	ClassDB::bind_method(D_METHOD("set_material_override", "material"), &PhysXDestructible3D::set_material_override);
 	ClassDB::bind_method(D_METHOD("get_material_override"), &PhysXDestructible3D::get_material_override);
+	ClassDB::bind_method(D_METHOD("set_interior_material", "material"), &PhysXDestructible3D::set_interior_material);
+	ClassDB::bind_method(D_METHOD("get_interior_material"), &PhysXDestructible3D::get_interior_material);
 	ClassDB::bind_method(D_METHOD("set_gi_mode", "mode"), &PhysXDestructible3D::set_gi_mode);
 	ClassDB::bind_method(D_METHOD("get_gi_mode"), &PhysXDestructible3D::get_gi_mode);
 	ClassDB::bind_method(D_METHOD("set_cast_shadow", "setting"), &PhysXDestructible3D::set_cast_shadow);
@@ -139,6 +142,7 @@ void PhysXDestructible3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "chunks_path", PROPERTY_HINT_FILE, "*.chunks"), "set_chunks_path", "get_chunks_path");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "blast_asset", PROPERTY_HINT_RESOURCE_TYPE, "PhysXBlastAsset"), "set_blast_asset", "get_blast_asset");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material_override", PROPERTY_HINT_RESOURCE_TYPE, "Material"), "set_material_override", "get_material_override");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "interior_material", PROPERTY_HINT_RESOURCE_TYPE, "BaseMaterial3D,ShaderMaterial"), "set_interior_material", "get_interior_material");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "material_overlay", PROPERTY_HINT_RESOURCE_TYPE, "BaseMaterial3D,ShaderMaterial"), "set_material_overlay", "get_material_overlay");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "transparency", PROPERTY_HINT_RANGE, "0.0,1.0,0.01"), "set_transparency", "get_transparency");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "cast_shadow", PROPERTY_HINT_ENUM, "Off,On,Double-Sided,Shadows Only"), "set_cast_shadow", "get_cast_shadow");
@@ -263,7 +267,15 @@ void PhysXDestructible3D::set_chunks_path(const String &p_path) {
 }
 
 void PhysXDestructible3D::set_blast_asset(const Ref<PhysXBlastAsset> &p_asset) {
+	// The hull warning follows the asset (Cook Hulls changes it).
+	const Callable warnings = callable_mp((Node *)this, &Node::update_configuration_warnings);
+	if (blast_asset.is_valid() && blast_asset->is_connected(CoreStringName(changed), warnings)) {
+		blast_asset->disconnect(CoreStringName(changed), warnings);
+	}
 	blast_asset = p_asset;
+	if (blast_asset.is_valid()) {
+		blast_asset->connect(CoreStringName(changed), warnings);
+	}
 	update_configuration_warnings();
 	_reload();
 }
@@ -291,9 +303,45 @@ void PhysXDestructible3D::set_collision_mask(uint32_t p_mask) {
 void PhysXDestructible3D::set_material_override(const Ref<Material> &p_material) {
 	material_override_res = p_material;
 	RenderingServer *rs = RenderingServer::get_singleton();
-	const RID mat_rid = material_override_res.is_valid() ? material_override_res->get_rid() : RID();
 	for (const ChunkVisual &piece : pieces) {
-		rs->instance_geometry_set_material_override(piece.instance, mat_rid);
+		_apply_piece_materials(rs, piece);
+	}
+}
+
+void PhysXDestructible3D::set_interior_material(const Ref<Material> &p_material) {
+	interior_material_res = p_material;
+	RenderingServer *rs = RenderingServer::get_singleton();
+	for (const ChunkVisual &piece : pieces) {
+		_apply_piece_materials(rs, piece);
+	}
+}
+
+Ref<Material> PhysXDestructible3D::_slot_material(int p_slot) const {
+	if (blast_asset.is_null()) {
+		return Ref<Material>();
+	}
+	const TypedArray<Material> materials = blast_asset->get_surface_materials();
+	const int surface = p_slot == interior_slot ? 0 : p_slot;
+	return surface < materials.size() ? Ref<Material>(materials[surface]) : Ref<Material>();
+}
+
+// An instance-wide override would cover the cut faces too, so a piece with its own material for those goes by surface.
+// Without an override, each surface keeps the material the asset gave its mesh surface.
+void PhysXDestructible3D::_apply_piece_materials(RenderingServer *p_rs, const ChunkVisual &p_piece) const {
+	const int interior_surface = (uint32_t)interior_slot < p_piece.surface_of_slot.size() ? p_piece.surface_of_slot[interior_slot] : -1;
+	const bool by_surface = interior_material_res.is_valid() && interior_surface >= 0;
+	const RID override_rid = material_override_res.is_valid() ? material_override_res->get_rid() : RID();
+	p_rs->instance_geometry_set_material_override(p_piece.instance, by_surface ? RID() : override_rid);
+	for (uint32_t slot = 0; slot < p_piece.surface_of_slot.size(); slot++) {
+		const int surface = p_piece.surface_of_slot[slot];
+		if (surface < 0) {
+			continue;
+		}
+		RID material;
+		if (by_surface) {
+			material = (int)slot == interior_slot ? interior_material_res->get_rid() : override_rid;
+		}
+		p_rs->instance_set_surface_override_material(p_piece.instance, surface, material);
 	}
 }
 
@@ -425,6 +473,18 @@ PackedStringArray PhysXDestructible3D::get_configuration_warnings() const {
 	if (blast_asset.is_null() && (asset_path.is_empty() || chunks_path.is_empty())) {
 		warnings.push_back("PhysXDestructible3D needs either blast_asset, or both asset_path and chunks_path, to render or collide.");
 	}
+	if (blast_asset.is_valid()) {
+		switch (blast_asset->get_hull_status()) {
+			case PhysXBlastAsset::HULLS_NONE:
+				warnings.push_back("The blast_asset has no pre-cooked collision hulls, so each piece's first break cooks its hull on the main thread. Select the asset and press Cook Hulls in the Inspector to store them.");
+				break;
+			case PhysXBlastAsset::HULLS_OUT_OF_DATE:
+				warnings.push_back(vformat("The blast_asset's collision hulls were cooked by %s, which this build can't load, so they're cooked at runtime instead. Select the asset and press Cook Hulls in the Inspector to cook them again.", blast_asset->get_hull_format().is_empty() ? String("another build") : blast_asset->get_hull_format()));
+				break;
+			case PhysXBlastAsset::HULLS_COOKED:
+				break;
+		}
+	}
 	return warnings;
 }
 
@@ -535,7 +595,7 @@ void PhysXDestructible3D::_notification(int p_what) {
 						// t.basis is a pure rotation here (see spawn_scale's own
 						// note) -- re-apply the real scale in the object's own
 						// local axes before this goes anywhere, or it's lost.
-						t.basis = t.basis.scaled_local(spawn_scale);
+						t.basis = t.basis.orthonormalized().scaled_local(spawn_scale);
 						set_global_transform(t);
 						RenderingServer::get_singleton()->instance_set_transform(pieces[0].instance, t);
 						_check_impact_fracture();
@@ -556,7 +616,6 @@ bool PhysXDestructible3D::_load_asset_bytes(const PackedByteArray &p_bytes) {
 	NvBlastAsset *asset = reinterpret_cast<NvBlastAsset *>(asset_mem);
 	asset_chunk_count = NvBlastAssetGetChunkCount(asset, blast_log);
 	asset_bond_count = NvBlastAssetGetBondCount(asset, blast_log);
-
 
 	const size_t family_size = NvBlastAssetGetFamilyMemorySize(asset, blast_log);
 	family_mem = aligned_alloc_16(family_size);
@@ -580,6 +639,7 @@ bool PhysXDestructible3D::_load_asset_bytes(const PackedByteArray &p_bytes) {
 }
 
 bool PhysXDestructible3D::_load() {
+	chunk_hulls.clear();
 	if (blast_asset.is_valid()) {
 		if (!_load_asset_bytes(blast_asset->get_asset_bytes())) {
 			return false;
@@ -588,6 +648,14 @@ bool PhysXDestructible3D::_load() {
 		chunk_points.resize(points.size());
 		for (int i = 0; i < points.size(); i++) {
 			chunk_points[i] = points[i];
+		}
+		// Hulls this build can load, or none: each is then cooked on its chunk's first break.
+		if (blast_asset->get_hull_status() == PhysXBlastAsset::HULLS_COOKED) {
+			const Array hulls = blast_asset->get_chunk_hulls();
+			chunk_hulls.resize(hulls.size());
+			for (int i = 0; i < hulls.size(); i++) {
+				chunk_hulls[i] = hulls[i];
+			}
 		}
 		_compute_chunk_volumes();
 		_compute_chunk_faces();
@@ -703,16 +771,95 @@ bool PhysXDestructible3D::_island_anchored(const LocalVector<uint32_t> &p_chunks
 	return false;
 }
 
+// Per triangle: normal-mapped materials need tangents, and the source mesh's aren't carried through the cut.
+static PackedFloat32Array _tangents_from_uvs(const PackedVector3Array &p_points, const PackedVector3Array &p_normals, const PackedVector2Array &p_uvs) {
+	PackedFloat32Array tangents;
+	tangents.resize(p_points.size() * 4);
+	float *tw = tangents.ptrw();
+	for (int t = 0; t + 2 < p_points.size(); t += 3) {
+		const Vector3 e1 = p_points[t + 1] - p_points[t];
+		const Vector3 e2 = p_points[t + 2] - p_points[t];
+		const Vector2 d1 = p_uvs[t + 1] - p_uvs[t];
+		const Vector2 d2 = p_uvs[t + 2] - p_uvs[t];
+		const real_t det = d1.cross(d2);
+		const bool mapped = Math::abs(det) > (real_t)1e-12;
+		const Vector3 along_u = mapped ? (e1 * d2.y - e2 * d1.y) / det : Vector3();
+		const Vector3 along_v = mapped ? (e2 * d1.x - e1 * d2.x) / det : Vector3();
+		for (int v = t; v < t + 3; v++) {
+			const Vector3 &n = p_normals[v];
+			Vector3 tangent = along_u - n * n.dot(along_u);
+			if (tangent.is_zero_approx()) {
+				// No usable UVs (a mesh without any): any direction along the face.
+				tangent = n.get_any_perpendicular();
+			}
+			tangent.normalize();
+			// As SurfaceTool's: Godot's binormal runs against V.
+			const real_t sign = n.cross(tangent).dot(-along_v) < 0.0 ? -1.0 : 1.0;
+			tw[v * 4 + 0] = tangent.x;
+			tw[v * 4 + 1] = tangent.y;
+			tw[v * 4 + 2] = tangent.z;
+			tw[v * 4 + 3] = sign;
+		}
+	}
+	return tangents;
+}
+
 void PhysXDestructible3D::_compute_chunk_surfaces() {
-	// Flat per-triangle normals -- the asset only stores positions -- with the
-	// winding (c-a)x(b-a), not the intuitive (b-a)x(c-a): Blast's
-	// AuthoringResult::geometry triangles are opposite to CCW-front-face here,
-	// and the wrong order cooked clean but rendered every face pitch-black
-	// (normals inward).
+	const Array asset_normals = blast_asset.is_valid() ? blast_asset->get_chunk_normals() : Array();
+	const Array asset_uvs = blast_asset.is_valid() ? blast_asset->get_chunk_uvs() : Array();
+	const PackedInt32Array interior_starts = blast_asset.is_valid() ? blast_asset->get_chunk_interior_starts() : PackedInt32Array();
+	const bool has_surface_data = asset_normals.size() == (int)chunk_points.size() && asset_uvs.size() == (int)chunk_points.size() && interior_starts.size() == (int)chunk_points.size();
+	const Array surface_starts = blast_asset.is_valid() ? blast_asset->get_chunk_surface_starts() : Array();
+	interior_slot = blast_asset.is_valid() ? blast_asset->get_surface_count() : 1;
+
+	// Without them, flat per-triangle normals with the winding (c-a)x(b-a), not
+	// the intuitive (b-a)x(c-a): Blast's AuthoringResult::geometry triangles are
+	// opposite to CCW-front-face here, and the wrong order cooked clean but
+	// rendered every face pitch-black (normals inward).
 	chunk_surfaces.resize(chunk_points.size());
 	for (uint32_t c = 0; c < chunk_points.size(); c++) {
 		const PackedVector3Array &points = chunk_points[c];
 		const int tri_count = points.size() / 3;
+		chunk_surfaces[c].clear();
+		if (has_surface_data) {
+			const PackedVector3Array normals = asset_normals[c];
+			const PackedVector2Array uvs = asset_uvs[c];
+			const int interior_start = interior_starts[c];
+			// Where each slot's faces start, then the end of the last. An asset from before surfaces were kept has one
+			// source surface, starting at 0.
+			LocalVector<int> bounds;
+			if (surface_starts.size() == (int)chunk_points.size()) {
+				const PackedInt32Array chunk_starts = surface_starts[c];
+				for (int s = 0; s < chunk_starts.size(); s++) {
+					bounds.push_back(chunk_starts[s]);
+				}
+			} else {
+				bounds.push_back(0);
+			}
+			bounds.push_back(interior_start);
+			bounds.push_back(points.size());
+			bool valid = normals.size() == points.size() && uvs.size() == points.size() && (int)bounds.size() == interior_slot + 2 && bounds[0] == 0;
+			for (uint32_t i = 1; valid && i < bounds.size(); i++) {
+				valid = bounds[i] >= bounds[i - 1];
+			}
+			if (valid) {
+				for (int slot = 0; slot <= interior_slot; slot++) {
+					const int from = bounds[slot];
+					const int to = bounds[slot + 1];
+					if (from >= to) {
+						continue;
+					}
+					ChunkSurface surface;
+					surface.slot = slot;
+					surface.vertices = points.slice(from, to);
+					surface.normals = normals.slice(from, to);
+					surface.uvs = uvs.slice(from, to);
+					surface.tangents = _tangents_from_uvs(surface.vertices, surface.normals, surface.uvs);
+					chunk_surfaces[c].push_back(surface);
+				}
+				continue;
+			}
+		}
 		ChunkSurface surface;
 		surface.vertices = points;
 		surface.normals.resize(points.size());
@@ -726,7 +873,6 @@ void PhysXDestructible3D::_compute_chunk_surfaces() {
 			nw[t * 3 + 1] = n;
 			nw[t * 3 + 2] = n;
 		}
-		chunk_surfaces[c].clear();
 		chunk_surfaces[c].push_back(surface);
 	}
 }
@@ -743,7 +889,15 @@ RID PhysXDestructible3D::_chunk_shape(uint32_t p_chunk) {
 	if (!chunk_shapes[p_chunk].is_valid()) {
 		PhysicsServer3D *ps = PhysicsServer3D::get_singleton();
 		chunk_shapes[p_chunk] = ps->convex_polygon_shape_create();
-		ps->shape_set_data(chunk_shapes[p_chunk], chunk_points[p_chunk]);
+		if (p_chunk < chunk_hulls.size() && !chunk_hulls[p_chunk].is_empty()) {
+			// Cooked with the asset: only loaded here.
+			Dictionary hull;
+			hull["points"] = chunk_points[p_chunk];
+			hull["cooked"] = chunk_hulls[p_chunk];
+			ps->shape_set_data(chunk_shapes[p_chunk], hull);
+		} else {
+			ps->shape_set_data(chunk_shapes[p_chunk], chunk_points[p_chunk]);
+		}
 	}
 	return chunk_shapes[p_chunk];
 }
@@ -962,6 +1116,12 @@ int PhysXDestructible3D::_spawn_piece(const LocalVector<uint32_t> &p_chunk_indic
 	// single body transform positions all of them.
 	RenderingServer *rs = RenderingServer::get_singleton();
 	RID mesh = rs->mesh_create();
+	LocalVector<int> surface_of_slot;
+	surface_of_slot.resize(interior_slot + 1);
+	for (int &surface : surface_of_slot) {
+		surface = -1;
+	}
+	int surface_count = 0;
 	int max_slot = -1;
 	for (uint32_t ci : p_chunk_indices) {
 		if (ci < chunk_surfaces.size()) {
@@ -982,12 +1142,26 @@ int PhysXDestructible3D::_spawn_piece(const LocalVector<uint32_t> &p_chunk_indic
 		if (count == 0) {
 			continue;
 		}
+		bool textured = true;
+		for (uint32_t ci : p_chunk_indices) {
+			for (const ChunkSurface &cs : chunk_surfaces[ci]) {
+				textured = textured && (cs.slot != slot || !cs.uvs.is_empty());
+			}
+		}
 		PackedVector3Array vertices;
 		PackedVector3Array normals;
+		PackedVector2Array uvs;
+		PackedFloat32Array tangents;
 		vertices.resize(count);
 		normals.resize(count);
+		if (textured) {
+			uvs.resize(count);
+			tangents.resize(count * 4);
+		}
 		Vector3 *vw = vertices.ptrw();
 		Vector3 *nw = normals.ptrw();
+		Vector2 *uw = textured ? uvs.ptrw() : nullptr;
+		float *tw = textured ? tangents.ptrw() : nullptr;
 		int at = 0;
 		for (uint32_t ci : p_chunk_indices) {
 			for (const ChunkSurface &cs : chunk_surfaces[ci]) {
@@ -996,6 +1170,10 @@ int PhysXDestructible3D::_spawn_piece(const LocalVector<uint32_t> &p_chunk_indic
 				}
 				memcpy(vw + at, cs.vertices.ptr(), sizeof(Vector3) * cs.vertices.size());
 				memcpy(nw + at, cs.normals.ptr(), sizeof(Vector3) * cs.normals.size());
+				if (textured) {
+					memcpy(uw + at, cs.uvs.ptr(), sizeof(Vector2) * cs.uvs.size());
+					memcpy(tw + at * 4, cs.tangents.ptr(), sizeof(float) * cs.tangents.size());
+				}
 				at += cs.vertices.size();
 			}
 		}
@@ -1003,14 +1181,21 @@ int PhysXDestructible3D::_spawn_piece(const LocalVector<uint32_t> &p_chunk_indic
 		arrays.resize(RSE::ARRAY_MAX);
 		arrays[RSE::ARRAY_VERTEX] = vertices;
 		arrays[RSE::ARRAY_NORMAL] = normals;
+		if (textured) {
+			arrays[RSE::ARRAY_TEX_UV] = uvs;
+			arrays[RSE::ARRAY_TANGENT] = tangents;
+		}
 		rs->mesh_add_surface_from_arrays(mesh, RSE::PRIMITIVE_TRIANGLES, arrays);
+		// The source surface's material; the cut faces take the first one's, as the whole mesh's did before.
+		const Ref<Material> material = _slot_material(slot);
+		if (material.is_valid()) {
+			rs->mesh_surface_set_material(mesh, surface_count, material->get_rid());
+		}
+		surface_of_slot[slot] = surface_count++;
 	}
 
 	RID instance = rs->instance_create2(mesh, get_world_3d().is_valid() ? get_world_3d()->get_scenario() : RID());
 	rs->instance_set_transform(instance, p_transform);
-	if (material_override_res.is_valid()) {
-		rs->instance_geometry_set_material_override(instance, material_override_res->get_rid());
-	}
 	_apply_gi_mode(rs, instance);
 	_apply_extra_render_settings(rs, instance);
 
@@ -1044,6 +1229,8 @@ int PhysXDestructible3D::_spawn_piece(const LocalVector<uint32_t> &p_chunk_indic
 	piece.body = body;
 	piece.mesh = mesh;
 	piece.instance = instance;
+	piece.surface_of_slot = surface_of_slot;
+	_apply_piece_materials(rs, piece);
 	piece.chunk_indices = chunk_indices_storage;
 	piece.actor = p_actor;
 	piece.last_linear_velocity = p_linear_velocity;
@@ -1210,10 +1397,12 @@ void PhysXDestructible3D::_sync_transforms() {
 				shrink = (real_t)(left / piece_shrink_time);
 			}
 		}
-		// t.basis is a pure rotation (see spawn_scale's own note) -- every
-		// piece was authored from the same intact mesh at the same original
-		// scale, so the same spawn_scale applies to all of them here too.
-		t.basis = t.basis.scaled_local(spawn_scale);
+		// Every piece was authored from the same intact mesh at the same
+		// original scale, so the same spawn_scale applies to all of them. A
+		// moving body's transform comes from PhysX without scale, but a static
+		// one (a chipped remainder) keeps the scaled transform it was spawned
+		// with: drop that first, or the scale is applied twice.
+		t.basis = t.basis.orthonormalized().scaled_local(spawn_scale);
 		if (shrink < 1.0) {
 			if (!piece.shrinking) {
 				// On its way out: stop it simulating and colliding (it would
@@ -1392,11 +1581,15 @@ int PhysXDestructible3D::_spawn_island_piece(NvBlastActor *p_actor, PhysicsServe
 	return 1;
 }
 
+Transform3D PhysXDestructible3D::_pose_with_scale(const Transform3D &p_body_pose) const {
+	return Transform3D(p_body_pose.basis.orthonormalized().scaled_local(spawn_scale), p_body_pose.origin);
+}
+
 Transform3D PhysXDestructible3D::get_piece_transform(int p_index) const {
 	if (p_index < 0 || p_index >= (int)pieces.size() || !pieces[p_index].body.is_valid()) {
 		return Transform3D();
 	}
-	return PhysicsServer3D::get_singleton()->body_get_state(pieces[p_index].body, PS3DE::BODY_STATE_TRANSFORM);
+	return _pose_with_scale(PhysicsServer3D::get_singleton()->body_get_state(pieces[p_index].body, PS3DE::BODY_STATE_TRANSFORM));
 }
 
 uint32_t PhysXDestructible3D::get_piece_chunk(int p_index) const {
@@ -1439,7 +1632,7 @@ int PhysXDestructible3D::apply_radial_damage(const Vector3 &p_world_position, fl
 	if (!fractured && !pieces.is_empty() && pieces[0].body.is_valid()) {
 		const Transform3D t = ps->body_get_state(pieces[0].body, PS3DE::BODY_STATE_TRANSFORM);
 		if (t != Transform3D()) {
-			base_transform = t;
+			base_transform = _pose_with_scale(t);
 			base_linear = pieces[0].last_linear_velocity; // pre-impact, see ChunkVisual
 			base_angular = pieces[0].last_angular_velocity;
 		}
@@ -1472,7 +1665,7 @@ int PhysXDestructible3D::apply_radial_damage(const Vector3 &p_world_position, fl
 		if (actor_piece >= 0 && pieces[actor_piece].body.is_valid()) {
 			const Transform3D t = ps->body_get_state(pieces[actor_piece].body, PS3DE::BODY_STATE_TRANSFORM);
 			if (t != Transform3D()) {
-				damage_from_asset = t;
+				damage_from_asset = _pose_with_scale(t);
 			}
 		}
 		const Vector3 local_position = damage_from_asset.affine_inverse().xform(p_world_position);
@@ -1531,7 +1724,7 @@ int PhysXDestructible3D::apply_radial_damage(const Vector3 &p_world_position, fl
 			const RID body = pieces[actor_piece].body;
 			const Transform3D t = ps->body_get_state(body, PS3DE::BODY_STATE_TRANSFORM);
 			if (t != Transform3D()) {
-				pred_transform = t;
+				pred_transform = _pose_with_scale(t);
 				// The velocity from before this tick's contacts (see ChunkVisual):
 				// an impact's push stays with the chunks near it (their shatter
 				// kick), not with the whole predecessor.

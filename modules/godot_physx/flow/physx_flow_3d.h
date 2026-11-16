@@ -33,9 +33,8 @@
 #include "flow_scatter_rd.h"
 
 #include "core/os/mutex.h"
-#include "core/templates/paged_array.h"
-
 #include "core/templates/local_vector.h"
+#include "core/templates/paged_array.h"
 #include "scene/3d/node_3d.h"
 #include "scene/resources/gradient.h"
 
@@ -150,15 +149,18 @@ private:
 	ObjectID light_id;
 	int light_search_countdown = 0;
 
-	// Light scattering: point / spot lights glowing in the gas (a pass of its
+	// Light scattering: point / spot (and directional) lights glowing in the gas (a pass of its
 	// own after Flow's, see FlowScatterRD). Off by default: it marches every
 	// pixel the gas covers once more, with a short march toward each light.
 	bool light_scattering = false;
 	int scattering_max_lights = 4;
 	float scattering_strength = 1.0f;
 	float scattering_anisotropy = 0.4f;
+	// The scene's directional lights scatter too (off: only omni and spot lights; Flow's own sun lighting either way).
+	bool scattering_directional = false;
 	int scattering_shadow_steps = 4;
 	float scattering_shadow_reach = 4.0f;
+
 public:
 	// Which lights' shadows the glow receives (a checkbox list). Directional
 	// will be a third flag (4) when the sun's shadow reaches the gas.
@@ -256,12 +258,17 @@ public:
 	float get_scattering_strength() const { return scattering_strength; }
 	void set_scattering_anisotropy(float p_v) { scattering_anisotropy = CLAMP(p_v, -0.95f, 0.95f); }
 	float get_scattering_anisotropy() const { return scattering_anisotropy; }
+	void set_scattering_directional(bool p_v) {
+		scattering_directional = p_v;
+		scatter_search_countdown = 0; // find the lights again now
+	}
+	bool is_scattering_directional() const { return scattering_directional; }
 	void set_scattering_shadow_steps(int p_v) { scattering_shadow_steps = CLAMP(p_v, 0, 64); }
 	int get_scattering_shadow_steps() const { return scattering_shadow_steps; }
 	void set_scattering_shadow_reach(float p_v) { scattering_shadow_reach = MAX(p_v, 0.05f); }
 	float get_scattering_shadow_reach() const { return scattering_shadow_reach; }
-	void set_scattering_receive_shadows(uint32_t p_flags) { scattering_receive_shadows = p_flags & (SCATTERING_SHADOW_OMNI | SCATTERING_SHADOW_SPOT); }
-	uint32_t get_scattering_receive_shadows() const { return scattering_receive_shadows; }
+	void set_scattering_receive_shadows(BitField<ScatteringShadowFlags> p_flags) { scattering_receive_shadows = uint32_t(p_flags) & (SCATTERING_SHADOW_OMNI | SCATTERING_SHADOW_SPOT); }
+	BitField<ScatteringShadowFlags> get_scattering_receive_shadows() const { return BitField<ScatteringShadowFlags>(scattering_receive_shadows); }
 	void set_scattering_resolution(ScatteringResolution p_v) { scattering_resolution = p_v; }
 	ScatteringResolution get_scattering_resolution() const { return scattering_resolution; }
 
