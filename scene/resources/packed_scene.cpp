@@ -651,7 +651,7 @@ Node *SceneState::_instantiate(GenEditState p_edit_state, LocalVector<DeferredNo
 			if (p_edit_state == GEN_EDIT_STATE_MAIN) {
 				_sanitize_node_pinned_properties(node);
 			} else {
-				node->remove_meta("_edit_pinned_properties_");
+				node->remove_meta(SNAME("_edit_pinned_properties_")); // Not a StringName built per node.
 			}
 		}
 

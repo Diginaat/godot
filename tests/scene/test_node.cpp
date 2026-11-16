@@ -519,6 +519,55 @@ TEST_CASE("[SceneTree][Node] Testing node operations with a more complex simple 
 
 // Group membership through repeated adds, removals and re-entering the tree
 // (each member exactly once, in tree order). docs/implementation/scene-runtime-roadmap.md, M1.
+TEST_CASE("[SceneTree][Node] A node's groups keep their order through removals and re-entering the tree") {
+	Node *node = memnew(Node);
+	const char *names[] = { "g0", "g1", "g2", "g3", "g4" };
+	for (const char *name : names) {
+		node->add_to_group(name, String(name) == "g1" || String(name) == "g3");
+	}
+	node->add_to_group("g2"); // Already in it: no change.
+
+	const auto group_names = [](Node *p_node) {
+		List<Node::GroupInfo> groups;
+		p_node->get_groups(&groups);
+		String joined;
+		for (const Node::GroupInfo &gi : groups) {
+			joined += String(gi.name) + (gi.persistent ? "*" : "") + " ";
+		}
+		return joined;
+	};
+	CHECK_EQ(group_names(node), "g0 g1* g2 g3* g4 ");
+	CHECK_EQ(node->get_persistent_group_count(), 2);
+
+	// Out of the tree, then in it: the tree finds the node in every group.
+	node->remove_from_group("g2");
+	CHECK_FALSE(node->is_in_group("g2"));
+	CHECK(node->is_in_group("g3"));
+	SceneTree::get_singleton()->get_root()->add_child(node);
+	for (const char *name : { "g0", "g1", "g3", "g4" }) {
+		CHECK_EQ(SceneTree::get_singleton()->get_first_node_in_group(name), node);
+	}
+	CHECK_FALSE(SceneTree::get_singleton()->has_group("g2"));
+
+	// Inside the tree: removals of the first and last, a re-addition at the end.
+	node->remove_from_group("g0");
+	node->remove_from_group("g4");
+	node->add_to_group("g0");
+	CHECK_EQ(group_names(node), "g1* g3* g0 ");
+	CHECK_FALSE(SceneTree::get_singleton()->has_group("g4"));
+	CHECK_EQ(SceneTree::get_singleton()->get_node_count_in_group("g0"), 1);
+
+	SceneTree::get_singleton()->get_root()->remove_child(node); // Leaves every group.
+	for (const char *name : names) {
+		CHECK_FALSE(SceneTree::get_singleton()->has_group(name));
+	}
+	CHECK_EQ(group_names(node), "g1* g3* g0 "); // The node keeps its own.
+	memdelete(node);
+	for (const char *name : names) {
+		CHECK_FALSE(SceneTree::get_singleton()->has_group(name));
+	}
+}
+
 TEST_CASE("[SceneTree][Node] Group membership through add, remove and re-entering the tree") {
 	Node *parent = memnew(Node);
 	SceneTree::get_singleton()->get_root()->add_child(parent);

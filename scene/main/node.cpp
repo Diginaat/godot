@@ -353,9 +353,9 @@ void Node::_propagate_enter_tree() {
 		data.viewport = data.parent->data.viewport;
 	}
 
-	for (KeyValue<StringName, GroupData> &E : data.grouped) {
-		E.value.group = data.tree->add_to_group(E.key, this);
-		E.value.position = E.value.group->nodes.size() - 1;
+	for (GroupEntry &E : data.grouped) {
+		E.data.group = data.tree->add_to_group(E.name, this);
+		E.data.position = E.data.group->nodes.size() - 1;
 	}
 
 	notification(NOTIFICATION_ENTER_TREE);
@@ -441,9 +441,9 @@ void Node::_propagate_exit_tree() {
 	}
 
 	// exit groups
-	for (KeyValue<StringName, GroupData> &E : data.grouped) {
-		data.tree->remove_from_group(E.key, this);
-		E.value.group = nullptr;
+	for (GroupEntry &E : data.grouped) {
+		data.tree->remove_from_group(E.name, this);
+		E.data.group = nullptr;
 	}
 
 	data.viewport = nullptr;
@@ -587,9 +587,9 @@ void Node::_move_child(Node *p_child, int p_index, bool p_ignore_end) {
 }
 
 void Node::_propagate_groups_dirty() {
-	for (const KeyValue<StringName, GroupData> &E : data.grouped) {
-		if (E.value.group) {
-			E.value.group->changed = true;
+	for (const GroupEntry &E : data.grouped) {
+		if (E.data.group) {
+			E.data.group->changed = true;
 		}
 	}
 
@@ -2541,14 +2541,14 @@ NodePath Node::get_path() const {
 
 bool Node::is_in_group(const StringName &p_identifier) const {
 	ERR_THREAD_GUARD_V(false);
-	return data.grouped.has(p_identifier);
+	return _find_group(p_identifier) != UINT32_MAX;
 }
 
 void Node::add_to_group(const StringName &p_identifier, bool p_persistent) {
 	ERR_THREAD_GUARD
 	ERR_FAIL_COND_MSG(p_identifier.is_empty(), vformat("Cannot add node '%s' to a group with an empty name.", get_name()));
 
-	if (data.grouped.has(p_identifier)) {
+	if (_find_group(p_identifier) != UINT32_MAX) {
 		return;
 	}
 
@@ -2563,7 +2563,7 @@ void Node::add_to_group(const StringName &p_identifier, bool p_persistent) {
 
 	gd.persistent = p_persistent;
 
-	data.grouped[p_identifier] = gd;
+	data.grouped.push_back({ p_identifier, gd });
 	if (p_persistent) {
 		_emit_editor_state_changed();
 	}
@@ -2571,21 +2571,21 @@ void Node::add_to_group(const StringName &p_identifier, bool p_persistent) {
 
 void Node::remove_from_group(const StringName &p_identifier) {
 	ERR_THREAD_GUARD
-	HashMap<StringName, GroupData>::Iterator E = data.grouped.find(p_identifier);
+	const uint32_t index = _find_group(p_identifier);
 
-	if (!E) {
+	if (index == UINT32_MAX) {
 		return;
 	}
 
 #ifdef TOOLS_ENABLED
-	bool persistent = E->value.persistent;
+	bool persistent = data.grouped[index].data.persistent;
 #endif
 
 	if (data.tree) {
-		data.tree->remove_from_group(E->key, this);
+		data.tree->remove_from_group(data.grouped[index].name, this);
 	}
 
-	data.grouped.remove(E);
+	data.grouped.remove_at(index); // Keeps the order of the others.
 
 #ifdef TOOLS_ENABLED
 	if (persistent) {
@@ -2607,10 +2607,10 @@ TypedArray<StringName> Node::_get_groups() const {
 
 void Node::get_groups(List<GroupInfo> *p_groups) const {
 	ERR_THREAD_GUARD
-	for (const KeyValue<StringName, GroupData> &E : data.grouped) {
+	for (const GroupEntry &E : data.grouped) {
 		GroupInfo gi;
-		gi.name = E.key;
-		gi.persistent = E.value.persistent;
+		gi.name = E.name;
+		gi.persistent = E.data.persistent;
 		p_groups->push_back(gi);
 	}
 }
@@ -2619,8 +2619,8 @@ int Node::get_persistent_group_count() const {
 	ERR_THREAD_GUARD_V(0);
 	int count = 0;
 
-	for (const KeyValue<StringName, GroupData> &E : data.grouped) {
-		if (E.value.persistent) {
+	for (const GroupEntry &E : data.grouped) {
+		if (E.data.persistent) {
 			count += 1;
 		}
 	}

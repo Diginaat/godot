@@ -176,6 +176,23 @@ private:
 		SceneTreeGroup *group = nullptr;
 	};
 
+	// A node is in few groups: a vector in insertion order (the order
+	// get_groups() returns) searched by StringName pointer needs one
+	// allocation, a HashMap three (docs/implementation/scene-runtime-roadmap.md, M5).
+	struct GroupEntry {
+		StringName name;
+		GroupData data;
+	};
+
+	_FORCE_INLINE_ uint32_t _find_group(const StringName &p_name) const {
+		for (uint32_t i = 0; i < data.grouped.size(); i++) {
+			if (data.grouped[i].name == p_name) {
+				return i;
+			}
+		}
+		return UINT32_MAX;
+	}
+
 	struct ComparatorByIndex {
 		bool operator()(const Node *p_left, const Node *p_right) const {
 			static const uint32_t order[3] = { 1, 0, 2 };
@@ -229,7 +246,7 @@ private:
 
 		mutable RID accessibility_element;
 
-		HashMap<StringName, GroupData> grouped;
+		LocalVector<GroupEntry> grouped;
 		List<Node *>::Element *OW = nullptr; // Owned element.
 		List<Node *> owned;
 

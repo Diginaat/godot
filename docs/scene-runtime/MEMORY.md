@@ -9,9 +9,9 @@ short; details go in the linked files.
 | Item | Value |
 | --- | --- |
 | Branch | `feat/scene-runtime` (from `feat/core-stl-simd-modernization` at `12cd0e0924`), worktree `GodotPhysxDev-core` |
-| Phase | M5 (allocations), 2026-11-16 |
-| Completed | M0: source analysis, three approaches compared, A chosen ([architecture](../architecture/hybrid-scene-runtime.md)), scenario benchmark and baseline ([numbers](../benchmarks/scene-runtime.md)); M1: `add_to_group` without the linear duplicate check (`instance` 100k -60%, `churn` 100k -51%); M2: children cache holes compacted on read (`churn_read` -15-17%); M3: group removals by recorded position (`churn` 100k -81%, `instance` 100k -70%); M4: Node3D propagation stops at dirty subtrees walked in the current notification epoch (`heavy` op 100k -32%) |
-| Next | M5 (allocations per child, group membership, signal connection): profile `instance` and `churn` first, one design, one build, one control |
+| Phase | M6 or M5 rest, 2026-11-16 |
+| Completed | M0: source analysis, three approaches compared, A chosen ([architecture](../architecture/hybrid-scene-runtime.md)), scenario benchmark and baseline ([numbers](../benchmarks/scene-runtime.md)); M1: `add_to_group` without the linear duplicate check (`instance` 100k -60%, `churn` 100k -51%); M2: children cache holes compacted on read (`churn_read` -15-17%); M3: group removals by recorded position (`churn` 100k -81%, `instance` 100k -70%); M4: Node3D propagation stops at dirty subtrees walked in the current notification epoch (`heavy` op 100k -32%); M5: node groups in a vector, `SNAME` in instancing (`instance` -20-24%, `churn` -8-10%, node -24 bytes) |
+| Next | M6 (process lists, only if a script-free profile shows them), or the rest of M5 (children map and owned list element allocations, signals) if a profile ranks them higher |
 | Builds | Editor `production=yes tests=yes debug_symbols=yes`; release `target=template_release production=yes debug_symbols=yes disable_path_overrides=no` (for `--path`) |
 
 ## Design decisions

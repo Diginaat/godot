@@ -34,7 +34,7 @@ Rules for every milestone:
 | M2 | Children cache: a removal leaves a hole, the next reader compacts it in place (no walk of the name map, no sort); updating it on every removal would cost more when many removals come before one read | `churn`, `reparent`, wide parents | child order, `get_index()`, internal front/back children, `move_child` after removals (test in place) | `wide`/`churn` not faster, or removals of front children much slower | done: `churn_read` -15-17%, profiled node workload -6.4% |
 | M3 | `remove_from_group` without a linear search (member index or tree-order rules) | `churn`, `instance` | `get_nodes_in_group` order, `call_group` during removal | group order changes | done: `churn` 100k -81%, `instance` 100k -70%, 10k -17-39% |
 | M4 | Node3D transform propagation stops at subtrees that need nothing more (per-subtree count of nodes that want `TRANSFORM_CHANGED`, plus the dirty invariant) | `deep`, `parents`, `heavy`, `-Visual` | notification counts per frame, global transforms after random moves, top_level, reparent, FTI | any notification lost or delayed | done: `heavy` op 10k -12%, 100k -32%; `wide`, `parents` op within 1.3% |
-| M5 | Allocations per child, group membership and signal connection (pooled or inline storage where the profile shows them) | `instance`, `churn`, allocation counts | lifecycle, ownership, signals | memory up without time down | next |
+| M5 | Allocations per child, group membership and signal connection (pooled or inline storage where the profile shows them) | `instance`, `churn`, allocation counts | lifecycle, ownership, signals | memory up without time down | done (groups part): `instance` -20-24%, `churn` -8-10%; node 24 bytes smaller |
 | M6 | Process lists: incremental priority order, cheaper per-node checks (only if a script-free profile shows them) | `native`, `script` | process order with priorities and pause modes | callback order changes | |
 | M7 | Experiment: breadth-first batched Node3D recomputation for the deep / heavy cases (approach B), behind a measured threshold | `deep`, `heavy`, `parents` at 100k | as M4 | no gain over M4 | |
 | M8 | Node2D / CanvasItem counterparts of M2-M4 | `mixed`, 2D variants | as M2-M4 | as M2-M4 | |
@@ -109,3 +109,24 @@ Order can change when a profile shows a larger cost elsewhere.
   `NOTIFICATION_TRANSFORM_CHANGED` handler or after the handlers in the
   flush cost 50-75 ns per notified node (`wide` with MeshInstance3D,
   headless).
+
+## M5 as implemented
+
+Profile first (release, `instance` 10k and `churn` 100k, headless): heap
+calls were 26% of the `instance` main thread. Per instanced node: the
+node's `grouped` HashMap (three allocations for its first group, three
+frees: 6.3% plus part of `~Node`'s 4.2%), the object itself
+(`ClassDB::creator`, 4.9%), the parent's `children` map element (1.5%),
+the owner's `owned` list element (1.3%), and a `StringName` built from a
+literal per node in `SceneState::_instantiate()` (`remove_meta()` of the
+pinned-properties key, about 1.2% with its hash, table lookup and unref).
+
+- `Node::Data::grouped` is a `LocalVector<GroupEntry>` (name, data) in
+  insertion order, searched by `StringName` pointer (`Node::_find_group()`):
+  one allocation for the first group, `get_groups()` order unchanged,
+  removal keeps the others' order. A node is in few groups; a node in very
+  many pays a linear search per lookup.
+- `SceneState::_instantiate()` uses `SNAME()` for that key.
+- `sizeof(Node)` 736 to 712 bytes, `Node3D` 1104 to 1080.
+- Not done (smaller in the profile): `children` and `owned` element
+  allocations, signal connections.

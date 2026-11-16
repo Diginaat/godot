@@ -204,8 +204,8 @@ void SceneTree::remove_from_group(const StringName &p_group, Node *p_node) {
 	// The member's recorded position: a hole there, no search and shift
 	// (docs/implementation/scene-runtime-roadmap.md, M3). A slot that holds
 	// the member is its slot, so a stale position is only slower.
-	const Node::GroupData *gd = p_node->data.grouped.getptr(p_group);
-	const uint32_t position = gd ? gd->position : UINT32_MAX;
+	const uint32_t entry = p_node->_find_group(p_group);
+	const uint32_t position = entry != UINT32_MAX ? p_node->data.grouped[entry].data.position : UINT32_MAX;
 	if (position < uint32_t(g.nodes.size()) && g.nodes[position] == p_node) {
 		g.nodes.write[position] = nullptr;
 		g.holes++;
@@ -248,9 +248,9 @@ void SceneTree::_update_group_positions(SceneTreeGroup &g) {
 		if (!nodes[i]) {
 			continue; // A hole.
 		}
-		Node::GroupData *gd = nodes[i]->data.grouped.getptr(g.name);
-		if (gd) {
-			gd->position = i;
+		const uint32_t entry = nodes[i]->_find_group(g.name);
+		if (entry != UINT32_MAX) {
+			nodes[i]->data.grouped[entry].data.position = i;
 		}
 	}
 	g.stale_removals = 0;

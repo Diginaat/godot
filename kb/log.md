@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-16 (scene runtime: M5)
+
+* **Implemented**: a node's groups in an ordered vector instead of a
+  HashMap (one allocation instead of three), and no `StringName` built per
+  node in scene instancing. `instance` -20-24%, `churn` -8-10%; each node
+  24 bytes smaller.
+
 ## 2026-11-16 (scene runtime: M4)
 
 * **Implemented**: Node3D transform propagation stops at dirty children

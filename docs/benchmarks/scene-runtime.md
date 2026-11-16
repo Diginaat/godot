@@ -172,3 +172,19 @@ Rejected designs (same bench, `wide` 10k frame against `m3pad` 1.37 ms):
 cleaning each notified node in its `NOTIFICATION_TRANSFORM_CHANGED`
 handler 1.92 ms, after the handlers in the flush (a cast and an `ObjectDB`
 lookup per node) 2.16 ms: 50-75 ns per notified node.
+
+### M5: node groups in a vector, no per-node StringName in instancing, 2026-11-16
+
+Release builds, M4 and M5 alternated, 3 rounds, headless, ms per frame,
+median (range):
+
+| Scenario | 1k | 10k | 100k |
+| --- | --- | --- | --- |
+| instance | 1.32 to 1.05 | 23.0 (21.5-29.8) to 18.3 (16.7-24.8) | 243 (243-312) to 186 (184-244) |
+| churn | 0.049 to 0.045 | 0.574 (0.574-0.624) to 0.523 (0.497-0.527) | 9.11 (9.11-9.43) to 8.16 (8.08-8.31) |
+| churn_read | 0.051 to 0.049 | 0.583 to 0.551 | 11.18 (11.15-11.22) to 10.27 (10.27-10.31) |
+
+Controls (no groups): `heavy` +1.5% / +4.4% / -0.7%, `script` +4.2% / -2.7%
+/ -3.0%, `native`, `sparse`, `wide`, `reparent` within -18% to +3% with
+overlapping ranges except `heavy` 10k: within the code layout spread
+measured for M4, and M5 touches no transform code.
