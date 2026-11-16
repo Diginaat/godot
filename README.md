@@ -1,3 +1,4 @@
+# Vibe Coded with Claude and OpenCode
 # Godot Engine with DDGI, NVIDIA DLSS, path tracing and PhysX 5
 
 ![The editor with the Modern Compact theme: the game runs in the split panel and the 3D editor follows it with the Live Runtime view](docs/images/editor/split_live_subway.jpg)
