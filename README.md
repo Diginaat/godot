@@ -510,7 +510,8 @@ the maintainer's own local paths; replace them with yours.
 ## Credits
 
 - **[Snesmocha](https://github.com/Snesmocha)** (mocha), for helping with
-  this build's optimizations.
+  this build's optimizations, and with the GPU and core engine improvements
+  of 0.10.1.
 - **[Wild Ox Studios](https://www.youtube.com/@WildOxStudios)**
   ([uno1982](https://github.com/uno1982)), for the PhysX 5 module (see
   [above](#physx-module-by-wild-ox-studios)).
