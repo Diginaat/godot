@@ -6,7 +6,7 @@ extends SceneTree
 ## setup time and static memory. --visual uses MeshInstance3D instead of
 ## Node3D, so transform changes reach the RenderingServer (needs a window).
 
-const SCENARIOS := ["idle", "deep", "wide", "parents", "sparse", "heavy", "script", "native", "churn", "churn_read", "reparent", "instance", "mixed"]
+const SCENARIOS := ["idle", "deep", "wide", "parents", "sparse", "heavy", "script", "native", "churn", "churn_read", "reparent", "instance", "mixed", "heavy2d", "parents2d"]
 
 var _scenario := "sparse"
 var _count := 10000
@@ -27,6 +27,7 @@ var _nodes: Array[Node3D] = []
 var _roots: Array[Node3D] = []
 var _leaves: Array[Node3D] = []
 var _nodes_2d: Array[Node2D] = []
+var _roots_2d: Array[Node2D] = []
 var _parents: Array[Node] = []
 var _scene: PackedScene
 var _instances: Array[Node] = []
@@ -213,6 +214,48 @@ func _setup_mixed() -> void:
 		_nodes_2d.append(n)
 
 
+func _setup_heavy2d() -> void:
+	# As heavy, with Node2D (CanvasItem propagation; added with M8).
+	var canvas := Node2D.new()
+	root.add_child(canvas)
+	var frontier: Array[Node2D] = [canvas]
+	var made := 0
+	while made < _count:
+		var next: Array[Node2D] = []
+		for parent in frontier:
+			for i in 8:
+				if made >= _count:
+					break
+				var n := Node2D.new()
+				n.position = Vector2(made % 100, made / 100)
+				parent.add_child(n)
+				_nodes_2d.append(n)
+				next.append(n)
+				made += 1
+		frontier = next
+
+
+func _setup_parents2d() -> void:
+	# As parents, with Node2D under a few levels of containers (CanvasItem
+	# propagation from a parent with many children; added with M8).
+	var canvas := Node2D.new()
+	root.add_child(canvas)
+	var container: Node2D = canvas
+	for level in 4:
+		var inner := Node2D.new()
+		container.add_child(inner)
+		container = inner
+	for p in maxi(_count / 100, 1):
+		var parent := Node2D.new()
+		container.add_child(parent)
+		_roots_2d.append(parent)
+		for i in 100:
+			var n := Node2D.new()
+			n.position = Vector2(i, 0)
+			parent.add_child(n)
+			_nodes_2d.append(n)
+
+
 # Per-frame work; returns nothing, timed by the caller.
 func _step() -> void:
 	var t := _frame * 0.016
@@ -274,6 +317,12 @@ func _step() -> void:
 				var inst := _scene.instantiate()
 				_container.add_child(inst)
 				_instances.append(inst)
+		"heavy2d":
+			for n in _nodes_2d:
+				n.position.y = sin(t)
+		"parents2d":
+			for r in _roots_2d:
+				r.rotate(0.01)
 		"mixed":
 			for i in maxi(_count / 200, 1):
 				_nodes[_rng.randi() % _nodes.size()].position.y = sin(t + i)

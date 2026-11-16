@@ -36,8 +36,8 @@ Rules for every milestone:
 | M4 | Node3D transform propagation stops at subtrees that need nothing more (per-subtree count of nodes that want `TRANSFORM_CHANGED`, plus the dirty invariant) | `deep`, `parents`, `heavy`, `-Visual` | notification counts per frame, global transforms after random moves, top_level, reparent, FTI | any notification lost or delayed | done: `heavy` op 10k -12%, 100k -32%; `wide`, `parents` op within 1.3% |
 | M5 | Allocations per child, group membership and signal connection (pooled or inline storage where the profile shows them) | `instance`, `churn`, allocation counts | lifecycle, ownership, signals | memory up without time down | done (groups part): `instance` -20-24%, `churn` -8-10%; node 24 bytes smaller |
 | M6 | Process lists: incremental priority order, cheaper per-node checks (only if a script-free profile shows them) | `native`, `script` | process order with priorities and pause modes | callback order changes | done: `native` 100k -40%, `script` 100k -5% |
-| M7 | Experiment: breadth-first batched Node3D recomputation for the deep / heavy cases (approach B), behind a measured threshold | `deep`, `heavy`, `parents` at 100k | as M4 | no gain over M4 | |
-| M8 | Node2D / CanvasItem counterparts of M2-M4 | `mixed`, 2D variants | as M2-M4 | as M2-M4 | |
+| M7 | Experiment: breadth-first batched Node3D recomputation for the deep / heavy cases (approach B), behind a measured threshold | `deep`, `heavy`, `parents` at 100k | as M4 | no gain over M4 | skipped (2026-11-16, by request) |
+| M8 | Node2D / CanvasItem counterparts of M2-M4 | `mixed`, 2D variants | as M2-M4 | as M2-M4 | not needed: 2D already has the early-out; see M8 notes |
 | M9 | Integration: full benchmark set, a game level, editor, C#, GDExtension | everything | full suite, smoke, large-world, editor | - | |
 
 Order can change when a profile shows a larger cost elsewhere.
@@ -153,3 +153,23 @@ checks' logic costs nothing; sorting and list maintenance do not show.
 - A threshold (no prefetch under 4,096 nodes) was tried: the 1k
   difference stayed (+11%, 3 us), so it is code layout, not the
   prefetches, and the threshold was dropped.
+
+## M8 findings (no change)
+
+- M2 (children cache) and M3 (groups) are in `Node`: 2D nodes have them.
+- The M4 counterpart exists upstream: `CanvasItem::_notify_transform()`
+  returns at a node whose global transform is already invalid, and
+  `set_notify_transform(true)` resolves the global transform first.
+- 2D rendering takes local transforms, so global transforms are rarely
+  read and nodes stay invalid: a move usually stops at its origin.
+  `parents2d` (1,000 parents with 100 children each, all rotating) costs
+  0.10 ms per frame at 100k nodes.
+- `heavy2d` (every node of a balanced Node2D tree moves, from GDScript):
+  39.5 ms at 100k, mostly GDScript property access and the first read of
+  each node in `Node2D::_update_transform()` (25%) and `_is_xform_dirty()`
+  (13%). `CanvasItem::_update_oversampling()` is 6%: it runs on the
+  propagation's origin for every node the propagation visits and walks up
+  the parents while the mode is "parent node". A cached resolved mode would
+  need invalidation on mode changes, reparenting and visibility; not worth
+  the risk at this share. Upstream detail kept as is: the first call reads
+  the origin's transform before it is invalidated.

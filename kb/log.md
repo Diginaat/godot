@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-16 (scene runtime: M7 skipped, M8 no change)
+
+* **Finding**: 2D needs no counterpart of M2-M4: groups and the children
+  cache are in `Node`, and `CanvasItem::_notify_transform()` already stops
+  at invalid nodes; 2D rendering takes local transforms, so nodes stay
+  invalid and moves stop at their origin (`parents2d` 100k: 0.10 ms).
+  `heavy2d` and `parents2d` added to the scene benchmark.
+
 ## 2026-11-16 (scene runtime: M6)
 
 * **Implemented**: the process loop prefetches the next nodes' cache

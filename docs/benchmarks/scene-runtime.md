@@ -33,6 +33,8 @@ disable_path_overrides=no`.
 | `reparent` | reparent 1% of N nodes between two parents |
 | `instance` | instantiate N / 100 copies of a 100-node scene (nodes in a group), free the previous ones |
 | `mixed` | move 0.5% of N/2 Node3D and N/2 Node2D nodes |
+| `heavy2d` | move every node of a balanced Node2D tree (added with M8) |
+| `parents2d` | N / 100 Node2D parents with 100 children each, under four containers: rotate every parent (added with M8) |
 
 ## Baseline, 2026-11-16
 
@@ -204,3 +206,9 @@ median (range):
 `native` at 1k is 2-3 us slower in both the M6 build and a build that
 skips the prefetches below 4,096 nodes (+11%): code layout on a 27 us
 frame, not the prefetches.
+
+### M8: 2D, 2026-11-16
+
+No change was needed (roadmap, M8 findings). M6 release build, headless,
+one run each: `heavy2d` 100k 39.5 ms per frame (op 39.4 ms); `parents2d`
+10k 0.012 ms, 100k 0.10 ms.
