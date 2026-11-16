@@ -172,6 +172,7 @@ public:
 private:
 	struct GroupData {
 		bool persistent = false;
+		uint32_t position = 0; // Index in group->nodes when last known (SceneTreeGroup).
 		SceneTreeGroup *group = nullptr;
 	};
 

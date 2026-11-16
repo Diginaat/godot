@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-16 (scene runtime: M3)
+
+* **Implemented**: `SceneTree::remove_from_group` nulls the member's
+  recorded slot instead of searching and shifting; readers compact the
+  holes in order. `churn` 100k 47.5 to 9.05 ms, `instance` 100k 812 to
+  247 ms; controls unchanged. With M1, groups no longer make node churn and
+  instancing quadratic.
+
 ## 2026-11-16 (scene runtime: M2)
 
 * **Implemented**: removing a child leaves a hole in the parent's children

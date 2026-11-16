@@ -85,8 +85,19 @@ public:
 };
 
 struct SceneTreeGroup {
+	// Removed members leave null holes, which _update_group_order() drops
+	// (keeping the order) before anything reads the nodes. Each member's
+	// Node::GroupData::position is its index here when the member was added
+	// or the positions were last rewritten; sorting and compacting can move
+	// members (rewriting every position would cost a lookup per member), so a
+	// removal checks the slot and searches when it does not hold the member.
+	// After STALE_REMOVALS_BEFORE_REWRITE searches, all positions are rewritten.
+	static constexpr uint32_t STALE_REMOVALS_BEFORE_REWRITE = 128;
 	Vector<Node *> nodes;
 	bool changed = false;
+	uint32_t holes = 0;
+	uint32_t stale_removals = 0;
+	StringName name;
 };
 
 class SceneTree : public MainLoop {
@@ -200,6 +211,8 @@ private:
 	void _flush_ugc();
 
 	_FORCE_INLINE_ void _update_group_order(SceneTreeGroup &g);
+	void _compact_group(SceneTreeGroup &g);
+	void _update_group_positions(SceneTreeGroup &g);
 
 	TypedArray<Node> _get_nodes_in_group(const StringName &p_group);
 

@@ -113,3 +113,29 @@ node larger: `wide` at 100k was 9% slower; next to the `bool` (in its
 padding) it is not. `churn` at 10k is +2%, within the 1.5% that code layout
 alone moves a build and not seen at 1k or 100k (not checked with a control
 build).
+
+### M3: `remove_from_group` without a search and shift, 2026-11-16
+
+Each member's `Node::GroupData` records its index in the group; a removal
+nulls that slot (a hole), and `_update_group_order()`, which every reader
+already calls, compacts the holes away in order before it sorts. A slot
+that does not hold the member (a sort or compaction moved it) falls back to
+the old search, still without the shift; after 128 such searches all
+positions are rewritten. Release builds, M2 and M3 alternated, 3 rounds, ms
+per frame, median (range):
+
+| Scenario | 1k | 10k | 100k |
+| --- | --- | --- | --- |
+| churn | 0.051 to 0.047 | 0.928 (0.921-1.016) to 0.569 (0.551-0.603) | 47.5 (47.0-48.1) to 9.05 (9.03-9.60) |
+| churn_read | 0.055 to 0.051 | 0.984 (0.973-1.080) to 0.599 (0.578-0.702) | 49.2 (49.0-50.6) to 11.2 (11.2-11.8) |
+| instance | 1.36 to 1.32 | 27.7 (27.6-28.3) to 23.1 (22.7-24.3) | 812 (810-839) to 247 (247-260) |
+| reparent (no groups, control) | 0.014 / 0.014 | 0.137 / 0.124 | 1.90 / 1.92 |
+| sparse (no groups, control) | 0.005 / 0.005 | 0.029 / 0.029 | 0.593 / 0.608 (ranges overlap) |
+| wide (control) | 0.009 / 0.008 | 0.074 / 0.074 | 3.95 / 3.87 |
+
+Since M0, `churn` at 100k is 97.1 to 9.05 ms and `instance` 2,000 to
+247 ms: the group scans were the quadratic part. A first version kept a
+"positions valid" flag cleared by every sort; checking the slot alone is
+enough (a slot that holds the member is its slot) and keeps members a sort
+left in place on the fast path. The new field sits in `GroupData`'s
+padding (16 bytes as before).

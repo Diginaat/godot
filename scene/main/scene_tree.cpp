@@ -178,6 +178,7 @@ SceneTreeGroup *SceneTree::add_to_group(const StringName &p_group, Node *p_node)
 	HashMap<StringName, SceneTreeGroup>::Iterator E = group_map.find(p_group);
 	if (!E) {
 		E = group_map.insert(p_group, SceneTreeGroup());
+		E->value.name = p_group;
 	}
 
 	// Both callers add a node that is not a member yet: Node::add_to_group()
@@ -199,10 +200,60 @@ void SceneTree::remove_from_group(const StringName &p_group, Node *p_node) {
 	HashMap<StringName, SceneTreeGroup>::Iterator E = group_map.find(p_group);
 	ERR_FAIL_COND(!E);
 
-	E->value.nodes.erase(p_node);
-	if (E->value.nodes.is_empty()) {
+	SceneTreeGroup &g = E->value;
+	// The member's recorded position: a hole there, no search and shift
+	// (docs/implementation/scene-runtime-roadmap.md, M3). A slot that holds
+	// the member is its slot, so a stale position is only slower.
+	const Node::GroupData *gd = p_node->data.grouped.getptr(p_group);
+	const uint32_t position = gd ? gd->position : UINT32_MAX;
+	if (position < uint32_t(g.nodes.size()) && g.nodes[position] == p_node) {
+		g.nodes.write[position] = nullptr;
+		g.holes++;
+	} else {
+		// Moved by a sort or compaction: the old search (holes never match),
+		// still no shift.
+		const int found = g.nodes.find(p_node);
+		if (found >= 0) {
+			g.nodes.write[found] = nullptr;
+			g.holes++;
+			if (++g.stale_removals >= SceneTreeGroup::STALE_REMOVALS_BEFORE_REWRITE) {
+				_update_group_positions(g);
+			}
+		}
+	}
+	if (uint32_t(g.nodes.size()) == g.holes) {
 		group_map.remove(E);
 	}
+}
+
+void SceneTree::_compact_group(SceneTreeGroup &g) {
+	if (g.holes == 0) {
+		return;
+	}
+	Node **nodes = g.nodes.ptrw();
+	const int count = g.nodes.size();
+	int write = 0;
+	for (int read = 0; read < count; read++) {
+		if (nodes[read]) {
+			nodes[write++] = nodes[read];
+		}
+	}
+	g.nodes.resize(write);
+	g.holes = 0;
+}
+
+void SceneTree::_update_group_positions(SceneTreeGroup &g) {
+	Node *const *nodes = g.nodes.ptr();
+	for (int i = 0; i < g.nodes.size(); i++) {
+		if (!nodes[i]) {
+			continue; // A hole.
+		}
+		Node::GroupData *gd = nodes[i]->data.grouped.getptr(g.name);
+		if (gd) {
+			gd->position = i;
+		}
+	}
+	g.stale_removals = 0;
 }
 
 void SceneTree::flush_transform_notifications() {
@@ -346,6 +397,7 @@ void SceneTree::_flush_ugc() {
 }
 
 void SceneTree::_update_group_order(SceneTreeGroup &g) {
+	_compact_group(g);
 	if (!g.changed) {
 		return;
 	}
@@ -1615,7 +1667,7 @@ int SceneTree::get_node_count_in_group(const StringName &p_group) const {
 		return 0;
 	}
 
-	return E->value.nodes.size();
+	return E->value.nodes.size() - E->value.holes;
 }
 
 Node *SceneTree::get_first_node_in_group(const StringName &p_group) {

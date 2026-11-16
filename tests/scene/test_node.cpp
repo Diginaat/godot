@@ -549,6 +549,8 @@ TEST_CASE("[SceneTree][Node] Group membership through add, remove and re-enterin
 	for (int i = 1; i < 64; i += 4) {
 		children[i]->remove_from_group("bench_group");
 	}
+	// The count before any reader compacts the removed members away (M3).
+	CHECK_EQ(tree->get_node_count_in_group("bench_group"), 64 - 16);
 	Vector<Node *> members = tree->get_nodes_in_group("bench_group");
 	CHECK_EQ(members.size(), 64 - 16);
 	HashSet<Node *> unique;
@@ -560,6 +562,58 @@ TEST_CASE("[SceneTree][Node] Group membership through add, remove and re-enterin
 		}
 	}
 	CHECK_EQ(unique.size(), uint32_t(members.size()));
+
+	// The first member removed: the next first in tree order, then removals
+	// and re-additions in a row, read once.
+	Node *first = tree->get_first_node_in_group("bench_group");
+	CHECK_EQ(first, members[0]);
+	first->remove_from_group("bench_group");
+	CHECK_EQ(tree->get_first_node_in_group("bench_group"), members[1]);
+	members[2]->remove_from_group("bench_group");
+	members[3]->remove_from_group("bench_group");
+	members[2]->add_to_group("bench_group");
+	members[5]->remove_from_group("bench_group");
+	Vector<Node *> after = tree->get_nodes_in_group("bench_group");
+	CHECK_EQ(after.size(), members.size() - 3); // Four removed, one added back.
+	for (int i = 1; i < after.size(); i++) {
+		CHECK(after[i]->is_greater_than(after[i - 1]));
+	}
+	CHECK(after.has(members[2]));
+	CHECK_FALSE(after.has(members[3]));
+	CHECK_FALSE(after.has(members[5]));
+
+	// Many removals after a sort (stale positions: searched removals, then one
+	// rewrite of all positions after 128 of them), then more, then a read.
+	{
+		Node *crowd = memnew(Node);
+		parent->add_child(crowd);
+		LocalVector<Node *> many;
+		for (int i = 0; i < 300; i++) {
+			Node *n = memnew(Node);
+			crowd->add_child(n);
+			n->add_to_group("crowd_group");
+			many.push_back(n);
+		}
+		CHECK_EQ(tree->get_nodes_in_group("crowd_group").size(), 300); // Sorted: positions stale.
+		for (int i = 0; i < 200; i++) {
+			many[(i * 7) % 300]->remove_from_group("crowd_group"); // 7 and 300 coprime: 200 distinct.
+		}
+		CHECK_EQ(tree->get_node_count_in_group("crowd_group"), 100);
+		Vector<Node *> rest = tree->get_nodes_in_group("crowd_group");
+		REQUIRE_EQ(rest.size(), 100);
+		for (int i = 1; i < rest.size(); i++) {
+			CHECK(rest[i]->is_greater_than(rest[i - 1]));
+		}
+		for (Node *n : rest) {
+			n->remove_from_group("crowd_group");
+		}
+		CHECK_FALSE(tree->has_group("crowd_group"));
+	}
+
+	// Removed while the group is being called: the call goes on with its copy.
+	tree->call_group("bench_group", "remove_from_group", "bench_group");
+	CHECK_EQ(tree->get_node_count_in_group("bench_group"), 0);
+	CHECK_FALSE(tree->has_group("bench_group"));
 
 	memdelete(parent); // Frees the children.
 	CHECK_EQ(tree->get_node_count_in_group("bench_group"), 0);

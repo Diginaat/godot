@@ -355,6 +355,7 @@ void Node::_propagate_enter_tree() {
 
 	for (KeyValue<StringName, GroupData> &E : data.grouped) {
 		E.value.group = data.tree->add_to_group(E.key, this);
+		E.value.position = E.value.group->nodes.size() - 1;
 	}
 
 	notification(NOTIFICATION_ENTER_TREE);
@@ -2555,6 +2556,7 @@ void Node::add_to_group(const StringName &p_identifier, bool p_persistent) {
 
 	if (data.tree) {
 		gd.group = data.tree->add_to_group(p_identifier, this);
+		gd.position = gd.group->nodes.size() - 1;
 	} else {
 		gd.group = nullptr;
 	}
