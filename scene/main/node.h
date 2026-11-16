@@ -205,6 +205,10 @@ private:
 		Node *owner = nullptr;
 		HashMap<StringName, Node *> children;
 		mutable bool children_cache_dirty = false;
+		// Removed children leave null holes in children_cache (counters and the
+		// other children's indices unchanged) until the next reader compacts it.
+		// (Next to the bool: in its padding, the node does not grow.)
+		mutable uint32_t children_cache_first_hole = UINT32_MAX;
 		mutable LocalVector<Node *> children_cache;
 		HashMap<StringName, Node *> owned_unique_nodes;
 		bool unique_name_in_owner = false;
@@ -344,12 +348,13 @@ private:
 	void _clean_up_owner();
 
 	_FORCE_INLINE_ void _update_children_cache() const {
-		if (unlikely(data.children_cache_dirty)) {
+		if (unlikely(data.children_cache_dirty || data.children_cache_first_hole != UINT32_MAX)) {
 			_update_children_cache_impl();
 		}
 	}
 
 	void _update_children_cache_impl() const;
+	void _compact_children_cache() const;
 
 	// Process group management
 	void _add_process_group();

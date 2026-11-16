@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-16 (scene runtime: M2)
+
+* **Implemented**: removing a child leaves a hole in the parent's children
+  cache; the next reader compacts it in place instead of rebuilding and
+  sorting it. `churn_read` (new scenario: reads after removals) -15-17%,
+  the profiled node workload -6.4%; scenarios without reads unchanged.
+* **Finding**: a new per-node field outside existing padding made `wide`
+  at 100k nodes 9% slower; moved into a bool's padding, no cost.
+
 ## 2026-11-16 (scene runtime: Phase 0 and M1)
 
 * **Started**: data-oriented SceneTree work on `feat/scene-runtime`:

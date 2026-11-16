@@ -10,8 +10,8 @@ short; details go in the linked files.
 | --- | --- |
 | Branch | `feat/scene-runtime` (from `feat/core-stl-simd-modernization` at `12cd0e0924`), worktree `GodotPhysxDev-core` |
 | Phase | 1 (hierarchy and groups), 2026-11-16 |
-| Completed | M0: source analysis, three approaches compared, A chosen ([architecture](../architecture/hybrid-scene-runtime.md)), scenario benchmark and baseline ([numbers](../benchmarks/scene-runtime.md)); M1: `add_to_group` without the linear duplicate check (`instance` 100k -60%, `churn` 100k -51%) |
-| Next | M2 (children cache holes; its test is already in `tests/scene/test_node.cpp`), then M3 (`remove_from_group`) |
+| Completed | M0: source analysis, three approaches compared, A chosen ([architecture](../architecture/hybrid-scene-runtime.md)), scenario benchmark and baseline ([numbers](../benchmarks/scene-runtime.md)); M1: `add_to_group` without the linear duplicate check (`instance` 100k -60%, `churn` 100k -51%); M2: children cache holes compacted on read (`churn_read` -15-17%) |
+| Next | M3 (`remove_from_group`: a hole at the member's position recorded in `Node::GroupData`, compaction in `_update_group_order()`; every group reader already calls it first), then M4 |
 | Builds | Editor `production=yes tests=yes debug_symbols=yes`; release `target=template_release production=yes debug_symbols=yes disable_path_overrides=no` (for `--path`) |
 
 ## Design decisions
@@ -35,6 +35,9 @@ short; details go in the linked files.
 - The benchmark project needs `low_processor_mode_sleep_usec=0` (headless
   sleeps 6.9 ms per frame otherwise); release templates need
   `disable_path_overrides=no` and an editor-made `.godot` cache.
+
+- New per-node fields go into existing padding: M2's first layout made
+  each node 8 bytes larger and `wide` at 100k 9% slower.
 
 ## Known issues
 

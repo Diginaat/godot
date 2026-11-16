@@ -1,6 +1,6 @@
 param(
 	# Scenarios of scene_bench.gd; default: all twelve.
-	[string[]]$Scenarios = @("idle", "deep", "wide", "parents", "sparse", "heavy", "script", "native", "churn", "reparent", "instance", "mixed"),
+	[string[]]$Scenarios = @("idle", "deep", "wide", "parents", "sparse", "heavy", "script", "native", "churn", "churn_read", "reparent", "instance", "mixed"),
 	[int[]]$Counts = @(1000, 10000, 100000),
 	# Binaries to compare, alternated in each round (the first is the baseline);
 	# names in bin\ (godot.windows.editor.x86_64.console.exe) or full paths.

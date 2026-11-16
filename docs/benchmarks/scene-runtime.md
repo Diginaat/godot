@@ -29,6 +29,7 @@ disable_path_overrides=no`.
 | `script` | N nodes with a GDScript `_process` setting their position |
 | `native` | N running Timers (internal processing) |
 | `churn` | free and add 2% of N leaf nodes under 10 parents, each in one group |
+| `churn_read` | as `churn`, then one child read per parent (as `get_index()` and `call_group()`'s tree-order sort do; added with M2) |
 | `reparent` | reparent 1% of N nodes between two parents |
 | `instance` | instantiate N / 100 copies of a 100-node scene (nodes in a group), free the previous ones |
 | `mixed` | move 0.5% of N/2 Node3D and N/2 Node2D nodes |
@@ -92,3 +93,23 @@ Release builds, base and M1 alternated, 3 rounds, ms per frame, median
 
 Every round lower, ranges apart; the control is unchanged. The rest of the
 quadratic cost of `churn` is `remove_from_group`'s search and shift (M3).
+
+### M2: holes in the children cache instead of a rebuild, 2026-11-16
+
+Release builds, M1 and M2 alternated, 3 rounds, ms per frame, median
+(range):
+
+| Scenario | 1k | 10k | 100k |
+| --- | --- | --- | --- |
+| churn_read | 0.064 to 0.055 | 1.106 (1.092-1.117) to 0.945 (0.933-0.955) | 58.2 (58.0-58.4) to 48.6 (48.5-48.9) |
+| churn (no reads) | 0.051 / 0.051 | 0.885 (0.882-0.891) / 0.903 (0.892-0.913) | 46.6 / 46.6 |
+| wide | 0.008 / 0.008 | 0.074 / 0.073 | 3.77 (3.67-3.81) / 3.73 (3.69-3.76) |
+
+The profiled workload of the core branch (10k `MeshInstance3D` under one
+parent, 200 freed and added per frame, a `call_group()` every frame;
+editor builds, 5 rounds): 13.88 (13.81-13.95) to 13.00 (12.96-13.29) ms.
+A first version put the new field after the cache vector, which made each
+node larger: `wide` at 100k was 9% slower; next to the `bool` (in its
+padding) it is not. `churn` at 10k is +2%, within the 1.5% that code layout
+alone moves a build and not seen at 1k or 100k (not checked with a control
+build).

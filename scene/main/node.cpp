@@ -1784,8 +1784,22 @@ void Node::remove_child(RequiredParam<Node> p_child) {
 				data.internal_children_back_count_cache--;
 			} break;
 		}
-	} else {
-		data.children_cache_dirty = true;
+	} else if (!data.children_cache_dirty) {
+		// Leave a hole at the child's position, which the counters and its
+		// index give while the cache is valid: the next reader compacts the
+		// cache instead of rebuilding and sorting it.
+		uint32_t position = child->data.index;
+		if (child->data.internal_mode == INTERNAL_MODE_DISABLED) {
+			position += data.internal_children_front_count_cache;
+		} else if (child->data.internal_mode == INTERNAL_MODE_BACK) {
+			position += data.internal_children_front_count_cache + data.external_children_count_cache;
+		}
+		if (position < data.children_cache.size() && data.children_cache[position] == child) {
+			data.children_cache[position] = nullptr;
+			data.children_cache_first_hole = MIN(data.children_cache_first_hole, position);
+		} else {
+			data.children_cache_dirty = true;
+		}
 	}
 	bool success = data.children.erase(child->data.name);
 	ERR_FAIL_COND_MSG(!success, "Children name does not match parent name in hashtable, this is a bug.");
@@ -1801,7 +1815,49 @@ void Node::remove_child(RequiredParam<Node> p_child) {
 	}
 }
 
+void Node::_compact_children_cache() const {
+	// Drops the holes, keeping the order. Children before the first hole keep
+	// their indices; the ones after it get theirs again.
+	const uint32_t size = data.children_cache.size();
+	uint32_t write = data.children_cache_first_hole;
+	int front = 0;
+	int external = 0;
+	int back = 0;
+	for (uint32_t read = 0; read < size; read++) {
+		Node *child = data.children_cache[read];
+		if (!child) {
+			continue;
+		}
+		int index = 0;
+		switch (child->data.internal_mode) {
+			case INTERNAL_MODE_DISABLED: {
+				index = external++;
+			} break;
+			case INTERNAL_MODE_FRONT: {
+				index = front++;
+			} break;
+			case INTERNAL_MODE_BACK: {
+				index = back++;
+			} break;
+		}
+		if (read > data.children_cache_first_hole) {
+			child->data.index = index;
+			data.children_cache[write++] = child;
+		}
+	}
+	data.children_cache.resize(write);
+	data.internal_children_front_count_cache = front;
+	data.external_children_count_cache = external;
+	data.internal_children_back_count_cache = back;
+	data.children_cache_first_hole = UINT32_MAX;
+}
+
 void Node::_update_children_cache_impl() const {
+	if (!data.children_cache_dirty) {
+		_compact_children_cache();
+		return;
+	}
+	data.children_cache_first_hole = UINT32_MAX;
 	// Assign children
 	data.children_cache.resize(data.children.size());
 	int idx = 0;

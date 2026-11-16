@@ -6,7 +6,7 @@ extends SceneTree
 ## setup time and static memory. --visual uses MeshInstance3D instead of
 ## Node3D, so transform changes reach the RenderingServer (needs a window).
 
-const SCENARIOS := ["idle", "deep", "wide", "parents", "sparse", "heavy", "script", "native", "churn", "reparent", "instance", "mixed"]
+const SCENARIOS := ["idle", "deep", "wide", "parents", "sparse", "heavy", "script", "native", "churn", "churn_read", "reparent", "instance", "mixed"]
 
 var _scenario := "sparse"
 var _count := 10000
@@ -173,6 +173,10 @@ func _setup_churn() -> void:
 		_nodes.append(n)
 
 
+func _setup_churn_read() -> void:
+	_setup_churn()
+
+
 func _setup_reparent() -> void:
 	for p in 2:
 		var parent := _new_3d()
@@ -244,6 +248,20 @@ func _step() -> void:
 				n.add_to_group("churned")
 				parent.add_child(n)
 				_nodes[index] = n
+		"churn_read":
+			# As churn, then one read of each parent's children (as get_index()
+			# and the tree-order sort of call_group() do after removals).
+			for i in maxi(_count / 50, 1):
+				var index := _rng.randi() % _nodes.size()
+				var old := _nodes[index]
+				var parent := old.get_parent()
+				old.free()
+				var n := _new_3d()
+				n.add_to_group("churned")
+				parent.add_child(n)
+				_nodes[index] = n
+			for parent in _parents:
+				_checksum += parent.get_child(0).get_index()
 		"reparent":
 			for i in maxi(_count / 100, 1):
 				var n := _nodes[_rng.randi() % _nodes.size()]
