@@ -34,3 +34,11 @@ three in one A/B. A control build of a header-only change can be quick
 (1-2 minutes when the header is included by few files). Profiling a
 renamed binary needs its PDB under the original name in a separate symbol
 directory (`devtools/profile/profile.ps1 -SymbolPath`).
+
+# Renderer-bound runs (scene runtime M4, 2026-11-16)
+
+The same check with an unused function added to `node_3d.cpp` of the
+unchanged source: windowed MeshInstance3D scenarios (100k BVH updates per
+frame) were 2-11% slower than the original build. Renderer-bound,
+memory-bound frames are more layout-sensitive than the 1.5% above; see
+[the mistake it caused](/mistakes/renderer-bound-frame-for-scene-changes.md).

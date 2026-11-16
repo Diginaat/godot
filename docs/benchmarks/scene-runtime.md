@@ -139,3 +139,36 @@ Since M0, `churn` at 100k is 97.1 to 9.05 ms and `instance` 2,000 to
 enough (a slot that holds the member is its slot) and keeps members a sort
 left in place on the fast path. The new field sits in `GroupData`'s
 padding (16 bytes as before).
+
+### M4: transform propagation stops at walked dirty subtrees, 2026-11-16
+
+Design in the [roadmap](../implementation/scene-runtime-roadmap.md#m4-as-implemented).
+Release builds, 3 rounds, MeshInstance3D nodes headless (`--headless
+--visual`: every node wants transform notifications, the dummy renderer
+takes no time), against a control build of the M3 source with an unused
+function added (`m3pad`), ms, median (range):
+
+| Scenario | op 10k | op 100k | frame 100k |
+| --- | --- | --- | --- |
+| heavy | 2.65 (2.53-2.84) to 2.33 (2.01-2.36) | 53.6 (53.1-53.8) to 36.2 (35.7-36.2) | 81.7 (81.1-81.9) to 61.6 (60.8-61.8) |
+| wide (no early-out) | 0.20 (0.20-0.23) / 0.21 (0.21-0.22) | 7.33 (7.30-7.48) / 7.40 (7.35-7.50) | 33.9 / 30.5 |
+| parents (no early-out) | 0.27 (0.14-0.37) / 0.28 (0.16-0.34) | 7.12 (7.06-7.16) / 7.21 (7.18-7.25) | 32.9 / 29.5 |
+
+`heavy` moves every node of a balanced tree: each move used to re-walk its
+whole subtree; now later moves stop at the children the first one walked.
+In `wide` and `parents` every child is clean when its parent moves (the
+notified nodes read their transforms), so nothing stops: the cost of the
+check is within 1.3% of `op`.
+
+How to read windowed runs: with a window (`-Visual`), frames are dominated
+by the renderer's scene update (DynamicBVH, 100k instance updates), which
+moves with code layout. The M3 source rebuilt with only an unused function
+was 2-11% slower than the M3 build there (`wide`, `parents`, `heavy`), and
+the first M4 builds showed `wide` 10-12% slower while a counter showed the
+early-out never triggered and the profile slowed down uniformly, renderer
+code included. Scene-side changes are judged on `op` and headless runs.
+
+Rejected designs (same bench, `wide` 10k frame against `m3pad` 1.37 ms):
+cleaning each notified node in its `NOTIFICATION_TRANSFORM_CHANGED`
+handler 1.92 ms, after the handlers in the flush (a cast and an `ObjectDB`
+lookup per node) 2.16 ms: 50-75 ns per notified node.

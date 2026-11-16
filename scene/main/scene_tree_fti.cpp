@@ -69,6 +69,11 @@ void SceneTreeFTI::_reset_flags(Node *p_node) {
 	if (s) {
 		_reset_node3d_flags(*s);
 
+		// Node3D::_propagate_transform_changed() keeps this bit set on whole
+		// subtrees only while interpolation is off; this walk restores that
+		// whenever interpolation is toggled.
+		s->_set_dirty_bits(Node3D::DIRTY_GLOBAL_INTERPOLATED_TRANSFORM);
+
 		// In most cases the later  NOTIFICATION_RESET_PHYSICS_INTERPOLATION
 		// will reset this, but this should help cover hidden nodes.
 		s->data.local_transform_prev = s->get_transform();

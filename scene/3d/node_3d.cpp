@@ -114,13 +114,44 @@ void Node3D::_propagate_transform_changed(Node3D *p_origin) {
 		return;
 	}
 
+	// A child needs nothing more when this propagation finds it dirty and a
+	// propagation walked its subtree since the last time transform
+	// notifications were sent (docs/implementation/scene-runtime-roadmap.md, M4):
+	// - Its whole subtree up to top-level nodes is dirty: get_global_transform()
+	//   cleans a node only after its parent, and propagation marks whole
+	//   subtrees.
+	// - Every node in it that wants NOTIFICATION_TRANSFORM_CHANGED is queued
+	//   (or its deferred queueing is pending): that walk queued them, nodes
+	//   leave the queue only notified (which bumps
+	//   SceneTree::xform_change_epoch) or with the tree, nodes that enter are
+	//   queued, and a dirty node that starts to want notifications bumps the
+	//   epoch too (_transform_notification_wanted()).
+	// Not with physics interpolation, which clears
+	// DIRTY_GLOBAL_INTERPOLATED_TRANSFORM out of tree order; SceneTreeFTI sets
+	// it on every node when interpolation is toggled.
+	SceneTree *tree = get_tree();
+	const uint32_t epoch = tree->xform_change_epoch.load(std::memory_order_relaxed);
+	const bool stop_at_dirty = !SceneTree::is_fti_enabled() && !tree->xform_change_epoch_wrapped.load(std::memory_order_relaxed);
+	_propagate_transform_changed_walk(epoch, stop_at_dirty);
+}
+
+void Node3D::_propagate_transform_changed_walk(uint32_t p_epoch, bool p_stop_at_dirty) {
+	if (!is_inside_tree()) {
+		return;
+	}
+
+	const uint32_t propagated_bits = DIRTY_GLOBAL_TRANSFORM | DIRTY_GLOBAL_INTERPOLATED_TRANSFORM;
 	for (uint32_t n = 0; n < data.node3d_children.size(); n++) {
 		Node3D *s = data.node3d_children[n];
 
 		// Don't propagate to a toplevel.
-		if (!s->data.top_level) {
-			s->_propagate_transform_changed(p_origin);
+		if (s->data.top_level) {
+			continue;
 		}
+		if (p_stop_at_dirty && s->data.propagated_epoch == p_epoch && (s->_read_dirty_mask() & propagated_bits) == propagated_bits) {
+			continue;
+		}
+		s->_propagate_transform_changed_walk(p_epoch, p_stop_at_dirty);
 	}
 
 #ifdef TOOLS_ENABLED
@@ -137,6 +168,7 @@ void Node3D::_propagate_transform_changed(Node3D *p_origin) {
 		}
 	}
 	_set_dirty_bits(DIRTY_GLOBAL_TRANSFORM | DIRTY_GLOBAL_INTERPOLATED_TRANSFORM);
+	data.propagated_epoch = p_epoch;
 }
 
 void Node3D::_notification(int p_what) {
@@ -913,6 +945,7 @@ void Node3D::add_gizmo(Ref<Node3DGizmo> p_gizmo) {
 		return;
 	}
 	data.gizmos.push_back(p_gizmo);
+	_transform_notification_wanted(); // Gizmos want transform notifications.
 
 	if (p_gizmo.is_valid() && is_inside_world()) {
 		p_gizmo->create();
@@ -1272,6 +1305,26 @@ Vector3 Node3D::to_global(Vector3 p_local) const {
 void Node3D::set_notify_transform(bool p_enabled) {
 	ERR_THREAD_GUARD;
 	data.notify_transform = p_enabled;
+	if (p_enabled) {
+		_transform_notification_wanted();
+	}
+}
+
+void Node3D::set_ignore_transform_notification(bool p_ignore) {
+	data.ignore_notification = p_ignore;
+	if (!p_ignore) {
+		_transform_notification_wanted();
+	}
+}
+
+void Node3D::_transform_notification_wanted() const {
+	// A dirty node that starts to want NOTIFICATION_TRANSFORM_CHANGED is not
+	// queued: no propagation may stop above it until one walks it again and
+	// queues it, as before (_propagate_transform_changed()). A clean node has
+	// only clean parents, where propagation does not stop.
+	if (is_inside_tree() && _test_dirty_bits(DIRTY_GLOBAL_TRANSFORM)) {
+		get_tree()->_xform_change_epoch_bump();
+	}
 }
 
 bool Node3D::is_transform_notification_enabled() const {
@@ -1297,7 +1350,9 @@ void Node3D::force_update_transform() {
 	}
 	get_tree()->xform_change_list.remove(&xform_change);
 
+	SceneTree *tree = get_tree();
 	notification(NOTIFICATION_TRANSFORM_CHANGED);
+	tree->_xform_change_epoch_bump(); // _propagate_transform_changed().
 }
 
 void Node3D::_update_visibility_parent(bool p_update_root) {

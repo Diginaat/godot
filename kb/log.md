@@ -1,5 +1,16 @@
 # Update log
 
+## 2026-11-16 (scene runtime: M4)
+
+* **Implemented**: Node3D transform propagation stops at dirty children
+  that a propagation walked since the last transform notifications
+  (`SceneTree::xform_change_epoch`); no work per notification. `heavy`
+  (MeshInstance3D, headless) op 100k 53.6 to 36.2 ms, 10k -12%; `wide`,
+  `parents` within 1.3%.
+* **Mistakes**: [renderer-bound frame time](/mistakes/renderer-bound-frame-for-scene-changes.md)
+  (code layout moved windowed runs 2-11%) and
+  [five builds of one milestone](/mistakes/iterated-builds-instead-of-design.md).
+
 ## 2026-11-16 (scene runtime: M3)
 
 * **Implemented**: `SceneTree::remove_from_group` nulls the member's

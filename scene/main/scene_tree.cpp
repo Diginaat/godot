@@ -260,6 +260,9 @@ void SceneTree::flush_transform_notifications() {
 	_THREAD_SAFE_METHOD_
 
 	SelfList<Node> *n = xform_change_list.first();
+	if (!n) {
+		return;
+	}
 	while (n) {
 		Node *node = n->self();
 		SelfList<Node> *nx = n->next();
@@ -267,6 +270,9 @@ void SceneTree::flush_transform_notifications() {
 		n = nx;
 		node->notification(NOTIFICATION_TRANSFORM_CHANGED);
 	}
+	// After the loop: handlers may move nodes, which queues them again in this
+	// flush.
+	_xform_change_epoch_bump();
 }
 
 bool SceneTree::is_accessibility_enabled() const {

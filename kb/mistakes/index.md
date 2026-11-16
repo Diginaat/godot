@@ -37,6 +37,8 @@ What worked is in [successes](/successes/).
 * [A per-frame readback callback outlived the renderer](/mistakes/readback-callback-after-renderer-teardown.md) - guard static async callbacks with a lifetime flag; resolve quit crashes with the event log and a map file
 * [A walking test that didn't walk](/mistakes/motion-test-that-did-not-move.md) - check the first and last frames of a motion test differ as intended
 * [A flicker metric that could not see the flicker](/mistakes/metric-blind-to-the-artifact.md) - check crops around each event; measure the artifact, not a proxy; reproduce the user's exact motion
+* [Judged a scene-side change on renderer-bound frame time](/mistakes/renderer-bound-frame-for-scene-changes.md) - code layout moves windowed MeshInstance3D frames 2-11%; judge on `op` and headless runs with a layout control
+* [Built and benched five variants of one milestone](/mistakes/iterated-builds-instead-of-design.md) - profile and estimate hot-path cost first, one design, one build, one control
 * [A test scene that could not quit](/mistakes/test-scene-without-hard-quit.md) - give every automated run `--quit-after`, check for `SCRIPT ERROR` before looping
 * [Static test expected a spot shadow pass every frame](/mistakes/cached-positional-shadows-in-tests.md) - positional shadows are cached; make the shadow dirty in frames that must render it
 * [Camera-facing splats were wound as back faces](/mistakes/billboard-winding-under-cull-disabled.md) - wind generated billboards clockwise from the camera; `cull_disabled` flips NORMAL on back faces

@@ -9,9 +9,9 @@ short; details go in the linked files.
 | Item | Value |
 | --- | --- |
 | Branch | `feat/scene-runtime` (from `feat/core-stl-simd-modernization` at `12cd0e0924`), worktree `GodotPhysxDev-core` |
-| Phase | 2 (transforms), 2026-11-16 |
-| Completed | M0: source analysis, three approaches compared, A chosen ([architecture](../architecture/hybrid-scene-runtime.md)), scenario benchmark and baseline ([numbers](../benchmarks/scene-runtime.md)); M1: `add_to_group` without the linear duplicate check (`instance` 100k -60%, `churn` 100k -51%); M2: children cache holes compacted on read (`churn_read` -15-17%); M3: group removals by recorded position (`churn` 100k -81%, `instance` 100k -70%) |
-| Next | M4 (Node3D propagation stops at dirty children; design and invariants in the roadmap's M4 notes and the comment in `Node3D::_propagate_transform_changed()`) |
+| Phase | M5 (allocations), 2026-11-16 |
+| Completed | M0: source analysis, three approaches compared, A chosen ([architecture](../architecture/hybrid-scene-runtime.md)), scenario benchmark and baseline ([numbers](../benchmarks/scene-runtime.md)); M1: `add_to_group` without the linear duplicate check (`instance` 100k -60%, `churn` 100k -51%); M2: children cache holes compacted on read (`churn_read` -15-17%); M3: group removals by recorded position (`churn` 100k -81%, `instance` 100k -70%); M4: Node3D propagation stops at dirty subtrees walked in the current notification epoch (`heavy` op 100k -32%) |
+| Next | M5 (allocations per child, group membership, signal connection): profile `instance` and `churn` first, one design, one build, one control |
 | Builds | Editor `production=yes tests=yes debug_symbols=yes`; release `target=template_release production=yes debug_symbols=yes disable_path_overrides=no` (for `--path`) |
 
 ## Design decisions
@@ -22,6 +22,13 @@ short; details go in the linked files.
   rejected for its semantic and maintenance cost.
 - S002: compare candidates against a control build of the same source when
   effects are a few percent (code layout moves a build by about 1.5%).
+- S003: judge scene-side changes on `op` time and headless runs
+  (`--headless --visual` for MeshInstance3D notifications); windowed
+  `-Visual` frames are renderer-bound and move 2-11% with code layout.
+- S004 (M4): no work per transform notification. The early-out's
+  invariant is kept by an epoch (`SceneTree::xform_change_epoch`, bumped
+  per non-empty flush and when a dirty node starts to want notifications),
+  not by cleaning notified nodes.
 
 ## Benchmark findings
 
@@ -54,11 +61,14 @@ short; details go in the linked files.
 
 ## Failed experiments
 
-- None yet on this branch (core branch: one-block HashMap, packed Vector3 SSE).
+- M4 by cleaning notified nodes (in the handler, or after the handlers in
+  the flush): 50-75 ns per notified node.
 
 ## Resume
 
 1. `git status -sb`, `git log -3 --oneline` in `GodotPhysxDev-core`.
+   Read `kb/mistakes/iterated-builds-instead-of-design.md` and
+   `kb/mistakes/renderer-bound-frame-for-scene-changes.md`.
 2. Read the roadmap row of the next milestone and the benchmark page.
 3. Build, run `devtools/test/scene_bench.ps1` for the touched scenarios
    with the previous binary copied as a baseline.

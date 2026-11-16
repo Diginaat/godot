@@ -38,6 +38,7 @@
 #include "core/templates/self_list.h"
 #include "scene/main/scene_tree_fti.h"
 
+#include <atomic>
 #include <cstdlib>
 
 class ArrayMesh;
@@ -272,6 +273,18 @@ private:
 	friend class Viewport;
 
 	SelfList<Node>::List xform_change_list;
+	// Bumped when nodes leave xform_change_list notified (a flush,
+	// Node3D::force_update_transform()) and when a dirty Node3D starts to want
+	// transform notifications, so that Node3D transform propagation knows which
+	// subtrees it walked since (Node3D::_propagate_transform_changed()).
+	// Relaxed atomics: nodes in thread groups bump it too.
+	std::atomic<uint32_t> xform_change_epoch = 1;
+	std::atomic<bool> xform_change_epoch_wrapped = false; // After 2^32 bumps: no early-out.
+	void _xform_change_epoch_bump() {
+		if (xform_change_epoch.fetch_add(1, std::memory_order_relaxed) == UINT32_MAX) {
+			xform_change_epoch_wrapped.store(true, std::memory_order_relaxed);
+		}
+	}
 
 #ifdef DEBUG_ENABLED // No live editor in release build.
 	friend class LiveEditor;

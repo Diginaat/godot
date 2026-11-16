@@ -122,6 +122,10 @@ private:
 		mutable RotationEditMode rotation_edit_mode = ROTATION_EDIT_MODE_EULER;
 
 		mutable MTNumeric<uint32_t> dirty;
+		// SceneTree::xform_change_epoch when a propagation last walked this
+		// node's subtree. Next to the dirty bits, which the same walk writes,
+		// in the padding before the next pointer.
+		uint32_t propagated_epoch = 0;
 
 		Viewport *viewport = nullptr;
 
@@ -182,15 +186,17 @@ private:
 	void _update_gizmos();
 	void _notify_dirty();
 	void _propagate_transform_changed(Node3D *p_origin);
+	void _propagate_transform_changed_walk(uint32_t p_epoch, bool p_stop_at_dirty);
 
 	void _propagate_visibility_changed();
 
 	void _propagate_visibility_parent();
 	void _update_visibility_parent(bool p_update_root);
 	void _propagate_transform_changed_deferred();
+	void _transform_notification_wanted() const;
 
 protected:
-	_FORCE_INLINE_ void set_ignore_transform_notification(bool p_ignore) { data.ignore_notification = p_ignore; }
+	void set_ignore_transform_notification(bool p_ignore);
 
 	_FORCE_INLINE_ void _update_local_transform() const;
 	_FORCE_INLINE_ void _update_rotation_and_scale() const;
