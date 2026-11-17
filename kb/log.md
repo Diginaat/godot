@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-17 (release 0.10.2)
+
+* **Released**: `godot4.8-beta-diginaat-physx-v0.10.2` at `09b6ec558f`
+  ([shader permutations](/project/shader-permutations.md): feature groups,
+  per-shader skipped variants, pruned transparent precompiles, full-key
+  pipeline maps, freed load buffers, SDFGI binding fix), editors and export
+  templates, standard and .NET; smoke passed for both.
+
 ## 2026-11-17 (shader permutations, step 1)
 
 * **Started**: shader and pipeline permutation work on
