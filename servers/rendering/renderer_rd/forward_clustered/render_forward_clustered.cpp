@@ -4872,6 +4872,15 @@ RID RenderForwardClustered::_setup_sdfgi_render_pass_uniform_set(RID p_albedo_te
 		u.append_id(scene_shader.default_vec4_xform_buffer);
 		uniforms.push_back(u);
 	}
+	// The GPU instance path's bindings (see _setup_render_pass_uniform_set); SDFGI
+	// draws don't use it, but the shader declares them.
+	for (uint32_t binding : { 47u, 48u }) {
+		RD::Uniform u;
+		u.binding = binding;
+		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+		u.append_id(scene_shader.default_vec4_xform_buffer);
+		uniforms.push_back(u);
+	}
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.default_shader_sdfgi_rd, RENDER_PASS_UNIFORM_SET, uniforms);
 }
 
