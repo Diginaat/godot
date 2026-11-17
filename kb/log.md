@@ -5,6 +5,8 @@
 * **Changed**: the project manager no longer forces a backup before this
   build first opens a project; it shows a "Your Project Can Break" warning
   with "Open Anyway" and "Cancel" instead (D040, replaces D021).
+* **Mistake**: [GUI clicks on a shared desktop](/mistakes/gui-clicks-on-a-shared-desktop.md)
+  captured more than the test window.
 
 ## 2026-11-17 (release 0.10.2)
 

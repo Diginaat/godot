@@ -12,6 +12,8 @@ something goes wrong: a false claim, a wasted rebuild, a test that
 measured the wrong thing, a correction from the user.
 What worked is in [successes](/successes/).
 
+* [GUI clicks on a shared desktop](/mistakes/gui-clicks-on-a-shared-desktop.md) - only drive and capture the test window; stop when other apps are on screen
+
 * [Editor theme validation](/mistakes/editor-theme-validation.md) - query the generated editor theme, not a Control's possibly null local theme
 
 * [Build interpreter mismatch](/mistakes/python-build-interpreter.md) - check existing Python installations before installing SCons or rebuilding SDKs
