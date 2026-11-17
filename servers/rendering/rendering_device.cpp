@@ -5155,6 +5155,7 @@ RID RenderingDevice::render_pipeline_create(RID p_shader, FramebufferFormatID p_
 	}
 
 	RenderPipeline pipeline;
+	uint64_t pipeline_start_usec = OS::get_singleton()->get_ticks_usec();
 	pipeline.driver_id = driver->render_pipeline_create(
 			shader->driver_id,
 			driver_vertex_format,
@@ -5168,6 +5169,12 @@ RID RenderingDevice::render_pipeline_create(RID p_shader, FramebufferFormatID p_
 			fb_format.render_pass,
 			p_for_render_pass,
 			p_specialization_constants);
+	{
+		uint64_t usec = OS::get_singleton()->get_ticks_usec() - pipeline_start_usec;
+		render_pipelines_created.increment();
+		render_pipeline_usec.add(usec);
+		render_pipeline_max_usec.exchange_if_greater(usec);
+	}
 
 	// Don't print error when it's expected.
 	if (unlikely(!pipeline.driver_id && driver->get_driver_workarounds().dont_print_on_render_pipeline_creation_failure)) {
@@ -5261,7 +5268,10 @@ RID RenderingDevice::compute_pipeline_create(RID p_shader, const Vector<Pipeline
 	}
 
 	ComputePipeline pipeline;
+	uint64_t pipeline_start_usec = OS::get_singleton()->get_ticks_usec();
 	pipeline.driver_id = driver->compute_pipeline_create(shader->driver_id, p_specialization_constants);
+	compute_pipelines_created.increment();
+	compute_pipeline_usec.add(OS::get_singleton()->get_ticks_usec() - pipeline_start_usec);
 	ERR_FAIL_COND_V(!pipeline.driver_id, RID());
 
 	if (pipeline_cache_enabled) {
@@ -9270,6 +9280,11 @@ uint64_t RenderingDevice::limit_get(Limit p_limit) const {
 }
 
 void RenderingDevice::finalize() {
+	if (OS::get_singleton()->is_stdout_verbose() && is_main_instance) {
+		print_line(vformat("PIPELINE_STATS: render=%d render_ms=%.1f render_max_ms=%.1f compute=%d compute_ms=%.1f cache_kb=%d",
+				render_pipelines_created.get(), render_pipeline_usec.get() / 1000.0, render_pipeline_max_usec.get() / 1000.0,
+				compute_pipelines_created.get(), compute_pipeline_usec.get() / 1000.0, int(pipeline_cache_size / 1024)));
+	}
 	ERR_RENDER_THREAD_GUARD();
 
 	if (!frames.is_empty()) {

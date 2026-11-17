@@ -1,5 +1,17 @@
 # Update log
 
+## 2026-11-17 (shader permutations, step 1)
+
+* **Started**: shader and pipeline permutation work on
+  `feat/shader-permutations`; audit, counters and benchmark in
+  `docs/shader-permutations/memory.md`. Baseline: 120 materials, cold,
+  stall the frame that adds them for 146 s (driver pipeline builds: 1577 s
+  CPU); 22 of 28 scene shader variants per material are never used.
+* **Fixed**: freed compiled shader bytes and the loaded Vulkan PSO cache
+  after use (warm memory 353 to 101 MB, same speed).
+* **Mistake**: [warm runs on a new exe](/mistakes/warm-runs-on-a-new-exe.md)
+  measured NVIDIA's per-exe driver cache.
+
 ## 2026-11-17 (release 0.10.1)
 
 * **Released**: `godot4.8-beta-diginaat-physx-v0.10.1` at `c968713b0b`

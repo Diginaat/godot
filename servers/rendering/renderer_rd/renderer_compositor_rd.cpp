@@ -400,6 +400,7 @@ RendererCompositorRD::RendererCompositorRD() {
 }
 
 RendererCompositorRD::~RendererCompositorRD() {
+	ShaderRD::print_stats();
 	singleton = nullptr;
 	memdelete(uniform_set_cache);
 	memdelete(framebuffer_cache);

@@ -37,6 +37,7 @@
 #include "core/templates/rb_map.h"
 #include "core/templates/rb_set.h"
 #include "core/templates/rid_owner.h"
+#include "core/templates/safe_refcount.h"
 #include "core/variant/type_info.h"
 #include "core/variant/typed_array.h"
 #include "servers/display/display_server_enums.h"
@@ -1249,6 +1250,12 @@ private:
 
 	bool pipeline_cache_enabled = false;
 	size_t pipeline_cache_size = 0;
+	// Pipeline creation statistics, printed on exit with --verbose.
+	SafeNumeric<uint32_t> render_pipelines_created;
+	SafeNumeric<uint64_t> render_pipeline_usec;
+	SafeNumeric<uint64_t> render_pipeline_max_usec;
+	SafeNumeric<uint32_t> compute_pipelines_created;
+	SafeNumeric<uint64_t> compute_pipeline_usec;
 	String pipeline_cache_file_path;
 	WorkerThreadPool::TaskID pipeline_cache_save_task = WorkerThreadPool::INVALID_TASK_ID;
 
