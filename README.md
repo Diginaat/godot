@@ -81,7 +81,7 @@ reaches them bounces off the sunlit tracks, grass and vines.
 Prebuilt Windows editors and export templates (standard and .NET) are on the
 [**Releases page**](https://github.com/Diginaat/godot/releases).
 Each release names the Godot version it's based on and this build's own
-version: `godot4.8-beta-diginaat-physx-v0.10.1` is build 0.10.1, on Godot
+version: `godot4.8-beta-diginaat-physx-v0.10.2` is build 0.10.2, on Godot
 4.8-beta. Releases before 0.9.0 are tagged `...-nvidia-rt-dlss-physx-v...`.
 
 > [!IMPORTANT]
@@ -230,6 +230,15 @@ Native C++ weather (`modules/weather`). Details: [WEATHER.md](WEATHER.md).
 
 ### Performance
 
+- **Fewer shader and pipeline permutations** (Forward+): scene shader
+  variants compile per feature group (motion vectors, lightmaps, VoxelGI,
+  SDFGI, separate specular, dual-paraboloid shadows, baking, multiview)
+  when a feature is first used, not all at once; each material skips the
+  variants it can never draw with; transparent pipelines no pass draws
+  are no longer precompiled. With 120 new materials in one frame (RTX
+  3060), compiled variants went from 3,556 to 472, the first-load stall
+  from 146 to 95 s (Vulkan) and 239 to 96 s (D3D12), the cached stall from
+  2.4 to 0.65 s, and memory from 353 to 84 MB. Images are unchanged.
 - **Scene tree and nodes**: groups, the children cache, Node3D transform
   propagation and the process loop were reworked inside the existing node
   structures, with the same API. At 100k nodes, scene instancing is 10.7x
