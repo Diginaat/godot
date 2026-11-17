@@ -182,8 +182,9 @@ CPU, rendering without DLSS).
   objects) while the editor camera stays free. The edited scene is never
   changed. Both are also proposed upstream in
   [godotengine/godot#125218](https://github.com/godotengine/godot/pull/125218).
-- **Project backup**: the first time this build opens a project, the project
-  manager asks you to back up the project folder.
+- **Compatibility warning**: the first time this build opens a project, the
+  project manager warns that the project can break (it may no longer work in
+  official Godot). Back up the project yourself if you want a working copy.
 
 ### Large-world geometry (Forward+)
 

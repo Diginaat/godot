@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-17 (project manager warning)
+
+* **Changed**: the project manager no longer forces a backup before this
+  build first opens a project; it shows a "Your Project Can Break" warning
+  with "Open Anyway" and "Cancel" instead (D040, replaces D021).
+
 ## 2026-11-17 (release 0.10.2)
 
 * **Released**: `godot4.8-beta-diginaat-physx-v0.10.2` at `09b6ec558f`

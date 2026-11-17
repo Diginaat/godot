@@ -292,6 +292,8 @@ the mesh covered. All 16 large_world fixtures pass on both drivers.
 
 ## D021 — The project manager makes a backup before this build opens a project
 
+Replaced by D040 on 2026-11-17: no backup is required any more.
+
 2026-11-06. Implemented; builds; not clicked through in the GUI yet. This
 build changes Godot's renderer, so a project opened in it may no longer work
 in official Godot. Opening a single project from the project manager first
@@ -875,3 +877,27 @@ within spread. Less CPU work per view (no copies into the staging buffer).
 `gpu_instances.ps1` passes on Vulkan and D3D12. The upload was not the
 game level's cost: stage timestamps put it in the GPU path's draws
 (benchmarks.md, "A game level").
+
+## D040 — The project manager warns before this build first opens a project, without a forced backup
+
+2026-11-17. Replaces D021, at the user's request: the forced backup is gone.
+The first time this build opens a project from the project manager (no
+`.godot/nvidia_dlss_physx_backup.cfg`), a "Your Project Can Break" dialog
+says that the build changes Godot's core renderer, so the project's files
+can change, it may no longer work in official Godot and the game can break;
+it suggests backing up first (Duplicate in the project list) and shows the
+path. The choices are "Open Anyway" and "Cancel" (focus starts on
+"Cancel"). "Open Anyway" writes the marker (`[warning] accepted=<date>`)
+and continues with the usual checks. Opening several projects at once adds the same warning to
+the confirmation, with the number of projects not opened in this build yet,
+and marks them when confirmed. The marker keeps its old name, so projects
+backed up under D021 are not warned again. Projects created with this build
+are marked at creation. Deleting `.godot` shows the warning again; starting
+the editor directly (`--editor --path`) does not show it.
+
+Clicked through in a self-contained project manager for one project:
+"Cancel" leaves it unmarked, "Open Anyway" writes the marker and opens the
+editor, and the next open shows no warning. The dialog gets its width at
+construction (`set_min_size`); with the width only passed to
+`popup_centered()`, its first popup was about 600 px tall with empty space.
+The several-projects path builds but was not clicked through.

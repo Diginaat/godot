@@ -148,9 +148,10 @@ straight.
     `methods.get_version_info()` so `version.py` stays as upstream has it.
   - New projects default to the Vulkan driver (`EditorNode::get_initial_settings()`),
     because path tracing needs Vulkan.
-  - The project manager requires a backup before this build first opens a
-    project (`_fork_backup_*` in `editor/project_manager/project_manager.cpp`,
-    marker `.godot/nvidia_dlss_physx_backup.cfg`).
+  - The project manager warns that a project can break the first time this
+    build opens it (`_fork_warning_*` in
+    `editor/project_manager/project_manager.cpp`, marker
+    `.godot/nvidia_dlss_physx_backup.cfg`). No backup is required.
   - CI `static_checks.yml` runs `prek` via pip instead of the third-party action.
   - The split workspace (`DOCK_SLOT_MAIN_SCREEN_SPLIT`, `EditorMainScreenSplit`,
     `DockSplitWorkspace` in `EditorNode`) and the Live Runtime view
