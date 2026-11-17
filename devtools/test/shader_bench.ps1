@@ -9,6 +9,11 @@ param(
 	# Motion vectors (TAA) and separate specular (SSR) turn on more shader variants.
 	[switch]$Mv,
 	[switch]$Ssr,
+	# More variant groups: SSS (separate specular), dual paraboloid shadows, SDFGI, VoxelGI.
+	[switch]$Sss,
+	[switch]$Dp,
+	[switch]$Sdfgi,
+	[switch]$VoxelGI,
 	# Cold: clear every shader and pipeline cache before every run (see Clear-ShaderCaches).
 	[switch]$Cold
 )
@@ -62,6 +67,11 @@ function Clear-ShaderCaches {
 $userArgs = [string[]]@("--count=$Count")
 if ($Mv) { $userArgs += "--mv" }
 if ($Ssr) { $userArgs += "--ssr" }
+if ($Sss) { $userArgs += "--sss" }
+if ($Dp) { $userArgs += "--dp" }
+if ($Sdfgi) { $userArgs += "--sdfgi" }
+if ($VoxelGI) { $userArgs += "--voxelgi" }
+$extra = (@("sss", "dp", "sdfgi", "voxelgi") | Where-Object { Get-Variable $_ -ValueOnly }) -join "_"
 $failed = $false
 $baseArgs = [string[]](@("--verbose", "--path", $project, "--rendering-driver", $Driver, "--quit-after", "20000", "res://shader_bench.tscn", "--") + $userArgs)
 if (-not $Cold) {
@@ -75,9 +85,11 @@ for ($r = 1; $r -le $Repeats; $r++) {
 		$left = Clear-ShaderCaches
 		if ($left -gt 0) { Write-Host "    WARNING: $left cached files could not be cleared; close other GPU applications" }
 	}
+	$shot = Join-Path $logs "shader_bench_${Label}_${Driver}_$(if ($Mv) { 'mv' } else { 'nomv' })$(if ($Ssr) { '_ssr' } else { '' })$(if ($extra) { "_$extra" } else { '' }).png"
+	$runArgs = [string[]]($runArgs + @("--shot=$shot"))
 	$lines = & $exe @runArgs 2>&1 | ForEach-Object { "$_" }
 	$code = $LASTEXITCODE
-	$kind = $(if ($Cold) { "cold" } else { "warm" }) + $(if ($Mv) { "_mv" } else { "" }) + $(if ($Ssr) { "_ssr" } else { "" })
+	$kind = $(if ($Cold) { "cold" } else { "warm" }) + $(if ($Mv) { "_mv" } else { "" }) + $(if ($Ssr) { "_ssr" } else { "" }) + $(if ($extra) { "_$extra" } else { "" })
 	$lines | Set-Content (Join-Path $logs "shader_bench_${Label}_${Driver}_${kind}_$r.log")
 	$bench = @($lines | Where-Object { $_ -match "^SHADER_BENCH:" })
 	Write-Output ("[$Label $Driver $kind #$r exit $code] " + ($bench -join " "))

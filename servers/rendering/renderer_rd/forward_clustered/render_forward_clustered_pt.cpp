@@ -114,7 +114,7 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 
 	if (p_render_data->scene_data->calculate_motion_vectors) {
 		color_pass_flags |= COLOR_PASS_FLAG_MOTION_VECTORS;
-		scene_shader.enable_advanced_shader_group();
+		scene_shader.enable_shader_features(SceneShaderForwardClustered::SHADER_FEATURE_MOTION_VECTORS);
 		global_pipeline_data_required.use_motion_vectors = true;
 	}
 
@@ -125,7 +125,7 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 
 	if (p_render_data->scene_data->view_count > 1) {
 		color_pass_flags |= COLOR_PASS_FLAG_MULTIVIEW;
-		scene_shader.shader.enable_group(SceneShaderForwardClustered::SHADER_GROUP_MULTIVIEW);
+		scene_shader.enable_multiview_shader_group();
 		global_pipeline_data_required.use_multiview = true;
 	}
 
@@ -206,7 +206,7 @@ void RenderForwardClusteredPT::_render_scene(RenderDataRD *p_render_data, const 
 	// Transparent geometry can still use lightmaps; make sure the matching shader
 	// group and pipeline requirements are live before we (re)compile pipelines.
 	if (scene_state.used_lightmap || scene_state.lightmaps_used > 0) {
-		scene_shader.enable_advanced_shader_group(p_render_data->scene_data->view_count > 1);
+		scene_shader.enable_shader_features(SceneShaderForwardClustered::SHADER_FEATURE_LIGHTMAP | (p_render_data->scene_data->view_count > 1 ? SceneShaderForwardClustered::SHADER_FEATURE_MULTIVIEW : 0));
 		global_pipeline_data_required.use_lightmaps = true;
 	}
 

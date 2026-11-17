@@ -43,11 +43,22 @@ private:
 	static Mutex singleton_mutex;
 
 public:
-	enum ShaderGroup {
-		SHADER_GROUP_BASE, // Always compiled at the beginning.
-		SHADER_GROUP_ADVANCED,
-		SHADER_GROUP_MULTIVIEW,
-		SHADER_GROUP_ADVANCED_MULTIVIEW,
+	// Rendering features that need extra shader variants. Each distinct set of
+	// features a variant needs is one ShaderRD group, compiled for every material
+	// shader once all its features are enabled (enable_shader_features()). Group 0
+	// needs none and is always compiled. Finer than "advanced": motion vectors
+	// alone don't pull in the lightmap, separate specular, GI and bake variants.
+	enum ShaderFeature {
+		SHADER_FEATURE_SEPARATE_SPECULAR = 1 << 0,
+		SHADER_FEATURE_LIGHTMAP = 1 << 1,
+		SHADER_FEATURE_MOTION_VECTORS = 1 << 2,
+		SHADER_FEATURE_DUAL_PARABOLOID = 1 << 3,
+		SHADER_FEATURE_NORMAL_ROUGHNESS = 1 << 4,
+		SHADER_FEATURE_VOXEL_GI = 1 << 5,
+		SHADER_FEATURE_MATERIAL = 1 << 6,
+		SHADER_FEATURE_SDF = 1 << 7,
+		SHADER_FEATURE_MULTIVIEW = 1 << 8,
+		SHADER_FEATURE_ALL_ADVANCED = SHADER_FEATURE_SEPARATE_SPECULAR | SHADER_FEATURE_LIGHTMAP | SHADER_FEATURE_MOTION_VECTORS | SHADER_FEATURE_DUAL_PARABOLOID | SHADER_FEATURE_NORMAL_ROUGHNESS | SHADER_FEATURE_VOXEL_GI | SHADER_FEATURE_MATERIAL | SHADER_FEATURE_SDF,
 	};
 
 	// Not an enum because these values are constants that are processed as numbers
@@ -512,13 +523,20 @@ public:
 
 	uint32_t pipeline_compilations[RSE::PIPELINE_SOURCE_MAX] = {};
 
+	LocalVector<uint32_t> group_features; // ShaderFeature bits each group needs, by group id.
+	std::atomic<uint32_t> enabled_features = 0;
+	Mutex group_enable_mutex;
+	uint32_t _get_variant_group(uint32_t p_features);
+	void _ensure_variant_group_enabled(uint16_t p_shader_version);
+
 	SceneShaderForwardClustered();
 	~SceneShaderForwardClustered();
 
 	void init(const String p_defines);
 	void set_default_specialization(const ShaderSpecialization &p_specialization);
+	void enable_shader_features(uint32_t p_features);
 	void enable_multiview_shader_group();
-	void enable_advanced_shader_group(bool p_needs_multiview = false);
+	void enable_advanced_shader_group(bool p_needs_multiview = false); // Every feature: shader baking.
 	bool is_multiview_shader_group_enabled() const;
 	bool is_advanced_shader_group_enabled(bool p_multiview) const;
 	uint32_t get_pipeline_compilations(RSE::PipelineSource p_source);

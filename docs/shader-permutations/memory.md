@@ -14,10 +14,11 @@ less compile stutter, same output. Read this first when resuming.
 | 1 | Baseline numbers, Vulkan, motion vectors (cold, warm) | done |
 | 1 | Baseline: no motion vectors, SSR, D3D12 | planned |
 | 2 | Free compiled shader bytes and the loaded Vulkan PSO cache after use | done |
-| 2 | Skip precompiling transparent pipelines that can't be drawn (TRANSPARENT+MV/SEP) | planned |
+| 2 | Skip precompiling transparent pipelines that can't be drawn (TRANSPARENT+MV/SEP) | done |
+| 2 | Fix: SDFGI pass uniform set lacked bindings 47/48 (found by the SDFGI config) | done |
 | 2 | Pipeline hash map keyed by the full key (collision fix) | planned |
 | 2 | Skip unused depth variants of shaders that use the shared shadow material | planned |
-| 3 | Split the Forward+ advanced group by feature | planned |
+| 3 | Split the Forward+ variant groups by feature | done |
 | 4 | Validation: smoke, image compare, DDGI/PT, D3D12 | planned |
 
 ## How the system works (audit)
@@ -112,7 +113,24 @@ first, then warm, is also what a user sees.
 | buf | cold | 145.6 s | same | 238.7 s | 23.1 s | 783 (1573 s, 6.9 s) | 2.32 / 1.73 ms | 100 / 212 MB |
 | buf | warm x2 | 2.41-2.44 s | same | - | 27.7 s | 783 (2.8 s, 17 ms) | 1.85 / 1.65 ms | 101 / 190 MB |
 
-`buf` = base + freed variant bytes + Vulkan PSO buffer trim. Cold stall is
+| groups | cold | 128.0 s | 762 scene (6/6) | 57.6 s | 5.4 s | 783 (1567 s, 7.0 s) | 2.62 / 1.72 ms | 85 / 116 MB |
+| groups | warm x2 | 0.77-0.78 s | 762 cached | - | 6.7 s | 783 (2.85 s, 24 ms) | 1.90 / 1.65 ms | 85 / 164 MB |
+| prune | cold | 96.1 s | 762 | 59.2 s | 6.0 s | 720 (1175 s, 6.9 s) | 2.29 / 1.95 ms | 85 / 122 MB |
+| prune | warm x2 | 0.72-0.74 s | 762 cached | - | 6.9 s | 720 (2.26 s, 20 ms) | 1.86 / 1.66 ms | 85 / 139 MB |
+
+`buf` = base + freed variant bytes + Vulkan PSO buffer trim. `groups` =
+buf + feature groups. `prune` = groups + no transparent MV/SEP pipeline
+precompiles (+ the SDFGI binding fix, which doesn't affect this scene).
+Shader cache on disk: 104 MB (base) -> 25.5 MB (groups). Vulkan PSO cache:
+156 -> 130 MB (prune). Cold GPU p50 differs run to run while specialized
+pipelines still compile in the background; warm GPU p50 is unchanged.
+
+Image checks (`devtools/test/image_diff.py`, last frame): base vs groups vs
+prune pixel-identical (max 0) for `-Mv`, no motion vectors, `-Mv -Ssr`,
+`-Mv -VoxelGI`; `-Mv -Sss -Dp -Sdfgi` identical for groups and differs by
+0.6% of pixels for prune because the SDFGI fix makes SDFGI voxelize the
+scene (base and groups logged 48 errors, 12 failed SDFGI draws; prune 0).
+No run logged the group safety net. Smoke passed on every build. Cold stall is
 dominated by the driver building pipelines (1577 s CPU over 12 threads);
 warm stall by creating 3556 shader variants from the cache (7.7 ms each).
 Scene shader variants used in this scene: 0 (depth: material uniform set
@@ -126,6 +144,21 @@ separate-specular and lightmap color variants (22 of 28).
 - D1: measure with engine counters printed at exit (`--verbose`), no new
   public API. Counters cost one mutex per variant compile and an atomic add
   per pipeline, nothing per draw.
+- D3: feature groups instead of BASE/ADVANCED: a variant's group is the set
+  of features it needs (separate specular, lightmap, motion vectors, dual
+  paraboloid, normal-roughness, VoxelGI, material, SDF, multiview); group 0
+  needs none. `enable_shader_features()` enables every group whose features
+  are all on. Enabled where the renderer sets the matching pipeline
+  requirement (`_update_dirty_geometry_pipelines`) and in the passes that
+  need them (MV color, separate specular/lightmap/VoxelGI before the passes,
+  shadow DP, material bake, SDFGI, path tracer). Safety net: a request for a
+  variant of a disabled group enables that group (one stall, logged with
+  `--verbose`) instead of returning a placeholder. Shader baking enables
+  every feature. Trade-off: a feature turned on later (SSR in a settings
+  menu) compiles its groups then; before, any advanced feature compiled all
+  of them up front. Warm (cached) that costs a cache load.
+- D4: transparent pipelines are precompiled without MV/SEP, matching both
+  transparent passes. Any other request still compiles on demand.
 - D2: free each group's compiled bytes at the end of `_compile_version_end`:
   nothing reads them later (a new group or new code compiles or loads again).
 
@@ -133,3 +166,8 @@ separate-specular and lightmap color variants (22 of 28).
 
 - 2026-11-17: audit, instrumentation, benchmark, Vulkan baseline; freed
   shader bytes and PSO buffer (warm memory 353 -> 101 MB, no speed change).
+- 2026-11-17: feature groups (variants 28 -> 6 per shader here; warm stall
+  2.42 -> 0.77 s, cold 145.6 -> 128.0 s, cache 104 -> 25.5 MB); transparent
+  pipeline pruning (cold 128.0 -> 96.1 s, pipeline CPU -25%); SDFGI binding
+  fix. Next: pipeline hash map key, D3D12 numbers, shared-shadow depth
+  variants, specialization compile priority during the stall.

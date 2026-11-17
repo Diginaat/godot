@@ -2516,7 +2516,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		if (p_render_data->scene_data->calculate_motion_vectors) {
 			color_pass_flags |= COLOR_PASS_FLAG_MOTION_VECTORS;
-			scene_shader.enable_advanced_shader_group();
+			scene_shader.enable_shader_features(SceneShaderForwardClustered::SHADER_FEATURE_MOTION_VECTORS);
 
 			// Indicate pipelines for motion vectors are required.
 			global_pipeline_data_required.use_motion_vectors = true;
@@ -2564,7 +2564,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		if (p_render_data->scene_data->view_count > 1) {
 			color_pass_flags |= COLOR_PASS_FLAG_MULTIVIEW;
 			// Try enabling here in case is_xr_enabled() returns false.
-			scene_shader.shader.enable_group(SceneShaderForwardClustered::SHADER_GROUP_MULTIVIEW);
+			scene_shader.enable_multiview_shader_group();
 
 			// Indicate pipelines for multiview are required.
 			global_pipeline_data_required.use_multiview = true;
@@ -2686,8 +2686,21 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		rb_data->ensure_normal_roughness_texture();
 	}
 
-	if (using_sss || using_separate_specular || scene_state.used_lightmap || scene_state.lightmaps_used > 0 || using_voxelgi || global_surface_data.sss_used) {
-		scene_shader.enable_advanced_shader_group(p_render_data->scene_data->view_count > 1);
+	{
+		uint32_t shader_features = 0;
+		if (using_sss || using_separate_specular || global_surface_data.sss_used) {
+			shader_features |= SceneShaderForwardClustered::SHADER_FEATURE_SEPARATE_SPECULAR;
+		}
+		if (scene_state.used_lightmap || scene_state.lightmaps_used > 0) {
+			shader_features |= SceneShaderForwardClustered::SHADER_FEATURE_LIGHTMAP;
+		}
+		if (using_voxelgi) {
+			shader_features |= SceneShaderForwardClustered::SHADER_FEATURE_VOXEL_GI;
+		}
+		if (shader_features != 0 && p_render_data->scene_data->view_count > 1) {
+			shader_features |= SceneShaderForwardClustered::SHADER_FEATURE_MULTIVIEW;
+		}
+		scene_shader.enable_shader_features(shader_features);
 	}
 
 	// Update the global pipeline requirements with all the features found to be in use in this scene.
@@ -3582,6 +3595,9 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	}
 
 	PassMode pass_mode = p_use_dp ? PASS_MODE_SHADOW_DP : PASS_MODE_SHADOW;
+	if (p_use_dp) {
+		scene_shader.enable_shader_features(SceneShaderForwardClustered::SHADER_FEATURE_DUAL_PARABOLOID);
+	}
 
 	uint32_t render_list_from = render_list[RENDER_LIST_SECONDARY].elements.size();
 	RENDER_TIMESTAMP("Fill Shadow Render List");
@@ -3735,7 +3751,7 @@ void RenderForwardClustered::_render_material(const Transform3D &p_cam_transform
 	render_data.cluster_max_elements = 32;
 	render_data.instances = &p_instances;
 
-	scene_shader.enable_advanced_shader_group();
+	scene_shader.enable_shader_features(SceneShaderForwardClustered::SHADER_FEATURE_MATERIAL);
 
 	_update_render_base_uniform_set();
 
@@ -3791,7 +3807,7 @@ void RenderForwardClustered::_render_uv2(const PagedArray<RenderGeometryInstance
 	render_data.cluster_max_elements = 32;
 	render_data.instances = &p_instances;
 
-	scene_shader.enable_advanced_shader_group();
+	scene_shader.enable_shader_features(SceneShaderForwardClustered::SHADER_FEATURE_MATERIAL);
 
 	_update_render_base_uniform_set();
 
@@ -4844,7 +4860,7 @@ RID RenderForwardClustered::_setup_sdfgi_render_pass_uniform_set(RID p_albedo_te
 	if (scene_shader.default_shader_sdfgi_rd.is_null()) {
 		// The variant for SDF from the default material should only be retrieved when SDFGI is required.
 		ERR_FAIL_NULL_V(scene_shader.default_material_shader_ptr, RID());
-		scene_shader.enable_advanced_shader_group();
+		scene_shader.enable_shader_features(SceneShaderForwardClustered::SHADER_FEATURE_SDF);
 		scene_shader.default_shader_sdfgi_rd = scene_shader.default_material_shader_ptr->get_shader_variant(SceneShaderForwardClustered::PIPELINE_VERSION_DEPTH_PASS_WITH_SDF, 0, true);
 		ERR_FAIL_COND_V(scene_shader.default_shader_sdfgi_rd.is_null(), RID());
 	}
@@ -4929,9 +4945,9 @@ void RenderForwardClustered::sdfgi_update(const Ref<RenderSceneBuffers> &p_rende
 		}
 	}
 
-	// Ensure advanced shaders are available if SDFGI is used.
+	// Ensure the SDF shader variants are available if SDFGI is used.
 	// Call here as this is the first entry point for SDFGI.
-	scene_shader.enable_advanced_shader_group();
+	scene_shader.enable_shader_features(SceneShaderForwardClustered::SHADER_FEATURE_SDF);
 
 	static const uint32_t history_frames_to_converge[RSE::ENV_SDFGI_CONVERGE_MAX] = { 5, 10, 15, 20, 25, 30 };
 	uint32_t requested_history_size = history_frames_to_converge[gi.sdfgi_frames_to_converge];
@@ -5759,6 +5775,21 @@ void RenderForwardClustered::_update_dirty_geometry_instances() {
 }
 
 void RenderForwardClustered::_update_dirty_geometry_pipelines() {
+	// The pipelines below need these shader variant groups: start compiling them first.
+	{
+		const GlobalPipelineData &required = global_pipeline_data_required;
+		uint32_t shader_features = 0;
+		shader_features |= required.use_separate_specular ? SceneShaderForwardClustered::SHADER_FEATURE_SEPARATE_SPECULAR : 0;
+		shader_features |= required.use_lightmaps ? SceneShaderForwardClustered::SHADER_FEATURE_LIGHTMAP : 0;
+		shader_features |= required.use_motion_vectors ? SceneShaderForwardClustered::SHADER_FEATURE_MOTION_VECTORS : 0;
+		shader_features |= required.use_shadow_dual_paraboloid ? SceneShaderForwardClustered::SHADER_FEATURE_DUAL_PARABOLOID : 0;
+		shader_features |= required.use_normal_and_roughness ? SceneShaderForwardClustered::SHADER_FEATURE_NORMAL_ROUGHNESS : 0;
+		shader_features |= required.use_voxelgi ? SceneShaderForwardClustered::SHADER_FEATURE_VOXEL_GI : 0;
+		shader_features |= required.use_sdfgi ? SceneShaderForwardClustered::SHADER_FEATURE_SDF : 0;
+		shader_features |= required.use_multiview ? SceneShaderForwardClustered::SHADER_FEATURE_MULTIVIEW : 0;
+		scene_shader.enable_shader_features(shader_features);
+	}
+
 	if (global_pipeline_data_required.key != global_pipeline_data_compiled.key) {
 		// Go through the entire list of surfaces and compile pipelines for everything again.
 		for (GeometryInstanceSurfaceDataCache &surface_cache : geometry_surface_compilation_all_list) {

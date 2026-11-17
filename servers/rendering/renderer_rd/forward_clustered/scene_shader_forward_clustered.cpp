@@ -642,6 +642,7 @@ RD::PolygonCullMode SceneShaderForwardClustered::ShaderData::get_cull_mode_from_
 RID SceneShaderForwardClustered::ShaderData::_get_shader_variant(uint16_t p_shader_version) const {
 	if (version.is_valid()) {
 		ERR_FAIL_NULL_V(SceneShaderForwardClustered::singleton, RID());
+		SceneShaderForwardClustered::singleton->_ensure_variant_group_enabled(p_shader_version);
 		return SceneShaderForwardClustered::singleton->shader.version_get_shader(version, p_shader_version);
 	} else {
 		return RID();
@@ -999,17 +1000,21 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 
 	{
 		Vector<ShaderRD::VariantDefine> shader_versions;
+		auto add_version = [&](uint32_t p_features, const String &p_defines) {
+			uint32_t group = _get_variant_group(p_features);
+			shader_versions.push_back(ShaderRD::VariantDefine(group, p_defines, p_features == 0));
+		};
 		for (uint32_t ubershader = 0; ubershader < 2; ubershader++) {
 			const String base_define = ubershader ? "\n#define UBERSHADER\n" : "";
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_BASE, base_define + "\n#define MODE_RENDER_DEPTH\n", true)); // SHADER_VERSION_DEPTH_PASS
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_BASE, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_DUAL_PARABOLOID\n", true)); // SHADER_VERSION_DEPTH_PASS_DP
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_BASE, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n", true)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_ADVANCED, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_VOXEL_GI\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_MULTIVIEW, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n", false)); // SHADER_VERSION_DEPTH_PASS_MULTIVIEW
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_MULTIVIEW, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_MULTIVIEW
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_ADVANCED_MULTIVIEW, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_VOXEL_GI\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_MULTIVIEW
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_ADVANCED, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_MATERIAL\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL
-			shader_versions.push_back(ShaderRD::VariantDefine(SHADER_GROUP_ADVANCED, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_SDF\n", false)); // SHADER_VERSION_DEPTH_PASS_WITH_SDF
+			add_version(0, base_define + "\n#define MODE_RENDER_DEPTH\n"); // SHADER_VERSION_DEPTH_PASS
+			add_version(SHADER_FEATURE_DUAL_PARABOLOID, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_DUAL_PARABOLOID\n"); // SHADER_VERSION_DEPTH_PASS_DP
+			add_version(SHADER_FEATURE_NORMAL_ROUGHNESS, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n"); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS
+			add_version(SHADER_FEATURE_VOXEL_GI, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_VOXEL_GI\n"); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI
+			add_version(SHADER_FEATURE_MULTIVIEW, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n"); // SHADER_VERSION_DEPTH_PASS_MULTIVIEW
+			add_version(SHADER_FEATURE_MULTIVIEW | SHADER_FEATURE_NORMAL_ROUGHNESS, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n"); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_MULTIVIEW
+			add_version(SHADER_FEATURE_MULTIVIEW | SHADER_FEATURE_VOXEL_GI, base_define + "\n#define USE_MULTIVIEW\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_NORMAL_ROUGHNESS\n#define MODE_RENDER_VOXEL_GI\n"); // SHADER_VERSION_DEPTH_PASS_WITH_NORMAL_AND_ROUGHNESS_AND_VOXEL_GI_MULTIVIEW
+			add_version(SHADER_FEATURE_MATERIAL, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_MATERIAL\n"); // SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL
+			add_version(SHADER_FEATURE_SDF, base_define + "\n#define MODE_RENDER_DEPTH\n#define MODE_RENDER_SDF\n"); // SHADER_VERSION_DEPTH_PASS_WITH_SDF
 		}
 
 		Vector<String> color_pass_flags = {
@@ -1028,19 +1033,13 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 				}
 			}
 
-			// Assign a group based on what features this pass contains.
-			ShaderGroup group = SHADER_GROUP_BASE;
-			bool advanced_group = (i & SHADER_COLOR_PASS_FLAG_SEPARATE_SPECULAR) || (i & SHADER_COLOR_PASS_FLAG_LIGHTMAP) || (i & SHADER_COLOR_PASS_FLAG_MOTION_VECTORS);
-			bool multiview_group = i & SHADER_COLOR_PASS_FLAG_MULTIVIEW;
-			if (advanced_group && multiview_group) {
-				group = SHADER_GROUP_ADVANCED_MULTIVIEW;
-			} else if (advanced_group) {
-				group = SHADER_GROUP_ADVANCED;
-			} else if (multiview_group) {
-				group = SHADER_GROUP_MULTIVIEW;
-			}
-
-			shader_versions.push_back(ShaderRD::VariantDefine(group, version, false));
+			// Group by the features this pass needs; the ubershader flag needs none.
+			uint32_t features = 0;
+			features |= (i & SHADER_COLOR_PASS_FLAG_SEPARATE_SPECULAR) ? SHADER_FEATURE_SEPARATE_SPECULAR : 0;
+			features |= (i & SHADER_COLOR_PASS_FLAG_LIGHTMAP) ? SHADER_FEATURE_LIGHTMAP : 0;
+			features |= (i & SHADER_COLOR_PASS_FLAG_MULTIVIEW) ? SHADER_FEATURE_MULTIVIEW : 0;
+			features |= (i & SHADER_COLOR_PASS_FLAG_MOTION_VECTORS) ? SHADER_FEATURE_MOTION_VECTORS : 0;
+			add_version(features, version);
 		}
 
 		Vector<uint64_t> dynamic_buffers;
@@ -1048,7 +1047,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		shader.initialize(shader_versions, p_defines, Vector<RD::PipelineImmutableSampler>(), dynamic_buffers);
 
 		if (RendererCompositorRD::get_singleton()->is_xr_enabled()) {
-			shader.enable_group(SHADER_GROUP_MULTIVIEW);
+			enable_shader_features(SHADER_FEATURE_MULTIVIEW);
 		}
 	}
 
@@ -1390,27 +1389,65 @@ void SceneShaderForwardClustered::set_default_specialization(const ShaderSpecial
 	}
 }
 
+uint32_t SceneShaderForwardClustered::_get_variant_group(uint32_t p_features) {
+	int64_t group = group_features.find(p_features);
+	if (group < 0) {
+		group = group_features.size();
+		group_features.push_back(p_features);
+	}
+	return group;
+}
+
+void SceneShaderForwardClustered::enable_shader_features(uint32_t p_features) {
+	if ((enabled_features.load(std::memory_order_relaxed) & p_features) == p_features) {
+		return; // Called every frame; nothing new.
+	}
+
+	MutexLock lock(group_enable_mutex);
+	uint32_t features = enabled_features.load() | p_features;
+	enabled_features.store(features);
+	for (uint32_t group = 0; group < group_features.size(); group++) {
+		if ((group_features[group] & ~features) == 0) {
+			shader.enable_group(group); // Does nothing if the group is enabled already.
+		}
+	}
+}
+
+void SceneShaderForwardClustered::_ensure_variant_group_enabled(uint16_t p_shader_version) {
+	int group = shader.get_variant_to_group(p_shader_version);
+	if (likely(shader.is_group_enabled(group))) {
+		return;
+	}
+
+	// A pass requested a variant whose features were never enabled. Compile its
+	// group now (one stall) instead of handing out a placeholder shader. The
+	// renderer enables features before such passes; this is the safety net.
+	MutexLock lock(group_enable_mutex);
+	if (!shader.is_group_enabled(group)) {
+		print_verbose(vformat("Forward+ shader variant %d requested before its features (0x%x) were enabled.", p_shader_version, group_features[group]));
+		shader.enable_group(group);
+	}
+}
+
 void SceneShaderForwardClustered::enable_multiview_shader_group() {
-	shader.enable_group(SHADER_GROUP_MULTIVIEW);
+	enable_shader_features(SHADER_FEATURE_MULTIVIEW);
 }
 
 void SceneShaderForwardClustered::enable_advanced_shader_group(bool p_needs_multiview) {
+	uint32_t features = SHADER_FEATURE_ALL_ADVANCED;
 	if (p_needs_multiview || RendererCompositorRD::get_singleton()->is_xr_enabled()) {
-		shader.enable_group(SHADER_GROUP_ADVANCED_MULTIVIEW);
+		features |= SHADER_FEATURE_MULTIVIEW;
 	}
-	shader.enable_group(SHADER_GROUP_ADVANCED);
+	enable_shader_features(features);
 }
 
 bool SceneShaderForwardClustered::is_multiview_shader_group_enabled() const {
-	return shader.is_group_enabled(SHADER_GROUP_MULTIVIEW);
+	return enabled_features.load(std::memory_order_relaxed) & SHADER_FEATURE_MULTIVIEW;
 }
 
 bool SceneShaderForwardClustered::is_advanced_shader_group_enabled(bool p_multiview) const {
-	if (p_multiview) {
-		return shader.is_group_enabled(SHADER_GROUP_ADVANCED_MULTIVIEW);
-	} else {
-		return shader.is_group_enabled(SHADER_GROUP_ADVANCED);
-	}
+	uint32_t features = SHADER_FEATURE_ALL_ADVANCED | (p_multiview ? SHADER_FEATURE_MULTIVIEW : 0);
+	return (enabled_features.load(std::memory_order_relaxed) & features) == features;
 }
 
 uint32_t SceneShaderForwardClustered::get_pipeline_compilations(RSE::PipelineSource p_source) {
