@@ -428,7 +428,7 @@ void RenderForwardMobile::mesh_generate_pipelines(RID p_mesh, bool p_background_
 	// Try to wait for all the pipelines that were compiled. This will force the loader to wait on all ubershader pipelines to be ready.
 	if (!p_background_compilation && !pipeline_pairs.is_empty()) {
 		for (ShaderPipelinePair pair : pipeline_pairs) {
-			pair.first->pipeline_hash_map.wait_for_pipeline(pair.second.hash());
+			pair.first->pipeline_hash_map.wait_for_pipeline(pair.second);
 		}
 	}
 }
@@ -2494,8 +2494,7 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 	SceneShaderForwardMobile::ShaderData *shader = nullptr;
 	SceneShaderForwardMobile::ShaderData *prev_shader = nullptr;
 	SceneShaderForwardMobile::ShaderData::PipelineKey pipeline_key;
-	uint32_t pipeline_hash = 0;
-	uint32_t prev_pipeline_hash = 0;
+	SceneShaderForwardMobile::ShaderData::PipelineKey prev_pipeline_key;
 
 	bool shadow_pass = (p_pass_mode == PASS_MODE_SHADOW) || (p_pass_mode == PASS_MODE_SHADOW_DP);
 
@@ -2644,16 +2643,14 @@ void RenderForwardMobile::_render_list_template(RenderingDevice::DrawListID p_dr
 				pipeline_key.cull_mode = cull_mode;
 			}
 
-			pipeline_hash = pipeline_key.hash();
-
-			if (shader != prev_shader || pipeline_hash != prev_pipeline_hash) {
+			if (shader != prev_shader || !(pipeline_key == prev_pipeline_key)) {
 				RSE::PipelineSource pipeline_source = pipeline_key.ubershader ? RSE::PIPELINE_SOURCE_DRAW : RSE::PIPELINE_SOURCE_SPECIALIZATION;
-				pipeline_rd = shader->pipeline_hash_map.get_pipeline(pipeline_key, pipeline_hash, pipeline_key.ubershader == (ubershader_iterations - 1), pipeline_source);
+				pipeline_rd = shader->pipeline_hash_map.get_pipeline(pipeline_key, pipeline_key.ubershader == (ubershader_iterations - 1), pipeline_source);
 
 				if (pipeline_rd.is_valid()) {
 					pipeline_valid = true;
 					prev_shader = shader;
-					prev_pipeline_hash = pipeline_hash;
+					prev_pipeline_key = pipeline_key;
 					break;
 				} else {
 					if (pipeline_key.ubershader == 1) {
@@ -3399,7 +3396,7 @@ void RenderForwardMobile::_mesh_compile_pipeline_for_surface(SceneShaderForwardM
 	bool emulate_point_size = p_shader->uses_point_size && scene_shader.emulate_point_size;
 	r_pipeline_key.vertex_format_id = mesh_storage->mesh_surface_get_vertex_format(p_mesh_surface, input_mask, p_instanced_surface, false, emulate_point_size);
 	r_pipeline_key.ubershader = true;
-	p_shader->pipeline_hash_map.compile_pipeline(r_pipeline_key, r_pipeline_key.hash(), p_source, r_pipeline_key.ubershader);
+	p_shader->pipeline_hash_map.compile_pipeline(r_pipeline_key, p_source, r_pipeline_key.ubershader);
 
 	if (r_pipeline_pairs != nullptr) {
 		r_pipeline_pairs->push_back({ p_shader, r_pipeline_key });

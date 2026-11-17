@@ -16,7 +16,7 @@ less compile stutter, same output. Read this first when resuming.
 | 2 | Free compiled shader bytes and the loaded Vulkan PSO cache after use | done |
 | 2 | Skip precompiling transparent pipelines that can't be drawn (TRANSPARENT+MV/SEP) | done |
 | 2 | Fix: SDFGI pass uniform set lacked bindings 47/48 (found by the SDFGI config) | done |
-| 2 | Pipeline hash map keyed by the full key (collision fix) | planned |
+| 2 | Pipeline hash map keyed by the full key (collision fix) | done |
 | 2 | Skip unused depth variants of shaders that use the shared shadow material | planned |
 | 3 | Split the Forward+ variant groups by feature | done |
 | 4 | Validation: smoke, image compare, DDGI/PT, D3D12 | planned |
@@ -102,7 +102,10 @@ driver cache is per executable and is only filled when the driver compiles a
 pipeline itself. A new exe whose Godot PSO cache is already full never fills
 it, and its "warm" runs stay slow: an identical copy of the baseline under a
 new name took 20.5 s of pipeline CPU instead of 2.7 s, for five runs. Cold
-first, then warm, is also what a user sees.
+first, then warm, is also what a user sees. Run a build's warm runs right
+after its own cold run: another build's cold run clears the driver cache
+for every exe (a `prune` control run after the `fullkey` cold run stalled
+1.53 s instead of 0.73 s).
 
 ### Results (RTX 3060, 12 threads, Vulkan, `-Mv`, 120 materials)
 
@@ -117,6 +120,8 @@ first, then warm, is also what a user sees.
 | groups | warm x2 | 0.77-0.78 s | 762 cached | - | 6.7 s | 783 (2.85 s, 24 ms) | 1.90 / 1.65 ms | 85 / 164 MB |
 | prune | cold | 96.1 s | 762 | 59.2 s | 6.0 s | 720 (1175 s, 6.9 s) | 2.29 / 1.95 ms | 85 / 122 MB |
 | prune | warm x2 | 0.72-0.74 s | 762 cached | - | 6.9 s | 720 (2.26 s, 20 ms) | 1.86 / 1.66 ms | 85 / 139 MB |
+| fullkey | cold | 96.4 s | 762 | - | - | 720 (1176 s, 6.8 s) | 2.34 / 1.73 ms | 85 / 119 MB |
+| fullkey | warm x3 | 0.72 s | 762 cached | - | - | 720 (2.30 s, 25 ms) | 1.86 / 1.65 ms (CPU 0.69) | 85 / 139 MB |
 
 `buf` = base + freed variant bytes + Vulkan PSO buffer trim. `groups` =
 buf + feature groups. `prune` = groups + no transparent MV/SEP pipeline
@@ -159,6 +164,11 @@ separate-specular and lightmap color variants (22 of 28).
   of them up front. Warm (cached) that costs a cache load.
 - D4: transparent pipelines are precompiled without MV/SEP, matching both
   transparent passes. Any other request still compiles on demand.
+- D5: `PipelineHashMapRD` keyed by the whole key (`HashMap<Key, RID>`,
+  `HashSet<Key>` for submitted compiles); each key has `operator==` over the
+  fields its `hash()` covers. The draw loops compare the previous key instead
+  of the previous hash (no murmur hash per draw). Applies to Forward+,
+  Mobile, canvas and the ray tracing scene shader.
 - D2: free each group's compiled bytes at the end of `_compile_version_end`:
   nothing reads them later (a new group or new code compiles or loads again).
 

@@ -366,8 +366,7 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 	SceneShaderForwardClustered::ShaderData *shader = nullptr;
 	SceneShaderForwardClustered::ShaderData *prev_shader = nullptr;
 	SceneShaderForwardClustered::ShaderData::PipelineKey pipeline_key;
-	uint32_t pipeline_hash = 0;
-	uint32_t prev_pipeline_hash = 0;
+	SceneShaderForwardClustered::ShaderData::PipelineKey prev_pipeline_key;
 
 	bool shadow_pass = (p_pass_mode == PASS_MODE_SHADOW) || (p_pass_mode == PASS_MODE_SHADOW_DP);
 
@@ -582,16 +581,14 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 				pipeline_key.cull_mode = cull_mode;
 			}
 
-			pipeline_hash = pipeline_key.hash();
-
-			if (shader != prev_shader || pipeline_hash != prev_pipeline_hash) {
+			if (shader != prev_shader || !(pipeline_key == prev_pipeline_key)) {
 				RSE::PipelineSource pipeline_source = pipeline_key.ubershader ? RSE::PIPELINE_SOURCE_DRAW : RSE::PIPELINE_SOURCE_SPECIALIZATION;
-				pipeline_rd = shader->pipeline_hash_map.get_pipeline(pipeline_key, pipeline_hash, pipeline_key.ubershader, pipeline_source);
+				pipeline_rd = shader->pipeline_hash_map.get_pipeline(pipeline_key, pipeline_key.ubershader, pipeline_source);
 
 				if (pipeline_rd.is_valid()) {
 					pipeline_valid = true;
 					prev_shader = shader;
-					prev_pipeline_hash = pipeline_hash;
+					prev_pipeline_key = pipeline_key;
 					break;
 				} else {
 					pipeline_key.ubershader++;
@@ -5604,7 +5601,7 @@ void RenderForwardClustered::_mesh_compile_pipeline_for_surface(SceneShaderForwa
 	r_pipeline_key.vertex_format_id = mesh_storage->mesh_surface_get_vertex_format(p_mesh_surface, input_mask, p_instanced_surface, pipeline_motion_vectors, emulate_point_size);
 	r_pipeline_key.ubershader = p_ubershader;
 
-	p_shader->pipeline_hash_map.compile_pipeline(r_pipeline_key, r_pipeline_key.hash(), p_source, p_ubershader);
+	p_shader->pipeline_hash_map.compile_pipeline(r_pipeline_key, p_source, p_ubershader);
 
 	if (r_pipeline_pairs != nullptr) {
 		r_pipeline_pairs->push_back({ p_shader, r_pipeline_key });
@@ -6077,7 +6074,7 @@ void RenderForwardClustered::mesh_generate_pipelines(RID p_mesh, bool p_backgrou
 	// Wait for all the pipelines that were compiled. This will force the loader to wait on all ubershader pipelines to be ready.
 	if (!p_background_compilation && !pipeline_pairs.is_empty()) {
 		for (ShaderPipelinePair pair : pipeline_pairs) {
-			pair.first->pipeline_hash_map.wait_for_pipeline(pair.second.hash());
+			pair.first->pipeline_hash_map.wait_for_pipeline(pair.second);
 		}
 	}
 }

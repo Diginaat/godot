@@ -144,6 +144,10 @@ class RendererCanvasRenderRD : public RendererCanvasRender {
 			h = hash_murmur3_one_32(ubershader, h);
 			return hash_fmix32(h);
 		}
+
+		bool operator==(const PipelineKey &p_other) const {
+			return variant == p_other.variant && framebuffer_format_id == p_other.framebuffer_format_id && vertex_format_id == p_other.vertex_format_id && render_primitive == p_other.render_primitive && shader_specialization.packed_0 == p_other.shader_specialization.packed_0 && lcd_blend == p_other.lcd_blend && ubershader == p_other.ubershader;
+		}
 	};
 
 	struct CanvasShaderData : public RendererRD::MaterialStorage::ShaderData {

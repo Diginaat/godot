@@ -223,6 +223,10 @@ public:
 				h = hash_murmur3_one_32(ubershader, h);
 				return hash_fmix32(h);
 			}
+
+			bool operator==(const PipelineKey &p_other) const {
+				return vertex_format_id == p_other.vertex_format_id && framebuffer_format_id == p_other.framebuffer_format_id && cull_mode == p_other.cull_mode && primitive_type == p_other.primitive_type && shader_specialization.packed_0 == p_other.shader_specialization.packed_0 && shader_specialization.packed_1 == p_other.shader_specialization.packed_1 && shader_specialization.packed_2 == p_other.shader_specialization.packed_2 && version == p_other.version && render_pass == p_other.render_pass && wireframe == p_other.wireframe && ubershader == p_other.ubershader;
+			}
 		};
 
 		void _create_pipeline(PipelineKey p_pipeline_key);

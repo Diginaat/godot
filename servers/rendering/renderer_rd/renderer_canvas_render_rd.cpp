@@ -494,7 +494,7 @@ RID RendererCanvasRenderRD::_get_pipeline_specialization_or_ubershader(CanvasSha
 
 		bool wait_for_compilation = r_pipeline_key.ubershader || ubershader_iterations == 1;
 		RSE::PipelineSource source = RSE::PIPELINE_SOURCE_CANVAS;
-		RID pipeline = p_shader_data->pipeline_hash_map.get_pipeline(r_pipeline_key, r_pipeline_key.hash(), wait_for_compilation, source);
+		RID pipeline = p_shader_data->pipeline_hash_map.get_pipeline(r_pipeline_key, wait_for_compilation, source);
 		if (pipeline.is_valid()) {
 			return pipeline;
 		}
@@ -1536,7 +1536,7 @@ void RendererCanvasRenderRD::CanvasShaderData::_create_pipeline(PipelineKey p_pi
 	RID pipeline = RD::get_singleton()->render_pipeline_create(shader_rid, p_pipeline_key.framebuffer_format_id, p_pipeline_key.vertex_format_id, p_pipeline_key.render_primitive, RD::PipelineRasterizationState(), multisample_state, RD::PipelineDepthStencilState(), blend_state, dynamic_state_flags, 0, specialization_constants);
 	ERR_FAIL_COND(pipeline.is_null());
 
-	pipeline_hash_map.add_compiled_pipeline(p_pipeline_key.hash(), pipeline);
+	pipeline_hash_map.add_compiled_pipeline(p_pipeline_key, pipeline);
 }
 
 void RendererCanvasRenderRD::CanvasShaderData::set_code(const String &p_code) {

@@ -460,7 +460,7 @@ void SceneShaderForwardMobile::ShaderData::_create_pipeline(PipelineKey p_pipeli
 
 	ERR_FAIL_COND(pipeline.is_null());
 
-	pipeline_hash_map.add_compiled_pipeline(p_pipeline_key.hash(), pipeline);
+	pipeline_hash_map.add_compiled_pipeline(p_pipeline_key, pipeline);
 }
 
 RD::PolygonCullMode SceneShaderForwardMobile::ShaderData::get_cull_mode_from_cull_variant(CullVariant p_cull_variant) {
