@@ -142,9 +142,16 @@ pipelines still compile in the background; warm GPU p50 is unchanged.
 | base | warm x2 | 0.65-0.67 s | - | - | 0.02 s | 783 (1.68 s) | 3.28 / 1.05 / 1.46 ms | 547 / 547 MB | - |
 | fullkey | cold | 97.1 s | 65 s | 509 s | 49 s | 720 (689 s) | 4.65 / 1.51 / 1.78 ms | 154 / 188 MB | 49 MB |
 | fullkey | warm x2 | 0.48-0.49 s | - | - | 0.02 s | 720 (1.51 s) | 2.38 / 0.83 / 1.45 ms | 153 / 196 MB | - |
+| skip4 | cold | 96.1 s | 43 s | 370 s | 4.2 s | 720 (821 s) | 4.13 / 1.51 / 1.77 ms | 133 / 171 MB | 34 MB |
+| skip4 | warm x2 | 0.46 s | - | - | 0.0 s | 720 (1.47 s) | 1.59 / 0.61 / 1.44 ms | 133 / 163 MB | - |
 
 D3D12 converts every variant to DXIL (7x the GLSL compile), so fewer
-variants matter more there. D3D12 has no Godot PSO cache (`cache_kb=0`).
+variants matter more there. The D3D12 cold stall is pipeline-bound
+after the groups (skip4 didn't move it). skip4's cold pipeline CPU (821 s
+against 689 s) is unexplained: the change doesn't touch pipelines, and 10
+files of NVIDIA's DXCache were held open by another application in every
+D3D12 cold run, so that cache wasn't fully cold. One run each; not
+repeated. D3D12 has no Godot PSO cache (`cache_kb=0`).
 
 Image checks (`devtools/test/image_diff.py`, last frame): base vs groups vs
 prune pixel-identical (max 0) for `-Mv`, no motion vectors, `-Mv -Ssr`,
