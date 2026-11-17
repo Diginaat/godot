@@ -103,6 +103,16 @@ Read with: [AGENTS.md](AGENTS.md) (entry point), [CUSTOM_BUILD.md](CUSTOM_BUILD.
 - The `large_world` fixtures draw a few marker pixels on black and quit; their
   windows look black by design.
 
+## Shaders and pipelines
+
+- Shader/pipeline compile numbers: `devtools/test/shader_bench.ps1` (with
+  `-Cold` it clears every cache layer, GPU driver caches included). Give each
+  build its own cold run immediately before its warm runs: NVIDIA's driver
+  cache is per exe and any cold run clears it for all exes.
+- `SHADER_VARIANTS` (with `--verbose`) prints built/used per Forward+ variant;
+  a variant built far more often than used is the place to look. A skipped
+  variant that something requests logs "compiling skipped variant".
+
 ## Core containers
 
 - The packed storage and robin-hood index migration was dropped

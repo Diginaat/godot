@@ -11,6 +11,10 @@
   after use (warm memory 353 to 101 MB, same speed).
 * **Mistake**: [warm runs on a new exe](/mistakes/warm-runs-on-a-new-exe.md)
   measured NVIDIA's per-exe driver cache.
+* **Done**: [shader permutations](/project/shader-permutations.md): feature
+  groups, pruned transparent precompiles, full-key pipeline maps, per-shader
+  skipped variants, SDFGI binding fix; cold stall 146 to 95 s (Vulkan), 239
+  to 97 s (D3D12), warm 2.4 to 0.65 s, memory 353 to 84 MB.
 
 ## 2026-11-17 (release 0.10.1)
 

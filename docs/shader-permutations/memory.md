@@ -12,12 +12,14 @@ less compile stutter, same output. Read this first when resuming.
 | 1 | Instrumentation: `SHADER_STATS`, `SHADER_VARIANTS`, `PIPELINE_STATS` (with `--verbose`) | done |
 | 1 | Benchmark `devtools/test/shader_bench.ps1` + `shader_bench.tscn` | done |
 | 1 | Baseline numbers, Vulkan, motion vectors (cold, warm) | done |
-| 1 | Baseline: no motion vectors, SSR, D3D12 | planned |
+| 1 | D3D12 baseline and after | done |
 | 2 | Free compiled shader bytes and the loaded Vulkan PSO cache after use | done |
 | 2 | Skip precompiling transparent pipelines that can't be drawn (TRANSPARENT+MV/SEP) | done |
 | 2 | Fix: SDFGI pass uniform set lacked bindings 47/48 (found by the SDFGI config) | done |
 | 2 | Pipeline hash map keyed by the full key (collision fix) | done |
-| 2 | Skip unused depth variants of shaders that use the shared shadow material | planned |
+| 2 | Per-shader skipped variants: own depth of shared-shadow shaders; depth, MV and SEP color of alpha-only shaders | done |
+| 3 | Measure ubershader vs specialized pipeline cost (`FORWARD_PIPELINE_STATS`) | done |
+| 3 | Specialized-first compile scheduling for the first draw | proposal (see below) |
 | 3 | Split the Forward+ variant groups by feature | done |
 | 4 | Validation: smoke, image compare, DDGI/PT, D3D12 | planned |
 
@@ -122,6 +124,8 @@ for every exe (a `prune` control run after the `fullkey` cold run stalled
 | prune | warm x2 | 0.72-0.74 s | 762 cached | - | 6.9 s | 720 (2.26 s, 20 ms) | 1.86 / 1.66 ms | 85 / 139 MB |
 | fullkey | cold | 96.4 s | 762 | - | - | 720 (1176 s, 6.8 s) | 2.34 / 1.73 ms | 85 / 119 MB |
 | fullkey | warm x3 | 0.72 s | 762 cached | - | - | 720 (2.30 s, 25 ms) | 1.86 / 1.65 ms (CPU 0.69) | 85 / 139 MB |
+| skip4 | cold | 94.7 s | 472 scene | 40.2 s | 3.9 s | 720 (1177 s, 6.8 s) | 2.39 / 1.73 ms | 83 / 114 MB |
+| skip4 | warm x2 | 0.65-0.66 s | 472 cached | - | 4.2 s | 720 (2.31 s, 20 ms) | 1.86 / 1.66 ms (CPU 0.68) | 84 / 139 MB |
 
 `buf` = base + freed variant bytes + Vulkan PSO buffer trim. `groups` =
 buf + feature groups. `prune` = groups + no transparent MV/SEP pipeline
@@ -129,6 +133,18 @@ precompiles (+ the SDFGI binding fix, which doesn't affect this scene).
 Shader cache on disk: 104 MB (base) -> 25.5 MB (groups). Vulkan PSO cache:
 156 -> 130 MB (prune). Cold GPU p50 differs run to run while specialized
 pipelines still compile in the background; warm GPU p50 is unchanged.
+
+### D3D12 (same scene, `-Driver d3d12 -Mv`)
+
+| Build | Run | Add frame stall | GLSL to SPIR-V | SPIR-V to DXIL | Render thread wait | Pipelines (CPU) | Frame p50 / CPU / GPU | Memory end / peak | Shader cache |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| base | cold | 238.7 s | 262 s | 1846 s | 166 s | 783 (905 s) | 5.00 / 1.63 / 1.78 ms | 548 / 561 MB | 194 MB |
+| base | warm x2 | 0.65-0.67 s | - | - | 0.02 s | 783 (1.68 s) | 3.28 / 1.05 / 1.46 ms | 547 / 547 MB | - |
+| fullkey | cold | 97.1 s | 65 s | 509 s | 49 s | 720 (689 s) | 4.65 / 1.51 / 1.78 ms | 154 / 188 MB | 49 MB |
+| fullkey | warm x2 | 0.48-0.49 s | - | - | 0.02 s | 720 (1.51 s) | 2.38 / 0.83 / 1.45 ms | 153 / 196 MB | - |
+
+D3D12 converts every variant to DXIL (7x the GLSL compile), so fewer
+variants matter more there. D3D12 has no Godot PSO cache (`cache_kb=0`).
 
 Image checks (`devtools/test/image_diff.py`, last frame): base vs groups vs
 prune pixel-identical (max 0) for `-Mv`, no motion vectors, `-Mv -Ssr`,
@@ -169,8 +185,44 @@ separate-specular and lightmap color variants (22 of 28).
   fields its `hash()` covers. The draw loops compare the previous key instead
   of the previous hash (no murmur hash per draw). Applies to Forward+,
   Mobile, canvas and the ray tracing scene shader.
+- D6: per-version skipped variants in ShaderRD
+  (`version_set_skipped_variants()`, a 64-bit mask set before
+  `version_set_code()` and part of the cache file name). Groups compile,
+  cache and load without them; `version_get_shader()` compiles a skipped
+  variant on demand (logged with `--verbose`, not cached) if one is asked
+  for. Forward+ skips, per shader: plain depth (+DP, multiview) for shaders
+  that use the shared shadow material; every depth variant but the material
+  one for alpha-only shaders without depth; color with motion vectors or
+  separate specular for alpha-only shaders. The default shader keeps all
+  (`initializing_default_shader`). The material uniform set takes its layout
+  from the color ubershader instead of depth variant 0. `uses_blend_alpha`
+  and the alpha-to-coverage blend mode are now set before the mask (they
+  were set after `version_set_code`, and `uses_alpha_pass()` reads them).
+  Result: variants built equal variants used except color with/without
+  motion vectors of opaque shaders (depends on whether instances move).
 - D2: free each group's compiled bytes at the end of `_compile_version_end`:
   nothing reads them later (a new group or new code compiles or loads again).
+
+## Proposal: specialized-first scheduling (not implemented)
+
+`FORWARD_PIPELINE_STATS` (cold, Vulkan, 120 materials): 379 specialized
+pipelines took 113 s of driver CPU (0.30 s each), 329 ubershader pipelines
+1067 s (3.24 s each, 11x). The add frame waits for the ubershader
+pipelines, so the cold stall is about ubershader CPU / threads. Waiting for
+the specialized pipeline instead could cut that stall to roughly a tenth,
+but needs three changes, each with a cost:
+
+1. Ubershader precompiles at low priority, so the waited-on specialized
+   compiles aren't queued behind them (the pool queue is FIFO).
+2. Submit the frame's specialized compiles before waiting on any (the draw
+   loop now requests them one draw at a time, which would wait serially).
+3. Accept ~1000 s of ubershader CPU running on the low-priority threads for
+   minutes after the stall, and a short stall (~0.3 s) when a draw needs a
+   new specialization before its ubershader is ready.
+
+Upstream chose ubershader-first for no stutter after load; scenes loaded
+with the resource loader compile their ubershader pipelines during the
+load (`mesh_generate_pipelines`), not in a frame. Decide with the user.
 
 ## Log
 
@@ -181,3 +233,7 @@ separate-specular and lightmap color variants (22 of 28).
   pipeline pruning (cold 128.0 -> 96.1 s, pipeline CPU -25%); SDFGI binding
   fix. Next: pipeline hash map key, D3D12 numbers, shared-shadow depth
   variants, specialization compile priority during the stall.
+- 2026-11-17: full-key pipeline maps; D3D12 numbers (cold 238.7 -> 97.1 s);
+  per-shader skipped variants (Vulkan variants 762 -> 472, warm stall 0.72
+  -> 0.65 s); ubershader vs specialized pipeline cost measured, scheduling
+  change written up as a proposal.

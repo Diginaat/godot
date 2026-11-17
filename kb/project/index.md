@@ -1,5 +1,7 @@
 # Project
 
+* [Forward+ shader variants and pipelines compiled only where used](/project/shader-permutations.md) - feature groups, per-shader skipped variants, pruned transparent precompiles, full-key pipeline maps: variants per material 28 to ~4, cold stall 146 to 95 s, warm 2.4 to 0.65 s, memory 353 to 84 MB
+
 * [Scene runtime optimization](/project/scene-runtime.md) - groups, children cache, transform propagation epoch, group storage, process prefetch: instancing and churn 10-11x faster at 100k nodes, API unchanged
 
 * [Unique array baseline and bulk-copy candidate](/project/unique-array-evaluation.md) - Windows correctness passes; 12-size boundary sweep finds small-copy regressions and blocks performance acceptance

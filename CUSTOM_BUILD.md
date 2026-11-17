@@ -157,6 +157,14 @@ straight.
     (`scene/debugger/runtime_state_observer.cpp`,
     `editor/run/live_runtime_plugin.cpp`). See
     [SPLIT_WORKSPACE.md](SPLIT_WORKSPACE.md).
+  - Forward+ shader variant feature groups and per-shader skipped variants
+    (`SceneShaderForwardClustered::ShaderFeature`, `enable_shader_features()`,
+    `ShaderRD::version_set_skipped_variants()`, the mask in
+    `ShaderData::set_code()`), and full-key `PipelineHashMapRD`. When
+    upstream adds a scene shader variant or changes which passes draw which
+    surfaces, give the variant its feature group and keep the skip rules in
+    step with the pass routing. See
+    [docs/shader-permutations/memory.md](docs/shader-permutations/memory.md).
   - The GPU geometry paths are on by default (`rendering/geometry/gpu_instances/*`,
     `gpu_instance_table`, `multimesh_gpu_culling/*`, `cluster_lod/*` and its
     streaming; `GLOBAL_DEF`s in `render_forward_clustered.cpp` and

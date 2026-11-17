@@ -527,6 +527,10 @@ public:
 
 	uint32_t pipeline_compilations[RSE::PIPELINE_SOURCE_MAX] = {};
 
+	// Pipeline creation time by kind, printed on exit with --verbose: [0] specialized, [1] ubershader.
+	SafeNumeric<uint32_t> pipelines_created[2];
+	SafeNumeric<uint64_t> pipeline_create_usec[2];
+
 	bool initializing_default_shader = false; // The default shader keeps its depth variants: shared shadows draw with it.
 	LocalVector<uint32_t> group_features; // ShaderFeature bits each group needs, by group id.
 	std::atomic<uint32_t> enabled_features = 0;

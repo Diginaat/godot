@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/math/math_defs.h"
+#include "core/os/os.h"
 #include "servers/rendering/renderer_rd/forward_clustered/render_forward_clustered.h"
 #include "servers/rendering/renderer_rd/renderer_compositor_rd.h"
 #include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
@@ -661,7 +662,10 @@ void SceneShaderForwardClustered::ShaderData::_create_pipeline(PipelineKey p_pip
 	RID shader_rid = get_shader_variant(p_pipeline_key.version, p_pipeline_key.color_pass_flags, p_pipeline_key.ubershader);
 	ERR_FAIL_COND(shader_rid.is_null());
 
+	uint64_t create_start = OS::get_singleton()->get_ticks_usec();
 	RID pipeline = RD::get_singleton()->render_pipeline_create(shader_rid, p_pipeline_key.framebuffer_format_id, p_pipeline_key.vertex_format_id, primitive_rd, raster_state, multisample_state, depth_stencil_state, blend_state, 0, 0, specialization_constants);
+	SceneShaderForwardClustered::singleton->pipelines_created[p_pipeline_key.ubershader ? 1 : 0].increment();
+	SceneShaderForwardClustered::singleton->pipeline_create_usec[p_pipeline_key.ubershader ? 1 : 0].add(OS::get_singleton()->get_ticks_usec() - create_start);
 	ERR_FAIL_COND(pipeline.is_null());
 
 	pipeline_hash_map.add_compiled_pipeline(p_pipeline_key, pipeline);
@@ -1016,6 +1020,11 @@ SceneShaderForwardClustered::SceneShaderForwardClustered() {
 }
 
 SceneShaderForwardClustered::~SceneShaderForwardClustered() {
+	if (OS::get_singleton()->is_stdout_verbose()) {
+		print_line(vformat("FORWARD_PIPELINE_STATS: specialized=%d specialized_ms=%.1f ubershader=%d ubershader_ms=%.1f",
+				pipelines_created[0].get(), pipeline_create_usec[0].get() / 1000.0, pipelines_created[1].get(), pipeline_create_usec[1].get() / 1000.0));
+	}
+
 	RendererRD::MaterialStorage *material_storage = RendererRD::MaterialStorage::get_singleton();
 
 	RD::get_singleton()->free_rid(default_vec4_xform_buffer);
