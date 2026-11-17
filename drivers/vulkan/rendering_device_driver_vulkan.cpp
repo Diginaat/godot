@@ -5548,6 +5548,10 @@ bool RenderingDeviceDriverVulkan::pipeline_cache_create(const Vector<uint8_t> &p
 		cache_info.pInitialData = pipelines_cache.buffer.ptr() + sizeof(PipelineCacheHeader);
 
 		VkResult err = vkCreatePipelineCache(vk_device, &cache_info, VKC::get_allocation_callbacks(VK_OBJECT_TYPE_PIPELINE_CACHE), &pipelines_cache.vk_cache);
+
+		// The driver copied the initial data; keep only the header (the file can be tens of MiB).
+		pipelines_cache.buffer.resize(sizeof(PipelineCacheHeader));
+
 		if (err != VK_SUCCESS) {
 			WARN_PRINT("vkCreatePipelinecache failed with error " + itos(err) + ".");
 			return false;
@@ -5589,13 +5593,18 @@ Vector<uint8_t> RenderingDeviceDriverVulkan::pipeline_cache_serialize() {
 	ERR_FAIL_COND_V_MSG(err != VK_SUCCESS && err != VK_INCOMPLETE, Vector<uint8_t>(), vformat("Couldn't get Vulkan pipeline cache data (VkResult error %d).", err));
 
 	// The real buffer size may now be bigger than the updated current_size.
-	// We take into account the new size but keep the buffer resized in a worst-case fashion.
-
 	PipelineCacheHeader *header = (PipelineCacheHeader *)pipelines_cache.buffer.ptrw();
 	header->data_size = pipelines_cache.current_size;
 	header->data_hash = hash_murmur3_buffer(pipelines_cache.buffer.ptr() + sizeof(PipelineCacheHeader), pipelines_cache.current_size);
 
-	return pipelines_cache.buffer;
+	// The caller writes the blob to disk and drops it; between saves only the header is kept.
+	// Shrink our copy first (copy-on-write copies just the header), then trim the blob,
+	// now the only owner, to the written size: the loader rejects a file whose size
+	// doesn't match data_size.
+	Vector<uint8_t> blob = pipelines_cache.buffer;
+	pipelines_cache.buffer.resize(sizeof(PipelineCacheHeader));
+	blob.resize(sizeof(PipelineCacheHeader) + pipelines_cache.current_size);
+	return blob;
 }
 
 /*******************/

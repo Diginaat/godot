@@ -814,6 +814,13 @@ void ShaderRD::_compile_version_end(Version *p_version, int p_group) {
 	}
 #endif
 
+	// The group's GPU shaders exist and its cache file is written, so its compiled
+	// bytes are not read again (a new group or a code change starts from scratch).
+	// Free them instead of keeping one copy of every variant for the shader's life.
+	for (uint32_t i = 0; i < group_to_variant_map[p_group].size(); i++) {
+		p_version->variant_data.write[group_to_variant_map[p_group][i]] = Vector<uint8_t>();
+	}
+
 	p_version->valid = true;
 }
 
