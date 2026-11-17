@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-17 (release 0.10.3)
+
+* **Released**: `godot4.8-beta-diginaat-physx-v0.10.3` at `db5506be7d`
+  (project manager warning instead of a forced backup, D040), editors and
+  export templates, standard and .NET; smoke passed for both.
+
 ## 2026-11-17 (project manager warning)
 
 * **Changed**: the project manager no longer forces a backup before this
