@@ -5650,8 +5650,10 @@ void RenderForwardClustered::_mesh_compile_pipelines_for_surface(const SurfacePi
 				_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
 
 				// Generate all the possible variants used during the advanced color passes.
-				const uint32_t separate_specular_iterations = p_global.use_separate_specular ? 2 : 1;
-				const uint32_t motion_vectors_iterations = p_global.use_motion_vectors ? 2 : 1;
+				// The transparent passes strip separate specular and motion vectors (see
+				// _render_scene and the path tracer's), so alpha needs neither.
+				const uint32_t separate_specular_iterations = (!alpha && p_global.use_separate_specular) ? 2 : 1;
+				const uint32_t motion_vectors_iterations = (!alpha && p_global.use_motion_vectors) ? 2 : 1;
 				uint32_t base_color_pass_flags = pipeline_key.color_pass_flags;
 				for (uint32_t separate_specular = 0; separate_specular < separate_specular_iterations; separate_specular++) {
 					for (uint32_t motion_vectors = 0; motion_vectors < motion_vectors_iterations; motion_vectors++) {
