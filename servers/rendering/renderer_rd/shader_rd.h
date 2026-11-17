@@ -92,6 +92,8 @@ private:
 		bool initialize_needed;
 		bool embedded;
 		uint64_t requested_variants = 0; // Variants (below 64) handed out by version_get_shader(), for the statistics.
+		uint64_t skipped_variants = 0; // See version_set_skipped_variants().
+		uint64_t skipped_variants_built = 0; // Skipped variants compiled on demand since the last (re)initialization.
 	};
 
 	struct CompileData {
@@ -101,6 +103,11 @@ private:
 
 	// Vector will have the size of SHADER_STAGE_MAX and unused stages will have empty strings.
 	void _compile_variant(uint32_t p_variant, CompileData p_data);
+	void _compile_variant_now(uint32_t p_variant, CompileData p_data);
+	void _compile_skipped_variant(Version *p_version, uint32_t p_variant);
+	_FORCE_INLINE_ static bool _is_variant_skipped(const Version *p_version, uint32_t p_variant) {
+		return p_variant < 64 && (p_version->skipped_variants & (uint64_t(1) << p_variant));
+	}
 
 	void _initialize_version(Version *p_version);
 	void _clear_version(Version *p_version);
@@ -246,6 +253,10 @@ public:
 			return RID();
 		}
 
+		if (unlikely(_is_variant_skipped(version, p_variant) && !(version->skipped_variants_built & (uint64_t(1) << p_variant)) && group_enabled[group])) {
+			_compile_skipped_variant(version, p_variant);
+		}
+
 		if (p_variant < 64 && !(version->requested_variants & (uint64_t(1) << p_variant))) {
 			version->requested_variants |= uint64_t(1) << p_variant;
 			_count_variant(p_variant, true);
@@ -255,6 +266,12 @@ public:
 	}
 
 	bool version_is_valid(RID p_version);
+
+	// Variants (below 64) this version is not expected to use. Its groups compile,
+	// cache and load without them; version_get_shader() compiles one on demand
+	// (on the calling thread, not cached) if it is requested anyway. Set it before
+	// version_set_code(); it is part of the cache file name.
+	void version_set_skipped_variants(RID p_version, uint64_t p_variants);
 
 	bool version_free(RID p_version);
 

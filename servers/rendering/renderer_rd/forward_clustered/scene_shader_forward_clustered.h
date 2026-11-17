@@ -527,6 +527,7 @@ public:
 
 	uint32_t pipeline_compilations[RSE::PIPELINE_SOURCE_MAX] = {};
 
+	bool initializing_default_shader = false; // The default shader keeps its depth variants: shared shadows draw with it.
 	LocalVector<uint32_t> group_features; // ShaderFeature bits each group needs, by group id.
 	std::atomic<uint32_t> enabled_features = 0;
 	Mutex group_enable_mutex;

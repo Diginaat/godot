@@ -266,6 +266,7 @@ void ShaderRD::_initialize_version(Version *p_version) {
 
 	p_version->variants.resize_initialized(variant_defines.size());
 	p_version->variant_data.resize(variant_defines.size());
+	p_version->skipped_variants_built = 0;
 	p_version->group_compilation_tasks.resize_initialized(group_enabled.size());
 	p_version->group_loaded_from_cache.resize_initialized(group_enabled.size());
 }
@@ -415,33 +416,37 @@ Vector<String> ShaderRD::_build_variant_stage_sources(uint32_t p_variant, Compil
 
 void ShaderRD::_compile_variant(uint32_t p_variant, CompileData p_data) {
 	uint32_t variant = group_to_variant_map[p_data.group][p_variant];
-	if (!variants_enabled[variant]) {
-		return; // Variant is disabled, return.
+	if (!variants_enabled[variant] || _is_variant_skipped(p_data.version, variant)) {
+		return; // Variant is disabled or skipped by this version, return.
 	}
 
+	_compile_variant_now(variant, p_data);
+}
+
+void ShaderRD::_compile_variant_now(uint32_t p_variant, CompileData p_data) {
 	Stats variant_stats;
 	variant_stats.variants_compiled = 1;
 	uint64_t t0 = OS::get_singleton()->get_ticks_usec();
 
-	Vector<String> variant_stage_sources = _build_variant_stage_sources(variant, p_data);
+	Vector<String> variant_stage_sources = _build_variant_stage_sources(p_variant, p_data);
 	Vector<RD::ShaderStageSPIRVData> variant_stages = compile_stages(variant_stage_sources, dynamic_buffers);
 	ERR_FAIL_COND(variant_stages.is_empty());
 	uint64_t t1 = OS::get_singleton()->get_ticks_usec();
 
-	Vector<uint8_t> shader_data = RD::get_singleton()->shader_compile_binary_from_spirv(variant_stages, name + ":" + itos(variant));
+	Vector<uint8_t> shader_data = RD::get_singleton()->shader_compile_binary_from_spirv(variant_stages, name + ":" + itos(p_variant));
 	ERR_FAIL_COND(shader_data.is_empty());
 	uint64_t t2 = OS::get_singleton()->get_ticks_usec();
 
 	{
-		p_data.version->variants.write[variant] = RD::get_singleton()->shader_create_from_bytecode_with_samplers(shader_data, p_data.version->variants[variant], immutable_samplers);
-		p_data.version->variant_data.write[variant] = shader_data;
+		p_data.version->variants.write[p_variant] = RD::get_singleton()->shader_create_from_bytecode_with_samplers(shader_data, p_data.version->variants[p_variant], immutable_samplers);
+		p_data.version->variant_data.write[p_variant] = shader_data;
 	}
 
 	variant_stats.spirv_usec = t1 - t0;
 	variant_stats.binary_usec = t2 - t1;
 	variant_stats.create_usec = OS::get_singleton()->get_ticks_usec() - t2;
 	_add_stats(variant_stats);
-	_count_variant(variant, false);
+	_count_variant(p_variant, false);
 }
 
 Vector<String> ShaderRD::version_build_variant_stage_sources(RID p_version, int p_variant) {
@@ -615,6 +620,10 @@ String ShaderRD::_version_get_sha1(Version *p_version) const {
 		hash_build.append("[custom_defines:" + itos(i) + "]");
 		hash_build.append(p_version->custom_defines[i].get_data());
 	}
+	if (p_version->skipped_variants != 0) {
+		hash_build.append("[skipped_variants]");
+		hash_build.append(String::num_uint64(p_version->skipped_variants, 16));
+	}
 
 	return hash_build.as_string().sha1_text();
 }
@@ -638,6 +647,9 @@ void ShaderRD::_load_variant_from_cache(uint32_t p_variant, CompileData p_data) 
 	if (!variants_enabled[variant]) {
 		p_data.version->variants.write[variant] = RID();
 		return; // Variant is disabled, return.
+	}
+	if (_is_variant_skipped(p_data.version, variant)) {
+		return; // Not loaded; keeps its placeholder, if any.
 	}
 
 	uint64_t t0 = OS::get_singleton()->get_ticks_usec();
@@ -683,7 +695,7 @@ bool ShaderRD::_load_from_cache(Version *p_version, int p_group) {
 	for (uint32_t i = 0; i < variant_count; i++) {
 		int variant_id = group_to_variant_map[p_group][i];
 		uint32_t variant_size = f->get_32();
-		if (!variants_enabled[variant_id]) {
+		if (!variants_enabled[variant_id] || _is_variant_skipped(p_version, variant_id)) {
 			f->seek(f->get_position() + variant_size);
 			continue;
 		}
@@ -784,8 +796,8 @@ void ShaderRD::_compile_version_end(Version *p_version, int p_group) {
 
 	for (uint32_t i = 0; i < group_to_variant_map[p_group].size(); i++) {
 		int variant_id = group_to_variant_map[p_group][i];
-		if (!variants_enabled[variant_id]) {
-			continue; // Disabled.
+		if (!variants_enabled[variant_id] || _is_variant_skipped(p_version, variant_id)) {
+			continue; // Disabled or skipped.
 		}
 		if (p_version->variants[variant_id].is_null()) {
 			all_valid = false;
@@ -925,6 +937,28 @@ bool ShaderRD::version_is_valid(RID p_version) {
 	_compile_ensure_finished(version);
 
 	return version->valid;
+}
+
+void ShaderRD::version_set_skipped_variants(RID p_version, uint64_t p_variants) {
+	Version *version = version_owner.get_or_null(p_version);
+	ERR_FAIL_NULL(version);
+
+	MutexLock lock(*version->mutex);
+	_compile_ensure_finished(version);
+	version->skipped_variants = p_variants;
+}
+
+void ShaderRD::_compile_skipped_variant(Version *p_version, uint32_t p_variant) {
+	// The version's mutex is held. Rare: the caller predicted this variant unused.
+	print_verbose(vformat("Shader '%s': compiling skipped variant %d on first use.", name, p_variant));
+
+	CompileData compile_data;
+	compile_data.version = p_version;
+	compile_data.group = variant_to_group[p_variant];
+	_compile_variant_now(p_variant, compile_data);
+
+	p_version->variant_data.write[p_variant] = Vector<uint8_t>(); // Not cached.
+	p_version->skipped_variants_built |= uint64_t(1) << p_variant;
 }
 
 bool ShaderRD::version_free(RID p_version) {

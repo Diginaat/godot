@@ -238,6 +238,51 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 #endif
 	pipeline_hash_map.clear_pipelines();
 
+	// If any form of Alpha Antialiasing is enabled, set the blend mode to alpha to coverage.
+	if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF) {
+		blend_mode = BLEND_MODE_ALPHA_TO_COVERAGE;
+	}
+
+	uses_blend_alpha = blend_mode_uses_blend_alpha(BlendMode(blend_mode));
+
+	// Variants this shader can't draw with, compiled only if something asks (see
+	// _geometry_instance_add_surface_with_material and _fill_render_list for the
+	// pass routing):
+	// - plain depth: depth and shadow passes draw shaders that use the shared
+	//   shadow material with the default material's shader;
+	// - every depth variant but the material one: a shader only in the alpha pass
+	//   without depth is in no depth, shadow, normal-roughness or SDF list;
+	// - color with motion vectors or separate specular: a shader in the alpha pass
+	//   is drawn only by the transparent passes, which use neither.
+	uint64_t skipped_variants = 0;
+	if (!SceneShaderForwardClustered::singleton->initializing_default_shader) {
+		const bool alpha_only = uses_alpha_pass();
+		const bool no_depth = alpha_only && !uses_depth_in_alpha_pass();
+		for (uint32_t ubershader = 0; ubershader < 2; ubershader++) {
+			const uint32_t base = ubershader ? ShaderVersion::SHADER_VERSION_COLOR_PASS : 0;
+			if (uses_shared_shadow_material() || no_depth) {
+				skipped_variants |= uint64_t(1) << (base + ShaderVersion::SHADER_VERSION_DEPTH_PASS);
+				skipped_variants |= uint64_t(1) << (base + ShaderVersion::SHADER_VERSION_DEPTH_PASS_DP);
+				skipped_variants |= uint64_t(1) << (base + ShaderVersion::SHADER_VERSION_DEPTH_PASS_MULTIVIEW);
+			}
+			if (no_depth) {
+				for (uint32_t depth_version = 0; depth_version < ShaderVersion::SHADER_VERSION_COLOR_PASS; depth_version++) {
+					if (depth_version != ShaderVersion::SHADER_VERSION_DEPTH_PASS_WITH_MATERIAL) {
+						skipped_variants |= uint64_t(1) << (base + depth_version);
+					}
+				}
+			}
+		}
+		if (alpha_only) {
+			for (uint32_t flags = 0; flags < SHADER_COLOR_PASS_FLAG_COUNT; flags++) {
+				if (flags & (SHADER_COLOR_PASS_FLAG_SEPARATE_SPECULAR | SHADER_COLOR_PASS_FLAG_MOTION_VECTORS)) {
+					skipped_variants |= uint64_t(1) << (ShaderVersion::SHADER_VERSION_COLOR_PASS * 2 + flags);
+				}
+			}
+		}
+	}
+	SceneShaderForwardClustered::singleton->shader.version_set_skipped_variants(version, skipped_variants);
+
 	SceneShaderForwardClustered::singleton->shader.version_set_code(version, gen_code.code, gen_code.uniforms, gen_code.stage_globals[ShaderCompiler::STAGE_VERTEX], gen_code.stage_globals[ShaderCompiler::STAGE_FRAGMENT], gen_code.defines);
 
 	ubo_size = gen_code.uniform_total_size;
@@ -251,13 +296,6 @@ void SceneShaderForwardClustered::ShaderData::set_code(const String &p_code) {
 		material_table = memnew(MaterialTable);
 		material_table->stride = ubo_size;
 	}
-
-	// If any form of Alpha Antialiasing is enabled, set the blend mode to alpha to coverage.
-	if (alpha_antialiasing_mode != ALPHA_ANTIALIASING_OFF) {
-		blend_mode = BLEND_MODE_ALPHA_TO_COVERAGE;
-	}
-
-	uses_blend_alpha = blend_mode_uses_blend_alpha(BlendMode(blend_mode));
 }
 
 void SceneShaderForwardClustered::ShaderData::set_code_rt(const String &p_code_rt) {
@@ -833,7 +871,9 @@ bool SceneShaderForwardClustered::MaterialData::update_parameters(const HashMap<
 	if (!shader_data->version.is_valid()) {
 		return false;
 	}
-	RID shader_rid = SceneShaderForwardClustered::singleton->shader.version_get_shader(shader_data->version, 0);
+	// The material set's layout is the same in every variant: take it from the
+	// color ubershader, which every shader builds (its depth variants may be skipped).
+	RID shader_rid = SceneShaderForwardClustered::singleton->shader.version_get_shader(shader_data->version, ShaderVersion::SHADER_VERSION_COLOR_PASS * 2 + SHADER_COLOR_PASS_FLAG_UBERSHADER);
 
 	MutexLock lock(SceneShaderForwardClustered::singleton_mutex);
 	RD *rd = RD::get_singleton();
@@ -1285,6 +1325,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		//default material and shader
 		default_shader = material_storage->shader_allocate();
 		material_storage->shader_initialize(default_shader);
+		initializing_default_shader = true;
 		material_storage->shader_set_code(default_shader, R"(
 // Default 3D material shader (Forward+).
 
@@ -1300,6 +1341,7 @@ void fragment() {
 	METALLIC = 0.2;
 }
 )");
+		initializing_default_shader = false;
 		default_material = material_storage->material_allocate();
 		material_storage->material_initialize(default_material);
 		material_storage->material_set_shader(default_material, default_shader);
