@@ -1,3 +1,4 @@
+# There will be no more active development on this fork.
 # Vibe Coded with Claude and OpenCode
 # Godot Engine with DDGI, NVIDIA DLSS, path tracing and PhysX 5
 
