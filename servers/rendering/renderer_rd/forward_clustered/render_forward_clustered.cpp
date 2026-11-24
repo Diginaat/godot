@@ -123,7 +123,7 @@ bool RenderForwardClustered::RenderBufferDataForwardClustered::ensure_mfx_tempor
 
 void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 	for (MultiMeshCullBuffers *cull : { &multimesh_cull, &multimesh_shadow_cull }) {
-		for (RID resource : { cull->visible_ids, cull->commands, cull->inputs, cull->ranks, cull->blocks, cull->occluded_ids, cull->occluded_commands, cull->occlusion_inputs, cull->history[0], cull->history[1], cull->phase1_ids, cull->phase1_commands, cull->phase2_ids, cull->phase2_commands }) {
+		for (RID resource : { cull->visible_ids, cull->commands, cull->inputs, cull->ranks, cull->blocks, cull->occluded_ids, cull->occluded_commands, cull->occlusion_inputs, cull->history[0], cull->history[1], cull->phase1_ids, cull->phase1_commands, cull->phase2_ids, cull->phase2_commands, cull->group_draws }) {
 			if (resource.is_valid()) {
 				RD::get_singleton()->free_rid(resource);
 			}

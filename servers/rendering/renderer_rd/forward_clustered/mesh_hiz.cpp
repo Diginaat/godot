@@ -496,6 +496,7 @@ void RenderForwardClustered::_dispatch_multimesh_selection(RD::ComputeListID p_c
 	for (uint32_t binding = 0; binding < 6; binding++) {
 		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, binding, resources[binding]));
 	}
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 10, cull.group_draws));
 	for (uint32_t i = 0; i < p_extra_count; i++) {
 		uniforms.push_back(p_extra[i]);
 	}
@@ -505,10 +506,8 @@ void RenderForwardClustered::_dispatch_multimesh_selection(RD::ComputeListID p_c
 		const RID shader = multimesh_cull.shader.version_get_shader(multimesh_cull.version, mode);
 		rd->compute_list_bind_compute_pipeline(p_compute, multimesh_cull.pipelines[mode]);
 		rd->compute_list_bind_uniform_set(p_compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
-		for (uint32_t draw = 0; draw < cull.draws.size(); draw++) {
-			rd->compute_list_set_push_constant(p_compute, &draw, sizeof(draw));
-			rd->compute_list_dispatch(p_compute, mode == 4 ? 1 : (cull.draws[draw].count + 63) / 64, 1, 1);
-		}
+		// Every mode here is batched: the scan per draw, the others per workgroup.
+		_dispatch_multimesh_batched(p_compute, mode == 4 ? cull.draws.size() : cull.group_count);
 		if (step != 2) {
 			rd->compute_list_add_barrier(p_compute);
 		}
@@ -546,6 +545,7 @@ void RenderForwardClustered::_occlude_multimesh(const RenderDataRD *p_render_dat
 	for (uint32_t binding = 0; binding < 6; binding++) {
 		shared.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, binding, resources[binding]));
 	}
+	shared.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 10, cull.group_draws));
 	LocalVector<RD::Uniform> occlude(shared);
 	occlude.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, cull.occlusion_inputs));
 	occlude.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 8, cull.history[cull.history_write ^ 1u]));
@@ -565,15 +565,21 @@ void RenderForwardClustered::_occlude_multimesh(const RenderDataRD *p_render_dat
 		const RID shader = multimesh_cull.shader.version_get_shader(multimesh_cull.version, mode);
 		rd->compute_list_bind_compute_pipeline(compute, multimesh_cull.pipelines[mode]);
 		rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, mode == 3 ? occlude : shared), 0);
-		RID previous_transforms;
-		for (uint32_t draw = 0; draw < cull.draws.size(); draw++) {
-			if (mode == 3 && cull.draws[draw].transforms != previous_transforms) {
-				RD::Uniform transforms(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, cull.draws[draw].transforms);
-				rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache(shader, 1, transforms), 1);
-				previous_transforms = cull.draws[draw].transforms;
+		if (mode == 4) {
+			_dispatch_multimesh_batched(compute, cull.draws.size());
+		} else if (mode == 2) {
+			_dispatch_multimesh_batched(compute, cull.group_count);
+		} else {
+			RID previous_transforms;
+			for (uint32_t draw = 0; draw < cull.draws.size(); draw++) {
+				if (cull.draws[draw].transforms != previous_transforms) {
+					RD::Uniform transforms(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, cull.draws[draw].transforms);
+					rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache(shader, 1, transforms), 1);
+					previous_transforms = cull.draws[draw].transforms;
+				}
+				rd->compute_list_set_push_constant(compute, &draw, sizeof(draw));
+				rd->compute_list_dispatch(compute, (cull.draws[draw].count + 63) / 64, 1, 1);
 			}
-			rd->compute_list_set_push_constant(compute, &draw, sizeof(draw));
-			rd->compute_list_dispatch(compute, mode == 4 ? 1 : (cull.draws[draw].count + 63) / 64, 1, 1);
 		}
 		if (step != 2) {
 			rd->compute_list_add_barrier(compute);

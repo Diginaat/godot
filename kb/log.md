@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-24 (batched MultiMesh selection)
+
+* **Changed**: [two-pass MultiMesh occlusion](/project/multimesh-two-pass.md):
+  scan, scatter, split and phase-2 selection run as one dispatch for all
+  draws; valley now 96-101% of one pass (was 101-107%), street grid 9-11%
+  faster. `culling.gd` kernel test uses the batched protocol.
+
 ## 2026-11-24 (two-pass MultiMesh occlusion)
 
 * **Added**: [two-pass MultiMesh occlusion](/project/multimesh-two-pass.md)

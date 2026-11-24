@@ -141,6 +141,11 @@ public:
 			};
 			LocalVector<Draw> draws;
 			LocalVector<uint32_t> command_words; // As uploaded to `commands`.
+			// Per workgroup of the batched modes (scatter, split, phase 2): its
+			// draw and its workgroup in that draw (multimesh_cull.glsl group_draws).
+			RID group_draws;
+			uint32_t group_capacity = 0;
+			uint32_t group_count = 0;
 			// HZB occlusion (main view only): the frustum-visible instances that
 			// are not behind the depth pre-pass, compacted into a second ID and
 			// command buffer that only the opaque colour passes use.
@@ -423,6 +428,9 @@ protected:
 	// Rank (p_rank_mode), scan and scatter of the main view's MultiMesh
 	// instances into an ID and command buffer pair.
 	void _dispatch_multimesh_selection(RD::ComputeListID p_compute, RenderBufferDataForwardClustered *p_buffers, uint32_t p_rank_mode, RID p_ids, RID p_commands, const RD::Uniform *p_extra, uint32_t p_extra_count);
+	// One dispatch of p_groups workgroups for the batched multimesh_cull modes
+	// (the group count goes in the push constant; wide dispatches use y).
+	static void _dispatch_multimesh_batched(RD::ComputeListID p_compute, uint32_t p_groups);
 	// GPU path instances (rendering/geometry/gpu_instances/occlusion): the
 	// colour passes draw the members the HZB cannot prove hidden.
 	bool _setup_gpu_instances_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);

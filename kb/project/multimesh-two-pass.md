@@ -1,7 +1,7 @@
 ---
 type: Finding
 title: Two-pass MultiMesh occlusion in the depth pre-pass
-description: GPU-culled MultiMesh instances hidden last frame are left out of the depth pre-pass; exact images; street grid 7-12% faster, open valley 1-7% slower.
+description: GPU-culled MultiMesh instances hidden last frame are left out of the depth pre-pass; exact images; street grid 9-11% faster, open valley neutral (96-101%) once the selection passes are batched.
 tags: [geometry, occlusion, hzb, multimesh, gpu, rendering]
 status: stable
 generated: { by: claude-opus-5-5, at: 2026-11-24T00:00:00Z }
@@ -39,6 +39,14 @@ from `mesh_hiz.cpp`:
   conservative), and visible is a subset of phase 1 plus phase 2, so the
   colour pass's depth-equal test finds every visible instance.
 - `multimesh_depth_instances` statistic (phase 1 plus phase 2).
+- Batched selection: scan, scatter, split and phase 2 read no transforms,
+  so each runs as one dispatch for all draws. The scan uses one workgroup
+  per draw; the others read a (draw, workgroup) table
+  (`MultiMeshCullBuffers::group_draws`, binding 10, built in
+  `_dispatch_multimesh_culling()`). The push constant is the workgroup
+  count, and wide dispatches spill into y (`_dispatch_multimesh_batched()`).
+  Only the cull and occlusion modes stay per draw (they bind each
+  MultiMesh's transform buffer).
 
 # Proof (2026-11-24, Linux, RTX 3060, Vulkan)
 
@@ -62,13 +70,22 @@ valley's depth pre-pass is dominated by terrain and grass, not MultiMesh
 trees (phase-1 interval 1.197 to 1.172 ms), so the selection passes and
 the phase-2 pass's extra indirect draws cost more than they save.
 
+After batching the selection dispatches (same day): valley 101%, 96%,
+100% of one pass; at view 27 the opaque pass is 1.590 vs 1.596 ms (was
+1.588 vs 1.814), MultiMesh HZB Occlusion 0.037 vs 0.047 ms (was 0.070 vs
+0.122). `hzb_bench` `two_pass+mm2` vs `two_pass+mm`: street 4.937 to
+4.409, corner 4.008 to 3.662, aerial 7.534 to 6.847 ms. The per-draw
+dispatches (one pipeline bind, push constant and barrier-separated
+dispatch per MultiMesh, four modes) were the open-scene cost.
+
 The valley does not repeat exactly along a moving camera path even with
 one pass (9 of 12 sampled frames differ between two identical runs), so
 image equality is tested in the controlled scene only.
 
 # Next
 
-- Cut the open-scene cost: phase 2 re-issues every GPU-culled MultiMesh
-  draw (mostly zero instances); skip it when no instance became visible.
+- Phase 2 still re-issues every GPU-culled MultiMesh draw (mostly zero
+  instances); skipping it when nothing became visible would save ~0.01 ms
+  here, not worth a GPU readback.
 - Same scheme for GPU path instances and CPU list meshes (they still draw
   everything in the pre-pass).

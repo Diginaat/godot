@@ -130,13 +130,21 @@ func _check_kernel() -> void:
 	ids.resize(64 + 3 * KERNEL_STRIDE + 64)
 	ids.fill(-1)
 	var commands := PackedInt32Array([3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 3, 0, 0, 0, 0])
+	# Scatter runs all draws in one dispatch: one (draw, workgroup) pair per
+	# workgroup, as the engine builds it.
+	var group_draws := PackedInt32Array()
+	for draw in 3:
+		for group in (draw_counts[draw] + 63) / 64:
+			group_draws.append_array(PackedInt32Array([draw, group]))
+	var group_count := group_draws.size() / 2
 	var buffers: Array[RID] = [
 		rd.storage_buffer_create(transforms.size() * 4, transforms.to_byte_array()),
 		rd.storage_buffer_create(inputs.size(), inputs),
 		rd.storage_buffer_create(ids.size() * 4, ids.to_byte_array()),
 		rd.storage_buffer_create(commands.size() * 4, commands.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT),
 		rd.storage_buffer_create(ids.size() * 4),
-		rd.storage_buffer_create((ids.size() / 64) * 4)
+		rd.storage_buffer_create((ids.size() / 64) * 4),
+		rd.storage_buffer_create(group_draws.size() * 4, group_draws.to_byte_array())
 	]
 	# Set 0: shared inputs, IDs, commands and scratch. Set 1 (cull mode only):
 	# the MultiMesh transform buffer.
@@ -147,6 +155,11 @@ func _check_kernel() -> void:
 		uniform.binding = binding
 		uniform.add_id(buffers[binding + 1])
 		uniforms.append(uniform)
+	var group_uniform := RDUniform.new()
+	group_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
+	group_uniform.binding = 10
+	group_uniform.add_id(buffers[6])
+	uniforms.append(group_uniform)
 	var transforms_uniform := RDUniform.new()
 	transforms_uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
 	transforms_uniform.binding = 0
@@ -161,9 +174,16 @@ func _check_kernel() -> void:
 		rd.compute_list_bind_uniform_set(list, uniform_sets[mode], 0)
 		if mode == 0:
 			rd.compute_list_bind_uniform_set(list, transforms_set, 1)
-		for draw in 3:
-			rd.compute_list_set_push_constant(list, PackedInt32Array([draw]).to_byte_array(), 4)
-			rd.compute_list_dispatch(list, 1 if mode == 1 else maxi(1, (draw_counts[draw] + 63) / 64), 1, 1)
+		if mode == 0:
+			for draw in 3:
+				rd.compute_list_set_push_constant(list, PackedInt32Array([draw]).to_byte_array(), 4)
+				rd.compute_list_dispatch(list, maxi(1, (draw_counts[draw] + 63) / 64), 1, 1)
+		else:
+			# Batched: the push constant is the number of workgroups (one per
+			# draw for the scan).
+			var groups := 3 if mode == 1 else group_count
+			rd.compute_list_set_push_constant(list, PackedInt32Array([groups]).to_byte_array(), 4)
+			rd.compute_list_dispatch(list, groups, 1, 1)
 		if mode != 2:
 			rd.compute_list_add_barrier(list)
 	rd.compute_list_end()

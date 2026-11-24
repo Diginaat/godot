@@ -331,6 +331,30 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 			return false;
 		}
 	}
+	// Workgroup table of the batched modes.
+	LocalVector<uint32_t> group_draws;
+	for (uint32_t draw = 0; draw < draw_count; draw++) {
+		for (uint32_t group = 0; group < (p_batch.inputs[draw].count + 63) / 64; group++) {
+			group_draws.push_back(draw);
+			group_draws.push_back(group);
+		}
+	}
+	const uint32_t group_count = group_draws.size() / 2;
+	if (r_buffers.group_capacity < MAX(group_count, 1u)) {
+		if (r_buffers.group_draws.is_valid()) {
+			rd->free_rid(r_buffers.group_draws);
+		}
+		r_buffers.group_capacity = Math::next_power_of_2(MAX(group_count, 1u));
+		r_buffers.group_draws = rd->storage_buffer_create(r_buffers.group_capacity * 2 * sizeof(uint32_t));
+		if (r_buffers.group_draws.is_null()) {
+			r_buffers.group_capacity = 0;
+			return false;
+		}
+	}
+	r_buffers.group_count = group_count;
+	if (group_count > 0) {
+		rd->buffer_update(r_buffers.group_draws, 0, group_draws.size() * sizeof(uint32_t), group_draws.ptr());
+	}
 	rd->buffer_update(r_buffers.commands, 0, p_batch.commands.size() * sizeof(uint32_t), p_batch.commands.ptr());
 	rd->buffer_update(r_buffers.inputs, 0, draw_count * sizeof(MultiMeshCullInput), p_batch.inputs.ptr());
 	rd->capture_timestamp(p_label);
@@ -345,21 +369,28 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 		uniform.append_id(resources[binding]);
 		shared.push_back(uniform);
 	}
+	shared.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 10, r_buffers.group_draws));
 	RD::ComputeListID compute_list = rd->compute_list_begin();
 	for (uint32_t mode = 0; mode < 3; mode++) {
 		const RID shader = multimesh_cull.shader.version_get_shader(multimesh_cull.version, mode);
 		rd->compute_list_bind_compute_pipeline(compute_list, multimesh_cull.pipelines[mode]);
 		rd->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, shared), 0);
-		RID previous_transforms;
-		for (uint32_t draw = 0; draw < draw_count; draw++) {
-			if (mode == 0 && p_batch.transforms[draw] != previous_transforms) {
-				// Consecutive surfaces of one MultiMesh share the transform set.
-				RD::Uniform transforms(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, p_batch.transforms[draw]);
-				rd->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache(shader, 1, transforms), 1);
-				previous_transforms = p_batch.transforms[draw];
+		if (mode == 1) {
+			_dispatch_multimesh_batched(compute_list, draw_count); // Scan: one workgroup per draw.
+		} else if (mode == 2) {
+			_dispatch_multimesh_batched(compute_list, group_count);
+		} else {
+			RID previous_transforms;
+			for (uint32_t draw = 0; draw < draw_count; draw++) {
+				if (p_batch.transforms[draw] != previous_transforms) {
+					// Consecutive surfaces of one MultiMesh share the transform set.
+					RD::Uniform transforms(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, p_batch.transforms[draw]);
+					rd->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache(shader, 1, transforms), 1);
+					previous_transforms = p_batch.transforms[draw];
+				}
+				rd->compute_list_set_push_constant(compute_list, &draw, sizeof(draw));
+				rd->compute_list_dispatch(compute_list, (p_batch.inputs[draw].count + 63) / 64, 1, 1);
 			}
-			rd->compute_list_set_push_constant(compute_list, &draw, sizeof(draw));
-			rd->compute_list_dispatch(compute_list, mode == 1 ? 1 : (p_batch.inputs[draw].count + 63) / 64, 1, 1);
 		}
 		if (mode != 2) {
 			rd->compute_list_add_barrier(compute_list);
@@ -381,4 +412,13 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 	}
 	r_buffers.active = true;
 	return true;
+}
+
+void RenderForwardClustered::_dispatch_multimesh_batched(RD::ComputeListID p_compute, uint32_t p_groups) {
+	if (p_groups == 0) {
+		return;
+	}
+	RD::get_singleton()->compute_list_set_push_constant(p_compute, &p_groups, sizeof(p_groups));
+	const uint32_t width = MIN(p_groups, 65535u);
+	RD::get_singleton()->compute_list_dispatch(p_compute, width, (p_groups + width - 1) / width, 1);
 }

@@ -106,16 +106,32 @@ layout(set = 0, binding = 7) uniform sampler2D depth_pyramid;
 
 const uint STAT_HZB_INSTANCES_OCCLUDED = 28u;
 #endif
+// Cull and occlusion dispatch once per draw (each binds its MultiMesh's
+// transforms; draw_index is the draw). The other modes run one dispatch for
+// all draws, where draw_index is the number of workgroups: the scan one
+// workgroup per draw, scatter, split and phase 2 through group_draws.
 layout(push_constant, std430) uniform Params {
 	uint draw_index;
 }
 params;
 
+#if defined(MODE_SCATTER) || defined(MODE_SPLIT) || defined(MODE_PHASE2)
+#define BATCHED_GROUPS
+// Per workgroup of the batched dispatch: its draw and its workgroup in that draw.
+layout(set = 0, binding = 10, std430) readonly buffer GroupDraws {
+	uvec2 data[];
+}
+group_draws;
+#endif
+
+uint draw_index;
+uint group_index;
+
 #if defined(MODE_OCCLUDE) || defined(MODE_SPLIT) || defined(MODE_PHASE2)
 // Phase 1 draws an instance when it was visible last frame, or when the
 // MultiMesh has no history (new to the view, or resized).
 bool drawn_in_phase1(uint instance_id) {
-	uint offset = occlusion.data[params.draw_index].params.z;
+	uint offset = occlusion.data[draw_index].params.z;
 	return offset == NO_HISTORY || previous_history.data[offset + instance_id] != 0u;
 }
 #endif
@@ -199,7 +215,25 @@ bool is_visible(CullData input_data, uint instance_id, out uint level) {
 #endif
 
 void main() {
-	CullData input_data = inputs.data[params.draw_index];
+#if defined(MODE_SCAN) || defined(BATCHED_GROUPS)
+	// Wide dispatches spill into y (65535 workgroups per dimension).
+	uint group = gl_WorkGroupID.x + gl_WorkGroupID.y * gl_NumWorkGroups.x;
+	if (group >= params.draw_index) {
+		return;
+	}
+#ifdef MODE_SCAN
+	draw_index = group;
+	group_index = 0u;
+#else
+	uvec2 entry = group_draws.data[group];
+	draw_index = entry.x;
+	group_index = entry.y;
+#endif
+#else
+	draw_index = params.draw_index;
+	group_index = gl_WorkGroupID.x;
+#endif
+	CullData input_data = inputs.data[draw_index];
 	// Each draw reserves levels * stride IDs; level l uses [l * stride, (l + 1) * stride)
 	// and its block counts start at block_offset + l * level_blocks.
 	uint block_offset = input_data.params.w / 64u;
@@ -241,7 +275,7 @@ void main() {
 		barrier();
 	}
 #elif defined(MODE_SCATTER)
-	uint instance_id = gl_GlobalInvocationID.x;
+	uint instance_id = group_index * 64u + gl_LocalInvocationIndex;
 	if (instance_id < input_data.params.x) {
 		uint rank = ranks.data[input_data.params.w + instance_id];
 		if ((rank & 0x80000000u) != 0u) {
@@ -251,7 +285,7 @@ void main() {
 		}
 	}
 #else
-	uint instance_id = gl_GlobalInvocationID.x;
+	uint instance_id = group_index * 64u + gl_LocalInvocationIndex;
 	uint level = 0u;
 	uint keep = 0u; // Rank bits kept on unselected instances (MODE_SPLIT).
 #ifdef MODE_OCCLUDE
@@ -270,7 +304,7 @@ void main() {
 			vec3 transformed_center = vec3(dot(r0, center), dot(r1, center), dot(r2, center));
 			vec3 extent = input_data.half_extents.xyz;
 			vec3 transformed_extent = vec3(dot(abs(r0.xyz), extent), dot(abs(r1.xyz), extent), dot(abs(r2.xyz), extent));
-			OcclusionData occlusion_data = occlusion.data[params.draw_index];
+			OcclusionData occlusion_data = occlusion.data[draw_index];
 			// Rounding bound: the CPU matrix bound times the largest local
 			// magnitude of the box, with a margin for the instance transform.
 			vec3 magnitude = abs(transformed_center) + transformed_extent + 1.0;
@@ -282,7 +316,7 @@ void main() {
 			}
 #endif
 		}
-		uint history_offset = occlusion.data[params.draw_index].params.w;
+		uint history_offset = occlusion.data[draw_index].params.w;
 		if (history_offset != NO_HISTORY) {
 			history.data[history_offset + instance_id] = visible ? 1u : 0u;
 		}
@@ -321,7 +355,7 @@ void main() {
 		uint selected = 0u;
 		for (uint l = 0u; l < levels; l++) {
 			uint count = (prefix >> (8u * l)) & 0xffu;
-			blocks.data[block_offset + l * level_blocks + gl_WorkGroupID.x] = count;
+			blocks.data[block_offset + l * level_blocks + group_index] = count;
 			selected += count;
 		}
 #if defined(GEOMETRY_STATISTICS) && (defined(MODE_SPLIT) || defined(MODE_PHASE2))
