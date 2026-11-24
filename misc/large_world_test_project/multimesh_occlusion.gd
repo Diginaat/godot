@@ -62,6 +62,10 @@ func _ready() -> void:
 	environment.background_color = Color(0.1, 0.12, 0.15)
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	environment.ambient_light_color = Color(0.4, 0.4, 0.4)
+	# SSAO reads the depth pre-pass, so an instance missing from the two-pass
+	# depth passes changes the image (the colour pass writes depth itself).
+	environment.ssao_enabled = true
+	environment.ssao_intensity = 4.0
 	var world := WorldEnvironment.new()
 	world.environment = environment
 	add_child(world)

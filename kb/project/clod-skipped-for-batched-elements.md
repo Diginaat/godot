@@ -62,6 +62,11 @@ triangles, corner 168 / 255,230. GPU p50, before and after:
 `gpu_instances`, `multimesh_occlusion`, `culling`, `multimesh_lod`, path
 tracer and DDGI smoke pass.
 
+The fix first reached only 55 of the 225 objects: the CLOD viewport budget
+was 65,536 groups and each object has about 1,190. The budget is now 2^20
+groups and 16,384 draws (buffers grow to what a frame uses). With all
+objects on CLOD (191 surfaces in the street view, 816,641 triangles):
+`off` street 3.699, corner 2.662, aerial 4.302 ms.
+
 Open: with CLOD drawn, CLOD HZB occlusion is slower than none here
-(street `two_pass` 4.359 vs `off` 4.036 ms): the CLOD groups are already
-cheap (234 k triangles), so the occlusion passes cost more than they save.
+(see [CLOD two-pass costs more than it saves](/project/clod-two-pass-zero-draws.md)).

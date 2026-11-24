@@ -22,6 +22,7 @@
 * [GPU cluster selection](/project/gpu-cluster-selection.md) - ancestor-veto cuts, projected-error/frustum selection and guarded native commands
 * [Two-pass MultiMesh occlusion](/project/multimesh-two-pass.md) - hidden-last-frame instances left out of the depth pre-pass; exact; street grid 7-12% faster, open valley 1-7% slower
 * [Cluster LOD skips repeat-batched elements](/project/clod-skipped-for-batched-elements.md) - shared meshes with same-shader materials batched since material tables, so no CLOD; fixed (G5): CLOD-eligible surfaces are not batched
+* [CLOD two-pass costs more than it saves](/project/clod-two-pass-zero-draws.md) - one indirect record per group in every pass, mostly empty; two_pass 27-32% slower than off in hzb_bench; fix: indirect count draws
 * [Adaptive variable rate shading](/project/adaptive-vrs.md) - GPU picks each tile's shading rate from the previous frame; main-viewport default; 2-5% on the valley, 3.6x on an expensive-shader floor, ~47 dB PSNR
 * [GPU occlusion for CPU render list meshes](/project/mesh-occlusion.md) - HZB-tested indirect draws for every opaque CPU-list mesh (lightmapped, skinned, fading...); exact images, 20 of 20 hidden meshes skipped
 * [Resident CLOD raster](/project/resident-clod-raster.md) - native storage, viewport commands, original vertex/material pipelines and conventional fallback

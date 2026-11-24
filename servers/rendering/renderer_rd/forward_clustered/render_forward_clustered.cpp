@@ -136,7 +136,7 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 		}
 	}
 	mesh_clod = {};
-	for (RID resource : { mesh_occlusion.elements, mesh_occlusion.commands, mesh_occlusion.view }) {
+	for (RID resource : { mesh_occlusion.elements, mesh_occlusion.commands, mesh_occlusion.view, mesh_occlusion.slots, mesh_occlusion.history, mesh_occlusion.phase1_commands, mesh_occlusion.phase2_commands }) {
 		if (resource.is_valid()) {
 			RD::get_singleton()->free_rid(resource);
 		}
@@ -392,7 +392,8 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		const GeometryInstanceSurfaceDataCache *surf = p_params->elements[i];
 		const RenderElementInfo &element_info = p_params->element_info[i];
 		const bool use_clod = p_params->mesh_clod_commands.is_valid() && element_info.mesh_clod_offset != UINT32_MAX;
-		if (p_params->depth_phase2_only && !use_clod && !(p_params->multimesh_cull_commands.is_valid() && element_info.multimesh_cull_draw != UINT32_MAX)) {
+		if (p_params->depth_phase2_only && !use_clod && !(p_params->multimesh_cull_commands.is_valid() && element_info.multimesh_cull_draw != UINT32_MAX) &&
+				!(p_params->mesh_occlusion_tested && p_params->mesh_occlusion_tested[i])) {
 			continue;
 		}
 		// GPU path bucket: one indirect draw of the instances its cull pass wrote.
@@ -2880,17 +2881,17 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 		RD::get_singleton()->draw_command_begin_label("Render Depth Pre-Pass");
 
-		// HZB occlusion: with two passes the pre-pass draws only the CLOD groups
-		// and GPU-culled MultiMesh instances that were visible when last tested,
-		// and a second depth pass adds the ones found visible now. GPU path
-		// instances and CPU list meshes are tested after the pre-pass and
-		// removed from the colour passes only.
+		// HZB occlusion: with two passes the pre-pass draws only the CLOD groups,
+		// GPU-culled MultiMesh instances and CPU list meshes that were visible
+		// when last tested, and a second depth pass adds the ones found visible
+		// now. GPU path instances are tested after the pre-pass and removed
+		// from the colour passes only.
 		const bool hzb_wanted = rb_data.is_valid() && ((mesh_clod_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_enabled"))) || (multimesh_cull_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/multimesh_gpu_culling/occlusion"))) || (gpu_instance_commands.is_valid() && GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion")) || (!render_list[RENDER_LIST_OPAQUE].elements.is_empty() && GLOBAL_GET_CACHED(bool, "rendering/geometry/mesh_occlusion/enabled")));
 		const bool hzb = hzb_wanted && _setup_hzb(p_render_data, rb_data.ptr());
 		const bool clod_occlusion = hzb && mesh_clod_commands.is_valid() && _setup_mesh_clod_occlusion(p_render_data, rb_data.ptr());
 		const bool multimesh_occlusion = hzb && multimesh_cull_commands.is_valid() && _setup_multimesh_occlusion(p_render_data, rb_data.ptr());
 		const bool gpu_instances_occlusion = hzb && gpu_instance_commands.is_valid() && _setup_gpu_instances_occlusion(p_render_data, rb_data.ptr());
-		const bool mesh_occlusion = hzb && _setup_mesh_occlusion(p_render_data, rb_data.ptr());
+		const bool mesh_occlusion = hzb && _setup_mesh_occlusion(p_render_data, rb_data.ptr(), depth_pass_mode == PASS_MODE_DEPTH);
 		const bool clod_two_pass = clod_occlusion && rb_data->mesh_clod.two_pass;
 		// Always-on stage timestamps while a GPU geometry path is active, for
 		// benchmarks (RENDER_TIMESTAMP needs the profiler).
@@ -2904,6 +2905,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		if (multimesh_two_pass) {
 			_split_multimesh_occlusion(rb_data.ptr());
 		}
+		const bool mesh_two_pass = mesh_occlusion && rb_data->mesh_occlusion.two_pass;
+		if (mesh_two_pass) {
+			_split_mesh_occlusion(rb_data.ptr());
+		}
 		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_two_pass ? rb_data->multimesh_cull.phase1_ids : multimesh_visible_ids, gpu_instance_data, gpu_instance_ids);
 
 		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || using_planar || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
@@ -2911,6 +2916,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		render_list_params.multimesh_cull_commands = multimesh_two_pass ? rb_data->multimesh_cull.phase1_commands : multimesh_cull_commands;
 		render_list_params.mesh_clod_commands = clod_two_pass ? rb_data->mesh_clod.depth_commands : mesh_clod_commands;
 		render_list_params.gpu_instance_commands = gpu_instance_commands;
+		if (mesh_two_pass) {
+			render_list_params.mesh_occlusion_commands = rb_data->mesh_occlusion.phase1_commands;
+			render_list_params.mesh_occlusion_tested = rb_data->mesh_occlusion.tested.ptr();
+		}
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 
 		if (clod_occlusion || multimesh_occlusion || gpu_instances_occlusion || mesh_occlusion) {
@@ -2925,12 +2934,18 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				// it stays hidden. Opaque and motion passes use the occluded lists.
 				_occlude_multimesh(p_render_data, rb_data.ptr());
 			}
-			if (clod_two_pass || multimesh_two_pass) {
+			if (mesh_occlusion) {
+				// Before phase 2: it also writes the phase-2 commands.
+				_occlude_meshes(p_render_data, rb_data.ptr());
+			}
+			if (clod_two_pass || multimesh_two_pass || mesh_two_pass) {
 				// Phase 2 adds what is visible now but was not drawn in phase 1.
 				RENDER_TIMESTAMP("Render Phase 2 Depth");
 				RD::get_singleton()->capture_timestamp("Mesh CLOD Phase 2 Depth");
 				render_list_params.mesh_clod_commands = clod_two_pass ? rb_data->mesh_clod.phase2_commands : RID();
 				render_list_params.multimesh_cull_commands = multimesh_two_pass ? rb_data->multimesh_cull.phase2_commands : RID();
+				render_list_params.mesh_occlusion_commands = mesh_two_pass ? rb_data->mesh_occlusion.phase2_commands : RID();
+				render_list_params.mesh_occlusion_tested = mesh_two_pass ? rb_data->mesh_occlusion.tested.ptr() : nullptr;
 				render_list_params.depth_phase2_only = true;
 				if (multimesh_two_pass) {
 					render_list_params.render_pass_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, rb_data->multimesh_cull.phase2_ids, gpu_instance_data, gpu_instance_ids);
@@ -2945,9 +2960,6 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				_occlude_gpu_instances(p_render_data, rb_data.ptr());
 				gpu_instance_commands = gpu_instances_view->occluded_commands_buffer;
 				gpu_instance_ids = gpu_instances_view->occluded_ids_buffer;
-			}
-			if (mesh_occlusion) {
-				_occlude_meshes(p_render_data, rb_data.ptr());
 			}
 		}
 		if (gpu_geometry_timestamps) {
@@ -6471,8 +6483,10 @@ RenderForwardClustered::~RenderForwardClustered() {
 		mesh_hiz.occlude_shader.version_free(mesh_hiz.occlude_version);
 	}
 	if (mesh_hiz.mesh_occlusion_version.is_valid()) {
-		if (mesh_hiz.mesh_occlusion_pipeline.is_valid()) {
-			RD::get_singleton()->free_rid(mesh_hiz.mesh_occlusion_pipeline);
+		for (RID pipeline : mesh_hiz.mesh_occlusion_pipelines) {
+			if (pipeline.is_valid()) {
+				RD::get_singleton()->free_rid(pipeline);
+			}
 		}
 		mesh_hiz.mesh_occlusion_shader.version_free(mesh_hiz.mesh_occlusion_version);
 	}

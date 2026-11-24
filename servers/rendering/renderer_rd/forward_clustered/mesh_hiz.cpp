@@ -759,9 +759,10 @@ namespace {
 struct MeshOcclusionElement {
 	float position[4];
 	float size[4];
-	uint32_t draw[4]; // Command index (= opaque list element), index or vertex count, instances, unused.
+	uint32_t draw[4]; // Command index (= opaque list element), index or vertex count, instances, depth pass index or vertex count.
+	uint32_t slots[4]; // First entry in the slot list, number of entries, unused.
 };
-static_assert(sizeof(MeshOcclusionElement) == 48);
+static_assert(sizeof(MeshOcclusionElement) == 64);
 struct MeshOcclusionView {
 	float world_to_clip[16];
 	float abs_to_clip[16];
@@ -770,9 +771,10 @@ struct MeshOcclusionView {
 static_assert(sizeof(MeshOcclusionView) == 144);
 } // namespace
 
-bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
+bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers, bool p_depth_shadow_mesh) {
 	auto &occlusion = p_buffers->mesh_occlusion;
 	occlusion.ready = false;
+	occlusion.two_pass = false;
 	occlusion.count = 0;
 	const RSE::ViewportDebugDraw debug_draw = get_debug_draw_mode();
 	// Wireframe draws other index arrays; overdraw should show every layer.
@@ -784,12 +786,17 @@ bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_
 	if (mesh_hiz.mesh_occlusion_version.is_null()) {
 		Vector<String> modes;
 		modes.push_back("");
+		modes.push_back("\n#define MODE_SPLIT\n");
 		mesh_hiz.mesh_occlusion_shader.initialize(modes);
 		mesh_hiz.mesh_occlusion_version = mesh_hiz.mesh_occlusion_shader.version_create();
-		mesh_hiz.mesh_occlusion_pipeline = rd->compute_pipeline_create(mesh_hiz.mesh_occlusion_shader.version_get_shader(mesh_hiz.mesh_occlusion_version, 0));
+		for (uint32_t mode = 0; mode < 2; mode++) {
+			mesh_hiz.mesh_occlusion_pipelines[mode] = rd->compute_pipeline_create(mesh_hiz.mesh_occlusion_shader.version_get_shader(mesh_hiz.mesh_occlusion_version, mode));
+		}
 	}
-	if (mesh_hiz.mesh_occlusion_pipeline.is_null()) {
-		return false;
+	for (RID pipeline : mesh_hiz.mesh_occlusion_pipelines) {
+		if (pipeline.is_null()) {
+			return false;
+		}
 	}
 
 	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
@@ -800,6 +807,8 @@ bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_
 		memset(occlusion.tested.ptr(), 0, list_size);
 	}
 	LocalVector<MeshOcclusionElement> elements;
+	LocalVector<uint32_t> slots;
+	uint32_t slot_end = 0;
 	for (uint32_t i = 0; i < list_size; i++) {
 		const RenderElementInfo &info = list.element_info[i];
 		const GeometryInstanceSurfaceDataCache *surface = list.elements[i];
@@ -818,9 +827,16 @@ bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_
 			for (uint32_t r = 1; r < repeat && i + r < list_size; r++) {
 				box.merge_with(list.elements[i + r]->owner->transformed_aabb);
 			}
-			const bool indexed = mesh_storage->mesh_surface_get_index_array(surface->surface, info.lod_index).is_valid();
-			const uint32_t count = indexed && info.lod_index > 0 ? mesh_storage->mesh_surface_get_index_count(surface->surface, info.lod_index) : mesh_storage->mesh_surface_get_vertices_drawn_count(surface->surface);
-			if (box.is_finite() && count > 0) {
+			// The draw arguments of a mesh surface at the element's LOD, as
+			// the render list binds them.
+			auto draw_count = [&](void *p_surface) -> uint32_t {
+				const bool indexed = mesh_storage->mesh_surface_get_index_array(p_surface, info.lod_index).is_valid();
+				return indexed && info.lod_index > 0 ? mesh_storage->mesh_surface_get_index_count(p_surface, info.lod_index) : mesh_storage->mesh_surface_get_vertices_drawn_count(p_surface);
+			};
+			const uint32_t count = draw_count(surface->surface);
+			// PASS_MODE_DEPTH draws the shadow mesh, which may have other counts.
+			const uint32_t depth_count = p_depth_shadow_mesh ? draw_count(surface->surface_shadow) : count;
+			if (box.is_finite() && count > 0 && depth_count > 0) {
 				MeshOcclusionElement element = {};
 				element.position[0] = box.position.x;
 				element.position[1] = box.position.y;
@@ -831,6 +847,14 @@ bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_
 				element.draw[0] = i;
 				element.draw[1] = count;
 				element.draw[2] = repeat;
+				element.draw[3] = depth_count;
+				element.slots[0] = slots.size();
+				element.slots[1] = repeat;
+				for (uint32_t r = 0; r < repeat; r++) {
+					const uint32_t slot = list.elements[MIN(i + r, list_size - 1)]->owner->gpu_slot;
+					slots.push_back(slot);
+					slot_end = MAX(slot_end, slot + 1);
+				}
 				elements.push_back(element);
 				occlusion.tested[i] = 1;
 			}
@@ -841,8 +865,21 @@ bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_
 		return false;
 	}
 	if (!ensure_buffer(occlusion.elements, occlusion.element_capacity, elements.size(), sizeof(MeshOcclusionElement)) ||
-			!ensure_buffer(occlusion.commands, occlusion.command_capacity, list_size, 5 * sizeof(uint32_t), RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT)) {
+			!ensure_buffer(occlusion.commands, occlusion.command_capacity, list_size, 5 * sizeof(uint32_t), RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT) ||
+			!ensure_buffer(occlusion.phase1_commands, occlusion.phase1_capacity, list_size, 5 * sizeof(uint32_t), RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT) ||
+			!ensure_buffer(occlusion.phase2_commands, occlusion.phase2_capacity, list_size, 5 * sizeof(uint32_t), RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT) ||
+			!ensure_buffer(occlusion.slots, occlusion.slot_capacity, slots.size(), sizeof(uint32_t))) {
 		return false;
+	}
+	if (occlusion.history_capacity < slot_end) {
+		// Grown empty: every slot counts as visible, so phase 1 draws it.
+		const uint32_t old_capacity = occlusion.history_capacity;
+		if (!ensure_buffer(occlusion.history, occlusion.history_capacity, slot_end, sizeof(uint32_t))) {
+			return false;
+		}
+		if (occlusion.history_capacity != old_capacity) {
+			rd->buffer_clear(occlusion.history, 0, occlusion.history_capacity * sizeof(uint32_t));
+		}
 	}
 	if (occlusion.view.is_null()) {
 		occlusion.view = rd->storage_buffer_create(sizeof(MeshOcclusionView));
@@ -870,9 +907,44 @@ bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_
 	view.size[1] = size.height;
 	rd->buffer_update(occlusion.view, 0, sizeof(view), &view);
 	rd->buffer_update(occlusion.elements, 0, elements.size() * sizeof(MeshOcclusionElement), elements.ptr());
+	rd->buffer_update(occlusion.slots, 0, slots.size() * sizeof(uint32_t), slots.ptr());
 	occlusion.count = elements.size();
 	occlusion.ready = true;
+	occlusion.two_pass = GLOBAL_GET_CACHED(bool, "rendering/geometry/mesh_occlusion/two_pass");
 	return true;
+}
+
+void RenderForwardClustered::_dispatch_mesh_occlusion(RenderBufferDataForwardClustered *p_buffers, uint32_t p_mode, const RD::Uniform *p_pyramid) {
+	auto &occlusion = p_buffers->mesh_occlusion;
+	RD *rd = RD::get_singleton();
+	const RID shader = mesh_hiz.mesh_occlusion_shader.version_get_shader(mesh_hiz.mesh_occlusion_version, p_mode);
+	LocalVector<RD::Uniform> uniforms;
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, occlusion.elements));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, occlusion.view));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 4, p_buffers->geometry_statistics.buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 5, occlusion.slots));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, occlusion.history));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 7, occlusion.phase1_commands));
+	if (p_pyramid) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, occlusion.commands));
+		uniforms.push_back(*p_pyramid);
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 8, occlusion.phase2_commands));
+	}
+	const uint32_t push[4] = { occlusion.count, occlusion.two_pass ? 1u : 0u, 0, 0 };
+	RD::ComputeListID compute = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(compute, mesh_hiz.mesh_occlusion_pipelines[p_mode]);
+	rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
+	rd->compute_list_set_push_constant(compute, push, sizeof(push));
+	rd->compute_list_dispatch(compute, (occlusion.count + 63) / 64, 1, 1);
+	rd->compute_list_end();
+}
+
+void RenderForwardClustered::_split_mesh_occlusion(RenderBufferDataForwardClustered *p_buffers) {
+	if (!p_buffers->mesh_occlusion.ready || !p_buffers->mesh_occlusion.two_pass) {
+		return;
+	}
+	RD::get_singleton()->capture_timestamp("Mesh Phase 1 Split");
+	_dispatch_mesh_occlusion(p_buffers, 1, nullptr);
 }
 
 void RenderForwardClustered::_occlude_meshes(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
@@ -882,25 +954,12 @@ void RenderForwardClustered::_occlude_meshes(const RenderDataRD *p_render_data, 
 	}
 	RD *rd = RD::get_singleton();
 	const Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
-	const RID shader = mesh_hiz.mesh_occlusion_shader.version_get_shader(mesh_hiz.mesh_occlusion_version, 0);
-	LocalVector<RD::Uniform> uniforms;
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, occlusion.elements));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, occlusion.commands));
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, occlusion.view));
 	RD::Uniform pyramid;
 	pyramid.binding = 3;
 	pyramid.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
 	pyramid.append_id(RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
 	pyramid.append_id(rb->get_texture_slice(hzb_scope(), hzb_name(), 0, 0, 1, p_buffers->hzb.mipmaps));
-	uniforms.push_back(pyramid);
-	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 4, p_buffers->geometry_statistics.buffer));
-	const uint32_t push[4] = { occlusion.count, 0, 0, 0 };
 	rd->capture_timestamp("Mesh HZB Occlusion");
-	RD::ComputeListID compute = rd->compute_list_begin();
-	rd->compute_list_bind_compute_pipeline(compute, mesh_hiz.mesh_occlusion_pipeline);
-	rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
-	rd->compute_list_set_push_constant(compute, push, sizeof(push));
-	rd->compute_list_dispatch(compute, (occlusion.count + 63) / 64, 1, 1);
-	rd->compute_list_end();
+	_dispatch_mesh_occlusion(p_buffers, 0, &pyramid);
 	rd->capture_timestamp("Mesh HZB Occlusion End");
 }

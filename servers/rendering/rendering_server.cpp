@@ -3761,6 +3761,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/shadow_min_casters", PROPERTY_HINT_RANGE, "0,4096,1,or_greater"), 256);
 	GLOBAL_DEF("rendering/geometry/mesh_occlusion/enabled", true);
+	GLOBAL_DEF("rendering/geometry/mesh_occlusion/two_pass", true);
 	// Adaptive variable rate shading: read every frame.
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/vrs/adaptive_threshold", PROPERTY_HINT_RANGE, "0,1,0.001"), 0.1);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/size.mobile", 2048);

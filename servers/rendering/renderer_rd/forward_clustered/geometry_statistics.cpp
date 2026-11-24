@@ -70,6 +70,9 @@ enum GeometryStatisticsWord {
 	// MultiMesh instances drawn by the depth passes of two-pass occlusion
 	// (phase 1 plus phase 2, multimesh_cull.glsl).
 	STAT_MULTIMESH_DEPTH_INSTANCES,
+	// CPU render list two-pass occlusion: tested elements left out of the
+	// phase-1 depth pass (mesh_occlusion.glsl).
+	STAT_MESHES_DEPTH_DEFERRED,
 	STAT_WORD_COUNT,
 };
 static_assert(STAT_SHADOW_BASE == RenderForwardClustered::GEOMETRY_STATISTICS_SHADOW_OFFSET);
@@ -143,6 +146,7 @@ void RenderForwardClustered::_receive_geometry_statistics(const Vector<uint8_t> 
 	result["gpu_instances_occluded"] = words[STAT_GPU_INSTANCES_OCCLUDED];
 	result["meshes_occluded"] = words[STAT_MESHES_OCCLUDED];
 	result["multimesh_depth_instances"] = words[STAT_MULTIMESH_DEPTH_INSTANCES];
+	result["meshes_depth_deferred"] = words[STAT_MESHES_DEPTH_DEFERRED];
 	result["shadow_multimesh_surfaces_culled"] = p_shadow_culled_surfaces;
 	result["shadow_multimesh_instances_tested"] = words[STAT_SHADOW_BASE + STAT_MULTIMESH_INSTANCES_TESTED];
 	result["shadow_multimesh_instances_visible"] = words[STAT_SHADOW_BASE + STAT_MULTIMESH_INSTANCES_VISIBLE];

@@ -134,7 +134,9 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 			continue;
 		}
 		const auto &resident = storage->mesh_surface_get_cluster_data(surface->surface);
-		if (total_groups + resident.group_count > 65536 || inputs.size() >= 4096) {
+		// Viewport limits; the buffers grow only to what a frame uses (20 bytes
+		// of commands per group, 144 bytes of input per draw).
+		if (total_groups + resident.group_count > (1u << 20) || inputs.size() >= 16384) {
 			continue;
 		}
 		Input input = {};

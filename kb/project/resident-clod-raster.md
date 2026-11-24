@@ -30,7 +30,7 @@ selected source LODs, mirror/reflection views, jitter, XR and double
 builds. Unsupported work and exceeded budgets keep conventional draws.
 
 Resident limits: 4096 groups per surface; 64 MiB group/index bytes per mesh.
-Viewport limits: 65536 groups (1.25 MiB commands) and 4096 draws (576 KiB input).
+Viewport limits: 1,048,576 groups (20 MiB commands) and 16384 draws (2.25 MiB input); buffers grow only to what a frame uses. Until 2026-11-24 they were 65536 groups and 4096 draws, which `hzb_bench` (225 objects of about 1,190 groups) exceeded once shared meshes got CLOD: only 55 objects drew cluster LOD.
 Scratch remains cached until viewport resize/destruction. Error scale uses a
 conservative Frobenius model-basis bound (over-refines even identity by sqrt(3)).
 Group records are submitted per surface with one multi-draw indirect call when

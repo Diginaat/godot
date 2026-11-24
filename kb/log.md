@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-24 (two-pass depth for CPU list meshes)
+
+* **Added**: [two-pass depth for CPU list meshes](/project/mesh-occlusion.md#two-pass-depth-2026-11-24-gpu-first-plan-g3)
+  (`rendering/geometry/mesh_occlusion/two_pass`, `meshes_depth_deferred`),
+  fixture `mesh_occlusion.tscn` with SSAO and a negative control;
+  `multimesh_occlusion.tscn` got SSAO.
+* **Changed**: CLOD viewport budget 2^20 groups and 16,384 draws (was 65,536
+  and 4,096; only 55 of `hzb_bench`'s 225 objects fit).
+* **Found**: [CLOD two-pass costs more than it saves](/project/clod-two-pass-zero-draws.md).
+
 ## 2026-11-24 (cluster LOD for shared meshes)
 
 * **Fixed**: [cluster LOD skips repeat-batched elements](/project/clod-skipped-for-batched-elements.md)

@@ -101,7 +101,7 @@ protected:
 	SceneShaderForwardClustered scene_shader;
 
 public:
-	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 32;
+	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 33;
 	// MultiMesh culling words of shadow passes start here (same layout as the main view's).
 	static constexpr uint32_t GEOMETRY_STATISTICS_SHADOW_OFFSET = 12;
 	virtual Dictionary gpu_geometry_get_statistics(const Ref<RenderSceneBuffers> &p_render_buffers) override;
@@ -221,6 +221,18 @@ public:
 			LocalVector<uint8_t> tested; // Per opaque list element: drawn through its command.
 			uint32_t count = 0;
 			bool ready = false;
+			// Two-pass: GPU instance slots of each tested element's instances,
+			// the per-slot history (1: occluded when last tested) and the
+			// phase-1 and phase-2 depth commands (one per opaque list element).
+			RID slots;
+			uint32_t slot_capacity = 0;
+			RID history;
+			uint32_t history_capacity = 0;
+			RID phase1_commands;
+			uint32_t phase1_capacity = 0;
+			RID phase2_commands;
+			uint32_t phase2_capacity = 0;
+			bool two_pass = false;
 		} mesh_occlusion;
 		// Depth pyramid shared by CLOD and MultiMesh HZB occlusion, built once
 		// per frame from the (phase-1) depth pre-pass.
@@ -439,8 +451,10 @@ protected:
 	void _occlude_gpu_instances(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	// HZB occlusion of the meshes the CPU render list draws in the opaque
 	// colour pass (rendering/geometry/mesh_occlusion/enabled).
-	bool _setup_mesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	bool _setup_mesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers, bool p_depth_shadow_mesh);
+	void _split_mesh_occlusion(RenderBufferDataForwardClustered *p_buffers);
 	void _occlude_meshes(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	void _dispatch_mesh_occlusion(RenderBufferDataForwardClustered *p_buffers, uint32_t p_mode, const RD::Uniform *p_pyramid);
 	// HZB occlusion of resident CLOD groups. Setup runs before the depth
 	// pre-pass; with two passes the split restricts the pre-pass to groups
 	// visible when last tested, and after the HZB test the recovered groups
@@ -461,7 +475,7 @@ protected:
 		RID split_pipeline;
 		MeshOcclusionShaderRD mesh_occlusion_shader;
 		RID mesh_occlusion_version;
-		RID mesh_occlusion_pipeline;
+		RID mesh_occlusion_pipelines[2]; // HZB test, two-pass phase-1 split.
 	} mesh_hiz;
 
 	struct RenderListParameters;
