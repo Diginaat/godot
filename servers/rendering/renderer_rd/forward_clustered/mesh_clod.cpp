@@ -36,22 +36,64 @@
 
 using namespace RendererSceneRenderImplementation;
 
+bool RenderForwardClustered::_mesh_clod_frame_enabled(const RenderDataRD *p_render_data, const RenderBufferDataForwardClustered *p_buffers) const {
+#ifdef REAL_T_IS_DOUBLE
+	return false;
+#else
+	if (!p_buffers) {
+		return false;
+	}
+	const float error_pixels = GLOBAL_GET_CACHED(float, "rendering/geometry/cluster_lod/error_pixels");
+	return GLOBAL_GET_CACHED(bool, "rendering/geometry/cluster_lod/enabled") && Math::is_finite(error_pixels) && error_pixels >= 0 &&
+			p_render_data->reflection_probe.is_null() && p_render_data->scene_data->view_count == 1 && !p_render_data->scene_data->mirror_pass;
+#endif
+}
+
+bool RenderForwardClustered::_mesh_clod_surface_eligible(const GeometryInstanceSurfaceDataCache *p_surface) const {
+	// Most surfaces have no cluster data: test that first, it runs for every
+	// opaque element while the list is filled.
+	const auto &resident = RendererRD::MeshStorage::get_singleton()->mesh_surface_get_cluster_data(p_surface->surface);
+	if (resident.group_count == 0) {
+		return false;
+	}
+	const GeometryInstanceForwardClustered *instance = p_surface->owner;
+	if (instance->data->base_type != RSE::INSTANCE_MESH || !instance->data->use_cluster_lod || instance->mesh_instance.is_valid() ||
+			(instance->base_flags & (INSTANCE_DATA_FLAG_MULTIMESH | INSTANCE_DATA_FLAG_PARTICLES)) || p_surface->sort.lod_index != 0 ||
+			(p_surface->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA) ||
+			!instance->transform.is_finite() || Math::is_zero_approx(instance->transform.basis.determinant())) {
+		return false;
+	}
+	const auto *shader = p_surface->shader;
+	if (shader->uses_vertex || shader->uses_position || shader->uses_world_coordinates || shader->writes_modelview_or_projection || shader->uses_custom_vertex_transform ||
+			shader->uses_z_clip_scale || shader->uses_point_size || shader->uses_alpha || shader->uses_blend_alpha || shader->uses_depth_prepass_alpha || shader->stencil_enabled) {
+		return false;
+	}
+	// A streamed surface without all roots resident keeps source rendering.
+	if (resident.streaming && (!resident.streaming->complete || resident.index_array.is_null())) {
+		return false;
+	}
+	// All passes over a source surface must use the same geometry. Until
+	// pass-chain eligibility is selected atomically, overlays/next_pass keep
+	// source raster even if one individual material would be eligible.
+	for (const GeometryInstanceSurfaceDataCache *pass = instance->surface_caches; pass; pass = pass->next) {
+		if (pass != p_surface && pass->surface == p_surface->surface) {
+			return false;
+		}
+	}
+	return true;
+}
+
 void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
 	if (!p_buffers) {
 		return;
 	}
 	auto &buffers = p_buffers->mesh_clod;
 	buffers.active = false;
-#ifdef REAL_T_IS_DOUBLE
-	return;
-#endif
-	const float error_pixels = GLOBAL_GET("rendering/geometry/cluster_lod/error_pixels");
 	// The selection kernel always binds the statistics buffer; without it, keep source draws.
-	if (p_buffers->geometry_statistics.buffer.is_null() || !bool(GLOBAL_GET("rendering/geometry/cluster_lod/enabled")) || !Math::is_finite(error_pixels) || error_pixels < 0 ||
-			p_render_data->reflection_probe.is_valid() || p_render_data->scene_data->view_count != 1 ||
-			p_render_data->scene_data->mirror_pass) {
+	if (p_buffers->geometry_statistics.buffer.is_null() || !_mesh_clod_frame_enabled(p_render_data, p_buffers)) {
 		return;
 	}
+	const float error_pixels = GLOBAL_GET_CACHED(float, "rendering/geometry/cluster_lod/error_pixels");
 	struct Input {
 		float planes[6][4];
 		float camera_projection[4];
@@ -82,40 +124,17 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 		GeometryInstanceSurfaceDataCache *surface = list.elements[i];
 		GeometryInstanceForwardClustered *instance = surface->owner;
 		RenderElementInfo &element = list.element_info[i];
+		// _fill_instance_data() does not batch eligible surfaces, so a
+		// repeated element is never eligible.
 		if (element.repeat != 1) {
 			i += element.repeat - 1;
 			continue;
 		}
-		if (instance->data->base_type != RSE::INSTANCE_MESH || !instance->data->use_cluster_lod || instance->mesh_instance.is_valid() ||
-				(instance->base_flags & (INSTANCE_DATA_FLAG_MULTIMESH | INSTANCE_DATA_FLAG_PARTICLES)) || element.lod_index != 0 ||
-				(surface->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA) ||
-				!instance->transform.is_finite() || Math::is_zero_approx(instance->transform.basis.determinant())) {
-			continue;
-		}
-		const auto *shader = surface->shader;
-		if (shader->uses_vertex || shader->uses_position || shader->uses_world_coordinates || shader->writes_modelview_or_projection || shader->uses_custom_vertex_transform ||
-				shader->uses_z_clip_scale || shader->uses_point_size || shader->uses_alpha || shader->uses_blend_alpha || shader->uses_depth_prepass_alpha || shader->stencil_enabled) {
+		if (!_mesh_clod_surface_eligible(surface)) {
 			continue;
 		}
 		const auto &resident = storage->mesh_surface_get_cluster_data(surface->surface);
-		if (resident.group_count == 0 || total_groups + resident.group_count > 65536 || inputs.size() >= 4096) {
-			continue;
-		}
-		// A streamed surface without all roots resident keeps source rendering.
-		if (resident.streaming && (!resident.streaming->complete || resident.index_array.is_null())) {
-			continue;
-		}
-		// All passes over a source surface must use the same geometry. Until
-		// pass-chain eligibility is selected atomically, overlays/next_pass keep
-		// source raster even if one individual material would be eligible.
-		bool multiple_passes = false;
-		for (const GeometryInstanceSurfaceDataCache *pass = instance->surface_caches; pass; pass = pass->next) {
-			if (pass != surface && pass->surface == surface->surface) {
-				multiple_passes = true;
-				break;
-			}
-		}
-		if (multiple_passes) {
+		if (total_groups + resident.group_count > 65536 || inputs.size() >= 4096) {
 			continue;
 		}
 		Input input = {};
@@ -193,6 +212,7 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 	rd->capture_timestamp("Mesh CLOD Selection");
 	RD::ComputeListID compute_list = rd->compute_list_begin();
 	uint32_t bound_mode = UINT32_MAX;
+	RID bound_set;
 	for (uint32_t draw = 0; draw < work.size(); draw++) {
 		const RendererRD::MeshStorage::ClusterStreaming *streaming = work[draw].streaming;
 		const uint32_t mode = streaming ? 1 : 0;
@@ -200,6 +220,7 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 		if (mode != bound_mode) {
 			rd->compute_list_bind_compute_pipeline(compute_list, mesh_clod.pipelines[mode]);
 			bound_mode = mode;
+			bound_set = RID();
 		}
 		LocalVector<RD::Uniform> uniforms;
 		const RID resources[6] = { work[draw].groups, buffers.inputs, buffers.commands,
@@ -216,7 +237,12 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 		statistics.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
 		statistics.append_id(p_buffers->geometry_statistics.buffer);
 		uniforms.push_back(statistics);
-		rd->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
+		// Instances of one surface share the set; only the push constant changes.
+		const RID set = UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms);
+		if (set != bound_set) {
+			rd->compute_list_bind_uniform_set(compute_list, set, 0);
+			bound_set = set;
+		}
 		// The residency mode adds the surface's first word in the request buffer.
 		const uint32_t push_constant[2] = { draw, streaming ? streaming->request_offset : 0 };
 		rd->compute_list_set_push_constant(compute_list, push_constant, streaming ? sizeof(push_constant) : sizeof(uint32_t));

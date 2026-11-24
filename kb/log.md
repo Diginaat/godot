@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-24 (cluster LOD for shared meshes)
+
+* **Fixed**: [cluster LOD skips repeat-batched elements](/project/clod-skipped-for-batched-elements.md)
+  (GPU-first plan G5): the opaque list no longer batches CLOD-eligible
+  surfaces; `hzb_bench` draws CLOD again, street grid 14-37% faster.
+
 ## 2026-11-24 (batched MultiMesh selection)
 
 * **Changed**: [two-pass MultiMesh occlusion](/project/multimesh-two-pass.md):

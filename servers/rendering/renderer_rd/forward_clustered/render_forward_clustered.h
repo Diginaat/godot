@@ -407,6 +407,8 @@ protected:
 		RID pipelines[7]; // Cull, scan, scatter, HZB occlusion, scan without statistics, two-pass phase-1 split, two-pass phase 2.
 	} multimesh_cull;
 	void _prepare_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	// Whether this frame's opaque list may draw cluster LOD (settings, view).
+	bool _mesh_clod_frame_enabled(const RenderDataRD *p_render_data, const RenderBufferDataForwardClustered *p_buffers) const;
 	struct MeshCLOD {
 		MeshClodSelectShaderRD shader;
 		RID version;
@@ -821,7 +823,9 @@ protected:
 	void _render_list(RenderingDevice::DrawListID p_draw_list, RenderingDevice::FramebufferFormatID p_framebuffer_Format, RenderListParameters *p_params, uint32_t p_from_element, uint32_t p_to_element);
 	void _render_list_with_draw_list(RenderListParameters *p_params, RID p_framebuffer, BitField<RD::DrawFlags> p_draw_flags = RD::DRAW_DEFAULT_ALL, const Vector<Color> &p_clear_color_values = Vector<Color>(), float p_clear_depth_value = 0.0, uint32_t p_clear_stencil_value = 0, const Rect2 &p_region = Rect2());
 
-	void _fill_instance_data(RenderListType p_render_list, int *p_render_info = nullptr, uint32_t p_offset = 0, int32_t p_max_elements = -1, bool p_update_buffer = true);
+	// Whether an opaque list surface may draw cluster LOD (instance, material, resident data).
+	bool _mesh_clod_surface_eligible(const GeometryInstanceSurfaceDataCache *p_surface) const;
+	void _fill_instance_data(RenderListType p_render_list, int *p_render_info = nullptr, uint32_t p_offset = 0, int32_t p_max_elements = -1, bool p_update_buffer = true, bool p_unbatch_clod = false);
 	void _fill_render_list(RenderListType p_render_list, const RenderDataRD *p_render_data, PassMode p_pass_mode, bool p_using_sdfgi = false, bool p_using_opaque_gi = false, bool p_using_motion_pass = false, bool p_append = false, bool p_alpha_only = false);
 
 	HashMap<Size2i, RID> sdfgi_framebuffer_size_cache;
