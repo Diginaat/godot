@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="LevelStreamCell3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		One streamed part of a level: an ordinary scene file loaded while the target of its [LevelStreamer3D] is near.
+	</brief_description>
+	<description>
+		Place cells below a [LevelStreamer3D] (directly or deeper) and give each a [member scene_path]. The cell's box (see [member size]) is where its content is; the streamer measures the target's distance to that box. The cell's scene is added as the cell's child, so it is authored in the cell's local space, centered on the cell's origin.
+		Each cell has a [member cell_id] that saved state and neighbors refer to. A new cell gets one from its node name; keep it when renaming the node. The editor warns about a missing streamer, a missing or duplicate ID, a missing scene, an unload distance below the preload distance, an empty size and unknown neighbors.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="contains" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="global_point" type="Vector3" />
+			<description>
+				Returns [code]true[/code] if [param global_point] is inside the cell's box.
+			</description>
+		</method>
+		<method name="distance_to" qualifiers="const">
+			<return type="float" />
+			<param index="0" name="global_point" type="Vector3" />
+			<description>
+				Returns the distance from [param global_point] to the cell's box, 0 inside it. The cell's scale is assumed uniform.
+			</description>
+		</method>
+		<method name="get_content" qualifiers="const">
+			<return type="Node" />
+			<description>
+				Returns the root of the cell's instantiated scene while the cell is active or ready, or [code]null[/code].
+			</description>
+		</method>
+		<method name="get_state" qualifiers="const">
+			<return type="int" />
+			<description>
+				Returns the cell's [enum LevelStreamer3D.CellState].
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="always_loaded" type="bool" setter="set_always_loaded" getter="is_always_loaded" default="false">
+			If [code]true[/code], the cell loads when the level starts and never unloads.
+		</member>
+		<member name="cell_id" type="StringName" setter="set_cell_id" getter="get_cell_id" default="&amp;&quot;&quot;">
+			The cell's stable ID, unique under its streamer. Saved state, neighbors and the [LevelStreamer3D] methods refer to it.
+		</member>
+		<member name="neighbors" type="PackedStringArray" setter="set_neighbors" getter="get_neighbors" default="PackedStringArray()">
+			IDs of cells loaded whenever the target is inside this cell, whatever their distance: for example the interior behind a door, so its lights, collision and navigation are there before the target reaches it.
+		</member>
+		<member name="preload_distance" type="float" setter="set_preload_distance" getter="get_preload_distance" default="30.0">
+			The cell starts to load when the target is this close to its box.
+		</member>
+		<member name="scene_path" type="String" setter="set_scene_path" getter="get_scene_path" default="&quot;&quot;">
+			The scene streamed into this cell. It is loaded only when needed, but exported with the project.
+		</member>
+		<member name="size" type="Vector3" setter="set_size" getter="get_size" default="Vector3(20, 10, 20)">
+			The size of the cell's box, centered on the cell's origin.
+		</member>
+		<member name="unload_distance" type="float" setter="set_unload_distance" getter="get_unload_distance" default="45.0">
+			The cell unloads when the target is farther than this from its box. Keep it larger than [member preload_distance].
+		</member>
+	</members>
+</class>

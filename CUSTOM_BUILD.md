@@ -206,6 +206,13 @@ straight.
     current on the main thread again after the separate render thread
     ends, so its `finalize()` runs at exit (without it the guard skipped
     the shutdown and objects leaked). Drop it if upstream fixes the same.
+  - The level streaming module (`modules/level_streaming/`:
+    `LevelStreamer3D`, `LevelStreamCell3D`) and its export hook,
+    `EditorExportPlugin::get_runtime_dependencies()`, called from
+    `_export_find_dependencies()` in `editor_export_platform.cpp` so
+    exports of selected scenes include the cells' scenes. If upstream
+    changes how exports gather dependencies, keep the hook in the new
+    code. See [docs/level-streaming.md](docs/level-streaming.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).

@@ -686,6 +686,9 @@ void EditorExportPlatform::_export_find_dependencies(const String &p_path, HashS
 	}
 
 	Vector<String> deps = dir->get_file_deps(file_idx);
+	for (const Ref<EditorExportPlugin> &plugin : EditorExport::get_singleton()->get_export_plugins()) {
+		deps.append_array(plugin->get_runtime_dependencies(p_path));
+	}
 
 	for (int i = 0; i < deps.size(); i++) {
 		_export_find_dependencies(deps[i], p_paths);

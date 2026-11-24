@@ -1,0 +1,134 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://test_driver.gd" id="driver"]
+
+[sub_resource type="ProceduralSkyMaterial" id="sky_material"]
+
+[sub_resource type="Sky" id="sky"]
+sky_material = SubResource("sky_material")
+
+[sub_resource type="Environment" id="environment"]
+background_mode = 2
+sky = SubResource("sky")
+tonemap_mode = 2
+
+[node name="Main" type="Node3D"]
+script = ExtResource("driver")
+
+[node name="Environment" type="WorldEnvironment" parent="."]
+environment = SubResource("environment")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866, -0.354, 0.354, 0, 0.707, 0.707, -0.5, -0.612, 0.612, 0, 20, 0)
+light_energy = 0.6
+shadow_enabled = true
+
+[node name="Player" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+
+[node name="Camera3D" type="Camera3D" parent="Player"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
+current = true
+far = 400.0
+
+[node name="Streamer" type="LevelStreamer3D" parent="."]
+target_path = NodePath("../Player")
+
+[node name="Street00" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+cell_id = &"street_00"
+scene_path = "res://cells/street_00.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_01")
+
+[node name="Street01" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 20)
+cell_id = &"street_01"
+scene_path = "res://cells/street_01.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_00", "street_02")
+
+[node name="Street02" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 40)
+cell_id = &"street_02"
+scene_path = "res://cells/street_02.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_01", "street_03")
+
+[node name="Street03" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 60)
+cell_id = &"street_03"
+scene_path = "res://cells/street_03.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_02", "street_04", "shop")
+
+[node name="Street04" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 80)
+cell_id = &"street_04"
+scene_path = "res://cells/street_04.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_03", "street_05")
+
+[node name="Street05" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 100)
+cell_id = &"street_05"
+scene_path = "res://cells/street_05.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_04", "street_06")
+
+[node name="Street06" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 120)
+cell_id = &"street_06"
+scene_path = "res://cells/street_06.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_05", "street_07")
+
+[node name="Street07" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 140)
+cell_id = &"street_07"
+scene_path = "res://cells/street_07.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_06", "street_08")
+
+[node name="Street08" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 160)
+cell_id = &"street_08"
+scene_path = "res://cells/street_08.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_07", "street_09")
+
+[node name="Street09" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 180)
+cell_id = &"street_09"
+scene_path = "res://cells/street_09.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("street_08")
+
+[node name="Shop" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 18, 0, 60)
+cell_id = &"shop"
+scene_path = "res://cells/shop.tscn"
+size = Vector3(16, 8, 16)
+preload_distance = 8.0
+unload_distance = 25.0
+neighbors = PackedStringArray("street_03")
+
+[node name="Plaza" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 400)
+cell_id = &"plaza"
+scene_path = "res://cells/plaza.tscn"
+size = Vector3(40, 10, 40)
+neighbors = PackedStringArray("annex")
+
+[node name="Annex" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 0, 400)
+cell_id = &"annex"
+scene_path = "res://cells/annex.tscn"
+size = Vector3(20, 10, 20)
+neighbors = PackedStringArray("plaza")
+
+[node name="Depot" type="LevelStreamCell3D" parent="Streamer"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 600)
+cell_id = &"depot"
+scene_path = "res://cells/depot.tscn"
+size = Vector3(20, 10, 20)

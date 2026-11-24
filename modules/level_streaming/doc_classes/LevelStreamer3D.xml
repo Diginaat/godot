@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<class name="LevelStreamer3D" inherits="Node3D" api_type="core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../../../doc/class.xsd">
+	<brief_description>
+		Streams the [LevelStreamCell3D] nodes below it in and out around a target.
+	</brief_description>
+	<description>
+		Each [LevelStreamCell3D] below this node names an ordinary scene file. While the target (see [member target_path]) is within a cell's [member LevelStreamCell3D.preload_distance], the streamer loads the cell's scene in the background with [method ResourceLoader.load_threaded_request], instantiates it on a worker thread and adds it as the cell's child. When the target is farther than [member LevelStreamCell3D.unload_distance], the content is saved (see below), removed and freed. The gap between the two distances keeps a cell at its boundary from loading and unloading over and over.
+		Work on the main thread is bounded: at most [member max_loading] scenes load at a time, and at most [member max_activations_per_frame] cells are added and removed per frame, nearest first. Requests are idempotent; a scene that arrives after the target turned back is dropped. A scene that fails to load emits [signal cell_failed] and is tried again after [member retry_delay].
+		A cell is [constant CELL_ACTIVE] once its content is in the tree and [constant CELL_READY] [member ready_physics_frames] physics frames later, when its collision shapes and navigation regions are registered. [method is_position_ready] tells whether the target can safely be at a point. For a teleport, call [method prefetch_position] with the destination, wait for [signal destination_ready], move the target and call [method clear_prefetch].
+		[b]Keeping state:[/b] nodes of a cell's scene in the [code]level_stream_persistent[/code] group can define [code]_save_stream_state() -> Variant[/code] and [code]_load_stream_state(state: Variant)[/code]. The first is called when the cell unloads, the second when it loads again, before the node enters the tree (so [method Node._ready] sees the restored state). The state is keyed by cell ID and node path; [method get_cell_state_data] and [method set_cell_state_data] read and write it for save games.
+		In the editor every cell's scene is shown (see [member preview_in_editor]); the preview is never saved into the level. On export, the cells' scenes are added to presets that export only selected scenes and their dependencies. A project without a streamer pays nothing per frame.
+	</description>
+	<tutorials>
+	</tutorials>
+	<methods>
+		<method name="clear_prefetch">
+			<return type="void" />
+			<description>
+				Releases the cells kept loaded by [method prefetch_position]; they then load and unload by distance again.
+			</description>
+		</method>
+		<method name="get_cell" qualifiers="const">
+			<return type="LevelStreamCell3D" />
+			<param index="0" name="cell_id" type="StringName" />
+			<description>
+				Returns the cell with the ID [param cell_id], or [code]null[/code].
+			</description>
+		</method>
+		<method name="get_cell_content" qualifiers="const">
+			<return type="Node" />
+			<param index="0" name="cell_id" type="StringName" />
+			<description>
+				Returns the root of the cell's instantiated scene while the cell is active or ready, or [code]null[/code].
+			</description>
+		</method>
+		<method name="get_cell_ids" qualifiers="const">
+			<return type="PackedStringArray" />
+			<description>
+				Returns the IDs of all streamed cells, in tree order.
+			</description>
+		</method>
+		<method name="get_cell_state" qualifiers="const">
+			<return type="int" enum="LevelStreamer3D.CellState" />
+			<param index="0" name="cell_id" type="StringName" />
+			<description>
+				Returns the cell's [enum CellState]. Unknown IDs return [constant CELL_UNLOADED].
+			</description>
+		</method>
+		<method name="get_cell_state_data" qualifiers="const">
+			<return type="Dictionary" />
+			<param index="0" name="cell_id" type="StringName" />
+			<description>
+				Returns the saved state of the cell's persistent nodes, keyed by node path relative to the cell's content. For an active cell, the current state.
+			</description>
+		</method>
+		<method name="get_cells_at" qualifiers="const">
+			<return type="PackedStringArray" />
+			<param index="0" name="global_point" type="Vector3" />
+			<description>
+				Returns the IDs of the cells whose bounds contain [param global_point].
+			</description>
+		</method>
+		<method name="get_statistics" qualifiers="const">
+			<return type="Dictionary" />
+			<description>
+				Returns counters for profiling: [code]cells[/code], the number of cells in each state ([code]unloaded[/code], [code]loading[/code], [code]instantiating[/code], [code skip-lint]active[/code], [code]ready[/code], [code]failed[/code]), and the totals [code]requests[/code], [code]activations[/code], [code]unloads[/code], [code]failures[/code] and [code]stale[/code] (loaded scenes dropped because the target turned back), [code]last_activation_usec[/code] and [code]max_activation_usec[/code] (main thread time to add a cell's content), [code]last_ready_delay_usec[/code] and [code]max_ready_delay_usec[/code] (from load request to ready).
+			</description>
+		</method>
+		<method name="is_cell_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="cell_id" type="StringName" />
+			<description>
+				Returns [code]true[/code] if the cell is [constant CELL_READY].
+			</description>
+		</method>
+		<method name="is_position_ready" qualifiers="const">
+			<return type="bool" />
+			<param index="0" name="global_point" type="Vector3" />
+			<description>
+				Returns [code]true[/code] if every cell containing [param global_point] is ready. A point outside all cells is ready.
+			</description>
+		</method>
+		<method name="prefetch_position">
+			<return type="void" />
+			<param index="0" name="global_point" type="Vector3" />
+			<description>
+				Loads the cells containing [param global_point] and their neighbors whatever their distance, and keeps them loaded until [method clear_prefetch]. [signal destination_ready] is emitted when all of them are ready. Replaces the previous prefetch.
+			</description>
+		</method>
+		<method name="set_cell_state_data">
+			<return type="void" />
+			<param index="0" name="cell_id" type="StringName" />
+			<param index="1" name="data" type="Dictionary" />
+			<description>
+				Replaces the saved state of the cell's persistent nodes (see [method get_cell_state_data]). If the cell is active, its nodes receive it at once.
+			</description>
+		</method>
+		<method name="update_now">
+			<return type="void" />
+			<description>
+				Runs one streaming update immediately instead of waiting for the next frame.
+			</description>
+		</method>
+	</methods>
+	<members>
+		<member name="active" type="bool" setter="set_active" getter="is_active" default="true">
+			If [code]false[/code], nothing is loaded or unloaded, and the streamer does no work per frame.
+		</member>
+		<member name="max_activations_per_frame" type="int" setter="set_max_activations_per_frame" getter="get_max_activations_per_frame" default="1">
+			The most cells added to the tree per frame, and the most removed. Lower values spread the main thread cost of a boundary over more frames.
+		</member>
+		<member name="max_loading" type="int" setter="set_max_loading" getter="get_max_loading" default="2">
+			The most cell scenes loading in the background at once.
+		</member>
+		<member name="preview_in_editor" type="bool" setter="set_preview_in_editor" getter="is_preview_in_editor" default="true">
+			If [code]true[/code], the editor shows every cell's scene, so a level can be laid out. The preview is not saved.
+		</member>
+		<member name="ready_physics_frames" type="int" setter="set_ready_physics_frames" getter="get_ready_physics_frames" default="2">
+			The physics frames between a cell's content entering the tree and the cell becoming [constant CELL_READY]. Bodies join the physics space and navigation regions sync on the physics step.
+		</member>
+		<member name="retry_delay" type="float" setter="set_retry_delay" getter="get_retry_delay" default="2.0">
+			Seconds before a cell whose scene failed to load is tried again.
+		</member>
+		<member name="target_path" type="NodePath" setter="set_target_path" getter="get_target_path" default="NodePath(&quot;&quot;)">
+			The [Node3D] cells stream around. If empty, the viewport's current [Camera3D].
+		</member>
+		<member name="threaded_instantiation" type="bool" setter="set_threaded_instantiation" getter="is_threaded_instantiation" default="true">
+			If [code]true[/code], cell scenes are instantiated on a worker thread, and only added to the tree on the main thread. Disable it if scripts in the cell scenes access the scene tree in [method Object._init].
+		</member>
+	</members>
+	<signals>
+		<signal name="cell_activated">
+			<param index="0" name="cell_id" type="StringName" />
+			<param index="1" name="content" type="Node" />
+			<description>
+				Emitted after the cell's [param content] was added to the tree.
+			</description>
+		</signal>
+		<signal name="cell_activating">
+			<param index="0" name="cell_id" type="StringName" />
+			<param index="1" name="content" type="Node" />
+			<description>
+				Emitted before the cell's [param content] is added to the tree, after its saved state was restored.
+			</description>
+		</signal>
+		<signal name="cell_failed">
+			<param index="0" name="cell_id" type="StringName" />
+			<param index="1" name="path" type="String" />
+			<description>
+				Emitted when the cell's scene at [param path] could not be loaded or instantiated. It is retried after [member retry_delay].
+			</description>
+		</signal>
+		<signal name="cell_ready">
+			<param index="0" name="cell_id" type="StringName" />
+			<description>
+				Emitted when the cell becomes [constant CELL_READY].
+			</description>
+		</signal>
+		<signal name="cell_unloaded">
+			<param index="0" name="cell_id" type="StringName" />
+			<description>
+				Emitted after the cell's content was removed from the tree.
+			</description>
+		</signal>
+		<signal name="cell_unloading">
+			<param index="0" name="cell_id" type="StringName" />
+			<param index="1" name="content" type="Node" />
+			<description>
+				Emitted before the cell's [param content] is saved and removed from the tree.
+			</description>
+		</signal>
+		<signal name="destination_ready">
+			<param index="0" name="global_point" type="Vector3" />
+			<description>
+				Emitted when all cells loaded by [method prefetch_position] for [param global_point] are ready.
+			</description>
+		</signal>
+	</signals>
+	<constants>
+		<constant name="CELL_UNLOADED" value="0" enum="CellState">
+			Not loaded.
+		</constant>
+		<constant name="CELL_LOADING" value="1" enum="CellState">
+			The scene is loading in the background.
+		</constant>
+		<constant name="CELL_INSTANTIATING" value="2" enum="CellState">
+			The scene is loaded and being instantiated, or waits for its turn to be added to the tree.
+		</constant>
+		<constant name="CELL_ACTIVE" value="3" enum="CellState">
+			The content is in the tree; its collision and navigation may not be registered yet.
+		</constant>
+		<constant name="CELL_READY" value="4" enum="CellState">
+			The content has been in the tree for [member ready_physics_frames] physics frames: safe to enter.
+		</constant>
+		<constant name="CELL_FAILED" value="5" enum="CellState">
+			The scene failed to load; it is tried again after [member retry_delay].
+		</constant>
+	</constants>
+</class>

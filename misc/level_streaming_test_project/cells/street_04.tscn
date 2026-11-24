@@ -1,0 +1,95 @@
+[gd_scene format=3]
+
+[ext_resource type="Texture2D" path="res://textures/street_04.png" id="sign_texture"]
+[ext_resource type="Material" path="res://materials/asphalt.tres" id="asphalt"]
+
+[sub_resource type="BoxShape3D" id="road_shape"]
+size = Vector3(20, 1, 20)
+
+[sub_resource type="BoxMesh" id="road_mesh"]
+material = ExtResource("asphalt")
+size = Vector3(20, 1, 20)
+
+[sub_resource type="BoxShape3D" id="building_shape"]
+size = Vector3(8, 12, 20)
+
+[sub_resource type="StandardMaterial3D" id="facade"]
+albedo_color = Color(0.358, 0.495, 0.550, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="building_mesh"]
+material = SubResource("facade")
+size = Vector3(8, 12, 20)
+
+[sub_resource type="StandardMaterial3D" id="sign_material"]
+albedo_texture = ExtResource("sign_texture")
+emission_enabled = true
+emission_texture = ExtResource("sign_texture")
+emission_energy_multiplier = 2.0
+
+[sub_resource type="QuadMesh" id="sign_mesh"]
+material = SubResource("sign_material")
+size = Vector2(6, 6)
+
+[sub_resource type="CylinderMesh" id="pole_mesh"]
+top_radius = 0.1
+bottom_radius = 0.12
+height = 6.0
+
+[sub_resource type="NavigationMesh" id="nav"]
+vertices = PackedVector3Array(-10, 0, -10, 10, 0, -10, 10, 0, 10, -10, 0, 10)
+polygons = [PackedInt32Array(0, 1, 2, 3)]
+
+[node name="Street04" type="Node3D"]
+
+[node name="Road" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="Shape" type="CollisionShape3D" parent="Road"]
+shape = SubResource("road_shape")
+
+[node name="Mesh" type="MeshInstance3D" parent="Road"]
+mesh = SubResource("road_mesh")
+
+[node name="BuildingWest" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, 6, 0)
+
+[node name="Shape" type="CollisionShape3D" parent="BuildingWest"]
+shape = SubResource("building_shape")
+
+[node name="Mesh" type="MeshInstance3D" parent="BuildingWest"]
+mesh = SubResource("building_mesh")
+
+[node name="BuildingEast" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 6, 0)
+
+[node name="Shape" type="CollisionShape3D" parent="BuildingEast"]
+shape = SubResource("building_shape")
+
+[node name="Mesh" type="MeshInstance3D" parent="BuildingEast"]
+mesh = SubResource("building_mesh")
+
+[node name="Sign" type="MeshInstance3D" parent="."]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -9.9, 5, 0)
+mesh = SubResource("sign_mesh")
+
+[node name="Neon" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 5, 0)
+light_color = Color(0.100, 0.741, 1.000, 1)
+light_energy = 2.0
+shadow_enabled = true
+omni_range = 12.0
+
+[node name="Pole" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 3, 5)
+mesh = SubResource("pole_mesh")
+
+[node name="Lamp" type="SpotLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 8, 6, 5)
+light_energy = 3.0
+shadow_enabled = true
+spot_range = 10.0
+spot_angle = 50.0
+
+[node name="Navigation" type="NavigationRegion3D" parent="."]
+navigation_mesh = SubResource("nav")

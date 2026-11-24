@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-11-24 (built-in level streamer)
+
+* **Added**: [built-in level streamer](/project/level-streaming.md)
+  (`modules/level_streaming`: `LevelStreamer3D`, `LevelStreamCell3D`,
+  gizmo, export plugin; engine hook
+  `EditorExportPlugin::get_runtime_dependencies()`), setup in
+  `docs/level-streaming.md`, acceptance fixture
+  `misc/level_streaming_test_project` with `devtools/test/level_streaming.sh`.
+  Exported release runs: 6 of 6 pass; streamed p99 1.35 ms vs 1.30 ms
+  preloaded (within noise); boundary frames p99 7.6 ms, all in the
+  teleport thrash; cold teleport ready in 25-34 ms.
+* **Mistake**: [template older than the module](/mistakes/template-older-than-the-module.md).
+
 ## 2026-11-24 (two-pass depth for GPU path instances)
 
 * **Added**: [two-pass depth for the GPU path](/project/mesh-occlusion.md#two-pass-depth-for-the-gpu-path-2026-11-24)

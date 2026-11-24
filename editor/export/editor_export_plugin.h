@@ -184,6 +184,11 @@ protected:
 public:
 	virtual String get_name() const;
 
+	// Files that p_path loads by path at run time and that its dependency
+	// list does not name (for example the scenes of streamed level cells).
+	// Exports that take only selected files and their dependencies add them.
+	virtual Vector<String> get_runtime_dependencies(const String &p_path) const { return Vector<String>(); }
+
 	virtual bool supports_platform(const Ref<EditorExportPlatform> &p_export_platform) const;
 	PackedStringArray get_export_features(const Ref<EditorExportPlatform> &p_export_platform, bool p_debug) const;
 

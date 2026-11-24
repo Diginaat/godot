@@ -1,0 +1,8 @@
+[gd_resource type="StandardMaterial3D" format=3]
+
+[ext_resource type="Texture2D" path="res://textures/asphalt.png" id="albedo"]
+
+[resource]
+albedo_texture = ExtResource("albedo")
+roughness = 0.9
+uv1_scale = Vector3(4, 4, 4)

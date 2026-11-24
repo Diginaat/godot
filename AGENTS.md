@@ -18,6 +18,10 @@ architecture, roadmap, benchmarks. Read it before working on it.
 Weather and wind (`modules/weather/`) are tracked in [WEATHER.md](WEATHER.md):
 design, step table, tests and findings. Keep it current with each step.
 
+The built-in level streamer (`modules/level_streaming/`) is described in
+[docs/level-streaming.md](docs/level-streaming.md), with its acceptance
+test. Run that test after changing the module or the export hook.
+
 GPU-driven renderer work (Forward+ modernization) is tracked in
 [docs/renderer/MEMORY.md](docs/renderer/MEMORY.md): current phase, next step,
 links to the architecture audit, roadmap and benchmarks. Read it before

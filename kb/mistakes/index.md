@@ -59,3 +59,4 @@ What worked is in [successes](/successes/).
 * [A benchmark ran with the feature it measures inactive](/mistakes/bench-without-the-feature-active.md) - check counters and timings are nonzero before printing numbers; shared mesh+material batches CLOD objects out of CLOD
 * [Separate runs had an order bias; a draw count was taken for the cost](/mistakes/separate-runs-order-bias.md) - alternate A/B settings inside one process with an A/A floor; remove the suspected counter and measure again before naming a cause
 * [Warm A/B runs on a new exe measured the driver cache](/mistakes/warm-runs-on-a-new-exe.md) - cold run first for every build; NVIDIA's driver cache is per exe
+* [The export template was built before the new module](/mistakes/template-older-than-the-module.md) - build the template after the module's last config change; check the class is in the template before an exported run

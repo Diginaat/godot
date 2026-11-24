@@ -1,0 +1,60 @@
+[gd_scene format=3]
+
+[ext_resource type="Texture2D" path="res://textures/plaza.png" id="sign_texture"]
+[ext_resource type="Material" path="res://materials/asphalt.tres" id="asphalt"]
+
+[sub_resource type="BoxShape3D" id="ground_shape"]
+size = Vector3(40, 1, 40)
+
+[sub_resource type="BoxMesh" id="ground_mesh"]
+material = ExtResource("asphalt")
+size = Vector3(40, 1, 40)
+
+[sub_resource type="StandardMaterial3D" id="sign_material"]
+albedo_texture = ExtResource("sign_texture")
+emission_enabled = true
+emission_texture = ExtResource("sign_texture")
+
+[sub_resource type="CylinderMesh" id="fountain_mesh"]
+material = SubResource("sign_material")
+top_radius = 4.0
+bottom_radius = 4.5
+height = 1.0
+
+[sub_resource type="CylinderShape3D" id="fountain_shape"]
+radius = 4.5
+height = 1.0
+
+[sub_resource type="NavigationMesh" id="nav"]
+vertices = PackedVector3Array(-20, 0, -20, 20, 0, -20, 20, 0, 20, -20, 0, 20)
+polygons = [PackedInt32Array(0, 1, 2, 3)]
+
+[node name="Plaza" type="Node3D"]
+
+[node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="Shape" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("ground_shape")
+
+[node name="Mesh" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("ground_mesh")
+
+[node name="Fountain" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -10)
+
+[node name="Shape" type="CollisionShape3D" parent="Fountain"]
+shape = SubResource("fountain_shape")
+
+[node name="Mesh" type="MeshInstance3D" parent="Fountain"]
+mesh = SubResource("fountain_mesh")
+
+[node name="Light" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -10)
+light_color = Color(0.6, 0.8, 1, 1)
+light_energy = 3.0
+shadow_enabled = true
+omni_range = 16.0
+
+[node name="Navigation" type="NavigationRegion3D" parent="."]
+navigation_mesh = SubResource("nav")
