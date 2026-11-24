@@ -16,6 +16,9 @@ var _expect_hzb := true
 
 
 func _ready() -> void:
+	# Adaptive VRS (the default) picks each frame's shading rates from the
+	# previous frame, so captures compared pixel for pixel would differ.
+	get_viewport().vrs_mode = Viewport.VRS_DISABLED
 	ProjectSettings.set_setting(OCCLUSION, true)
 	# The HZB timestamp counts every build of the shared pyramid; only CLOD
 	# may build it here (the GPU path, MultiMesh and mesh occlusion are on by default).

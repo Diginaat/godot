@@ -32,6 +32,9 @@
 
 #include "servers/rendering/renderer_rd/pipeline_cache_rd.h"
 #include "servers/rendering/renderer_rd/shaders/effects/vrs.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/effects/vrs_adaptive.glsl.gen.h"
+
+class RenderSceneBuffersRD;
 
 namespace RendererRD {
 
@@ -59,6 +62,26 @@ private:
 		PipelineCacheRD pipelines[VRS_MAX];
 	} vrs_shader;
 
+	// Content-adaptive rates computed from the previous frame (VIEWPORT_VRS_ADAPTIVE).
+	enum AdaptiveMode {
+		ADAPTIVE_RATE,
+		ADAPTIVE_RG,
+		ADAPTIVE_MAX,
+	};
+	struct AdaptivePushConstant {
+		int32_t source_size[2];
+		int32_t tile_size[2];
+		float threshold;
+		uint32_t max_rate;
+		uint32_t full_rate;
+		uint32_t pad;
+	};
+	struct AdaptiveShader {
+		VrsAdaptiveShaderRD shader;
+		RID shader_version;
+		RID pipelines[ADAPTIVE_MAX];
+	} adaptive_shader;
+
 public:
 	VRS();
 	~VRS();
@@ -67,6 +90,8 @@ public:
 
 	Size2i get_vrs_texture_size(const Size2i p_base_size) const;
 	void update_vrs_texture(RID p_vrs_fb, RID p_render_target);
+	// Writes the VRS texture of p_render_buffers from its previous frame.
+	void update_vrs_texture_adaptive(RenderSceneBuffersRD *p_render_buffers);
 };
 
 } // namespace RendererRD

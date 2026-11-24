@@ -25,6 +25,8 @@ What worked is in [successes](/successes/).
 * [Shared texture mip readback](/mistakes/shared-texture-mip-readback.md) - inspect owner mip chains, not assumed shared-view copy offsets
 * [Deferred help after editor teardown](/mistakes/deferred-help-after-editor-teardown.md) - static worker callbacks need editor lifetime guards
 
+* [Ran doctool with --gdscript-docs from the repository root](/mistakes/doctool-gdscript-docs-flag.md) - 567 stray XMLs and unrelated doc rewrites; use `--doctool .` alone and keep only the change's hunks
+
 * [Reported a bug from runs that hadn't converged](/mistakes/conclusions-from-unconverged-runs.md) - repeat and converge before claiming a difference
 * [Metrics that measured noise](/mistakes/metric-measured-noise.md) - measure the noise floor first, then pick thresholds
 * [Ran a GI test with auto exposure and real-time timing](/mistakes/uncontrolled-test-conditions.md) - pin everything that adapts or animates over time

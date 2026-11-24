@@ -49,6 +49,9 @@ func _multimesh(mesh: Mesh, transforms: Array[Transform3D]) -> MultiMeshInstance
 
 func _ready() -> void:
 	get_window().size = Vector2i(640, 360)
+	# Adaptive VRS (the default) picks each frame's shading rates from the
+	# previous frame, so captures compared pixel for pixel would differ.
+	get_viewport().vrs_mode = Viewport.VRS_DISABLED
 	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/enabled", true)
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/enabled", false)
 	var environment := Environment.new()

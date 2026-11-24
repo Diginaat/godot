@@ -1360,7 +1360,9 @@ void RendererSceneRenderRD::_update_vrs(Ref<RenderSceneBuffersRD> p_render_buffe
 		RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 
 		RSE::ViewportVRSMode vrs_mode = texture_storage->render_target_get_vrs_mode(render_target);
-		if (vrs_mode != RSE::VIEWPORT_VRS_DISABLED) {
+		if (vrs_mode == RSE::VIEWPORT_VRS_ADAPTIVE) {
+			vrs->update_vrs_texture_adaptive(p_render_buffers.ptr());
+		} else if (vrs_mode != RSE::VIEWPORT_VRS_DISABLED) {
 			RID vrs_texture = p_render_buffers->get_texture(RB_SCOPE_VRS, RB_TEXTURE);
 
 			// We use get_cache_multipass instead of get_cache_multiview because the default behavior is for

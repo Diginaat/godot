@@ -4246,6 +4246,9 @@ void Viewport::set_vrs_mode(Viewport::VRSMode p_vrs_mode) {
 		case VRS_XR: {
 			RS::get_singleton()->viewport_set_vrs_mode(viewport, RSE::VIEWPORT_VRS_XR);
 		} break;
+		case VRS_ADAPTIVE: {
+			RS::get_singleton()->viewport_set_vrs_mode(viewport, RSE::VIEWPORT_VRS_ADAPTIVE);
+		} break;
 		default: {
 			RS::get_singleton()->viewport_set_vrs_mode(viewport, RSE::VIEWPORT_VRS_DISABLED);
 		} break;
@@ -5451,7 +5454,7 @@ void Viewport::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2× (Faster),4× (Fast),8× (Average),16x (Slow)")), "set_anisotropic_filtering_level", "get_anisotropic_filtering_level");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "fsr_sharpness", PROPERTY_HINT_RANGE, "0,2,0.01"), "set_fsr_sharpness", "get_fsr_sharpness");
 	ADD_GROUP("Variable Rate Shading", "vrs_");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "vrs_mode", PROPERTY_HINT_ENUM, "Disabled,Texture,XR"), "set_vrs_mode", "get_vrs_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "vrs_mode", PROPERTY_HINT_ENUM, "Disabled,Texture,XR,Adaptive"), "set_vrs_mode", "get_vrs_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "vrs_update_mode", PROPERTY_HINT_ENUM, "Disabled,Once,Always"), "set_vrs_update_mode", "get_vrs_update_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "vrs_texture", PROPERTY_HINT_RESOURCE_TYPE, Texture2D::get_class_static()), "set_vrs_texture", "get_vrs_texture");
 #endif
@@ -5610,6 +5613,7 @@ void Viewport::_bind_methods() {
 	BIND_ENUM_CONSTANT(VRS_DISABLED);
 	BIND_ENUM_CONSTANT(VRS_TEXTURE);
 	BIND_ENUM_CONSTANT(VRS_XR);
+	BIND_ENUM_CONSTANT(VRS_ADAPTIVE);
 	BIND_ENUM_CONSTANT(VRS_MAX);
 
 	BIND_ENUM_CONSTANT(VRS_UPDATE_DISABLED);
@@ -5624,7 +5628,7 @@ void Viewport::_validate_property(PropertyInfo &p_property) const {
 	}
 	if (vrs_mode != VRS_TEXTURE && (p_property.name == "vrs_texture")) {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
-	} else if (vrs_mode == VRS_DISABLED && (p_property.name == "vrs_update_mode")) {
+	} else if ((vrs_mode == VRS_DISABLED || vrs_mode == VRS_ADAPTIVE) && (p_property.name == "vrs_update_mode")) {
 		p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 	}
 }

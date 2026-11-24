@@ -3055,6 +3055,7 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_DISABLED);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_TEXTURE);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_XR);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_ADAPTIVE);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_MAX);
 
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_UPDATE_DISABLED);
@@ -3759,6 +3760,8 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/shadow_min_casters", PROPERTY_HINT_RANGE, "0,4096,1,or_greater"), 256);
 	GLOBAL_DEF("rendering/geometry/mesh_occlusion/enabled", true);
+	// Adaptive variable rate shading: read every frame.
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/vrs/adaptive_threshold", PROPERTY_HINT_RANGE, "0,1,0.001"), 0.1);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/size.mobile", 2048);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality", PROPERTY_HINT_ENUM, "Hard (Fastest),Soft Very Low (Faster),Soft Low (Fast),Soft Medium (Average),Soft High (Slow),Soft Ultra (Slowest)"), 2);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile", 0);

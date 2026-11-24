@@ -29,6 +29,9 @@ func _sphere(segments: int) -> ArrayMesh:
 
 func _ready() -> void:
 	get_window().size = Vector2i(640, 360)
+	# Adaptive VRS (the default) picks each frame's shading rates from the
+	# previous frame, so captures compared pixel for pixel would differ.
+	get_viewport().vrs_mode = Viewport.VRS_DISABLED
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/enabled", true)
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/error_pixels", 0.5)
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/occlusion_two_pass", true)

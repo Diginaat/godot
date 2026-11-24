@@ -5939,7 +5939,10 @@
 		<constant name="VIEWPORT_VRS_XR" value="2" enum="ViewportVRSMode">
 			Variable rate shading texture is supplied by the primary [XRInterface]. Note that this may override the update mode.
 		</constant>
-		<constant name="VIEWPORT_VRS_MAX" value="3" enum="ViewportVRSMode">
+		<constant name="VIEWPORT_VRS_ADAPTIVE" value="3" enum="ViewportVRSMode">
+			Content-adaptive variable rate shading. The shading rate is chosen every frame on the GPU from the image of the previous frame: each shading rate tile (usually 8×8 or 16×16 pixels) is shaded at 2×1, 1×2, 2×2 or up to 4×4 pixels per sample where neighboring pixels differ less than [member ProjectSettings.rendering/vrs/adaptive_threshold] allows, such as sky, fog, flat walls and dark areas, and at full rate elsewhere and along edges. This lowers the fragment shading cost of the 3D color passes without a visible change in most scenes. Requires a GPU with attachment VRS; ignored otherwise.
+		</constant>
+		<constant name="VIEWPORT_VRS_MAX" value="4" enum="ViewportVRSMode">
 			Represents the size of the [enum ViewportVRSMode] enum.
 		</constant>
 		<constant name="VIEWPORT_VRS_UPDATE_DISABLED" value="0" enum="ViewportVRSUpdateMode">

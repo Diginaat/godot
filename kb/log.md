@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-24 (adaptive VRS)
+
+* **Added**: [adaptive variable rate shading](/project/adaptive-vrs.md)
+  (GPU-first plan G2): `Viewport.VRS_ADAPTIVE`,
+  `rendering/vrs/adaptive_threshold`, `rendering/vrs/mode` defaults to
+  Adaptive; fixture `vrs_adaptive.tscn`. Pixel-compare fixtures pin VRS off.
+* **Added**: mistake [doctool with --gdscript-docs](/mistakes/doctool-gdscript-docs-flag.md).
+
 ## 2026-11-24 (Cluster LOD debug view)
 
 * **Added**: [Cluster LOD debug draw mode](/project/resident-clod-raster.md#debug-view)

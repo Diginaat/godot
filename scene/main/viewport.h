@@ -244,6 +244,7 @@ public:
 		VRS_DISABLED,
 		VRS_TEXTURE,
 		VRS_XR,
+		VRS_ADAPTIVE,
 		VRS_MAX
 	};
 
