@@ -159,7 +159,7 @@ void SceneTreeDock::input(const Ref<InputEvent> &p_event) {
 
 	Ref<InputEventMouseButton> mb = p_event;
 
-	if (mb.is_valid() && (mb->get_button_index() == MouseButton::LEFT || mb->get_button_index() == MouseButton::RIGHT)) {
+	if (mb.is_valid() && mb->get_button_index() == MouseButton::LEFT) {
 		Tree *tree = scene_tree->get_scene_tree();
 		if (mb->is_pressed() && tree->get_rect().has_point(tree->get_local_mouse_position())) {
 			tree_clicked = true;
@@ -1381,7 +1381,6 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 			bool editable = editable_state == STATE_CHECKED;
 
 			if (editable) {
-				editable_instance_remove_dialog->set_text(TTR("Disabling \"Editable Children\" will cause all properties of this subscene's descendant nodes to be reverted to their default."));
 				editable_instance_remove_dialog->popup_centered();
 			} else {
 				_toggle_editable_children(selection);
@@ -1398,25 +1397,25 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 			}
 
 			ItemCheckState editable_state = _is_editable_children(selection);
-			ItemCheckState placeholder_state = _is_placeholder(selection);
-			bool editable = editable_state != STATE_UNCHECKED;
-			bool placeholder = placeholder_state == STATE_CHECKED;
-			// Fire confirmation dialog when children are editable.
-			if (editable && !placeholder) {
-				placeholder_editable_instance_remove_dialog->set_text(TTR("Enabling \"Load as Placeholder\" will disable \"Editable Children\" and cause all properties of the node to be reverted to their default."));
+			if (editable_state != STATE_UNCHECKED) {
+				// Fire confirmation dialog when children are editable.
 				placeholder_editable_instance_remove_dialog->popup_centered();
 			} else {
-				placeholder = !placeholder;
+				EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+				undo_redo->create_action(TTR("Toggle Load as Placeholder"));
+
+				ItemCheckState placeholder_state = _is_placeholder(selection);
+				bool placeholder = placeholder_state == STATE_CHECKED;
 				for (Node *node : selection) {
 					if (node) {
-						if (placeholder) {
-							EditorNode::get_singleton()->get_edited_scene()->set_editable_instance(node, false);
-						}
-
-						node->set_scene_instance_load_placeholder(placeholder);
+						undo_redo->add_do_method(node, "set_scene_instance_load_placeholder", !placeholder);
+						undo_redo->add_undo_method(node, "set_scene_instance_load_placeholder", node->get_scene_instance_load_placeholder());
 					}
 				}
-				scene_tree->update_tree();
+
+				undo_redo->add_do_method(scene_tree, "update_tree");
+				undo_redo->add_undo_method(scene_tree, "update_tree");
+				undo_redo->commit_action();
 			}
 		} break;
 		case TOOL_SCENE_MAKE_LOCAL: {
@@ -1479,9 +1478,7 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 				Node *node = e->get();
 				if (node) {
 					node->set_scene_inherited_state(Ref<SceneState>());
-					editor_data->reload_scene_from_memory(editor_data->get_edited_scene(), true);
-					scene_tree->clear_cache();
-					InspectorDock::get_inspector_singleton()->update_tree();
+					EditorNode::get_singleton()->soft_reload_edited_scene();
 				}
 			}
 		} break;
@@ -2770,25 +2767,38 @@ void SceneTreeDock::_shader_creation_closed() {
 	shader_create_dialog->disconnect("canceled", callable_mp(this, &SceneTreeDock::_shader_creation_closed));
 }
 
-void SceneTreeDock::_toggle_editable_children_from_selection() {
+void SceneTreeDock::_toggle_editable_children_from_selection(bool p_reload) {
 	List<Node *> selection = editor_selection->get_full_selected_node_list();
-	_toggle_editable_children(selection);
+	_toggle_editable_children(selection, STATE_INDETERMINATE, p_reload);
 }
 
-void SceneTreeDock::_toggle_placeholder_from_selection() {
+void SceneTreeDock::_toggle_placeholder_from_selection(bool p_reload) {
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
 	List<Node *> selection = editor_selection->get_full_selected_node_list();
-	ItemCheckState placeholder_state = _is_placeholder(selection);
-	bool placeholder = placeholder_state != STATE_CHECKED;
-	if (placeholder) {
-		_toggle_editable_children(selection, STATE_CHECKED);
-	}
 
-	for (Node *node : selection) {
-		if (node) {
-			node->set_scene_instance_load_placeholder(placeholder);
+	if (p_reload) {
+		for (Node *node : selection) {
+			if (node) {
+				node->set_scene_instance_load_placeholder(true);
+			}
+		}
+	} else {
+		// Explicit context is needed to workaround a bug with nesting actions in the undo manager.
+		undo_redo->create_action(TTR("Toggle Load as Placeholder"), UndoRedo::MERGE_DISABLE, edited_scene);
+
+		for (Node *node : selection) {
+			if (node) {
+				undo_redo->add_do_method(node, "set_scene_instance_load_placeholder", true);
+				undo_redo->add_undo_method(node, "set_scene_instance_load_placeholder", node->get_scene_instance_load_placeholder());
+			}
 		}
 	}
-	scene_tree->update_tree();
+
+	_toggle_editable_children(selection, STATE_CHECKED, p_reload);
+
+	if (!p_reload) {
+		undo_redo->commit_action();
+	}
 }
 
 void SceneTreeDock::_reparent_nodes_to_root(Node *p_root, const Array &p_nodes, Node *p_owner) {
@@ -2813,9 +2823,8 @@ void SceneTreeDock::_reparent_nodes_to_root(Node *p_root, const Array &p_nodes, 
 	}
 }
 
-void SceneTreeDock::_reparent_nodes_to_paths_with_transform_and_name(Node *p_root, const Array &p_nodes, const Array &p_paths, const Array &p_transforms, const Array &p_names, Node *p_owner) {
+void SceneTreeDock::_reparent_nodes_to_paths_with_name(Node *p_root, const Array &p_nodes, const Array &p_paths, const Array &p_names, Node *p_owner) {
 	ERR_FAIL_COND(p_nodes.size() != p_paths.size());
-	ERR_FAIL_COND(p_nodes.size() != p_transforms.size());
 	ERR_FAIL_COND(p_nodes.size() != p_names.size());
 
 	for (int i = 0; i < p_nodes.size(); i++) {
@@ -2829,15 +2838,6 @@ void SceneTreeDock::_reparent_nodes_to_paths_with_transform_and_name(Node *p_roo
 		node->get_owned_by(p_owner, &owned);
 		node->reparent(parent_node);
 		node->set_name(p_names[i]);
-		Node3D *node_3d = Object::cast_to<Node3D>(node);
-		if (node_3d) {
-			node_3d->set_transform(p_transforms[i]);
-		} else {
-			Node2D *node_2d = Object::cast_to<Node2D>(node);
-			if (node_2d) {
-				node_2d->set_transform(p_transforms[i]);
-			}
-		}
 
 		for (Node *F : owned) {
 			F->set_owner(p_owner);
@@ -2845,67 +2845,76 @@ void SceneTreeDock::_reparent_nodes_to_paths_with_transform_and_name(Node *p_roo
 	}
 }
 
-void SceneTreeDock::_toggle_editable_children(List<Node *> &p_nodes, ItemCheckState p_current_state) {
-	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
-
-	undo_redo->create_action(TTR("Toggle Editable Children"));
-
+void SceneTreeDock::_toggle_editable_children(List<Node *> &p_nodes, ItemCheckState p_current_state, bool p_reload) {
 	bool is_indeterminate = p_current_state == STATE_INDETERMINATE;
 	ItemCheckState editable_state = is_indeterminate ? _is_editable_children(p_nodes) : p_current_state;
 	bool editable = editable_state != STATE_CHECKED;
 
+	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+	if (editable || !p_reload) {
+		undo_redo->create_action(TTR("Toggle Editable Children"));
+	}
+
 	for (Node *node : p_nodes) {
-		if (node) {
-			undo_redo->add_undo_method(EditorNode::get_singleton()->get_edited_scene(), "set_editable_instance", node, !editable);
-			undo_redo->add_do_method(EditorNode::get_singleton()->get_edited_scene(), "set_editable_instance", node, editable);
+		if (!node) {
+			continue;
+		}
 
-			if (editable) {
-				bool original_scene_instance_load_placeholder = node->get_scene_instance_load_placeholder();
+		if (editable) {
+			undo_redo->add_do_method(edited_scene, "set_editable_instance", node, true);
+			undo_redo->add_undo_method(edited_scene, "set_editable_instance", node, edited_scene->is_editable_instance(node));
 
-				undo_redo->add_undo_method(node, "set_scene_instance_load_placeholder", original_scene_instance_load_placeholder);
-				undo_redo->add_do_method(node, "set_scene_instance_load_placeholder", false);
+			undo_redo->add_do_method(node, "set_scene_instance_load_placeholder", false);
+			undo_redo->add_undo_method(node, "set_scene_instance_load_placeholder", node->get_scene_instance_load_placeholder());
+
+			undo_redo->add_do_method(Node3DEditor::get_singleton(), "update_all_gizmos", node);
+			undo_redo->add_undo_method(Node3DEditor::get_singleton(), "update_all_gizmos", node);
+		} else if (edited_scene->is_editable_instance(node)) {
+			if (p_reload) {
+				// No need for undo, as the history will be cleared with the scene reloaded.
+				edited_scene->set_editable_instance(node, false);
 			} else {
-				List<Node *> owned;
-				node->get_owned_by(edited_scene, &owned);
+				undo_redo->add_do_method(edited_scene, "set_editable_instance", node, false);
+				undo_redo->add_undo_method(edited_scene, "set_editable_instance", node, true);
+			}
 
-				// Get the original paths, transforms, and names for undo.
-				Array owned_nodes_array;
-				Array paths_array;
-				Array transform_array;
-				Array name_array;
+			List<Node *> owned;
+			node->get_owned_by(edited_scene, &owned);
 
-				for (Node *owned_node : owned) {
-					if (owned_node != node && owned_node != edited_scene && owned_node->get_owner() == edited_scene && owned_node->get_parent()->get_owner() != edited_scene) {
-						owned_nodes_array.push_back(owned_node);
+			// Get the original paths, transforms, and names for undo.
+			Array owned_nodes_array;
+			Array paths_array;
+			Array name_array;
+
+			for (Node *owned_node : owned) {
+				if (owned_node != node && owned_node != edited_scene && owned_node->get_owner() == edited_scene && owned_node->get_parent()->get_owner() != edited_scene) {
+					owned_nodes_array.push_back(owned_node);
+
+					if (!p_reload) {
 						paths_array.push_back(node->get_path_to(owned_node->get_parent()));
 						name_array.push_back(owned_node->get_name());
-						Node3D *node_3d = Object::cast_to<Node3D>(owned_node);
-						if (node_3d) {
-							transform_array.push_back(node_3d->get_transform());
-						} else {
-							Node2D *node_2d = Object::cast_to<Node2D>(owned_node);
-							if (node_2d) {
-								transform_array.push_back(node_2d->get_transform());
-							} else {
-								transform_array.push_back(Variant());
-							}
-						}
 					}
-				}
-
-				if (!owned_nodes_array.is_empty()) {
-					undo_redo->add_undo_method(this, "_reparent_nodes_to_paths_with_transform_and_name", node, owned_nodes_array, paths_array, transform_array, name_array, edited_scene);
-					undo_redo->add_do_method(this, "_reparent_nodes_to_root", node, owned_nodes_array, edited_scene);
 				}
 			}
 
-			undo_redo->add_undo_method(Node3DEditor::get_singleton(), "update_all_gizmos", node);
-			undo_redo->add_do_method(Node3DEditor::get_singleton(), "update_all_gizmos", node);
+			if (!owned_nodes_array.is_empty()) {
+				if (p_reload) {
+					_reparent_nodes_to_root(node, owned_nodes_array, edited_scene);
+				} else {
+					undo_redo->add_do_method(this, "_reparent_nodes_to_root", node, owned_nodes_array, edited_scene);
+					undo_redo->add_undo_method(this, "_reparent_nodes_to_paths_with_name", node, owned_nodes_array, paths_array, name_array, edited_scene);
+				}
+			}
 		}
 	}
-	undo_redo->add_undo_method(scene_tree, "update_tree");
-	undo_redo->add_do_method(scene_tree, "update_tree");
-	undo_redo->commit_action();
+
+	if (editable || !p_reload) {
+		undo_redo->add_undo_method(scene_tree, "update_tree");
+		undo_redo->add_do_method(scene_tree, "update_tree");
+		undo_redo->commit_action();
+	} else {
+		EditorNode::get_singleton()->soft_reload_edited_scene();
+	}
 }
 
 bool SceneTreeDock::_is_external(Node *p_node) const {
@@ -5209,7 +5218,7 @@ void SceneTreeDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("_apply_owners_map"), &SceneTreeDock::_apply_owners_map);
 	ClassDB::bind_method(D_METHOD("_set_owners"), &SceneTreeDock::_set_owners);
 	ClassDB::bind_method(D_METHOD("_reparent_nodes_to_root"), &SceneTreeDock::_reparent_nodes_to_root);
-	ClassDB::bind_method(D_METHOD("_reparent_nodes_to_paths_with_transform_and_name"), &SceneTreeDock::_reparent_nodes_to_paths_with_transform_and_name);
+	ClassDB::bind_method(D_METHOD("_reparent_nodes_to_paths_with_name"), &SceneTreeDock::_reparent_nodes_to_paths_with_name);
 
 	ClassDB::bind_method(D_METHOD("_queue_update_script_button"), &SceneTreeDock::_queue_update_script_button);
 
@@ -5464,14 +5473,22 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	vb->add_child(delete_tracks_checkbox);
 
 	editable_instance_remove_dialog = memnew(ConfirmationDialog);
+	editable_instance_remove_dialog->set_text(TTRC("Disabling \"Editable Children\" will cause all properties of this subscene's descendant nodes to be reverted to their default.\nFor the reversion to be immediate, the scene needs to be reloaded (changes won't be discarded, but there's no undo)."));
+	editable_instance_remove_dialog->add_button(TTRC("OK (No Reload)"), false, "no_reload");
 	editable_instance_remove_dialog->set_flag(Window::FLAG_RESIZE_DISABLED, true);
 	add_child(editable_instance_remove_dialog);
-	editable_instance_remove_dialog->connect(SceneStringName(confirmed), callable_mp(this, &SceneTreeDock::_toggle_editable_children_from_selection));
+	editable_instance_remove_dialog->connect(SceneStringName(confirmed), callable_mp(this, &SceneTreeDock::_toggle_editable_children_from_selection).bind(true));
+	editable_instance_remove_dialog->connect("custom_action", callable_mp(this, &SceneTreeDock::_toggle_editable_children_from_selection).bind(false).unbind(1));
+	editable_instance_remove_dialog->connect("custom_action", callable_mp((Window *)editable_instance_remove_dialog, &ConfirmationDialog::hide).unbind(1));
 
 	placeholder_editable_instance_remove_dialog = memnew(ConfirmationDialog);
+	placeholder_editable_instance_remove_dialog->set_text(TTRC("Enabling \"Load as Placeholder\" will disable \"Editable Children\" and cause all properties of the node to be reverted to their default.\nFor the reversion to be immediate, the scene needs to be reloaded (changes won't be discarded, but there's no undo)"));
+	placeholder_editable_instance_remove_dialog->add_button(TTRC("OK (No Reload)"), false, "no_reload");
 	placeholder_editable_instance_remove_dialog->set_flag(Window::FLAG_RESIZE_DISABLED, true);
 	add_child(placeholder_editable_instance_remove_dialog);
-	placeholder_editable_instance_remove_dialog->connect(SceneStringName(confirmed), callable_mp(this, &SceneTreeDock::_toggle_placeholder_from_selection));
+	placeholder_editable_instance_remove_dialog->connect(SceneStringName(confirmed), callable_mp(this, &SceneTreeDock::_toggle_placeholder_from_selection).bind(true));
+	placeholder_editable_instance_remove_dialog->connect("custom_action", callable_mp(this, &SceneTreeDock::_toggle_placeholder_from_selection).bind(false).unbind(1));
+	placeholder_editable_instance_remove_dialog->connect("custom_action", callable_mp((Window *)placeholder_editable_instance_remove_dialog, &ConfirmationDialog::hide).unbind(1));
 
 	new_scene_from_dialog = memnew(EditorFileDialog);
 	new_scene_from_dialog->set_title(TTRC("Save New Scene As..."));

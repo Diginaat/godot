@@ -499,12 +499,12 @@ void ThemeModern::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edit
 			// TooltipPanel is also used for custom tooltips, while TooltipLabel
 			// is only relevant for default tooltips.
 
-			p_theme->set_stylebox(CoreStringName(normal), "TooltipLabel", p_config.base_empty_style);
 			p_theme->set_color(SceneStringName(font_color), "TooltipLabel", p_config.font_hover_color);
 			p_theme->set_color("font_shadow_color", "TooltipLabel", Color(1, 1, 1, 0));
 
 			Ref<StyleBoxFlat> tooltip_style = p_config.base_style->duplicate();
 			tooltip_style->set_bg_color(p_config.surface_popup_color);
+			tooltip_style->set_content_margin_all(0);
 			tooltip_style->set_corner_radius_all(p_config.is_modern_compact() ? EDSCALE_RND(p_config.corner_radius) : 0);
 			if (p_config.is_modern_compact()) {
 				_set_transparent_popup_gutter(tooltip_style);
