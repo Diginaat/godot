@@ -1,5 +1,19 @@
 # Update log
 
+## 2026-11-24 (sync, DDGI headless leak)
+
+* **Synced** `dev`: PhysX module `aaafe7ed42`, upstream master
+  `94fc09c62d` (MetalFX jitter ported into `_render_3d_upscaling`).
+  Linux .NET editor builds; smoke (PhysX game and editor, path tracer,
+  DDGI interior) passes.
+* **Fixed**: [automatic reflections leaked an instance every frame on the dummy renderer](/ddgi/findings/headless-auto-reflection-leak.md).
+* **Open**: NVIDIA's force-push `49a825dc52` is half merged on the
+  `dev-nvidia` branch (43 of 57 files). Its rewrite of TLAS building
+  conflicts with the fork's DDGI and path tracer changes in
+  `render_raytracing.*` and the ray tracing shaders; those need porting,
+  not hunk merging. In the merged `fog.cpp`, the ray-query shadow path
+  ignores DDGI.
+
 ## 2026-11-17 (release 0.10.3)
 
 * **Released**: `godot4.8-beta-diginaat-physx-v0.10.3` at `db5506be7d`
