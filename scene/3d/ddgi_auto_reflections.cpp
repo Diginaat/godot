@@ -575,13 +575,17 @@ void DDGIAutoReflections::_set_probe(bool p_enabled, const Transform3D &p_transf
 	if (!p_enabled) {
 		if (probe_instance.is_valid()) {
 			rs->free_rid(probe_instance);
-			rs->free_rid(probe);
+			if (probe.is_valid()) {
+				rs->free_rid(probe);
+			}
 			probe_instance = RID();
 			probe = RID();
 		}
 		return;
 	}
-	if (probe.is_null()) {
+	// Keyed on the instance: the dummy renderer (headless) returns an empty probe RID, and
+	// keying on the probe created a new instance every frame.
+	if (probe_instance.is_null()) {
 		probe = rs->reflection_probe_create();
 		probe_realtime = p_realtime;
 		rs->reflection_probe_set_update_mode(probe, p_realtime ? RSE::REFLECTION_PROBE_UPDATE_ALWAYS : RSE::REFLECTION_PROBE_UPDATE_ONCE);
