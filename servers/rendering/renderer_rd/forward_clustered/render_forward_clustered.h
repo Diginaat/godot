@@ -101,7 +101,7 @@ protected:
 	SceneShaderForwardClustered scene_shader;
 
 public:
-	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 31;
+	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 32;
 	// MultiMesh culling words of shadow passes start here (same layout as the main view's).
 	static constexpr uint32_t GEOMETRY_STATISTICS_SHADOW_OFFSET = 12;
 	virtual Dictionary gpu_geometry_get_statistics(const Ref<RenderSceneBuffers> &p_render_buffers) override;
@@ -151,6 +151,23 @@ public:
 			uint32_t occluded_draw_capacity = 0;
 			uint32_t occlusion_input_capacity = 0;
 			bool occlusion_ready = false;
+			// Two-pass occlusion (main view): the depth pre-pass draws the
+			// instances visible last frame (phase 1); after the HZB test a
+			// second depth pass draws the visible ones phase 1 left out.
+			// History: one word per instance of each MultiMesh transform
+			// buffer, ping-ponged; history_layout maps a transform buffer to
+			// its (offset, instance count) in the buffer written last.
+			RID history[2];
+			uint32_t history_capacity = 0;
+			uint32_t history_write = 0; // Buffer written this frame.
+			HashMap<RID, Vector2i> history_layout;
+			RID phase1_ids;
+			RID phase1_commands;
+			RID phase2_ids;
+			RID phase2_commands;
+			uint32_t phase_id_capacity = 0;
+			uint32_t phase_draw_capacity = 0;
+			bool two_pass = false;
 		};
 		// Main view and shadow passes keep separate buffers: shadow draws run
 		// between the main view's culling dispatch and its opaque draws.
@@ -382,7 +399,7 @@ protected:
 	struct MultiMeshCull {
 		MultimeshCullShaderRD shader;
 		RID version;
-		RID pipelines[5]; // Cull, scan, scatter, HZB occlusion, scan without statistics.
+		RID pipelines[7]; // Cull, scan, scatter, HZB occlusion, scan without statistics, two-pass phase-1 split, two-pass phase 2.
 	} multimesh_cull;
 	void _prepare_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	struct MeshCLOD {
@@ -401,6 +418,11 @@ protected:
 	// passes; the depth pre-pass keeps the frustum-culled instances.
 	bool _setup_multimesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	void _occlude_multimesh(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	// Two-pass occlusion: selects the phase-1 depth instances (visible last frame).
+	void _split_multimesh_occlusion(RenderBufferDataForwardClustered *p_buffers);
+	// Rank (p_rank_mode), scan and scatter of the main view's MultiMesh
+	// instances into an ID and command buffer pair.
+	void _dispatch_multimesh_selection(RD::ComputeListID p_compute, RenderBufferDataForwardClustered *p_buffers, uint32_t p_rank_mode, RID p_ids, RID p_commands, const RD::Uniform *p_extra, uint32_t p_extra_count);
 	// GPU path instances (rendering/geometry/gpu_instances/occlusion): the
 	// colour passes draw the members the HZB cannot prove hidden.
 	bool _setup_gpu_instances_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
@@ -496,7 +518,7 @@ protected:
 		bool use_material_feedback = false;
 		RID multimesh_cull_commands;
 		RID mesh_clod_commands;
-		bool mesh_clod_only = false; // Draw only CLOD elements (phase-2 depth of two-pass occlusion).
+		bool depth_phase2_only = false; // Draw only CLOD and GPU-culled MultiMesh elements (phase-2 depth of two-pass occlusion).
 		RID gpu_instance_commands; // GPU path draw buckets' indirect commands.
 		RID mesh_occlusion_commands; // CPU list elements tested against the HZB: one command per element.
 		const uint8_t *mesh_occlusion_tested = nullptr; // Per element: draw through its command.

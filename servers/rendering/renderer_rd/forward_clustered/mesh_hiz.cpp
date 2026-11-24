@@ -413,14 +413,124 @@ bool RenderForwardClustered::_setup_multimesh_occlusion(const RenderDataRD *p_re
 	if (cull.occluded_ids.is_null() || cull.occluded_commands.is_null()) {
 		return false;
 	}
+
+	// Visibility history: one word per instance of each transform buffer
+	// (surfaces of one MultiMesh share it). The previous frame's offsets are
+	// valid only for transform buffers it had with the same instance count.
+	HashMap<RID, Vector2i> layout;
+	uint32_t history_words = 0;
+	for (const auto &draw : cull.draws) {
+		if (!layout.has(draw.transforms)) {
+			layout.insert(draw.transforms, Vector2i(history_words, draw.count));
+			history_words += draw.count;
+		}
+	}
+	if (cull.history_capacity < history_words) {
+		for (RID &buffer : cull.history) {
+			if (buffer.is_valid()) {
+				rd->free_rid(buffer);
+			}
+		}
+		cull.history_capacity = Math::next_power_of_2(MAX(history_words, 1u));
+		for (RID &buffer : cull.history) {
+			buffer = rd->storage_buffer_create(cull.history_capacity * sizeof(uint32_t));
+		}
+		if (cull.history[0].is_null() || cull.history[1].is_null()) {
+			cull.history_capacity = 0;
+			return false;
+		}
+		cull.history_layout.clear(); // The new buffers hold no history.
+	}
+	cull.history_write ^= 1u;
+	const bool two_pass = GLOBAL_GET_CACHED(bool, "rendering/geometry/multimesh_gpu_culling/occlusion_two_pass");
+	constexpr uint32_t NO_HISTORY = UINT32_MAX;
+	for (uint32_t draw = 0; draw < cull.draws.size(); draw++) {
+		const Vector2i *previous = cull.history_layout.getptr(cull.draws[draw].transforms);
+		inputs[draw].params[2] = (two_pass && previous && uint32_t(previous->y) == cull.draws[draw].count) ? uint32_t(previous->x) : NO_HISTORY;
+		inputs[draw].params[3] = uint32_t(layout[cull.draws[draw].transforms].x);
+	}
+	cull.history_layout = layout;
+
+	cull.two_pass = false;
+	if (two_pass) {
+		// Phase lists mirror the frustum lists' layout and capacity.
+		if (cull.phase_id_capacity != cull.id_capacity || cull.phase_draw_capacity != cull.draw_capacity) {
+			for (RID *buffer : { &cull.phase1_ids, &cull.phase1_commands, &cull.phase2_ids, &cull.phase2_commands }) {
+				if (buffer->is_valid()) {
+					rd->free_rid(*buffer);
+				}
+			}
+			cull.phase1_ids = rd->storage_buffer_create(cull.id_capacity * sizeof(uint32_t));
+			cull.phase2_ids = rd->storage_buffer_create(cull.id_capacity * sizeof(uint32_t));
+			cull.phase1_commands = rd->storage_buffer_create(cull.draw_capacity * 4 * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+			cull.phase2_commands = rd->storage_buffer_create(cull.draw_capacity * 4 * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+			cull.phase_id_capacity = cull.id_capacity;
+			cull.phase_draw_capacity = cull.draw_capacity;
+		}
+		cull.two_pass = cull.phase1_ids.is_valid() && cull.phase2_ids.is_valid() && cull.phase1_commands.is_valid() && cull.phase2_commands.is_valid();
+		if (!cull.two_pass) {
+			cull.phase_id_capacity = 0;
+			cull.phase_draw_capacity = 0;
+		}
+	}
+
 	rd->buffer_update(cull.occlusion_inputs, 0, inputs.size() * sizeof(MultiMeshOcclusionInput), inputs.ptr());
 	// Index counts and the other command words; the scan rewrites instance
 	// counts. Uploaded, not copied from `commands` on the GPU: on D3D12 a
 	// buffer copy followed by compute writes to the destination fails the
 	// command list (Close returns E_INVALIDARG, then the device is removed).
 	rd->buffer_update(cull.occluded_commands, 0, cull.command_words.size() * sizeof(uint32_t), cull.command_words.ptr());
+	if (cull.two_pass) {
+		rd->buffer_update(cull.phase1_commands, 0, cull.command_words.size() * sizeof(uint32_t), cull.command_words.ptr());
+		rd->buffer_update(cull.phase2_commands, 0, cull.command_words.size() * sizeof(uint32_t), cull.command_words.ptr());
+	}
 	cull.occlusion_ready = true;
 	return true;
+}
+
+void RenderForwardClustered::_dispatch_multimesh_selection(RD::ComputeListID p_compute, RenderBufferDataForwardClustered *p_buffers, uint32_t p_rank_mode, RID p_ids, RID p_commands, const RD::Uniform *p_extra, uint32_t p_extra_count) {
+	RD *rd = RD::get_singleton();
+	const auto &cull = p_buffers->multimesh_cull;
+	LocalVector<RD::Uniform> uniforms;
+	const RID resources[6] = { cull.inputs, p_ids, p_commands, cull.ranks, cull.blocks, p_buffers->geometry_statistics.buffer };
+	for (uint32_t binding = 0; binding < 6; binding++) {
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, binding, resources[binding]));
+	}
+	for (uint32_t i = 0; i < p_extra_count; i++) {
+		uniforms.push_back(p_extra[i]);
+	}
+	const uint32_t modes[3] = { p_rank_mode, 4, 2 };
+	for (uint32_t step = 0; step < 3; step++) {
+		const uint32_t mode = modes[step];
+		const RID shader = multimesh_cull.shader.version_get_shader(multimesh_cull.version, mode);
+		rd->compute_list_bind_compute_pipeline(p_compute, multimesh_cull.pipelines[mode]);
+		rd->compute_list_bind_uniform_set(p_compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
+		for (uint32_t draw = 0; draw < cull.draws.size(); draw++) {
+			rd->compute_list_set_push_constant(p_compute, &draw, sizeof(draw));
+			rd->compute_list_dispatch(p_compute, mode == 4 ? 1 : (cull.draws[draw].count + 63) / 64, 1, 1);
+		}
+		if (step != 2) {
+			rd->compute_list_add_barrier(p_compute);
+		}
+	}
+}
+
+void RenderForwardClustered::_split_multimesh_occlusion(RenderBufferDataForwardClustered *p_buffers) {
+	auto &cull = p_buffers->multimesh_cull;
+	if (!cull.occlusion_ready || !cull.two_pass) {
+		return;
+	}
+	RD *rd = RD::get_singleton();
+	const RD::Uniform extra[3] = {
+		RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, cull.occlusion_inputs),
+		RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 8, cull.history[cull.history_write ^ 1u]),
+		RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 9, cull.history[cull.history_write]),
+	};
+	rd->capture_timestamp("MultiMesh Phase 1 Split");
+	RD::ComputeListID compute = rd->compute_list_begin();
+	_dispatch_multimesh_selection(compute, p_buffers, 5, cull.phase1_ids, cull.phase1_commands, extra, 3);
+	rd->compute_list_end();
+	rd->capture_timestamp("MultiMesh Phase 1 Split End");
 }
 
 void RenderForwardClustered::_occlude_multimesh(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
@@ -438,6 +548,8 @@ void RenderForwardClustered::_occlude_multimesh(const RenderDataRD *p_render_dat
 	}
 	LocalVector<RD::Uniform> occlude(shared);
 	occlude.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, cull.occlusion_inputs));
+	occlude.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 8, cull.history[cull.history_write ^ 1u]));
+	occlude.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 9, cull.history[cull.history_write]));
 	RD::Uniform pyramid;
 	pyramid.binding = 7;
 	pyramid.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
@@ -466,6 +578,17 @@ void RenderForwardClustered::_occlude_multimesh(const RenderDataRD *p_render_dat
 		if (step != 2) {
 			rd->compute_list_add_barrier(compute);
 		}
+	}
+	if (cull.two_pass) {
+		// Phase 2: the visible instances phase 1 did not draw. Ranks and
+		// blocks are rewritten, so wait for the scatter above.
+		rd->compute_list_add_barrier(compute);
+		const RD::Uniform extra[3] = {
+			RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 6, cull.occlusion_inputs),
+			RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 8, cull.history[cull.history_write ^ 1u]),
+			RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 9, cull.history[cull.history_write]),
+		};
+		_dispatch_multimesh_selection(compute, p_buffers, 6, cull.phase2_ids, cull.phase2_commands, extra, 3);
 	}
 	rd->compute_list_end();
 	rd->capture_timestamp("MultiMesh HZB Occlusion End");

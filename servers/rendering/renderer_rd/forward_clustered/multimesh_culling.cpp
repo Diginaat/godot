@@ -318,9 +318,11 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 		modes.push_back("\n#define MODE_SCATTER\n");
 		modes.push_back("\n#define MODE_OCCLUDE\n");
 		modes.push_back("\n#define MODE_SCAN\n#define SCAN_NO_STATISTICS\n");
+		modes.push_back("\n#define MODE_SPLIT\n");
+		modes.push_back("\n#define MODE_PHASE2\n");
 		multimesh_cull.shader.initialize(modes, "\n#define GEOMETRY_STATISTICS\n");
 		multimesh_cull.version = multimesh_cull.shader.version_create();
-		for (uint32_t mode = 0; mode < 5; mode++) {
+		for (uint32_t mode = 0; mode < 7; mode++) {
 			multimesh_cull.pipelines[mode] = rd->compute_pipeline_create(multimesh_cull.shader.version_get_shader(multimesh_cull.version, mode));
 		}
 	}

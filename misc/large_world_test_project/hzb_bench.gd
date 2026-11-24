@@ -4,7 +4,8 @@ extends Node3D
 ## Four modes: occlusion off, CLOD single pass (every selected group in depth,
 ## colour trimmed), CLOD two passes (groups occluded when last tested are left
 ## out of depth too) and two passes plus MultiMesh instance occlusion (colour
-## only). Three fixed views,
+## only), and that plus MultiMesh two-pass occlusion (instances occluded when
+## last tested are left out of depth too). Three fixed views,
 ## alternating mode order, pipelines warmed first. Prints GPU frame time and
 ## the depth-stage times from RD timestamps. Not a correctness test.
 
@@ -14,7 +15,7 @@ const BLOCKS := 8
 const SPACING := 26.0
 const BUILDING := 18.0
 const FRAMES := 240
-const MODES: Array[String] = ["off", "single", "two_pass", "two_pass+mm"]
+const MODES: Array[String] = ["off", "single", "two_pass", "two_pass+mm", "two_pass+mm2"]
 const VIEWS: Array[String] = ["street", "corner", "aerial"]
 var _camera: Camera3D
 var _objects := 0
@@ -150,7 +151,8 @@ func _view(index: int) -> void:
 func _mode(index: int) -> void:
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/occlusion_enabled", index > 0)
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/occlusion_two_pass", index >= 2)
-	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion", index == 3)
+	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion", index >= 3)
+	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion_two_pass", index == 4)
 
 
 func _read_stages() -> void:
@@ -251,5 +253,5 @@ func _run() -> void:
 			var expect_occlusion := m > 0 and VIEWS[view] != "aerial"
 			if int(stats.get("clod_groups_visible", 0)) <= 0 or (expect_occlusion and int(stats.get("hzb_groups_occluded", 0)) <= 0) or (m == 3 and int(stats.get("hzb_instances_occluded", 0)) <= 0):
 				printerr("HZB_BENCH_FAIL: %s view=%s mode=%s did not exercise CLOD or occlusion: %s" % [driver, VIEWS[view], MODES[m], stats])
-			print("HZB_BENCH_STATS: %s view=%s mode=%-11s clod_groups_visible=%d clod_triangles_visible=%d hzb_groups_occluded=%d hzb_triangles_occluded=%d hzb_triangles_deferred=%d hzb_triangles_recovered=%d multimesh_instances_visible=%d hzb_instances_occluded=%d" % [driver, VIEWS[view], MODES[m], stats.get("clod_groups_visible", -1), stats.get("clod_triangles_visible", -1), stats.get("hzb_groups_occluded", -1), stats.get("hzb_triangles_occluded", -1), stats.get("hzb_triangles_deferred", -1), stats.get("hzb_triangles_recovered", -1), stats.get("multimesh_instances_visible", -1), stats.get("hzb_instances_occluded", -1)])
+			print("HZB_BENCH_STATS: %s view=%s mode=%-11s clod_groups_visible=%d clod_triangles_visible=%d hzb_groups_occluded=%d hzb_triangles_occluded=%d hzb_triangles_deferred=%d hzb_triangles_recovered=%d multimesh_instances_visible=%d hzb_instances_occluded=%d multimesh_depth_instances=%d" % [driver, VIEWS[view], MODES[m], stats.get("clod_groups_visible", -1), stats.get("clod_triangles_visible", -1), stats.get("hzb_groups_occluded", -1), stats.get("hzb_triangles_occluded", -1), stats.get("hzb_triangles_deferred", -1), stats.get("hzb_triangles_recovered", -1), stats.get("multimesh_instances_visible", -1), stats.get("hzb_instances_occluded", -1), stats.get("multimesh_depth_instances", -1)])
 	get_tree().quit(0)

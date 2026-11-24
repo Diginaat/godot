@@ -20,6 +20,8 @@
 * [Native MultiMesh culling](/project/native-multimesh-culling.md) - opt-in GPU frustum tests, stable IDs, viewport-owned commands and fallback
 * [Cluster hierarchy cooker](/project/cluster-hierarchy-cooker.md) - source-index LOD trees, boundary locks, checked resource and complete reference cuts
 * [GPU cluster selection](/project/gpu-cluster-selection.md) - ancestor-veto cuts, projected-error/frustum selection and guarded native commands
+* [Two-pass MultiMesh occlusion](/project/multimesh-two-pass.md) - hidden-last-frame instances left out of the depth pre-pass; exact; street grid 7-12% faster, open valley 1-7% slower
+* [Cluster LOD skips repeat-batched elements](/project/clod-skipped-for-batched-elements.md) - shared meshes with same-shader materials batch since material tables, so no CLOD (hzb_bench); fix is G5
 * [Adaptive variable rate shading](/project/adaptive-vrs.md) - GPU picks each tile's shading rate from the previous frame; main-viewport default; 2-5% on the valley, 3.6x on an expensive-shader floor, ~47 dB PSNR
 * [GPU occlusion for CPU render list meshes](/project/mesh-occlusion.md) - HZB-tested indirect draws for every opaque CPU-list mesh (lightmapped, skinned, fading...); exact images, 20 of 20 hidden meshes skipped
 * [Resident CLOD raster](/project/resident-clod-raster.md) - native storage, viewport commands, original vertex/material pipelines and conventional fallback

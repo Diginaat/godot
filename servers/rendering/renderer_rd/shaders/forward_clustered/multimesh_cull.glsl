@@ -58,26 +58,48 @@ layout(set = 0, binding = 5, std430) buffer Statistics {
 }
 statistics;
 #endif
-#if !defined(MODE_SCAN) && !defined(MODE_SCATTER)
+#if !defined(MODE_SCAN) && !defined(MODE_SCATTER) && !defined(MODE_SPLIT) && !defined(MODE_PHASE2)
 layout(set = 1, binding = 0, std430) readonly buffer Transforms {
 	vec4 data[];
 }
 transforms;
 #endif
-#ifdef MODE_OCCLUDE
-// HZB occlusion of the frustum-visible instances, for the opaque colour
-// passes only. Runs after the depth pre-pass; reads the frustum pass's ranks
-// (visibility and LOD level) and ranks again, so the scan and scatter modes
-// then compact the unoccluded instances into a second ID and command buffer.
+// Rank words: bit 31 selects the instance in the current ranking, bits 24-29
+// hold its LOD level, bits 0-23 its rank in the workgroup. MODE_SPLIT also
+// sets bit 30 on every frustum-visible instance, as it no longer selects all.
+#if defined(MODE_OCCLUDE) || defined(MODE_SPLIT) || defined(MODE_PHASE2)
+// HZB occlusion of the frustum-visible instances. Runs after the depth
+// pre-pass; reads the frustum pass's ranks (visibility and LOD level) and
+// ranks again, so the scan and scatter modes then compact the unoccluded
+// instances into a second ID and command buffer for the opaque colour passes.
+// With two-pass occlusion, MODE_SPLIT first selects the instances that were
+// visible last frame for the depth pre-pass (phase 1), MODE_OCCLUDE records
+// this frame's visibility, and MODE_PHASE2 selects the visible instances that
+// phase 1 did not draw, for a second depth pass.
 struct OcclusionData {
 	mat4 local_to_clip; // MultiMesh-local space to jittered clip space.
 	mat4 abs_to_clip; // abs(P) * abs(V) * abs(M), bounds the rounding of local_to_clip.
-	uvec4 params; // Actual depth width/height.
+	uvec4 params; // Actual depth width/height, previous and current history offset (NO_HISTORY: none).
 };
 layout(set = 0, binding = 6, std430) readonly buffer OcclusionInputs {
 	OcclusionData data[];
 }
 occlusion;
+// One word per instance of each MultiMesh: visible after occlusion. The
+// previous frame's buffer is read, the current one written.
+layout(set = 0, binding = 8, std430) readonly buffer PreviousHistory {
+	uint data[];
+}
+previous_history;
+layout(set = 0, binding = 9, std430) writeonly buffer History {
+	uint data[];
+}
+history;
+
+const uint NO_HISTORY = 0xffffffffu;
+const uint STAT_MULTIMESH_DEPTH_INSTANCES = 31u;
+#endif
+#ifdef MODE_OCCLUDE
 layout(set = 0, binding = 7) uniform sampler2D depth_pyramid;
 
 #include "mesh_hiz_inc.glsl"
@@ -88,6 +110,15 @@ layout(push_constant, std430) uniform Params {
 	uint draw_index;
 }
 params;
+
+#if defined(MODE_OCCLUDE) || defined(MODE_SPLIT) || defined(MODE_PHASE2)
+// Phase 1 draws an instance when it was visible last frame, or when the
+// MultiMesh has no history (new to the view, or resized).
+bool drawn_in_phase1(uint instance_id) {
+	uint offset = occlusion.data[params.draw_index].params.z;
+	return offset == NO_HISTORY || previous_history.data[offset + instance_id] != 0u;
+}
+#endif
 
 shared uint scan_data[SCAN_WIDTH];
 shared uint carry;
@@ -105,7 +136,7 @@ uint inclusive_scan(uint value) {
 	return scan_data[lane];
 }
 
-#if !defined(MODE_SCAN) && !defined(MODE_SCATTER) && !defined(MODE_OCCLUDE)
+#if !defined(MODE_SCAN) && !defined(MODE_SCATTER) && !defined(MODE_OCCLUDE) && !defined(MODE_SPLIT) && !defined(MODE_PHASE2)
 // Stable per-instance value in [0, 1): an instance is either always kept or
 // always dropped at a given distance, so thinning never flickers.
 float thinning_hash(uint x) {
@@ -214,7 +245,7 @@ void main() {
 	if (instance_id < input_data.params.x) {
 		uint rank = ranks.data[input_data.params.w + instance_id];
 		if ((rank & 0x80000000u) != 0u) {
-			uint level = (rank >> 24u) & 0x7fu;
+			uint level = (rank >> 24u) & 0x3fu;
 			uint slot = blocks.data[block_offset + level * level_blocks + instance_id / 64u] + (rank & 0xffffffu);
 			visible_ids.data[input_data.params.w + level * stride + slot] = instance_id;
 		}
@@ -222,12 +253,14 @@ void main() {
 #else
 	uint instance_id = gl_GlobalInvocationID.x;
 	uint level = 0u;
+	uint keep = 0u; // Rank bits kept on unselected instances (MODE_SPLIT).
 #ifdef MODE_OCCLUDE
 	bool visible = false;
 	if (instance_id < input_data.params.x) {
 		uint frustum_rank = ranks.data[input_data.params.w + instance_id];
-		if ((frustum_rank & 0x80000000u) != 0u) {
-			level = (frustum_rank >> 24u) & 0x7fu;
+		// Bit 31 from the frustum pass, or bit 30 after MODE_SPLIT.
+		if ((frustum_rank & 0xc0000000u) != 0u) {
+			level = (frustum_rank >> 24u) & 0x3fu;
 			// The instance box in MultiMesh-local space, as in is_visible().
 			uint offset = (instance_id + input_data.params.z) * input_data.params.y;
 			vec4 r0 = transforms.data[offset];
@@ -249,6 +282,29 @@ void main() {
 			}
 #endif
 		}
+		uint history_offset = occlusion.data[params.draw_index].params.w;
+		if (history_offset != NO_HISTORY) {
+			history.data[history_offset + instance_id] = visible ? 1u : 0u;
+		}
+	}
+#elif defined(MODE_SPLIT)
+	bool visible = false;
+	if (instance_id < input_data.params.x) {
+		uint frustum_rank = ranks.data[input_data.params.w + instance_id];
+		if ((frustum_rank & 0x80000000u) != 0u) {
+			level = (frustum_rank >> 24u) & 0x3fu;
+			keep = 0x40000000u;
+			visible = drawn_in_phase1(instance_id);
+		}
+	}
+#elif defined(MODE_PHASE2)
+	bool visible = false;
+	if (instance_id < input_data.params.x) {
+		uint rank = ranks.data[input_data.params.w + instance_id];
+		if ((rank & 0x80000000u) != 0u) {
+			level = (rank >> 24u) & 0x3fu;
+			visible = !drawn_in_phase1(instance_id);
+		}
 	}
 #else
 	bool visible = instance_id < input_data.params.x && is_visible(input_data, instance_id, level);
@@ -258,12 +314,21 @@ void main() {
 	uint prefix = inclusive_scan(visible ? (1u << (8u * level)) : 0u);
 	if (instance_id < input_data.params.x) {
 		uint rank = ((prefix >> (8u * level)) & 0xffu) - 1u;
-		ranks.data[input_data.params.w + instance_id] = visible ? (0x80000000u | (level << 24u) | rank) : 0u;
+		uint kept = keep != 0u ? (keep | (level << 24u)) : 0u;
+		ranks.data[input_data.params.w + instance_id] = visible ? (0x80000000u | kept | (level << 24u) | rank) : kept;
 	}
 	if (gl_LocalInvocationIndex == 63u) {
+		uint selected = 0u;
 		for (uint l = 0u; l < levels; l++) {
-			blocks.data[block_offset + l * level_blocks + gl_WorkGroupID.x] = (prefix >> (8u * l)) & 0xffu;
+			uint count = (prefix >> (8u * l)) & 0xffu;
+			blocks.data[block_offset + l * level_blocks + gl_WorkGroupID.x] = count;
+			selected += count;
 		}
+#if defined(GEOMETRY_STATISTICS) && (defined(MODE_SPLIT) || defined(MODE_PHASE2))
+		if (selected > 0u) {
+			atomicAdd(statistics.data[STAT_MULTIMESH_DEPTH_INSTANCES], selected);
+		}
+#endif
 	}
 #endif
 }

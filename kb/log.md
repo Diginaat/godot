@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-24 (two-pass MultiMesh occlusion)
+
+* **Added**: [two-pass MultiMesh occlusion](/project/multimesh-two-pass.md)
+  (GPU-first plan G3, MultiMesh path):
+  `rendering/geometry/multimesh_gpu_culling/occlusion_two_pass`,
+  `multimesh_depth_instances` statistic, fixture `multimesh_two_pass.tscn`,
+  `multimesh_occlusion.tscn` part E, `hzb_bench.tscn` mode `two_pass+mm2`.
+* **Found**: [cluster LOD skips repeat-batched elements](/project/clod-skipped-for-batched-elements.md);
+  `hzb_bench` draws no CLOD.
+
 ## 2026-11-24 (adaptive VRS)
 
 * **Added**: [adaptive variable rate shading](/project/adaptive-vrs.md)

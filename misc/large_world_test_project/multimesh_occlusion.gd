@@ -8,6 +8,9 @@ extends Node3D
 ##    still culled on the GPU, and all its instances are occluded.
 ## C: with TAA (a jittered projection), the image equals TAA without occlusion.
 ## D: with the setting off, nothing is occluded.
+## E: two-pass occlusion (on by default, so A-C ran with it; A's alternating
+##    views give each frame the other view's history) draws fewer instances in
+##    the depth passes than the frustum keeps; with it off the images match.
 
 var _failures: Array[String] = []
 var _camera: Camera3D
@@ -210,6 +213,20 @@ func _run() -> void:
 	if int(c.get("hzb_instances_occluded", 0)) == 0:
 		_failures.append("TAA: no instance occluded under jitter")
 
+	# E. Two-pass occlusion engaged in A, and off gives the same image.
+	_occlusion(true)
+	_view(0)
+	await _settle()
+	var e := await _statistics()
+	var depth := int(e.get("multimesh_depth_instances", 0))
+	if depth <= 0 or depth >= int(e.get("multimesh_instances_visible", 0)):
+		_failures.append("two-pass: depth passes drew %d of %s frustum-visible instances" % [depth, e.get("multimesh_instances_visible")])
+	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion_two_pass", false)
+	await _settle()
+	if (await _frame()).get_data() != references[0].get_data():
+		_failures.append("two-pass off: image differs from the reference")
+	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion_two_pass", true)
+
 	# D. Setting off.
 	_occlusion(false)
 	await _settle()
@@ -218,7 +235,7 @@ func _run() -> void:
 		_failures.append("setting off: %s instances occluded" % d.get("hzb_instances_occluded"))
 
 	if _failures.is_empty():
-		print("MULTIMESH_OCCLUSION_TEST_PASS: views occlude %d and %d instances with images equal to the reference, 30 alternating frames equal, hidden MultiMesh %d of %d occluded, TAA %d occluded and equal, none with the setting off" % [occluded[0], occluded[1], b.get("hzb_instances_occluded"), _hidden_count, c.get("hzb_instances_occluded")])
+		print("MULTIMESH_OCCLUSION_TEST_PASS: views occlude %d and %d instances with images equal to the reference, 30 alternating frames equal, hidden MultiMesh %d of %d occluded, TAA %d occluded and equal, two-pass depth draws %d of %d instances, none with the setting off" % [occluded[0], occluded[1], b.get("hzb_instances_occluded"), _hidden_count, c.get("hzb_instances_occluded"), depth, e.get("multimesh_instances_visible")])
 	else:
 		for failure in _failures:
 			printerr("MULTIMESH_OCCLUSION_TEST_FAIL: ", failure)

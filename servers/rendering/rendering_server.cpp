@@ -3753,6 +3753,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/enabled", true);
 	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/shadows", true);
 	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/occlusion", true);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/occlusion_two_pass", true);
 	GLOBAL_DEF("rendering/geometry/gpu_instance_table/enabled", true);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instance_table/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
 	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", true);
