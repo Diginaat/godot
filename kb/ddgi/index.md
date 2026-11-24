@@ -12,6 +12,7 @@
 * [Probes put nearby bounce light in the wrong place](/ddgi/findings/near-field-blob.md) - a lagging blob around the nearest probes; was fixed with near-field rays, back since they were removed
 * [Near-field rays left dark spots that moved with the camera](/ddgi/findings/near-field-camera-spots.md) - screen-space history; the rays were removed from the engine
 * [DDGI rays through glass ended wrong](/ddgi/findings/glass-probe-rays.md) - four termination and tint bugs at refractive surfaces
+* [Scrolled probes traced at another probe's position](/ddgi/findings/negative-modulo-scroll.md) - GLSL `%` on negative values in `ddgi_probe_logical()`; black squares with infinite_world
 * [Automatic reflections leaked an instance every frame on the dummy renderer](/ddgi/findings/headless-auto-reflection-leak.md) - headless runs; keyed creation on the instance, not the empty probe RID
 * [Indirect light trails behind a moving lamp](/ddgi/findings/moving-light-trailing.md) - open issue: what limits the response, two rejected fixes, options
 

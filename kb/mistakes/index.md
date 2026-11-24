@@ -1,5 +1,7 @@
 # Mistakes
 
+* [Ruled out scrolling with a jump smaller than the probe grid](/mistakes/jump-smaller-than-the-grid.md) - a short teleport scrolls the volume; move farther than the grid to reset it
+
 * [Copy benchmark retained-byte omission](/mistakes/copy-benchmark-retained-bytes.md) - populate memory metrics per workload in untimed passes; zero defaults are not measured zero
 
 * [Benchmark snapshot dependencies](/mistakes/benchmark-snapshot-dependencies.md) - validate infrastructure against original sources; declare generated prerequisites and optional dependency fingerprints

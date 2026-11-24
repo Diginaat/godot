@@ -83,10 +83,6 @@ vec3 ddgi_xform_dir(vec4 rows[3], vec3 d) {
 	return vec3(dot(rows[0].xyz, d), dot(rows[1].xyz, d), dot(rows[2].xyz, d));
 }
 
-ivec3 ddgi_imod(ivec3 a, ivec3 n) {
-	return ((a % n) + n) % n;
-}
-
 // Logical probe coordinates (0..grid-1 from the volume's min corner) to the
 // global probe index. Scrolling volumes rotate storage instead of moving data.
 // Both the coordinates and the scroll offset are in 0..grid-1, so a
@@ -100,7 +96,11 @@ uint ddgi_probe_index(DDGIVolume vol, ivec3 logical) {
 ivec3 ddgi_probe_logical(DDGIVolume vol, uint p_probe) {
 	int rel = int(p_probe) - vol.grid.w;
 	ivec3 s = ivec3(rel % vol.grid.x, (rel / vol.grid.x) % vol.grid.y, rel / (vol.grid.x * vol.grid.y));
-	return ddgi_imod(s - vol.scroll.xyz, vol.grid.xyz);
+	// Both are in 0..grid-1. Not ((a % n) + n) % n: GLSL leaves % undefined for
+	// negative operands, and NVIDIA computes it as unsigned (-15 % 29 = 1, not
+	// 14), which put scrolled probes at another probe's position.
+	ivec3 l = s - vol.scroll.xyz;
+	return l + ivec3(lessThan(l, ivec3(0))) * vol.grid.xyz;
 }
 
 vec3 ddgi_probe_local_position(DDGIVolume vol, ivec3 logical) {

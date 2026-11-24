@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-24 (DDGI infinite world)
+
+* **Fixed**: [scrolled probes traced at another probe's position](/ddgi/findings/negative-modulo-scroll.md)
+  (brown squares on floors with `infinite_world`).
+* **Mistake**: [ruled out scrolling with a jump smaller than the probe grid](/mistakes/jump-smaller-than-the-grid.md).
+
 ## 2026-11-24 (sync, DDGI headless leak)
 
 * **Synced** `dev`: PhysX module `aaafe7ed42`, upstream master
