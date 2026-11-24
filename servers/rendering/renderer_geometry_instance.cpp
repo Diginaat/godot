@@ -122,6 +122,11 @@ void RenderGeometryInstanceBase::set_use_dynamic_gi(bool p_enable) {
 	_mark_dirty();
 }
 
+void RenderGeometryInstanceBase::set_use_cluster_lod(bool p_enable) {
+	// Read when cluster LOD draws are selected each frame; no surface cache depends on it.
+	data->use_cluster_lod = p_enable;
+}
+
 void RenderGeometryInstanceBase::set_instance_shader_uniforms_offset(int32_t p_offset) {
 	shader_uniforms_offset = p_offset;
 

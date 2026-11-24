@@ -125,6 +125,9 @@
 		</method>
 	</methods>
 	<members>
+		<member name="cluster_lod" type="int" setter="set_cluster_lod" getter="get_cluster_lod" enum="MeshInstance3D.ClusterLOD" default="0">
+			Whether this instance is drawn with cluster LOD (Forward+ only, see [member ProjectSettings.rendering/geometry/cluster_lod/enabled]). Select several [MeshInstance3D] nodes in the editor to change it on all of them at once. See [enum ClusterLOD].
+		</member>
 		<member name="mesh" type="Mesh" setter="set_mesh" getter="get_mesh">
 			The [Mesh] resource for the instance.
 		</member>
@@ -136,4 +139,15 @@
 			The [Skin] to be used by this instance.
 		</member>
 	</members>
+	<constants>
+		<constant name="CLUSTER_LOD_PROJECT_DEFAULT" value="0" enum="ClusterLOD">
+			Behaves as [constant CLUSTER_LOD_ENABLED] if [member ProjectSettings.rendering/geometry/cluster_lod/mesh_instance_default] is [code]true[/code]. Otherwise, the mesh is drawn with cluster LOD only if it already has cluster data.
+		</constant>
+		<constant name="CLUSTER_LOD_ENABLED" value="1" enum="ClusterLOD">
+			Draws the mesh with cluster LOD. If it is an [ArrayMesh] without cluster data, [method ArrayMesh.generate_cluster_lods] runs when the node enters the scene tree; the data is stored on the mesh, so it is cooked once for all instances that share it and is saved with the mesh. Other mesh types are drawn without cluster LOD.
+		</constant>
+		<constant name="CLUSTER_LOD_DISABLED" value="2" enum="ClusterLOD">
+			Never draws this instance with cluster LOD, even if its mesh has cluster data (sets [constant RenderingServer.INSTANCE_FLAG_USE_CLUSTER_LOD] to [code]false[/code]).
+		</constant>
+	</constants>
 </class>

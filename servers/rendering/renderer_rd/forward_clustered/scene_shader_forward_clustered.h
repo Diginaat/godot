@@ -504,6 +504,8 @@ public:
 	RID overdraw_material;
 	RID debug_shadow_splits_material_shader;
 	RID debug_shadow_splits_material;
+	RID debug_cluster_lod_material_shader;
+	RID debug_cluster_lod_material;
 	RID default_shader_rd;
 	RID default_multiview_shader_rd; // This is lazily initialized, use "get_default_shader_rd" instead.
 	RID default_shader_sdfgi_rd;
@@ -522,6 +524,9 @@ public:
 
 	RID debug_shadow_splits_material_uniform_set;
 	ShaderData *debug_shadow_splits_material_shader_ptr = nullptr;
+
+	RID debug_cluster_lod_material_uniform_set;
+	ShaderData *debug_cluster_lod_material_shader_ptr = nullptr;
 
 	ShaderSpecialization default_specialization = {};
 

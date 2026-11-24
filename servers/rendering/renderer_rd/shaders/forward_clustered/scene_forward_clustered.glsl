@@ -1313,6 +1313,21 @@ void fragment_shader(in SceneData scene_data) {
 #CODE : FRAGMENT
 	}
 
+#if defined(DEBUG_DRAW_CLUSTER_LOD) && defined(NORMAL_USED)
+	{
+		// One color per cluster group and instance; gray without cluster LOD.
+		vec3 cluster_color = vec3(0.35);
+		if (draw_call.cluster_lod_group != 0xffffffffu) {
+			uint h = draw_call.cluster_lod_group * 0x9e3779b1u ^ instance_index * 0x85ebca6bu;
+			h ^= h >> 16u;
+			h *= 0x7feb352du;
+			h ^= h >> 15u;
+			cluster_color = vec3(uvec3(h, h >> 8u, h >> 16u) & 0xffu) / 255.0 * 0.8 + 0.2;
+		}
+		albedo_highp = cluster_color * (0.3 + 0.7 * abs(dot(normalize(normal_highp), view_highp)));
+	}
+#endif
+
 	float roughness = roughness_highp;
 	float metallic = metallic_highp;
 	vec3 albedo = albedo_highp;

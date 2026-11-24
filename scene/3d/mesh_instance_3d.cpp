@@ -31,6 +31,7 @@
 #include "mesh_instance_3d.h"
 
 #include "core/object/callable_mp.h"
+#include "core/config/project_settings.h"
 #include "core/object/class_db.h"
 #include "scene/3d/skeleton_3d.h"
 #include "scene/main/scene_tree.h"
@@ -134,6 +135,7 @@ void MeshInstance3D::set_mesh(const Ref<Mesh> &p_mesh) {
 		set_base(mesh->get_rid());
 		mesh->connect_changed(callable_mp(this, &MeshInstance3D::_mesh_changed));
 		_mesh_changed();
+		_update_cluster_lod();
 	} else {
 		blend_shape_tracks.clear();
 		blend_shape_properties.clear();
@@ -359,6 +361,7 @@ void MeshInstance3D::_notification(int p_what) {
 			}
 #endif
 			_resolve_skeleton_path();
+			_update_cluster_lod();
 		} break;
 		case NOTIFICATION_TRANSLATION_CHANGED: {
 			if (mesh.is_valid()) {
@@ -407,6 +410,48 @@ Ref<Material> MeshInstance3D::get_active_material(int p_surface) const {
 	}
 
 	return m->surface_get_material(p_surface);
+}
+
+void MeshInstance3D::set_cluster_lod(ClusterLOD p_mode) {
+	ERR_FAIL_INDEX(int(p_mode), 3);
+	if (cluster_lod == p_mode) {
+		return;
+	}
+	cluster_lod = p_mode;
+	_update_cluster_lod();
+	update_configuration_warnings();
+}
+
+MeshInstance3D::ClusterLOD MeshInstance3D::get_cluster_lod() const {
+	return cluster_lod;
+}
+
+bool MeshInstance3D::_is_cluster_lod_requested() const {
+	return cluster_lod == CLUSTER_LOD_ENABLED || (cluster_lod == CLUSTER_LOD_PROJECT_DEFAULT && GLOBAL_GET_CACHED(bool, "rendering/geometry/cluster_lod/mesh_instance_default"));
+}
+
+void MeshInstance3D::_update_cluster_lod() {
+	// Disabled opts this instance out even when its mesh has cluster data;
+	// the other modes draw cooked meshes with cluster LOD.
+	RS::get_singleton()->instance_geometry_set_flag(get_instance(), RSE::INSTANCE_FLAG_USE_CLUSTER_LOD, cluster_lod != CLUSTER_LOD_DISABLED);
+
+	// Requested: cook an ArrayMesh that has no cluster data yet. The data is
+	// stored on the mesh, so instances sharing it cook once, and a mesh saved
+	// with the scene keeps it. Only Forward+ draws cluster LOD.
+	if (!is_inside_tree() || !_is_cluster_lod_requested()) {
+		return;
+	}
+	Ref<ArrayMesh> array_mesh = mesh;
+	if (array_mesh.is_null() || array_mesh->get_surface_count() == 0 || array_mesh->get_cluster_data().is_valid()) {
+		return;
+	}
+	if (RS::get_singleton()->get_current_rendering_method() != "forward_plus" || !GLOBAL_GET_CACHED(bool, "rendering/geometry/cluster_lod/enabled")) {
+		return;
+	}
+	const Error error = array_mesh->generate_cluster_lods();
+	if (error != OK) {
+		WARN_PRINT(vformat("MeshInstance3D \"%s\": could not generate cluster LODs for its mesh (error %d); it is drawn without cluster LOD.", get_name(), error));
+	}
 }
 
 void MeshInstance3D::_mesh_changed() {
@@ -903,6 +948,8 @@ void MeshInstance3D::navmesh_parse_source_geometry(const Ref<NavigationMesh> &p_
 void MeshInstance3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_mesh", "mesh"), &MeshInstance3D::set_mesh);
 	ClassDB::bind_method(D_METHOD("get_mesh"), &MeshInstance3D::get_mesh);
+	ClassDB::bind_method(D_METHOD("set_cluster_lod", "mode"), &MeshInstance3D::set_cluster_lod);
+	ClassDB::bind_method(D_METHOD("get_cluster_lod"), &MeshInstance3D::get_cluster_lod);
 	ClassDB::bind_method(D_METHOD("set_skeleton_path", "skeleton_path"), &MeshInstance3D::set_skeleton_path);
 	ClassDB::bind_method(D_METHOD("get_skeleton_path"), &MeshInstance3D::get_skeleton_path);
 	ClassDB::bind_method(D_METHOD("set_skin", "skin"), &MeshInstance3D::set_skin);
@@ -937,16 +984,23 @@ void MeshInstance3D::_bind_methods() {
 	// but list generic Mesh last to allow extended types to show up at the end.
 	// Keep the order in sync with MeshInstance2D's `mesh` property.
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "mesh", PROPERTY_HINT_RESOURCE_TYPE, "BoxMesh,SphereMesh,CapsuleMesh,CylinderMesh,PrismMesh,TorusMesh,PlaneMesh,QuadMesh,TextMesh,RibbonTrailMesh,TubeTrailMesh,PointMesh,ArrayMesh,ImmediateMesh,PlaceholderMesh,Mesh", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_EDITOR_INSTANTIATE_OBJECT), "set_mesh", "get_mesh");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "cluster_lod", PROPERTY_HINT_ENUM, "Project Default,Enabled,Disabled"), "set_cluster_lod", "get_cluster_lod");
 	ADD_GROUP("Skeleton", "");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "skin", PROPERTY_HINT_RESOURCE_TYPE, Skin::get_class_static()), "set_skin", "get_skin");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "skeleton", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Skeleton3D"), "set_skeleton_path", "get_skeleton_path");
 	ADD_GROUP("", "");
+
+	BIND_ENUM_CONSTANT(CLUSTER_LOD_PROJECT_DEFAULT);
+	BIND_ENUM_CONSTANT(CLUSTER_LOD_ENABLED);
+	BIND_ENUM_CONSTANT(CLUSTER_LOD_DISABLED);
 }
 
 PackedStringArray MeshInstance3D::get_configuration_warnings() const {
 	PackedStringArray warnings = GeometryInstance3D::get_configuration_warnings();
 	if (mesh.is_null()) {
 		warnings.push_back(RTR("MeshInstance3D requires a Mesh to render anything. Please add a mesh resource for it!"));
+	} else if (_is_cluster_lod_requested() && Object::cast_to<ArrayMesh>(mesh.ptr()) == nullptr) {
+		warnings.push_back(RTR("Cluster LOD needs an ArrayMesh. Other mesh types are drawn without cluster LOD."));
 	}
 	return warnings;
 }

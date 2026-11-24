@@ -271,3 +271,31 @@ editor responsiveness, PhysX/DDGI/path tracer projects, remove dead code.
   separate project; not planned until a measurement shows idle GPU time.
 - **Mesh shaders** are not exposed by RD; CLOD covers the virtual geometry
   need with compute plus indirect draws (D002).
+
+## GPU-first plan (2026-11-24)
+
+Goal: the GPU does the per-object and per-pixel work, the CPU only what
+needs it (scene logic, physics, submission of what the GPU cannot decide).
+Measured basis: the valley (`forest_map`, Linux Vulkan, RTX 3060) is
+GPU-bound, with 0.5 ms render CPU against 5.4 ms whole-frame GPU: opaque
+colour 2.0 ms, depth pre-pass about 1.1 ms, shadows 0.87 ms, post-processing
+about 0.8 ms (SSR 0.23, tonemap 0.20, glow 0.18, SSAO 0.14). Phases 1-6
+already took per-instance CPU work to the GPU; what is left is mostly GPU
+work that can be skipped or made cheaper. Ranked by expected gain on that
+breakdown:
+
+| # | Trick | Targets | State |
+| --- | --- | --- | --- |
+| G1 | HZB occlusion for every opaque mesh: CPU render list draws become HZB-tested indirect draws (`rendering/geometry/mesh_occlusion/enabled`) | Opaque colour pass of meshes the GPU paths do not take (lightmapped, skinned, fading, visibility range) | Done 2026-11-24 ([kb](../../kb/project/mesh-occlusion.md)) |
+| G2 | Content-adaptive variable rate shading: a compute pass writes the shading-rate image each frame from the previous frame's luminance contrast and motion (a new `VIEWPORT_VRS_ADAPTIVE` mode on top of the existing VRS attachment) | Opaque colour pass (2.0 ms): 20-40% fewer fragment invocations in flat or fast-moving areas on GPUs with attachment VRS | Next |
+| G3 | Two-pass occlusion for the depth pre-pass on all paths (5.2): draw what was visible last frame, build the HZB, draw only the newly visible rest; per-element history for the CPU list, per-member for the GPU path, per-instance for MultiMesh (CLOD has it) | Depth pre-pass (~1.1 ms) | Planned |
+| G4 | Shadow caster culling against the camera (6.4): skip casters whose shadow volume cannot reach a visible receiver (camera HZB projected into light space); then HZB occlusion inside each shadow map | Shadows (0.87 ms) | Planned |
+| G5 | Per-instance cluster LOD selection inside instanced draws, so meshes shared by many nodes (rocks, props) get cluster LOD and their instancing | Triangle count of repeated meshes | Planned |
+| G6 | Half-resolution and temporal post: SSR and SSAO/SSIL at half resolution with temporal accumulation by default where quality allows; glow and tonemap merged where possible | Post-processing (~0.8 ms) | Planned |
+| G7 | Light culling and shadow atlas scheduling at 128-2048 lights (Phase 7), positional shadow updates only when casters in range moved | Many-light scenes | Measure first |
+| G8 | DDGI and path tracer TLAS refit instead of rebuild when only transforms changed (Phase 9) | GI frames with moving objects | Measure first |
+| G9 | Bench scene with expensive materials behind occluders, for G1-G4 numbers | Evidence | Needed for G1's frame-time number |
+
+Not planned (still true): async compute (RD has one queue), mesh shaders
+(not in RD; CLOD covers the need), a visibility buffer (would replace
+Forward+ shading; only after G2-G4 show what is left).

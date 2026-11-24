@@ -803,6 +803,9 @@
 		<constant name="DEBUG_DRAW_RECONSTRUCTED_DEPTH" value="33" enum="DebugDraw">
 			Displays the depth buffer reconstructed by NVIDIA DLSS Ray Reconstruction after denoising. Only has an effect when DLSS Ray Reconstruction is active.
 		</constant>
+		<constant name="DEBUG_DRAW_CLUSTER_LOD" value="34" enum="DebugDraw">
+			Gives each cluster group selected by cluster LOD its own color. Geometry drawn without cluster LOD is gray. Only has an effect in Forward+ with [member ProjectSettings.rendering/geometry/cluster_lod/enabled] and meshes that have cluster data.
+		</constant>
 		<constant name="DEFAULT_CANVAS_ITEM_TEXTURE_FILTER_NEAREST" value="0" enum="DefaultCanvasItemTextureFilter">
 			The texture filter reads from the nearest pixel only. This makes the texture look pixelated from up close, and grainy from a distance (due to mipmaps not being sampled).
 		</constant>

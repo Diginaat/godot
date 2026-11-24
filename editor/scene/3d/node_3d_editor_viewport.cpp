@@ -4698,7 +4698,8 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 		case VIEW_DISPLAY_DEBUG_DLSS_RR_SPECULAR_ALBEDO:
 		case VIEW_DISPLAY_DEBUG_DLSS_RR_NORMAL_ROUGHNESS:
 		case VIEW_DISPLAY_DEBUG_DLSS_RR_SPECULAR_HIT_DIST:
-		case VIEW_DISPLAY_DEBUG_RECONSTRUCTED_DEPTH: {
+		case VIEW_DISPLAY_DEBUG_RECONSTRUCTED_DEPTH:
+		case VIEW_DISPLAY_DEBUG_CLUSTER_LOD: {
 			static const int display_options[] = {
 				VIEW_DISPLAY_NORMAL,
 				VIEW_DISPLAY_WIREFRAME,
@@ -4734,6 +4735,7 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				VIEW_DISPLAY_DEBUG_DLSS_RR_NORMAL_ROUGHNESS,
 				VIEW_DISPLAY_DEBUG_DLSS_RR_SPECULAR_HIT_DIST,
 				VIEW_DISPLAY_DEBUG_RECONSTRUCTED_DEPTH,
+				VIEW_DISPLAY_DEBUG_CLUSTER_LOD,
 				VIEW_MAX
 			};
 			static const Viewport::DebugDraw debug_draw_modes[] = {
@@ -4771,6 +4773,7 @@ void Node3DEditorViewport::_menu_option(int p_option) {
 				Viewport::DEBUG_DRAW_DLSS_RR_NORMAL_ROUGHNESS,
 				Viewport::DEBUG_DRAW_DLSS_RR_SPECULAR_HIT_DIST,
 				Viewport::DEBUG_DRAW_RECONSTRUCTED_DEPTH,
+				Viewport::DEBUG_DRAW_CLUSTER_LOD,
 			};
 
 			for (int idx = 0; display_options[idx] != VIEW_MAX; idx++) {
@@ -7103,6 +7106,8 @@ Node3DEditorViewport::Node3DEditorViewport(Node3DEditor *p_spatial_editor, int p
 	display_submenu->add_separator();
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Disable Mesh LOD"), VIEW_DISPLAY_DEBUG_DISABLE_LOD, SupportedRenderingMethods::ALL,
 			TTRC("Renders all meshes with their highest level of detail regardless of their distance from the camera."));
+	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("Cluster LOD"), VIEW_DISPLAY_DEBUG_CLUSTER_LOD, SupportedRenderingMethods::FORWARD_PLUS,
+			TTRC("Gives each cluster group that cluster LOD selected its own color. Geometry drawn without cluster LOD is gray.\nRequires rendering/geometry/cluster_lod/enabled and meshes with cluster data."));
 	display_submenu->add_separator();
 	_add_advanced_debug_draw_mode_item(display_submenu, TTRC("OmniLight3D Cluster"), VIEW_DISPLAY_DEBUG_CLUSTER_OMNI_LIGHTS, SupportedRenderingMethods::FORWARD_PLUS,
 			TTRC("Highlights tiles of pixels that are affected by at least one OmniLight3D."));

@@ -3050,6 +3050,7 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_DLSS_RR_NORMAL_ROUGHNESS);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_DLSS_RR_SPECULAR_HIT_DIST);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_RECONSTRUCTED_DEPTH);
+	BIND_ENUM_CONSTANT(RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_LOD);
 
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_DISABLED);
 	BIND_ENUM_CONSTANT(RSE::VIEWPORT_VRS_TEXTURE);
@@ -3324,6 +3325,7 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_USE_DYNAMIC_GI);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_DRAW_NEXT_FRAME_IF_VISIBLE);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_IGNORE_OCCLUSION_CULLING);
+	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_USE_CLUSTER_LOD);
 	BIND_ENUM_CONSTANT(RSE::INSTANCE_FLAG_MAX);
 
 	BIND_ENUM_CONSTANT(RSE::SHADOW_CASTING_SETTING_OFF);
@@ -3736,6 +3738,27 @@ void RenderingServer::init() {
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/size", PROPERTY_HINT_RANGE, "256,16384"), 4096);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/far_cascade_update_interval", PROPERTY_HINT_RANGE, "1,8,1"), 4);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/mesh_lod/lod_change/shadow_threshold_scale", PROPERTY_HINT_RANGE, "1,16,0.1"), 4.0);
+
+	// GPU-driven geometry (Forward+). Registered here, not by the renderer, so
+	// they exist and show in Project Settings with every rendering method.
+	// All but streaming/enabled are read every frame and switch live.
+	GLOBAL_DEF("rendering/geometry/cluster_lod/enabled", true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/error_pixels", PROPERTY_HINT_RANGE, "0,64,0.1,or_greater"), 1.0);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/mesh_instance_default", false);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_enabled", true);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_two_pass", true);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/streaming/enabled", true);
+	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/streaming/budget_mb", PROPERTY_HINT_RANGE, "0.25,4096,0.25,or_greater"), 64.0);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/enabled", true);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/shadows", true);
+	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/occlusion", true);
+	GLOBAL_DEF("rendering/geometry/gpu_instance_table/enabled", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instance_table/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
+	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
+	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/shadow_min_casters", PROPERTY_HINT_RANGE, "0,4096,1,or_greater"), 256);
+	GLOBAL_DEF("rendering/geometry/mesh_occlusion/enabled", true);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/size.mobile", 2048);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality", PROPERTY_HINT_ENUM, "Hard (Fastest),Soft Very Low (Faster),Soft Low (Fast),Soft Medium (Average),Soft High (Slow),Soft Ultra (Slowest)"), 2);
 	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/soft_shadow_filter_quality.mobile", 0);

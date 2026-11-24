@@ -136,6 +136,12 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 		}
 	}
 	mesh_clod = {};
+	for (RID resource : { mesh_occlusion.elements, mesh_occlusion.commands, mesh_occlusion.view }) {
+		if (resource.is_valid()) {
+			RD::get_singleton()->free_rid(resource);
+		}
+	}
+	mesh_occlusion = {};
 	hzb = {};
 	if (geometry_statistics.buffer.is_valid()) {
 		RD::get_singleton()->free_rid(geometry_statistics.buffer);
@@ -371,6 +377,7 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 	bool shadow_pass = (p_pass_mode == PASS_MODE_SHADOW) || (p_pass_mode == PASS_MODE_SHADOW_DP);
 
 	SceneState::PushConstant push_constant;
+	push_constant.cluster_lod_group = UINT32_MAX;
 
 	if constexpr (p_pass_mode == PASS_MODE_DEPTH_MATERIAL) {
 		push_constant.uv_offset = Math::make_half_float(p_params->uv_offset.y) << 16;
@@ -432,6 +439,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			} else if (unlikely(get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_PSSM_SPLITS)) {
 				material_uniform_set = scene_shader.debug_shadow_splits_material_uniform_set;
 				shader = scene_shader.debug_shadow_splits_material_shader_ptr;
+			} else if (unlikely(get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_LOD)) {
+				material_uniform_set = scene_shader.debug_cluster_lod_material_uniform_set;
+				shader = scene_shader.debug_cluster_lod_material_shader_ptr;
 			} else {
 #endif
 				material_uniform_set = surf->material_uniform_set;
@@ -680,13 +690,20 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 				const uint32_t group_count = mesh_storage->mesh_surface_get_cluster_data(mesh_surface).group_count;
 				// One command record per group (unselected groups have zero
 				// instances). Multi-draw consumes the whole surface range in one
-				// call; backends without it keep one call per record.
-				if (mesh_clod.multi_draw) {
+				// call; backends without it keep one call per record. The Cluster
+				// LOD debug view also draws per record, to push each group's id.
+				const bool debug_groups = p_pass_mode == PASS_MODE_COLOR && get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_LOD;
+				if (mesh_clod.multi_draw && !debug_groups) {
 					RD::get_singleton()->draw_list_draw_indirect(draw_list, true, p_params->mesh_clod_commands, element_info.mesh_clod_offset * sizeof(uint32_t), group_count, 5 * sizeof(uint32_t));
 				} else {
 					for (uint32_t group = 0; group < group_count; group++) {
+						if (debug_groups) {
+							push_constant.cluster_lod_group = group;
+							RD::get_singleton()->draw_list_set_push_constant(draw_list, &push_constant, push_constant_size);
+						}
 						RD::get_singleton()->draw_list_draw_indirect(draw_list, true, p_params->mesh_clod_commands, (element_info.mesh_clod_offset + group * 5) * sizeof(uint32_t), 1, 0);
 					}
+					push_constant.cluster_lod_group = UINT32_MAX;
 				}
 			} else if (gpu_culled) {
 				// One draw per GPU LOD bucket: each binds its index LOD and its own
@@ -704,6 +721,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 				}
 			} else if (indirect) {
 				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), mesh_storage->_multimesh_get_command_buffer_rd_rid(surf->owner->data->base), surf->surface_index * sizeof(uint32_t) * mesh_storage->INDIRECT_MULTIMESH_COMMAND_STRIDE, 1, 0);
+			} else if (p_params->mesh_occlusion_tested && p_params->mesh_occlusion_tested[i]) {
+				// HZB-tested: zero instances when proven hidden (mesh_occlusion.glsl).
+				RD::get_singleton()->draw_list_draw_indirect(draw_list, index_array_rd.is_valid(), p_params->mesh_occlusion_commands, i * 5 * sizeof(uint32_t), 1, 0);
 			} else {
 				RD::get_singleton()->draw_list_draw(draw_list, index_array_rd.is_valid(), instance_count);
 			}
@@ -2608,6 +2628,10 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	}
 	_prepare_multimesh_culling(p_render_data, rb_data.ptr());
 	_prepare_mesh_clod(p_render_data, rb_data.ptr());
+	if (rb_data.is_valid()) {
+		// Set again by _setup_mesh_occlusion() when this frame tests the list.
+		rb_data->mesh_occlusion.ready = false;
+	}
 	const RID mesh_clod_commands = rb_data.is_valid() && rb_data->mesh_clod.active ? rb_data->mesh_clod.commands : RID();
 	RID multimesh_visible_ids;
 	RID multimesh_cull_commands;
@@ -2859,11 +2883,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		// HZB occlusion: with two passes the pre-pass draws only CLOD groups
 		// that were visible when last tested. MultiMesh and GPU path instances
 		// are tested after the pre-pass and removed from the colour passes only.
-		const bool hzb_wanted = rb_data.is_valid() && ((mesh_clod_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_enabled"))) || (multimesh_cull_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/multimesh_gpu_culling/occlusion"))) || (gpu_instance_commands.is_valid() && GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion")));
+		const bool hzb_wanted = rb_data.is_valid() && ((mesh_clod_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_enabled"))) || (multimesh_cull_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/multimesh_gpu_culling/occlusion"))) || (gpu_instance_commands.is_valid() && GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion")) || (!render_list[RENDER_LIST_OPAQUE].elements.is_empty() && GLOBAL_GET_CACHED(bool, "rendering/geometry/mesh_occlusion/enabled")));
 		const bool hzb = hzb_wanted && _setup_hzb(p_render_data, rb_data.ptr());
 		const bool clod_occlusion = hzb && mesh_clod_commands.is_valid() && _setup_mesh_clod_occlusion(p_render_data, rb_data.ptr());
 		const bool multimesh_occlusion = hzb && multimesh_cull_commands.is_valid() && _setup_multimesh_occlusion(p_render_data, rb_data.ptr());
 		const bool gpu_instances_occlusion = hzb && gpu_instance_commands.is_valid() && _setup_gpu_instances_occlusion(p_render_data, rb_data.ptr());
+		const bool mesh_occlusion = hzb && _setup_mesh_occlusion(p_render_data, rb_data.ptr());
 		const bool clod_two_pass = clod_occlusion && rb_data->mesh_clod.two_pass;
 		// Always-on stage timestamps while a GPU geometry path is active, for
 		// benchmarks (RENDER_TIMESTAMP needs the profiler).
@@ -2881,7 +2906,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		render_list_params.gpu_instance_commands = gpu_instance_commands;
 		_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DrawFlags(needs_pre_resolve ? RD::DRAW_DEFAULT_ALL : RD::DRAW_CLEAR_ALL), depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 
-		if (clod_occlusion || multimesh_occlusion || gpu_instances_occlusion) {
+		if (clod_occlusion || multimesh_occlusion || gpu_instances_occlusion || mesh_occlusion) {
 			// HZB from the phase-1 depth; the test clears occluded groups' opaque
 			// commands. Phase 2 adds the recovered groups to depth (and normals).
 			_build_hzb(p_render_data, rb_data.ptr());
@@ -2906,6 +2931,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				_occlude_gpu_instances(p_render_data, rb_data.ptr());
 				gpu_instance_commands = gpu_instances_view->occluded_commands_buffer;
 				gpu_instance_ids = gpu_instances_view->occluded_ids_buffer;
+			}
+			if (mesh_occlusion) {
+				_occlude_meshes(p_render_data, rb_data.ptr());
 			}
 		}
 		if (gpu_geometry_timestamps) {
@@ -3009,6 +3037,11 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			render_list_params.multimesh_cull_commands = multimesh_cull_commands;
 			render_list_params.mesh_clod_commands = mesh_clod_commands;
 			render_list_params.gpu_instance_commands = gpu_instance_commands;
+			if (rb_data.is_valid() && rb_data->mesh_occlusion.ready) {
+				// Tested elements draw through their HZB-written commands.
+				render_list_params.mesh_occlusion_commands = rb_data->mesh_occlusion.commands;
+				render_list_params.mesh_occlusion_tested = rb_data->mesh_occlusion.tested.ptr();
+			}
 			if (gpu_geometry_timestamps) {
 				RD::get_singleton()->capture_timestamp("GPU Geometry Opaque Pass");
 			}
@@ -6163,19 +6196,7 @@ void RenderForwardClustered::_update_shader_quality_settings() {
 }
 
 RenderForwardClustered::RenderForwardClustered() {
-	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/enabled", true);
-	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/shadows", true);
-	GLOBAL_DEF("rendering/geometry/multimesh_gpu_culling/occlusion", true);
-	GLOBAL_DEF("rendering/geometry/cluster_lod/enabled", true);
-	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_enabled", true);
-	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_two_pass", true);
-	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/error_pixels", PROPERTY_HINT_RANGE, "0,64,0.1,or_greater"), 1.0);
-	GLOBAL_DEF("rendering/geometry/gpu_instance_table/enabled", true);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instance_table/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
-	GLOBAL_DEF("rendering/geometry/gpu_instances/enabled", true);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/validate", PROPERTY_HINT_ENUM, "Off,Check,Check With Self-Test"), 0);
-	GLOBAL_DEF("rendering/geometry/gpu_instances/occlusion", true);
-	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/geometry/gpu_instances/shadow_min_casters", PROPERTY_HINT_RANGE, "0,4096,1,or_greater"), 256);
+	// The rendering/geometry/* settings are registered in RenderingServer::init().
 	singleton = this;
 	gpu_instances_readbacks_alive = true;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);
@@ -6434,6 +6455,12 @@ RenderForwardClustered::~RenderForwardClustered() {
 			RD::get_singleton()->free_rid(mesh_hiz.occlude_pipeline);
 		}
 		mesh_hiz.occlude_shader.version_free(mesh_hiz.occlude_version);
+	}
+	if (mesh_hiz.mesh_occlusion_version.is_valid()) {
+		if (mesh_hiz.mesh_occlusion_pipeline.is_valid()) {
+			RD::get_singleton()->free_rid(mesh_hiz.mesh_occlusion_pipeline);
+		}
+		mesh_hiz.mesh_occlusion_shader.version_free(mesh_hiz.mesh_occlusion_version);
 	}
 
 	RD::get_singleton()->free_rid(dfg_lut.pipeline);

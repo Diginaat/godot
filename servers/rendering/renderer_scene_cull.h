@@ -478,6 +478,7 @@ public:
 		float lod_bias;
 
 		bool ignore_occlusion_culling;
+		bool use_cluster_lod;
 		bool ignore_all_culling;
 
 		Vector<RID> materials;
@@ -639,6 +640,7 @@ public:
 			lightmap_cull_index = 0;
 			lod_bias = 1.0;
 			ignore_occlusion_culling = false;
+			use_cluster_lod = true;
 			ignore_all_culling = false;
 
 			scenario = nullptr;

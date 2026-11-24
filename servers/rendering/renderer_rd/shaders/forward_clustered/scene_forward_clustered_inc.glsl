@@ -29,6 +29,7 @@ layout(push_constant, std430) uniform DrawCall {
 	uint multimesh_motion_vectors_current_offset;
 	uint multimesh_motion_vectors_previous_offset;
 	uint multimesh_visible_ids_offset;
+	uint cluster_lod_group; // Cluster LOD debug draw only: the drawn group, 0xffffffff otherwise.
 #ifdef UBERSHADER
 	uint sc_packed_0;
 	uint sc_packed_1;

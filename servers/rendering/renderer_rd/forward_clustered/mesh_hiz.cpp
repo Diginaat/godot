@@ -624,3 +624,154 @@ void RenderForwardClustered::_occlude_gpu_instances(const RenderDataRD *p_render
 	rd->compute_list_end();
 	rd->capture_timestamp("GPU Instances HZB Occlusion End");
 }
+
+namespace {
+// Matches Element and View in mesh_occlusion.glsl.
+struct MeshOcclusionElement {
+	float position[4];
+	float size[4];
+	uint32_t draw[4]; // Command index (= opaque list element), index or vertex count, instances, unused.
+};
+static_assert(sizeof(MeshOcclusionElement) == 48);
+struct MeshOcclusionView {
+	float world_to_clip[16];
+	float abs_to_clip[16];
+	uint32_t size[4];
+};
+static_assert(sizeof(MeshOcclusionView) == 144);
+} // namespace
+
+bool RenderForwardClustered::_setup_mesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
+	auto &occlusion = p_buffers->mesh_occlusion;
+	occlusion.ready = false;
+	occlusion.count = 0;
+	const RSE::ViewportDebugDraw debug_draw = get_debug_draw_mode();
+	// Wireframe draws other index arrays; overdraw should show every layer.
+	if (!p_buffers->hzb.ready || p_render_data->scene_data->view_count != 1 || debug_draw == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME || debug_draw == RSE::VIEWPORT_DEBUG_DRAW_OVERDRAW ||
+			!GLOBAL_GET_CACHED(bool, "rendering/geometry/mesh_occlusion/enabled")) {
+		return false;
+	}
+	RD *rd = RD::get_singleton();
+	if (mesh_hiz.mesh_occlusion_version.is_null()) {
+		Vector<String> modes;
+		modes.push_back("");
+		mesh_hiz.mesh_occlusion_shader.initialize(modes);
+		mesh_hiz.mesh_occlusion_version = mesh_hiz.mesh_occlusion_shader.version_create();
+		mesh_hiz.mesh_occlusion_pipeline = rd->compute_pipeline_create(mesh_hiz.mesh_occlusion_shader.version_get_shader(mesh_hiz.mesh_occlusion_version, 0));
+	}
+	if (mesh_hiz.mesh_occlusion_pipeline.is_null()) {
+		return false;
+	}
+
+	RendererRD::MeshStorage *mesh_storage = RendererRD::MeshStorage::get_singleton();
+	RenderList &list = render_list[RENDER_LIST_OPAQUE];
+	const uint32_t list_size = list.elements.size();
+	occlusion.tested.resize(list_size);
+	if (list_size > 0) {
+		memset(occlusion.tested.ptr(), 0, list_size);
+	}
+	LocalVector<MeshOcclusionElement> elements;
+	for (uint32_t i = 0; i < list_size; i++) {
+		const RenderElementInfo &info = list.element_info[i];
+		const GeometryInstanceSurfaceDataCache *surface = list.elements[i];
+		const uint32_t repeat = MAX(info.repeat, 1u);
+		const GeometryInstanceForwardClustered *instance = surface->owner;
+		const SceneShaderForwardClustered::ShaderData *shader = surface->shader;
+		// Drawn by the GPU paths, by indirect or instanced commands of their
+		// own, or with vertices the box may not bound: keep the direct draw.
+		const bool skip = info.gpu_bucket != UINT32_MAX || info.mesh_clod_offset != UINT32_MAX || instance->instance_count == 0 ||
+				(instance->base_flags & (INSTANCE_DATA_FLAG_MULTIMESH | INSTANCE_DATA_FLAG_PARTICLES)) || surface->primitive == RSE::PRIMITIVE_POINTS ||
+				!shader || shader->uses_vertex || shader->uses_position || shader->writes_modelview_or_projection || shader->uses_custom_vertex_transform ||
+				shader->uses_point_size || shader->uses_particle_trails;
+		if (!skip) {
+			// One box for the instances the element draws together.
+			AABB box = instance->transformed_aabb;
+			for (uint32_t r = 1; r < repeat && i + r < list_size; r++) {
+				box.merge_with(list.elements[i + r]->owner->transformed_aabb);
+			}
+			const bool indexed = mesh_storage->mesh_surface_get_index_array(surface->surface, info.lod_index).is_valid();
+			const uint32_t count = indexed && info.lod_index > 0 ? mesh_storage->mesh_surface_get_index_count(surface->surface, info.lod_index) : mesh_storage->mesh_surface_get_vertices_drawn_count(surface->surface);
+			if (box.is_finite() && count > 0) {
+				MeshOcclusionElement element = {};
+				element.position[0] = box.position.x;
+				element.position[1] = box.position.y;
+				element.position[2] = box.position.z;
+				element.size[0] = box.size.x;
+				element.size[1] = box.size.y;
+				element.size[2] = box.size.z;
+				element.draw[0] = i;
+				element.draw[1] = count;
+				element.draw[2] = repeat;
+				elements.push_back(element);
+				occlusion.tested[i] = 1;
+			}
+		}
+		i += repeat - 1;
+	}
+	if (elements.is_empty()) {
+		return false;
+	}
+	if (!ensure_buffer(occlusion.elements, occlusion.element_capacity, elements.size(), sizeof(MeshOcclusionElement)) ||
+			!ensure_buffer(occlusion.commands, occlusion.command_capacity, list_size, 5 * sizeof(uint32_t), RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT)) {
+		return false;
+	}
+	if (occlusion.view.is_null()) {
+		occlusion.view = rd->storage_buffer_create(sizeof(MeshOcclusionView));
+		if (occlusion.view.is_null()) {
+			return false;
+		}
+	}
+	const Size2i size = p_render_data->render_buffers->get_internal_size();
+	const Projection projection = p_render_data->scene_data->get_cam_projection();
+	const Projection view_matrix(p_render_data->scene_data->cam_transform.affine_inverse());
+	MeshOcclusionView view = {};
+	RendererRD::MaterialStorage::store_camera(projection * view_matrix, view.world_to_clip);
+	// abs(P) * abs(V) in double: the shader multiplies it by the world
+	// magnitude of each box to bound float rounding (as the GPU instance test).
+	for (uint32_t column = 0; column < 4; column++) {
+		for (uint32_t row = 0; row < 4; row++) {
+			double sum = 0.0;
+			for (uint32_t k = 0; k < 4; k++) {
+				sum += Math::abs(double(projection[k][row])) * Math::abs(double(view_matrix[column][k]));
+			}
+			view.abs_to_clip[column * 4 + row] = float(sum);
+		}
+	}
+	view.size[0] = size.width;
+	view.size[1] = size.height;
+	rd->buffer_update(occlusion.view, 0, sizeof(view), &view);
+	rd->buffer_update(occlusion.elements, 0, elements.size() * sizeof(MeshOcclusionElement), elements.ptr());
+	occlusion.count = elements.size();
+	occlusion.ready = true;
+	return true;
+}
+
+void RenderForwardClustered::_occlude_meshes(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
+	auto &occlusion = p_buffers->mesh_occlusion;
+	if (!occlusion.ready || !p_buffers->hzb.ready) {
+		return;
+	}
+	RD *rd = RD::get_singleton();
+	const Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
+	const RID shader = mesh_hiz.mesh_occlusion_shader.version_get_shader(mesh_hiz.mesh_occlusion_version, 0);
+	LocalVector<RD::Uniform> uniforms;
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 0, occlusion.elements));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, occlusion.commands));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, occlusion.view));
+	RD::Uniform pyramid;
+	pyramid.binding = 3;
+	pyramid.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+	pyramid.append_id(RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
+	pyramid.append_id(rb->get_texture_slice(hzb_scope(), hzb_name(), 0, 0, 1, p_buffers->hzb.mipmaps));
+	uniforms.push_back(pyramid);
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 4, p_buffers->geometry_statistics.buffer));
+	const uint32_t push[4] = { occlusion.count, 0, 0, 0 };
+	rd->capture_timestamp("Mesh HZB Occlusion");
+	RD::ComputeListID compute = rd->compute_list_begin();
+	rd->compute_list_bind_compute_pipeline(compute, mesh_hiz.mesh_occlusion_pipeline);
+	rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
+	rd->compute_list_set_push_constant(compute, push, sizeof(push));
+	rd->compute_list_dispatch(compute, (occlusion.count + 63) / 64, 1, 1);
+	rd->compute_list_end();
+	rd->capture_timestamp("Mesh HZB Occlusion End");
+}

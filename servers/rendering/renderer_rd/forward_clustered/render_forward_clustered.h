@@ -49,6 +49,7 @@
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_clod_select.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_occlude.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_reduce.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_occlusion.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/gpu_instance_cull.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/multimesh_cull.glsl.gen.h"
 
@@ -100,7 +101,7 @@ protected:
 	SceneShaderForwardClustered scene_shader;
 
 public:
-	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 30;
+	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 31;
 	// MultiMesh culling words of shadow passes start here (same layout as the main view's).
 	static constexpr uint32_t GEOMETRY_STATISTICS_SHADOW_OFFSET = 12;
 	virtual Dictionary gpu_geometry_get_statistics(const Ref<RenderSceneBuffers> &p_render_buffers) override;
@@ -186,6 +187,19 @@ public:
 			bool occlusion_ready = false;
 			bool two_pass = false;
 		} mesh_clod;
+		// HZB occlusion of the CPU render list's opaque meshes: one tested
+		// record per element and one indirect command per opaque list element
+		// (only tested elements draw through theirs).
+		struct MeshOcclusionBuffers {
+			RID elements;
+			uint32_t element_capacity = 0;
+			RID commands;
+			uint32_t command_capacity = 0;
+			RID view;
+			LocalVector<uint8_t> tested; // Per opaque list element: drawn through its command.
+			uint32_t count = 0;
+			bool ready = false;
+		} mesh_occlusion;
 		// Depth pyramid shared by CLOD and MultiMesh HZB occlusion, built once
 		// per frame from the (phase-1) depth pre-pass.
 		struct HZB {
@@ -391,6 +405,10 @@ protected:
 	// colour passes draw the members the HZB cannot prove hidden.
 	bool _setup_gpu_instances_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	void _occlude_gpu_instances(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	// HZB occlusion of the meshes the CPU render list draws in the opaque
+	// colour pass (rendering/geometry/mesh_occlusion/enabled).
+	bool _setup_mesh_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
+	void _occlude_meshes(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	// HZB occlusion of resident CLOD groups. Setup runs before the depth
 	// pre-pass; with two passes the split restricts the pre-pass to groups
 	// visible when last tested, and after the HZB test the recovered groups
@@ -409,6 +427,9 @@ protected:
 		RID occlude_version;
 		RID occlude_pipeline;
 		RID split_pipeline;
+		MeshOcclusionShaderRD mesh_occlusion_shader;
+		RID mesh_occlusion_version;
+		RID mesh_occlusion_pipeline;
 	} mesh_hiz;
 
 	struct RenderListParameters;
@@ -477,6 +498,8 @@ protected:
 		RID mesh_clod_commands;
 		bool mesh_clod_only = false; // Draw only CLOD elements (phase-2 depth of two-pass occlusion).
 		RID gpu_instance_commands; // GPU path draw buckets' indirect commands.
+		RID mesh_occlusion_commands; // CPU list elements tested against the HZB: one command per element.
+		const uint8_t *mesh_occlusion_tested = nullptr; // Per element: draw through its command.
 
 		RenderListParameters(GeometryInstanceSurfaceDataCache **p_elements, RenderElementInfo *p_element_info, int p_element_count, bool p_reverse_cull, PassMode p_pass_mode, uint32_t p_color_pass_flags, bool p_no_gi, bool p_use_directional_soft_shadows, RID p_render_pass_uniform_set, bool p_force_wireframe = false, const Vector2 &p_uv_offset = Vector2(), float p_lod_distance_multiplier = 0.0, float p_screen_mesh_lod_threshold = 0.0, uint32_t p_view_count = 1, uint32_t p_element_offset = 0, SceneShaderForwardClustered::ShaderSpecialization p_base_specialization = {}, bool p_use_material_feedback = false) {
 			elements = p_elements;
@@ -591,6 +614,7 @@ protected:
 			uint32_t multimesh_motion_vectors_current_offset;
 			uint32_t multimesh_motion_vectors_previous_offset;
 			uint32_t multimesh_visible_ids_offset;
+			uint32_t cluster_lod_group; // Cluster LOD debug draw only: the drawn group, UINT32_MAX otherwise.
 			PushConstantUbershader ubershader;
 		};
 

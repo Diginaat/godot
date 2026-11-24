@@ -44,8 +44,16 @@ class SkinReference;
 class MeshInstance3D : public GeometryInstance3D {
 	GDCLASS(MeshInstance3D, GeometryInstance3D);
 
+public:
+	enum ClusterLOD {
+		CLUSTER_LOD_PROJECT_DEFAULT,
+		CLUSTER_LOD_ENABLED,
+		CLUSTER_LOD_DISABLED,
+	};
+
 protected:
 	Ref<Mesh> mesh;
+	ClusterLOD cluster_lod = CLUSTER_LOD_PROJECT_DEFAULT;
 	Ref<Skin> skin;
 	Ref<Skin> skin_internal;
 	Ref<SkinReference> skin_ref;
@@ -57,6 +65,8 @@ protected:
 
 	void _mesh_changed();
 	void _resolve_skeleton_path();
+	bool _is_cluster_lod_requested() const;
+	void _update_cluster_lod();
 
 protected:
 	bool _set(const StringName &p_name, const Variant &p_value);
@@ -80,6 +90,9 @@ public:
 
 	void set_mesh(const Ref<Mesh> &p_mesh);
 	Ref<Mesh> get_mesh() const;
+
+	void set_cluster_lod(ClusterLOD p_mode);
+	ClusterLOD get_cluster_lod() const;
 
 	void set_skin(const Ref<Skin> &p_skin);
 	Ref<Skin> get_skin() const;
@@ -136,3 +149,5 @@ public:
 
 	MeshInstance3D();
 };
+
+VARIANT_ENUM_CAST(MeshInstance3D::ClusterLOD);

@@ -86,7 +86,7 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 			i += element.repeat - 1;
 			continue;
 		}
-		if (instance->data->base_type != RSE::INSTANCE_MESH || instance->mesh_instance.is_valid() ||
+		if (instance->data->base_type != RSE::INSTANCE_MESH || !instance->data->use_cluster_lod || instance->mesh_instance.is_valid() ||
 				(instance->base_flags & (INSTANCE_DATA_FLAG_MULTIMESH | INSTANCE_DATA_FLAG_PARTICLES)) || element.lod_index != 0 ||
 				(surface->flags & GeometryInstanceSurfaceDataCache::FLAG_PASS_ALPHA) ||
 				!instance->transform.is_finite() || Math::is_zero_approx(instance->transform.basis.determinant())) {

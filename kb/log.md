@@ -1,5 +1,24 @@
 # Update log
 
+## 2026-11-24 (Cluster LOD debug view)
+
+* **Added**: [Cluster LOD debug draw mode](/project/resident-clod-raster.md#debug-view)
+  (`Viewport.DEBUG_DRAW_CLUSTER_LOD`, editor Display Advanced > Cluster LOD).
+* **Added**: [per-instance cluster LOD](/project/resident-clod-raster.md#per-instance-control)
+  (`MeshInstance3D.cluster_lod`, `INSTANCE_FLAG_USE_CLUSTER_LOD`,
+  `rendering/geometry/cluster_lod/mesh_instance_default`). Occlusion tests
+  (`hzb`, `hzb_two_pass`, `multimesh_occlusion`, `gpu_instances`,
+  `clod_raster`) pass on the Linux .NET editor, Vulkan.
+* **Added**: [GPU occlusion for CPU render list meshes](/project/mesh-occlusion.md)
+  (`rendering/geometry/mesh_occlusion/enabled`, default on).
+* **Changed**: the `rendering/geometry/*` settings are registered in
+  `RenderingServer::init()`, so they exist and show with every rendering
+  method; cluster LOD setting descriptions rewritten.
+* **Measured**: valley (`forest_map`), Linux Vulkan, RTX 3060: GPU 5.4 ms
+  per frame (opaque colour 2.0, depth pre-pass ~1.1, shadows 0.87,
+  post ~0.8); render CPU 0.5 ms. GPU-bound: next work is GPU-side
+  (plan in `docs/renderer/roadmap.md`, "GPU-first plan").
+
 ## 2026-11-24 (DDGI infinite world)
 
 * **Fixed**: [scrolled probes traced at another probe's position](/ddgi/findings/negative-modulo-scroll.md)

@@ -56,6 +56,31 @@ depth uses original source vertices for hierarchy indices; actual shadows retain
 their own independently indexed mesh. A reversed shadow-ID raster fixture passes
 on both backends, including unchanged measurable cast-shadow pixels at coarse CLOD.
 
+# Per-instance control
+
+`MeshInstance3D.cluster_lod` (Project Default, Enabled, Disabled) and
+`RenderingServer.INSTANCE_FLAG_USE_CLUSTER_LOD` (default on; Disabled sets it
+off; `_prepare_mesh_clod()` skips instances without it). Enabled cooks an
+ArrayMesh without cluster data on enter tree (main thread, stored on the
+mesh, once per shared mesh). `rendering/geometry/cluster_lod/mesh_instance_default`
+makes Project Default behave as Enabled; off, Project Default only draws
+already-cooked meshes with CLOD (the old behavior). RenderingServer cannot
+cook. Multi-select edits the property on several nodes. Test: a scratch
+scene with each mode and RS flag, checked in the Cluster LOD debug view
+(10 checks pass, Linux Vulkan, .NET editor).
+
+# Debug view
+
+`Viewport.DEBUG_DRAW_CLUSTER_LOD` (editor: Display Advanced > Cluster LOD)
+colors each selected group by a hash of group id and instance; geometry not
+drawn through CLOD is gray. The color pass then draws one indirect call per
+group record (no multi-draw) and pushes the group id in
+`PushConstant::cluster_lod_group`; the debug material's `debug_cluster_lod`
+render mode makes the scene shader read it. Debug only: up to 65536 calls.
+At the default 1 px error a smooth sphere often selects a single root group
+(one color); `error_pixels = 0` shows the finest groups. A mesh shared by
+several MeshInstance3D nodes is batched (`repeat > 1`) and stays gray.
+
 Source/evidence: `mesh_clod.cpp`, RD `mesh_storage.cpp`,
 `misc/large_world_test_project/clod_raster.gd`,
 [commands](../../knowledge/CLUSTER_COOKER_TESTING.md).

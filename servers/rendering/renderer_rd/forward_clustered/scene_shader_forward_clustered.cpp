@@ -1034,10 +1034,12 @@ SceneShaderForwardClustered::~SceneShaderForwardClustered() {
 	material_storage->shader_free(overdraw_material_shader);
 	material_storage->shader_free(default_shader);
 	material_storage->shader_free(debug_shadow_splits_material_shader);
+	material_storage->shader_free(debug_cluster_lod_material_shader);
 
 	material_storage->material_free(overdraw_material);
 	material_storage->material_free(default_material);
 	material_storage->material_free(debug_shadow_splits_material);
+	material_storage->material_free(debug_cluster_lod_material);
 }
 
 void SceneShaderForwardClustered::init(const String p_defines) {
@@ -1311,6 +1313,7 @@ void SceneShaderForwardClustered::init(const String p_defines) {
 		}
 
 		actions.render_mode_defines["debug_shadow_splits"] = "#define DEBUG_DRAW_PSSM_SPLITS\n";
+		actions.render_mode_defines["debug_cluster_lod"] = "#define DEBUG_DRAW_CLUSTER_LOD\n";
 		actions.render_mode_defines["fog_disabled"] = "#define FOG_DISABLED\n";
 
 		actions.render_mode_defines["specular_occlusion_disabled"] = "#define SPECULAR_OCCLUSION_DISABLED\n";
@@ -1408,6 +1411,30 @@ void fragment() {
 		MaterialData *md = static_cast<MaterialData *>(material_storage->material_get_data(debug_shadow_splits_material, RendererRD::MaterialStorage::SHADER_TYPE_3D));
 		debug_shadow_splits_material_shader_ptr = md->shader_data;
 		debug_shadow_splits_material_uniform_set = md->uniform_set;
+	}
+
+	{
+		debug_cluster_lod_material_shader = material_storage->shader_allocate();
+		material_storage->shader_initialize(debug_cluster_lod_material_shader);
+		material_storage->shader_set_code(debug_cluster_lod_material_shader, R"(
+// 3D editor Cluster LOD debug draw mode shader (Forward+).
+// The scene shader colors each cluster group (DEBUG_DRAW_CLUSTER_LOD).
+
+shader_type spatial;
+
+render_mode debug_cluster_lod, unshaded, fog_disabled;
+
+void fragment() {
+	ALBEDO = vec3(1.0);
+}
+)");
+		debug_cluster_lod_material = material_storage->material_allocate();
+		material_storage->material_initialize(debug_cluster_lod_material);
+		material_storage->material_set_shader(debug_cluster_lod_material, debug_cluster_lod_material_shader);
+
+		MaterialData *md = static_cast<MaterialData *>(material_storage->material_get_data(debug_cluster_lod_material, RendererRD::MaterialStorage::SHADER_TYPE_3D));
+		debug_cluster_lod_material_shader_ptr = md->shader_data;
+		debug_cluster_lod_material_uniform_set = md->uniform_set;
 	}
 
 	{
