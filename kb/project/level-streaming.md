@@ -98,10 +98,27 @@ Notes:
 - Streaming uses 25-35 MiB more peak RSS than preloading this small level.
   The thrash keeps scenes in flight on the workers. VRAM is 15 MiB lower.
 
+Physics: GodotPhysics3D, the engine default (the fixture does not select
+PhysX).
+
+# Unit tests
+
+`modules/level_streaming/tests/test_level_streaming.h` (4 cases, 51
+assertions, run with `--test --test-case="*LevelStreaming*"` on a
+`tests=yes` build) covers these:
+
+- registration, including cells deeper than direct children
+- a duplicate ID rejected, then promoted when the first cell leaves
+- re-registration after an ID change
+- every configuration warning
+- the distance to rotated and scaled cells
+- the saved-state copy semantics
+
+The configuration warnings are C++ only, because
+`get_configuration_warnings()` is not bound to scripts.
+
 # Not verified
 
 - Authoring was not done by clicking in the Inspector. `generate.py` writes
-  the same properties the Inspector edits. The configuration warnings are
-  C++ only (`get_configuration_warnings()` is not bound to scripts). A
-  doctest is the follow-up.
+  the same properties the Inspector edits.
 - .NET builds were not tested, and nor were Windows exports.

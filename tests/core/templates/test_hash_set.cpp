@@ -291,7 +291,7 @@ static void test_hash_set_keys_through_growth(T (*p_key)(int)) {
 
 TEST_CASE("[HashSet] Keys of different sizes and alignments through growth") {
 	test_hash_set_keys_through_growth<uint8_t>([](int i) { return uint8_t(i); });
-	test_hash_set_keys_through_growth<uint64_t>([](int i) { return uint64_t(i) * 0x100000001ull; });
+	test_hash_set_keys_through_growth<uint64_t>([](int i) { return uint64_t(uint64_t(i) * 0x100000001ull); });
 	test_hash_set_keys_through_growth<Vector3>([](int i) { return Vector3(i, -i, i * 0.5); });
 	test_hash_set_keys_through_growth<String>([](int i) { return String::num_int64(i) + " key"; });
 }

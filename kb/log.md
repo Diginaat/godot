@@ -12,6 +12,12 @@
   preloaded (within noise); boundary frames p99 7.6 ms, all in the
   teleport thrash; cold teleport ready in 25-34 ms.
 * **Mistake**: [template older than the module](/mistakes/template-older-than-the-module.md).
+* **Added**: level streaming doctests (4 cases, 51 assertions).
+* **Fixed**: `test_hash_set.cpp` did not compile with GCC: a `uint64_t`
+  key lambda returned `unsigned long long`. It now passes, 15 of 15 cases.
+* **Found**: on Linux, `production=yes` means full GCC LTO, so every relink
+  takes 10-20 min. Iterate with `lto=none` and keep LTO for measured and
+  release builds.
 
 ## 2026-11-24 (two-pass depth for GPU path instances)
 
