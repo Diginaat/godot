@@ -101,7 +101,7 @@ protected:
 	SceneShaderForwardClustered scene_shader;
 
 public:
-	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 33;
+	static constexpr uint32_t GEOMETRY_STATISTICS_WORDS = 34;
 	// MultiMesh culling words of shadow passes start here (same layout as the main view's).
 	static constexpr uint32_t GEOMETRY_STATISTICS_SHADOW_OFFSET = 12;
 	virtual Dictionary gpu_geometry_get_statistics(const Ref<RenderSceneBuffers> &p_render_buffers) override;
@@ -1174,6 +1174,21 @@ protected:
 		RID occlusion_buffer;
 		uint32_t occluded_command_capacity = 0;
 		uint32_t occluded_id_capacity = 0;
+		// Two-pass occlusion (gpu_instance_cull.glsl): history per table slot
+		// (1: occluded when last tested), whether each member is in phase 1,
+		// and the phase-1 and phase-2 depth lists (layout of commands_buffer
+		// and ids_buffer). two_pass: the current view's camera run wrote them.
+		RID history_buffer;
+		RID phase1_buffer;
+		RID phase1_commands_buffer;
+		RID phase1_ids_buffer;
+		RID phase2_commands_buffer;
+		RID phase2_ids_buffer;
+		uint32_t history_capacity = 0;
+		uint32_t phase1_capacity = 0;
+		uint32_t phase_command_capacity = 0;
+		uint32_t phase_id_capacity = 0;
+		bool two_pass = false;
 		uint32_t member_capacity = 0;
 		uint32_t bucket_capacity = 0;
 		uint32_t command_capacity = 0;
@@ -1262,6 +1277,10 @@ protected:
 	// the CPU list must draw them.
 	bool _gpu_instances_shadow_pass(const RenderShadowData *p_shadow_data, const RenderSceneDataRD &p_scene_data, uint32_t p_render_list_from, SceneState::ShadowPass &r_pass, int *p_render_info);
 	void _gpu_instances_free_scenario(GPUInstanceScenario *p_scenario);
+	// Two-pass occlusion: grows the scenario's lists and clears phase 1.
+	bool _gpu_instances_prepare_two_pass(GPUInstanceScenario &p_scenario);
+	// Bindings 14-17 of gpu_instance_cull.glsl: phase-1 lists in the camera run, phase-2 lists in the occlusion run.
+	static void _gpu_instances_bind_two_pass(const GPUInstanceScenario &p_scenario, RID p_commands, RID p_ids, LocalVector<RD::Uniform> &r_uniforms);
 	// The LOD inputs of a cull run (GPUInstanceCullParams), for the CPU's
 	// copy of its level choice.
 	struct GPUInstanceLODView {

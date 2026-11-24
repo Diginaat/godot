@@ -19,6 +19,15 @@
 // and appends the members it cannot prove hidden to a second set of
 // commands and IDs (same layout), which the colour passes draw.
 //
+// Two-pass (VIEW_FLAG_TWO_PASS, rendering/geometry/gpu_instances/occlusion_two_pass):
+// the camera run also appends the drawn members whose instance was visible
+// when last tested (history word 0, per table slot) to the phase-1 commands
+// and IDs, which the depth pre-pass draws, and records that per member.
+// MODE_OCCLUDE then appends the members visible now and not in phase 1 to
+// the phase-2 commands and IDs (a second depth pass) and writes the history.
+// The phase-1 depth is a subset of the final depth, so the test stays
+// conservative whatever the history says.
+//
 // MODE_SHADOW_BATCH culls all shadow passes of a render in one dispatch: a
 // workgroup row per pass, whose LOD inputs and offsets into the commands,
 // IDs and visible bits come from ShadowPasses. It writes no instance data
@@ -128,6 +137,7 @@ shared uint group_primitives;
 #define VIEW_FLAG_ORTHOGONAL 4
 #define VIEW_FLAG_MOTION 8
 #define VIEW_FLAG_SHADOW 16
+#define VIEW_FLAG_TWO_PASS 32
 
 #define GPU_FLAG_MOVED 1
 #define GPU_FLAG_CAN_SDFGI 2
@@ -159,6 +169,47 @@ uint append_member(uint p_command_offset, uint p_command) {
 	}
 	return rank;
 }
+
+#ifndef MODE_SHADOW_BATCH
+// Two-pass, see the top. Per table slot: 1 if occluded when last tested.
+layout(set = 0, binding = 14, std430) restrict buffer History {
+	uint data[];
+}
+history;
+
+// Per member: 1 if the camera run put it in phase 1.
+layout(set = 0, binding = 15, std430) restrict buffer Phase1 {
+	uint data[];
+}
+phase1;
+
+// Phase-1 lists in the camera run, phase-2 lists in MODE_OCCLUDE.
+layout(set = 0, binding = 16, std430) restrict buffer PhaseCommands {
+	uint data[];
+}
+phase_commands;
+
+layout(set = 0, binding = 17, std430) restrict writeonly buffer PhaseIDs {
+	uint data[];
+}
+phase_ids;
+
+uint append_phase_member(uint p_command) {
+	uint rank = atomicAdd(phase_commands.data[p_command * 5 + 1], 1);
+	if (rank == 0) {
+		phase_commands.data[p_command * 5] = command_indices.data[p_command];
+	}
+	return rank;
+}
+
+void append_phase(uint p_index, Bucket p_bucket, uint p_command) {
+	uint rank = append_phase_member(p_bucket.command + p_command);
+	phase_ids.data[p_bucket.ids_first + p_command * p_bucket.capacity + rank] = p_index;
+	if (p_bucket.depth_command != 0xFFFFFFFFu) {
+		append_phase_member(p_bucket.depth_command + p_command);
+	}
+}
+#endif
 
 #ifdef MODE_SHADOW_BATCH
 struct ShadowPass { // RenderForwardClustered::GPUInstanceShadowPassData, 48 bytes.
@@ -197,6 +248,7 @@ statistics;
 
 // The word after the MultiMesh one in geometry_statistics.cpp.
 const uint STAT_GPU_INSTANCES_OCCLUDED = 29u;
+const uint STAT_GPU_INSTANCES_DEPTH_DEFERRED = 33u;
 
 #include "mesh_hiz_inc.glsl"
 #endif
@@ -256,7 +308,18 @@ void main() {
 	// of the box (as the MultiMesh test).
 	vec3 magnitude = max(abs(record.aabb_position), abs(record.aabb_position + record.aabb_size)) + 1.0;
 	vec4 error = (occlusion.abs_to_clip * vec4(magnitude, 1.0)) * (128.0 * 1.1920929e-7);
-	if (hzb_box_occluded(record.aabb_position, record.aabb_size, occlusion.world_to_clip, error, ivec2(occlusion.size.xy))) {
+	bool occluded = hzb_box_occluded(record.aabb_position, record.aabb_size, occlusion.world_to_clip, error, ivec2(occlusion.size.xy));
+	if (bool(params.view_flags & VIEW_FLAG_TWO_PASS)) {
+		// The instance's surfaces share its box: they write the same value.
+		history.data[member.x] = occluded ? 1u : 0u;
+		if (phase1.data[index] == 0u) {
+			atomicAdd(statistics.data[STAT_GPU_INSTANCES_DEPTH_DEFERRED], 1u);
+			if (!occluded) {
+				append_phase(index, bucket, command);
+			}
+		}
+	}
+	if (occluded) {
 		atomicAdd(statistics.data[STAT_GPU_INSTANCES_OCCLUDED], 1u);
 		return;
 	}
@@ -350,6 +413,15 @@ uint cull_member(uint index, out uint r_primitives) {
 		// A separate shadow mesh: the depth pre-pass draws as many instances.
 		append_member(command_offset, bucket.depth_command + command);
 	}
+#ifndef MODE_SHADOW_BATCH
+	if (bool(view_flags & VIEW_FLAG_TWO_PASS)) {
+		bool in_phase1 = history.data[member.x] == 0u;
+		phase1.data[index] = in_phase1 ? 1u : 0u;
+		if (in_phase1) {
+			append_phase(index, bucket, command);
+		}
+	}
+#endif
 	r_primitives = command_primitives.data[bucket.command + command];
 	return motion_pass && moved ? 2 : 1;
 }

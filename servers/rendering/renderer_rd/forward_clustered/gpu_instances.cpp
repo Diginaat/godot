@@ -69,6 +69,7 @@ enum {
 	GPU_INSTANCE_VIEW_ORTHOGONAL = 4,
 	GPU_INSTANCE_VIEW_MOTION = 8, // Members that moved go to the motion pass's commands.
 	GPU_INSTANCE_VIEW_SHADOW = 16, // A shadow pass: no dynamic flag.
+	GPU_INSTANCE_VIEW_TWO_PASS = 32, // Phase-1 and phase-2 depth lists (two-pass occlusion).
 };
 
 // As in render_forward_clustered.cpp.
@@ -299,12 +300,81 @@ void RenderForwardClustered::_gpu_instances_update_setting() {
 	}
 }
 
+bool RenderForwardClustered::_gpu_instances_prepare_two_pass(GPUInstanceScenario &p_scenario) {
+	RD *rd = RD::get_singleton();
+	struct Grow {
+		RID *buffer;
+		uint32_t *capacity;
+		uint32_t needed;
+		uint32_t element_size;
+		bool indirect;
+	};
+	const uint32_t command_count = p_scenario.commands.size() / 5;
+	// Phase-1 and phase-2 lists share their capacity: grown together.
+	const uint32_t command_capacity = p_scenario.phase_command_capacity;
+	const uint32_t id_capacity = p_scenario.phase_id_capacity;
+	const uint32_t history_capacity = p_scenario.history_capacity;
+	const Grow grows[] = {
+		{ &p_scenario.history_buffer, &p_scenario.history_capacity, gpu_instance_slots.get_capacity(), sizeof(uint32_t), false },
+		{ &p_scenario.phase1_buffer, &p_scenario.phase1_capacity, p_scenario.member_count, sizeof(uint32_t), false },
+	};
+	for (const Grow &grow : grows) {
+		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
+			continue;
+		}
+		if (grow.buffer->is_valid()) {
+			rd->free_rid(*grow.buffer);
+		}
+		*grow.capacity = Math::next_power_of_2(MAX(grow.needed, 64u));
+		*grow.buffer = rd->storage_buffer_create(*grow.capacity * grow.element_size);
+		if (grow.buffer->is_null()) {
+			*grow.capacity = 0;
+			return false;
+		}
+	}
+	if (p_scenario.history_capacity != history_capacity) {
+		// Grown empty: every slot counts as visible, so phase 1 draws it.
+		rd->buffer_clear(p_scenario.history_buffer, 0, p_scenario.history_capacity * sizeof(uint32_t));
+	}
+	if (command_capacity < p_scenario.command_capacity || id_capacity < p_scenario.id_capacity || p_scenario.phase1_commands_buffer.is_null()) {
+		for (RID *buffer : { &p_scenario.phase1_commands_buffer, &p_scenario.phase1_ids_buffer, &p_scenario.phase2_commands_buffer, &p_scenario.phase2_ids_buffer }) {
+			if (buffer->is_valid()) {
+				rd->free_rid(*buffer);
+			}
+		}
+		p_scenario.phase_command_capacity = p_scenario.command_capacity;
+		p_scenario.phase_id_capacity = p_scenario.id_capacity;
+		p_scenario.phase1_commands_buffer = rd->storage_buffer_create(p_scenario.command_capacity * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		p_scenario.phase2_commands_buffer = rd->storage_buffer_create(p_scenario.command_capacity * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		p_scenario.phase1_ids_buffer = rd->storage_buffer_create(p_scenario.id_capacity * sizeof(uint32_t));
+		p_scenario.phase2_ids_buffer = rd->storage_buffer_create(p_scenario.id_capacity * sizeof(uint32_t));
+		if (p_scenario.phase1_commands_buffer.is_null() || p_scenario.phase2_commands_buffer.is_null() || p_scenario.phase1_ids_buffer.is_null() || p_scenario.phase2_ids_buffer.is_null()) {
+			p_scenario.phase_command_capacity = 0;
+			p_scenario.phase_id_capacity = 0;
+			return false;
+		}
+	}
+	// Zeroed on the GPU (a clear, not a copy); the camera run appends.
+	rd->buffer_clear(p_scenario.phase1_commands_buffer, 0, command_count * 5 * sizeof(uint32_t));
+	return true;
+}
+
+void RenderForwardClustered::_gpu_instances_bind_two_pass(const GPUInstanceScenario &p_scenario, RID p_commands, RID p_ids, LocalVector<RD::Uniform> &r_uniforms) {
+	// Without two-pass the shader touches none of these: bind stand-ins.
+	const bool two_pass = p_scenario.two_pass;
+	r_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 14, two_pass ? p_scenario.history_buffer : p_scenario.visible_buffer));
+	r_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 15, two_pass ? p_scenario.phase1_buffer : p_scenario.visible_buffer));
+	r_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 16, two_pass ? p_commands : p_scenario.command_indices_buffer));
+	r_uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 17, two_pass ? p_ids : p_scenario.command_indices_buffer));
+}
+
 void RenderForwardClustered::_gpu_instances_free_scenario(GPUInstanceScenario *p_scenario) {
 	if (gpu_instances_view == p_scenario) {
 		gpu_instances_view = nullptr;
 	}
 	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->output_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->command_indices_buffer, &p_scenario->stats_buffer,
-		&p_scenario->visible_buffer, &p_scenario->occluded_commands_buffer, &p_scenario->occluded_ids_buffer, &p_scenario->occlusion_buffer });
+		&p_scenario->visible_buffer, &p_scenario->occluded_commands_buffer, &p_scenario->occluded_ids_buffer, &p_scenario->occlusion_buffer, &p_scenario->history_buffer, &p_scenario->phase1_buffer,
+		&p_scenario->phase1_commands_buffer, &p_scenario->phase1_ids_buffer, &p_scenario->phase2_commands_buffer, &p_scenario->phase2_ids_buffer });
 	RD *rd = RD::get_singleton();
 	const GPUInstanceScenario::ShadowBatch &batch = p_scenario->shadow_batch;
 	for (RID buffer : { batch.commands, batch.ids, batch.visible, batch.passes, batch.stats }) {
@@ -868,8 +938,10 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	// validation reports moved members drawn without it).
 	const uint64_t frame = RSG::rasterizer->get_frame_number();
 	gpu_instances_view_motion = p_using_motion_pass && gpu_instances_moved_frame + 1 >= frame;
+	scenario->two_pass = gpu_instance_cull.occlude_pipeline.is_valid() && GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion") &&
+			GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion_two_pass") && _gpu_instances_prepare_two_pass(*scenario);
 	params.view_flags = (p_using_opaque_gi ? GPU_INSTANCE_VIEW_USE_GI_BUFFERS : 0) | (p_using_sdfgi ? GPU_INSTANCE_VIEW_USE_SDFGI : 0) | (scene->cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0) |
-			(gpu_instances_view_motion ? GPU_INSTANCE_VIEW_MOTION : 0);
+			(gpu_instances_view_motion ? GPU_INSTANCE_VIEW_MOTION : 0) | (scenario->two_pass ? GPU_INSTANCE_VIEW_TWO_PASS : 0);
 	// The LOD inputs of _fill_render_list().
 	params.lod_threshold = scene->screen_mesh_lod_threshold;
 	const Vector3 lod_camera = scene->main_cam_transform.origin;
@@ -897,6 +969,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		uniforms.push_back(uniform);
 	}
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 13, scenario->command_indices_buffer));
+	_gpu_instances_bind_two_pass(*scenario, scenario->phase1_commands_buffer, scenario->phase1_ids_buffer, uniforms);
 	RENDER_TIMESTAMP("GPU Instances Cull");
 	RD::ComputeListID compute_list = rd->compute_list_begin();
 	rd->compute_list_bind_compute_pipeline(compute_list, gpu_instance_cull.pipeline);

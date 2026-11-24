@@ -393,7 +393,7 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 		const RenderElementInfo &element_info = p_params->element_info[i];
 		const bool use_clod = p_params->mesh_clod_commands.is_valid() && element_info.mesh_clod_offset != UINT32_MAX;
 		if (p_params->depth_phase2_only && !use_clod && !(p_params->multimesh_cull_commands.is_valid() && element_info.multimesh_cull_draw != UINT32_MAX) &&
-				!(p_params->mesh_occlusion_tested && p_params->mesh_occlusion_tested[i])) {
+				!(p_params->mesh_occlusion_tested && p_params->mesh_occlusion_tested[i]) && !(p_params->gpu_instance_commands.is_valid() && element_info.gpu_bucket != UINT32_MAX)) {
 			continue;
 		}
 		// GPU path bucket: one indirect draw of the instances its cull pass wrote.
@@ -2882,10 +2882,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		RD::get_singleton()->draw_command_begin_label("Render Depth Pre-Pass");
 
 		// HZB occlusion: with two passes the pre-pass draws only the CLOD groups,
-		// GPU-culled MultiMesh instances and CPU list meshes that were visible
-		// when last tested, and a second depth pass adds the ones found visible
-		// now. GPU path instances are tested after the pre-pass and removed
-		// from the colour passes only.
+		// GPU-culled MultiMesh instances, GPU path instances and CPU list meshes
+		// that were visible when last tested, and a second depth pass adds the
+		// ones found visible now.
 		const bool hzb_wanted = rb_data.is_valid() && ((mesh_clod_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_enabled"))) || (multimesh_cull_commands.is_valid() && bool(GLOBAL_GET("rendering/geometry/multimesh_gpu_culling/occlusion"))) || (gpu_instance_commands.is_valid() && GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion")) || (!render_list[RENDER_LIST_OPAQUE].elements.is_empty() && GLOBAL_GET_CACHED(bool, "rendering/geometry/mesh_occlusion/enabled")));
 		const bool hzb = hzb_wanted && _setup_hzb(p_render_data, rb_data.ptr());
 		const bool clod_occlusion = hzb && mesh_clod_commands.is_valid() && _setup_mesh_clod_occlusion(p_render_data, rb_data.ptr());
@@ -2909,13 +2908,15 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		if (mesh_two_pass) {
 			_split_mesh_occlusion(rb_data.ptr());
 		}
-		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_two_pass ? rb_data->multimesh_cull.phase1_ids : multimesh_visible_ids, gpu_instance_data, gpu_instance_ids);
+		// The camera run (_gpu_instances_begin_view()) wrote the phase-1 lists.
+		const bool gpu_two_pass = gpu_instances_occlusion && gpu_instances_view->two_pass;
+		RID rp_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_two_pass ? rb_data->multimesh_cull.phase1_ids : multimesh_visible_ids, gpu_instance_data, gpu_two_pass ? gpu_instances_view->phase1_ids_buffer : gpu_instance_ids);
 
 		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || using_planar || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 		render_list_params.multimesh_cull_commands = multimesh_two_pass ? rb_data->multimesh_cull.phase1_commands : multimesh_cull_commands;
 		render_list_params.mesh_clod_commands = clod_two_pass ? rb_data->mesh_clod.depth_commands : mesh_clod_commands;
-		render_list_params.gpu_instance_commands = gpu_instance_commands;
+		render_list_params.gpu_instance_commands = gpu_two_pass ? gpu_instances_view->phase1_commands_buffer : gpu_instance_commands;
 		if (mesh_two_pass) {
 			render_list_params.mesh_occlusion_commands = rb_data->mesh_occlusion.phase1_commands;
 			render_list_params.mesh_occlusion_tested = rb_data->mesh_occlusion.tested.ptr();
@@ -2934,11 +2935,14 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				// it stays hidden. Opaque and motion passes use the occluded lists.
 				_occlude_multimesh(p_render_data, rb_data.ptr());
 			}
+			// Before phase 2: these also write the phase-2 commands.
 			if (mesh_occlusion) {
-				// Before phase 2: it also writes the phase-2 commands.
 				_occlude_meshes(p_render_data, rb_data.ptr());
 			}
-			if (clod_two_pass || multimesh_two_pass || mesh_two_pass) {
+			if (gpu_instances_occlusion) {
+				_occlude_gpu_instances(p_render_data, rb_data.ptr());
+			}
+			if (clod_two_pass || multimesh_two_pass || mesh_two_pass || gpu_two_pass) {
 				// Phase 2 adds what is visible now but was not drawn in phase 1.
 				RENDER_TIMESTAMP("Render Phase 2 Depth");
 				RD::get_singleton()->capture_timestamp("Mesh CLOD Phase 2 Depth");
@@ -2946,9 +2950,11 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				render_list_params.multimesh_cull_commands = multimesh_two_pass ? rb_data->multimesh_cull.phase2_commands : RID();
 				render_list_params.mesh_occlusion_commands = mesh_two_pass ? rb_data->mesh_occlusion.phase2_commands : RID();
 				render_list_params.mesh_occlusion_tested = mesh_two_pass ? rb_data->mesh_occlusion.tested.ptr() : nullptr;
+				render_list_params.gpu_instance_commands = gpu_two_pass ? gpu_instances_view->phase2_commands_buffer : RID();
 				render_list_params.depth_phase2_only = true;
-				if (multimesh_two_pass) {
-					render_list_params.render_pass_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, rb_data->multimesh_cull.phase2_ids, gpu_instance_data, gpu_instance_ids);
+				if (multimesh_two_pass || gpu_two_pass) {
+					render_list_params.render_pass_uniform_set = _setup_render_pass_uniform_set(RENDER_LIST_OPAQUE, nullptr, is_multiview, RID(), samplers, depth_prepass_uniform_buffer_index, false, multimesh_two_pass ? rb_data->multimesh_cull.phase2_ids : multimesh_visible_ids,
+							gpu_instance_data, gpu_two_pass ? gpu_instances_view->phase2_ids_buffer : gpu_instance_ids);
 				}
 				_render_list_with_draw_list(&render_list_params, depth_framebuffer, RD::DRAW_DEFAULT_ALL, depth_pass_clear, 0.0f, 0u, p_render_data->render_region);
 			}
@@ -2957,7 +2963,6 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				multimesh_visible_ids = rb_data->multimesh_cull.occluded_ids;
 			}
 			if (gpu_instances_occlusion) {
-				_occlude_gpu_instances(p_render_data, rb_data.ptr());
 				gpu_instance_commands = gpu_instances_view->occluded_commands_buffer;
 				gpu_instance_ids = gpu_instances_view->occluded_ids_buffer;
 			}

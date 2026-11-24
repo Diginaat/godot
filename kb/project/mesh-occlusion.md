@@ -59,6 +59,33 @@ GPU p50 street 3.095 to 1.687 ms, corner 2.324 to 1.546, aerial 6.073 to
 5.375; depth p50 about halved. With every object on CLOD the bench has no
 tested CPU-list mesh left. The valley map has none either.
 
+## Two-pass depth for the GPU path (2026-11-24)
+
+`rendering/geometry/gpu_instances/occlusion_two_pass` (default on), in
+`gpu_instance_cull.glsl` (`VIEW_FLAG_TWO_PASS`, bindings 14-17). The camera
+run reads a per-table-slot history (`GPUInstanceScenario::history_buffer`,
+the same `gpu_slot` key as the CPU list), records per member whether it went
+to phase 1, and appends members whose instance was visible when last tested
+to phase-1 commands and IDs (layout of `commands_buffer`/`ids_buffer`); the
+depth pre-pass draws those. `MODE_OCCLUDE` (now before the phase-2 pass)
+writes the history and appends visible members not in phase 1 to the phase-2
+lists; the phase-2 depth pass draws GPU buckets from them with its own
+render-pass uniform set. Reading the phase-1 flag instead of the history
+avoids the race between an instance's surfaces. Without two-pass the
+bindings get stand-in buffers the shader does not touch.
+`gpu_instances_depth_deferred` statistic.
+
+Proof: `mesh_occlusion.tscn` runs every check for the GPU path too (spheres
+without a visibility range): 20 occluded and deferred, static and 30
+alternating frames equal the reference; negative control (phase-2 append
+removed): 30 of 30 alternating frames differ. All large-world fixtures pass.
+
+Speed: neutral. `hzb_bench` (64 buildings on the GPU path) within 1-3%;
+`instance_bench` (up to 100k nodes, little occlusion) within noise: a first
+off-then-on run showed the 100k cases 1.2 ms slower, the reversed on-then-off
+run showed no difference (run order, not the feature). Gains need GPU path
+meshes with expensive depth behind occluders.
+
 Not tested: GPU path, CLOD and MultiMesh/particle elements (own paths),
 points, shaders using `VERTEX`/`POSITION`/custom transforms (box may not
 bound them), XR, wireframe and overdraw debug modes; HZB preconditions

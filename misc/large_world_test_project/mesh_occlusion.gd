@@ -1,7 +1,9 @@
 extends Node3D
-## HZB occlusion of CPU render list meshes (rendering/geometry/mesh_occlusion/*).
-## Spheres with a visibility range stay on the CPU list (the GPU path does not
-## take them): 20 behind a wall, 5 in front of it, 3 over its top edge.
+## HZB occlusion of CPU render list meshes (rendering/geometry/mesh_occlusion/*)
+## and of GPU path instances (rendering/geometry/gpu_instances/occlusion*).
+## 28 spheres: 20 behind a wall, 5 in front of it, 3 over its top edge. With a
+## visibility range they stay on the CPU list (the GPU path does not take
+## them); without one the GPU path draws them. A-C run for both.
 ## A: one pass: the 20 hidden spheres are left out of the colour pass, the
 ##    image equals the reference (occlusion off).
 ## B: two passes (the default): the 20 are also left out of the first depth
@@ -10,12 +12,16 @@ extends Node3D
 ##    what became visible) equal the reference exactly.
 ## C: with the settings off, nothing is occluded or deferred.
 
-const ENABLED := "rendering/geometry/mesh_occlusion/enabled"
-const TWO_PASS := "rendering/geometry/mesh_occlusion/two_pass"
+const PATHS := {
+	"cpu": ["rendering/geometry/mesh_occlusion/enabled", "rendering/geometry/mesh_occlusion/two_pass", "meshes_occluded", "meshes_depth_deferred"],
+	"gpu": ["rendering/geometry/gpu_instances/occlusion", "rendering/geometry/gpu_instances/occlusion_two_pass", "gpu_instances_occluded", "gpu_instances_depth_deferred"],
+}
 const HIDDEN := 20
 
 var _failures: Array[String] = []
 var _camera: Camera3D
+var _spheres: Node3D
+var _path := "cpu"
 
 
 func _ready() -> void:
@@ -46,6 +52,18 @@ func _ready() -> void:
 	wall.mesh = box
 	wall.position = Vector3(0, 1, 0)
 	add_child(wall)
+	_camera = Camera3D.new()
+	add_child(_camera)
+	_camera.current = true
+	_view(0)
+	_run.call_deferred()
+
+
+func _spawn(gpu: bool) -> void:
+	if _spheres:
+		_spheres.free()
+	_spheres = Node3D.new()
+	add_child(_spheres)
 	for i in 28:
 		var sphere := SphereMesh.new()
 		sphere.radius = 0.3
@@ -55,19 +73,15 @@ func _ready() -> void:
 		sphere.material = material
 		var node := MeshInstance3D.new()
 		node.mesh = sphere
-		node.visibility_range_end = 1000.0
+		if not gpu:
+			node.visibility_range_end = 1000.0
 		if i < HIDDEN:
 			node.position = Vector3(-4.0 + (i % 5) * 2.0, -1.0 + (i / 5) * 1.0, -3.0)
 		elif i < 25:
 			node.position = Vector3(-4.0 + (i - 20) * 2.0, 0.0, 2.0)
 		else:
 			node.position = Vector3(-2.0 + (i - 25) * 2.0, 4.25, -0.6)
-		add_child(node)
-	_camera = Camera3D.new()
-	add_child(_camera)
-	_camera.current = true
-	_view(0)
-	_run.call_deferred()
+		_spheres.add_child(node)
 
 
 func _view(index: int) -> void:
@@ -81,8 +95,10 @@ func _view(index: int) -> void:
 
 
 func _settings(enabled: bool, two_pass: bool) -> void:
-	ProjectSettings.set_setting(ENABLED, enabled)
-	ProjectSettings.set_setting(TWO_PASS, two_pass)
+	for path in PATHS:
+		# The other path's occlusion stays on: it must not change the counts.
+		ProjectSettings.set_setting(PATHS[path][0], enabled or path != _path)
+		ProjectSettings.set_setting(PATHS[path][1], two_pass or path != _path)
 
 
 func _frame() -> Image:
@@ -113,13 +129,28 @@ func _check_view(label: String, index: int, reference: Image, occluded: int, def
 	if (await _frame()).get_data() != reference.get_data():
 		_failures.append("%s view %d: image differs from the reference" % [label, index])
 	var stats := await _statistics()
-	if int(stats.get("meshes_occluded", -1)) != occluded:
-		_failures.append("%s view %d: %d meshes occluded, expected %d" % [label, index, int(stats.get("meshes_occluded", -1)), occluded])
-	if int(stats.get("meshes_depth_deferred", -1)) != deferred:
-		_failures.append("%s view %d: %d meshes deferred from phase-1 depth, expected %d" % [label, index, int(stats.get("meshes_depth_deferred", -1)), deferred])
+	var occluded_key: String = PATHS[_path][2]
+	var deferred_key: String = PATHS[_path][3]
+	if int(stats.get(occluded_key, -1)) != occluded:
+		_failures.append("%s %s view %d: %s %d, expected %d" % [_path, label, index, occluded_key, int(stats.get(occluded_key, -1)), occluded])
+	if int(stats.get(deferred_key, -1)) != deferred:
+		_failures.append("%s %s view %d: %s %d, expected %d" % [_path, label, index, deferred_key, int(stats.get(deferred_key, -1)), deferred])
 
 
 func _run() -> void:
+	for path in PATHS:
+		_path = path
+		_spawn(path == "gpu")
+		await _run_path()
+	if _failures.is_empty():
+		print("MESH_OCCLUSION_TEST_PASS: CPU list and GPU path: %d hidden meshes left out of the colour pass and the phase-1 depth pass, images equal the reference in static and 30 alternating frames, one-pass and off match" % HIDDEN)
+	else:
+		for failure in _failures:
+			print("MESH_OCCLUSION_TEST_FAIL: " + failure)
+	get_tree().quit(1 if not _failures.is_empty() else 0)
+
+
+func _run_path() -> void:
 	_settings(false, false)
 	var references: Array[Image] = []
 	for index in 2:
@@ -127,7 +158,7 @@ func _run() -> void:
 		await _settle()
 		references.append(await _frame())
 	if references[0].get_data() == references[1].get_data():
-		_failures.append("the two views render the same image")
+		_failures.append("%s: the two views render the same image" % _path)
 
 	# A. One pass.
 	_settings(true, false)
@@ -144,16 +175,10 @@ func _run() -> void:
 		if (await _frame()).get_data() != references[index].get_data():
 			mismatches += 1
 	if mismatches > 0:
-		_failures.append("alternating: %d of 30 frames differ from the reference" % mismatches)
+		_failures.append("%s alternating: %d of 30 frames differ from the reference" % [_path, mismatches])
 
 	# C. Off.
 	_settings(false, true)
 	await _check_view("off", 0, references[0], 0, 0)
 
 	_settings(true, true)
-	if _failures.is_empty():
-		print("MESH_OCCLUSION_TEST_PASS: %d hidden meshes left out of the colour pass and the phase-1 depth pass, images equal the reference in static and 30 alternating frames, one-pass and off match" % HIDDEN)
-	else:
-		for failure in _failures:
-			print("MESH_OCCLUSION_TEST_FAIL: " + failure)
-	get_tree().quit(1 if not _failures.is_empty() else 0)

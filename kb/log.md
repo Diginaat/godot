@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-24 (two-pass depth for GPU path instances)
+
+* **Added**: [two-pass depth for the GPU path](/project/mesh-occlusion.md#two-pass-depth-for-the-gpu-path-2026-11-24)
+  (`rendering/geometry/gpu_instances/occlusion_two_pass`,
+  `gpu_instances_depth_deferred`); `mesh_occlusion.tscn` covers both paths.
+  G3 is complete: every path (CLOD, MultiMesh, GPU path, CPU list) has
+  two-pass depth.
+* **Seen again**: [separate runs had an order bias](/mistakes/separate-runs-order-bias.md):
+  `instance_bench` run order alone moved the 100k cases by 1.2 ms.
+
 ## 2026-11-24 (two-pass depth for CPU list meshes)
 
 * **Added**: [two-pass depth for CPU list meshes](/project/mesh-occlusion.md#two-pass-depth-2026-11-24-gpu-first-plan-g3)
