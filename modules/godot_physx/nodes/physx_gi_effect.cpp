@@ -118,8 +118,23 @@ layout(set = 0, binding = 9, std140) uniform Frame {
 	vec4 src_capture[8];
 	ivec4 srcs; // x: count
 	vec4 src_border; // x: the atlas maps' border, y: the scale inside it, z: the roughest level
+	// The traced skinned meshes' world bounds (a little grown): a reflection doesn't take what the screen shows inside
+	// them (the side of a character the camera sees), but traces the mesh.
+	vec4 traced_lo[8];
+	vec4 traced_hi[8];
+	ivec4 traced; // x: count
 }
 f;
+
+// Whether world point w is inside a traced mesh's bounds.
+bool in_traced(vec3 w) {
+	for (int i = 0; i < f.traced.x; i++) {
+		if (all(greaterThanEqual(w, f.traced_lo[i].xyz)) && all(lessThanEqual(w, f.traced_hi[i].xyz))) {
+			return true;
+		}
+	}
+	return false;
+}
 
 // Whether a reflection probe replaces this kind of light (1 bounce, 2 reflections) at world point w anyway: then
 // there's no point tracing it.
@@ -223,6 +238,8 @@ struct Primitive {
 	vec4 shape;
 	vec4 albedo;
 	vec4 emission;
+	vec4 glow_lo; // where on the shape the glow is, in its local frame (w 1: set; unset: all of it)
+	vec4 glow_hi; // w: 1 for a traced skinned mesh
 };
 layout(std430, set = 0, binding = 4) restrict readonly buffer Primitives {
 	Primitive p[];
@@ -239,6 +256,17 @@ layout(std430, set = 0, binding = 10) restrict readonly buffer Geometry {
 	vec4 v[];
 }
 geo;
+
+// The color of the triangle the last trace hit, plus 1 (a traced skinned mesh's triangles carry their own); zero when
+// it hit something else, or a triangle without one (its shape's albedo).
+vec3 traced_albedo = vec3(0.0);
+
+// While set, traces see only static bodies' shapes (what a reflection probe's capture can be trusted to hold).
+bool trace_static_only = false;
+
+vec3 triangle_albedo(int tris, int k) {
+	return vec3(geo.v[tris + k * 3].w, geo.v[tris + k * 3 + 1].w, geo.v[tris + k * 3 + 2].w);
+}
 
 // Where a local ray enters a mesh tree node's box (1e30: it misses it, or only beyond best).
 float mesh_box_entry(vec3 o, vec3 inv, int at, float best) {
@@ -313,6 +341,7 @@ bool hit_mesh(int nodes, int tris, vec3 o, vec3 d, inout float t, out vec3 n) {
 					t = th;
 					n = cross(e1, e2);
 					found = true;
+					traced_albedo = triangle_albedo(tris, k);
 				}
 			}
 			}
@@ -467,6 +496,9 @@ bool hit_primitive(Primitive q, vec3 o, vec3 d, inout float best, out vec3 norma
 		n = lo + ld * t;
 	}
 	best = t;
+	if (type != 5) {
+		traced_albedo = vec3(0.0);
+	}
 	// Local to world for a normal: the transpose of the world-to-local rows.
 	normal = normalize(n.x * q.r0.xyz + n.y * q.r1.xyz + n.z * q.r2.xyz);
 	return true;
@@ -593,6 +625,7 @@ int walk_world(vec3 o, vec3 d, inout float t, out vec3 normal, bool any_hit) {
 					Primitive q = prims.p[mesh];
 					normal = normalize(n.x * q.r0.xyz + n.y * q.r1.xyz + n.z * q.r2.xyz);
 					hit = mesh;
+					traced_albedo = triangle_albedo(mesh_tris, k);
 					if (any_hit) {
 						return hit;
 					}
@@ -601,6 +634,9 @@ int walk_world(vec3 o, vec3 d, inout float t, out vec3 normal, bool any_hit) {
 		} else {
 			int first = floatBitsToInt(nlo.w);
 			for (int i = first; i < first + count; i++) {
+				if (trace_static_only && prims.p[i].emission.w < 0.5) {
+					continue;
+				}
 				vec4 shape = prims.p[i].shape;
 				if (int(shape.x + 0.5) == 5) {
 					// Into a mesh: the ray in its space, its own tree from its root (a leaf holds one shape).
@@ -624,6 +660,7 @@ int walk_world(vec3 o, vec3 d, inout float t, out vec3 normal, bool any_hit) {
 					if (hit_primitive(prims.p[i], o, d, t, n)) {
 						hit = i;
 						normal = n;
+						traced_albedo = vec3(0.0);
 						if (any_hit) {
 							return hit;
 						}
@@ -705,6 +742,9 @@ int walk_world(vec3 o, vec3 d, inout float t, out vec3 normal, bool any_hit) {
 		} else {
 			int first = floatBitsToInt(nd.lo.w);
 			for (int i = first; i < first + count; i++) {
+				if (trace_static_only && prims.p[i].emission.w < 0.5) {
+					continue;
+				}
 				vec3 n;
 				if (hit_primitive(prims.p[i], o, d, t, n)) {
 					hit = i;
@@ -966,12 +1006,25 @@ bool sampled_emissive(int p_hit) {
 	return false;
 }
 
+// Whether world point x on shape hit is where its glow is (its glowing surface's box, when it has one).
+bool in_glow(int hit, vec3 x) {
+	if (prims.p[hit].glow_lo.w < 0.5) {
+		return true;
+	}
+	vec3 l = vec3(dot(prims.p[hit].r0.xyz, x) + prims.p[hit].r0.w, dot(prims.p[hit].r1.xyz, x) + prims.p[hit].r1.w, dot(prims.p[hit].r2.xyz, x) + prims.p[hit].r2.w);
+	return all(greaterThanEqual(l, prims.p[hit].glow_lo.xyz)) && all(lessThanEqual(l, prims.p[hit].glow_hi.xyz));
+}
+
 vec3 world_light(vec3 x, vec3 n, int hit, sampler2D depth_tex, sampler2D color_tex, bool from_pixels, bool with_glow, bool sharp) {
+	// The hit triangle's own color, if it has one (read before any shadow ray traces again).
+	vec3 triangle = traced_albedo;
 	// Without with_glow only the emissives sampled directly go without their glow here (it would count them twice);
-	// every other one glows as it is hit.
+	// every other one glows as it is hit. Only where on the shape its glow is: a pot's light strip, not the pot.
+	bool glowing_here = prims.p[hit].emission.rgb != vec3(0.0) && in_glow(hit, x);
 	bool glows = with_glow || !sampled_emissive(hit);
 	vec3 v = (f.world_to_view * vec4(x, 1.0)).xyz;
-	if (v.z < -f.clip.x) {
+	// A traced mesh's hit doesn't take the screen's light either: what's there may be its other side.
+	if (prims.p[hit].glow_hi.w < 0.5 && v.z < -f.clip.x) {
 		vec2 sp = pixel_from_view(v, f.proj_info);
 		if (on_screen(sp)) {
 			float sd = texelFetch(depth_tex, ivec2(sp), 0).r;
@@ -981,7 +1034,7 @@ vec3 world_light(vec3 x, vec3 n, int hit, sampler2D depth_tex, sampler2D color_t
 				vec2 pp = prev_pixel(v, pd);
 				if (on_screen(pp)) {
 					vec3 seen = texture(color_tex, (pp + 0.5) / vec2(f.sizes.xy)).rgb;
-					return glows ? seen : max(seen - prims.p[hit].emission.rgb * f.sun_color.w, vec3(0.0));
+					return glows || !glowing_here ? seen : max(seen - prims.p[hit].emission.rgb * f.sun_color.w, vec3(0.0));
 				}
 			}
 		}
@@ -995,8 +1048,38 @@ vec3 world_light(vec3 x, vec3 n, int hit, sampler2D depth_tex, sampler2D color_t
 		}
 	}
 #endif
-	vec3 albedo = prims.p[hit].albedo.rgb;
-	vec3 glow = glows ? prims.p[hit].emission.rgb * f.sun_color.w : vec3(0.0);
+	vec3 albedo = triangle.x > 0.5 ? triangle - 1.0 : prims.p[hit].albedo.rgb;
+	vec3 glow = glows && glowing_here ? prims.p[hit].emission.rgb * f.sun_color.w : vec3(0.0);
+	if (prims.p[hit].glow_hi.w > 0.5 && f.cache.z != 0u) {
+		// A traced skinned mesh moves through the cache's cells: one at its surface is fresh (no bounce light yet)
+		// where it has just moved to, and inside it once it moves on, a dark patch crossing it as it walks. Its bounce
+		// light comes from cells out in the open in front of it (more than a cell's blend away), holding the light
+		// arriving there (claimed white): true whatever passes by.
+		vec3 xc = x + n * 0.4;
+		bool claimed;
+		int slot = cache_slot(xc, n, from_pixels, claimed);
+		if (slot >= 0) {
+			if (claimed) {
+				cells.c[slot].pos = vec4(xc, uintBitsToFloat(f.cache.x));
+				cells.c[slot].normal = vec4(n, 0.0);
+				cells.c[slot].albedo = vec4(1.0, 1.0, 1.0, 0.0);
+				cells.c[slot].incoming = vec4(0.0);
+			} else if (from_pixels) {
+				cells.c[slot].pos.w = uintBitsToFloat(f.cache.x);
+			}
+		}
+#ifdef PROBE_SOURCES
+		bool lit_here = sharp && mirror_hit;
+#else
+		bool lit_here = sharp;
+#endif
+		if (lit_here) {
+			return glow + albedo * (direct_light(x, n) + smooth_cache(xc, n, false));
+		}
+		// Elsewhere the cells' light leaving (white: the light arriving there, direct light included).
+		vec3 arriving = smooth_cache(xc, n, true);
+		return glow + albedo * (arriving != vec3(0.0) ? arriving : direct_light(x, n));
+	}
 	if (f.cache.z != 0u) {
 		bool claimed;
 		int slot = cache_slot(x, n, from_pixels, claimed);
@@ -1565,7 +1648,9 @@ bool mirror_hit = false;
 
 // The light a reflection probe's capture shows at world point x (facing n) on shape hit: from the first probe whose
 // box holds x, when the shape doesn't move (the capture may be older than the frame), x faces the capture point and
-// no collision shape stands between them (the capture holds only the nearest thing in each direction).
+// no static body's shape stands between them (the capture holds only the nearest thing in each direction). What moves
+// doesn't count: the capture may not have it where it is now (or at all, left out by the probe's cull mask), and a
+// character walking between a wall and the probe would shade its outline onto the wall.
 bool probe_source(vec3 x, vec3 n, int hit, out vec3 seen) {
 	seen = vec3(0.0);
 	if (prims.p[hit].emission.w < 0.5) {
@@ -1578,7 +1663,13 @@ bool probe_source(vec3 x, vec3 n, int hit, out vec3 seen) {
 		}
 		vec3 to = f.src_capture[i].xyz - x;
 		float dist = length(to);
-		if (dist < 0.05 || dot(n, to) <= 0.0 || blocked(x + n * 0.02, to / dist, dist - 0.05)) {
+		if (dist < 0.05 || dot(n, to) <= 0.0) {
+			continue;
+		}
+		trace_static_only = true;
+		bool hidden = blocked(x + n * 0.02, to / dist, dist - 0.05);
+		trace_static_only = false;
+		if (hidden) {
 			continue;
 		}
 		// Godot's octahedral map of the capture, in the probe's own axes, inside the atlas border.
@@ -1662,8 +1753,14 @@ void main() {
 		if (behind > 0.0 && behind < max(0.1 + 0.02 * surface, 1.5 * stride)) {
 			vec2 hp = clamp(pixel_from_view(origin + dir * refine_hit(depth_tex, origin, dir, in_front, along), f.proj_info), vec2(0.0), vec2(f.sizes.xy) - 1.0);
 			float hd = texelFetch(depth_tex, ivec2(hp), 0).r;
+			vec3 hv = view_from_pixel(floor(hp), hd > 0.0 ? hd : sd, f.proj_info, f.clip.x, f.clip.y);
+			// Inside a traced mesh's bounds the screen shows only the side of it the camera sees (a character's back,
+			// seen in a mirror in front of it): its triangles are traced instead.
+			if (int(f.reflect.x) >= 2 && in_traced((f.view_to_world * vec4(hv, 1.0)).xyz)) {
+				break;
+			}
 			float pd;
-			vec2 pp = prev_pixel(view_from_pixel(floor(hp), hd > 0.0 ? hd : sd, f.proj_info, f.clip.x, f.clip.y), pd);
+			vec2 pp = prev_pixel(hv, pd);
 			if (on_screen(pp)) {
 				light = texture(color_tex, (pp + 0.5) / vec2(f.sizes.xy)).rgb;
 				found = true;
@@ -2133,6 +2230,9 @@ struct FrameData {
 	float src_capture[8][4];
 	int32_t srcs[4];
 	float src_border[4];
+	float traced_lo[8][4];
+	float traced_hi[8][4];
+	int32_t traced[4];
 };
 
 void projection_info(const Projection &p_projection, const Size2i &p_size, float *r_info) {
@@ -2613,6 +2713,13 @@ void PhysXGIEffect::_render(int p_callback_type, const RenderData *p_render_data
 	data.cache[1] = CACHE_SLOTS - 1;
 	data.cache[2] = s.multi_bounce ? 1 : 0;
 	data.cache[3] = s.rays_per_texel;
+	data.traced[0] = s.traced_count;
+	for (int i = 0; i < s.traced_count; i++) {
+		for (int a = 0; a < 3; a++) {
+			data.traced_lo[i][a] = s.traced_lo[i][a];
+			data.traced_hi[i][a] = s.traced_hi[i][a];
+		}
+	}
 	data.probes[0] = s.probe_count;
 	data.probes[1] = s.emissive_candidates;
 	for (int i = 0; i < s.probe_count; i++) {
@@ -2669,18 +2776,29 @@ void PhysXGIEffect::_render(int p_callback_type, const RenderData *p_render_data
 	if (primitives_uploaded == UINT64_MAX) {
 		primitives_uploaded = s.primitives_version;
 	}
-	if (s.geometry_version != geometry_uploaded || geometry_buffer.is_null()) {
+	// The geometry, and after it the traced meshes' part: the whole buffer made again when the geometry changes (or
+	// the traced part's size does), else only the traced part rewritten when it changes (every frame they move).
+	if (s.geometry_version != geometry_uploaded || geometry_buffer.is_null() || s.geometry.size() != geometry_static_floats || s.dynamic_geometry.size() != geometry_dynamic_floats) {
 		if (geometry_buffer.is_valid()) {
 			rd->free_rid(geometry_buffer);
 		}
 		Vector<uint8_t> bytes;
-		bytes.resize(MAX(s.geometry.size(), 4) * sizeof(float));
+		bytes.resize(MAX(s.geometry.size() + s.dynamic_geometry.size(), 4) * sizeof(float));
 		bytes.fill(0);
 		if (s.geometry.size() > 0) {
 			memcpy(bytes.ptrw(), s.geometry.ptr(), s.geometry.size() * sizeof(float));
 		}
+		if (s.dynamic_geometry.size() > 0) {
+			memcpy(bytes.ptrw() + s.geometry.size() * sizeof(float), s.dynamic_geometry.ptr(), s.dynamic_geometry.size() * sizeof(float));
+		}
 		geometry_buffer = rd->storage_buffer_create(bytes.size(), bytes);
 		geometry_uploaded = s.geometry_version;
+		dynamic_uploaded = s.dynamic_version;
+		geometry_static_floats = s.geometry.size();
+		geometry_dynamic_floats = s.dynamic_geometry.size();
+	} else if (s.dynamic_version != dynamic_uploaded && s.dynamic_geometry.size() > 0) {
+		rd->buffer_update(geometry_buffer, s.geometry.size() * sizeof(float), s.dynamic_geometry.size() * sizeof(float), s.dynamic_geometry.ptr());
+		dynamic_uploaded = s.dynamic_version;
 	}
 
 	auto sampled = [&](int p_binding, const RID &p_sampler, const RID &p_texture) {

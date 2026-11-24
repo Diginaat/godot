@@ -60,6 +60,7 @@ void GodotPhysXArea3D::_destroy_actor() {
 	_release_all_pairs();
 	if (space && space->get_px_scene()) {
 		space->get_px_scene()->removeActor(*px_actor);
+		space->count_actor_removed();
 	}
 	px_actor->release();
 	px_actor = nullptr;
@@ -74,8 +75,11 @@ PxShape *GodotPhysXArea3D::_create_px_shape(uint32_t p_idx) {
 		return nullptr;
 	}
 	const GodotPhysXShape3D::ScaledGeometry sg = sr.shape->scaled_geometry(built_scale * sr.xform.basis.get_scale());
-	PxShape *px_shape = space->get_px_physics()->createShape(sg.geom.any(), *space->get_default_material(), true,
-			PxShapeFlag::eTRIGGER_SHAPE | PxShapeFlag::eSCENE_QUERY_SHAPE);
+	PxShapeFlags flags = PxShapeFlag::eSCENE_QUERY_SHAPE;
+	if (shapes_are_triggers) {
+		flags |= PxShapeFlag::eTRIGGER_SHAPE;
+	}
+	PxShape *px_shape = space->get_px_physics()->createShape(sg.geom.any(), *space->get_default_material(), true, flags);
 	if (!px_shape) {
 		return nullptr;
 	}
@@ -178,7 +182,7 @@ void GodotPhysXArea3D::_build_actor() {
 	ERR_FAIL_NULL(scene);
 	ERR_FAIL_NULL(space->get_default_material());
 
-	// Kinematic, not static: PhysX never pairs two statics, so a static area could never see a StaticBody3D (Godot
+	// Kinematic, not static: PhysX never pairs two static actors, so a static area could never see a StaticBody3D (Godot
 	// Physics and Jolt do), and an area that moves every step (a hitbox) is a static the static pruner keeps
 	// rebuilding. The scene keeps kinematic-static / kinematic-kinematic pairs for the filter shader, which lets only
 	// an area's triggers through.
@@ -188,6 +192,7 @@ void GodotPhysXArea3D::_build_actor() {
 	dyn->setActorFlag(PxActorFlag::eDISABLE_GRAVITY, true);
 	dyn->setName(ACTOR_NAME);
 	px_actor = dyn;
+	shapes_are_triggers = _wants_triggers();
 	px_actor->userData = this;
 	built_scale = area_transform.basis.get_scale();
 
@@ -203,6 +208,7 @@ void GodotPhysXArea3D::_build_actor() {
 
 	_apply_filter_data();
 	scene->addActor(*px_actor);
+	space->count_actor_added();
 }
 
 void GodotPhysXArea3D::_apply_filter_data() {
@@ -237,6 +243,45 @@ void GodotPhysXArea3D::set_space(GodotPhysXSpace3D *p_space) {
 	if (space) {
 		space->register_area(this);
 		_build_actor();
+	}
+}
+
+void GodotPhysXArea3D::set_monitor_callback(const Callable &p_callback) {
+	monitor_callback = p_callback;
+	if (monitor_callback.is_null()) {
+		pending.clear(); // (Area3D forgets its bodies itself when monitoring goes off)
+	}
+	_refresh_role();
+}
+
+void GodotPhysXArea3D::set_area_monitor_callback(const Callable &p_callback) {
+	area_monitor_callback = p_callback;
+	if (area_monitor_callback.is_null()) {
+		pending_areas.clear();
+	}
+	_refresh_role();
+}
+
+// After a callback or an override changed: the space's lists of areas to call back / to apply, and whether the
+// shapes are triggers. Turning triggers off forgets the overlapping bodies (nothing reports them any more); turning
+// them on lets PhysX find the bodies already inside as new pairs on the next step, so a monitor sees them enter.
+void GodotPhysXArea3D::_refresh_role() {
+	if (space) {
+		space->update_area_role(this);
+	}
+	const bool want = _wants_triggers();
+	if (want == shapes_are_triggers || !px_actor) {
+		shapes_are_triggers = want; // (no actor: the shapes are made with it)
+		return;
+	}
+	shapes_are_triggers = want;
+	if (!want) {
+		_release_all_pairs();
+	}
+	for (PxShape *s : px_shapes) {
+		if (s) {
+			s->setFlag(PxShapeFlag::eTRIGGER_SHAPE, want);
+		}
 	}
 }
 
@@ -605,6 +650,9 @@ void GodotPhysXArea3D::set_param(PS3DE::AreaParameter p_param, const Variant &p_
 			break;
 		default:
 			break;
+	}
+	if (has_force_override() != (space && space->is_override_area(this))) {
+		_refresh_role();
 	}
 }
 

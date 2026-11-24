@@ -87,8 +87,9 @@ public:
 	// One collision shape the off-screen rays are traced against: world-to-local rows, the shape (x: 0 box, 1 sphere,
 	// 2 capsule, 3 cylinder along local y, 4 convex hull, 5 triangle mesh; yzw: half extents; the radius; the radius
 	// and half the height; for a hull its first plane and plane count, for a mesh its first tree node and first
-	// triangle, in the geometry buffer, as int bits), its body's albedo, the light it emits.
-	static constexpr int PRIMITIVE_FLOATS = 24;
+	// triangle, in the geometry buffer, as int bits), its body's albedo, the light it emits, and where on it that light
+	// is (a box in its local frame, min with w 1 when set, then max; unset: all of it).
+	static constexpr int PRIMITIVE_FLOATS = 32;
 
 	// A bounding volume tree over the primitives, two vec4 per node: min (w: the right child for an inner node, the
 	// first primitive for a leaf), max (w: 0 for an inner node, the leaf's primitive count); ints stored as float bits.
@@ -105,6 +106,10 @@ public:
 		// the version changes.
 		Vector<float> geometry;
 		uint64_t geometry_version = 0;
+		// The traced skinned meshes' trees and triangles, placed right after the geometry and rewritten every frame (only
+		// this part is uploaded when only this version changes).
+		Vector<float> dynamic_geometry;
+		uint64_t dynamic_version = 0;
 		Vector3 sun_direction; // toward the sun, world space
 		Color sun_color; // linear, times energy; black for none
 		// Omni lights: position and 1 / range; linear colour times energy, and the attenuation exponent.
@@ -130,7 +135,7 @@ public:
 		float world_distance = 30.0f; // how far a GI ray goes against the collision shapes
 		int rays_per_texel = 4;
 		int emissive_candidates = 6; // weighed by a texel for its one emissive shadow ray
-		// Emissive shapes sampled directly by every texel (the nearest to the camera): an oriented box each (centre and
+		// Emissive shapes sampled directly by every texel (the nearest to the camera): an oriented box each (center and
 		// three half axes, world space) and the light its surface gives off.
 		static constexpr int MAX_EMISSIVES = 64;
 		int emissive_count = 0;
@@ -148,6 +153,11 @@ public:
 		// world-to-local, the inner half extents where the override is whole, what they override (1 ambient, 2
 		// reflections).
 		static constexpr int MAX_PROBES = 8;
+		// Traced skinned meshes' world bounds (grown a little): reflections don't take the screen's view inside them.
+		static constexpr int MAX_TRACED = 8;
+		int traced_count = 0;
+		Vector3 traced_lo[MAX_TRACED];
+		Vector3 traced_hi[MAX_TRACED];
 		int probe_count = 0;
 		Transform3D probe_to_local[MAX_PROBES];
 		Vector3 probe_core[MAX_PROBES];
@@ -192,6 +202,9 @@ private:
 	int node_capacity = 0;
 	RID geometry_buffer;
 	uint64_t geometry_uploaded = UINT64_MAX;
+	uint64_t dynamic_uploaded = UINT64_MAX;
+	int geometry_static_floats = 0; // where the dynamic part starts in the buffer
+	int geometry_dynamic_floats = 0;
 	bool failed = false;
 
 	// The radiance cache: surface patches the off-screen rays hit, hashed by position (cells growing with distance from
@@ -219,6 +232,8 @@ public:
 	static void remove_settings(const ObjectID &p_node);
 
 	static void attach_world(World3D *p_world);
+	// Whether a PXTGI3D delivers GI in this world (a scene capture of it can be lit by PXTGI too).
+	static bool has_world(const ObjectID &p_world) { return worlds.has(p_world); }
 	static void detach_world(const ObjectID &p_world);
 	static void install(World3D *p_world, Camera3D *p_camera);
 

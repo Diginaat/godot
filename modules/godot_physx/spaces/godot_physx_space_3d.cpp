@@ -46,6 +46,8 @@
 #include "core/math/math_defs.h"
 #include "core/object/object.h"
 #include "core/os/mutex.h"
+#include "core/os/os.h"
+#include "core/profiling/profiling.h"
 
 #include <PxPhysicsAPI.h>
 
@@ -389,6 +391,16 @@ void GodotPhysXSpace3D::step(real_t p_step) {
 	}
 	last_step = p_step;
 
+	// Each stage is a profiler zone (Tracy / Perfetto builds; nothing otherwise) and is timed for
+	// PhysX.space_get_step_stats().
+	GodotProfileZoneGroupedFirst(_px_step, "PhysX: pre-solve");
+	const OS *os = OS::get_singleton();
+	const uint64_t t_start = os->get_ticks_usec();
+	step_stats.actors_added = pending_actors_added;
+	step_stats.actors_removed = pending_actors_removed;
+	pending_actors_added = 0;
+	pending_actors_removed = 0;
+
 	for (GodotPhysXBody3D *body : contact_reporters) {
 		body->clear_contacts();
 	}
@@ -406,12 +418,23 @@ void GodotPhysXSpace3D::step(real_t p_step) {
 		body->keep_awake();
 	}
 
+	GodotProfileZoneGrouped(_px_step, "PhysX: area overrides");
+	const uint64_t t_overrides = os->get_ticks_usec();
 	_apply_area_overrides();
+	GodotProfileZoneGrouped(_px_step, "PhysX: area overlaps");
+	const uint64_t t_overlaps = os->get_ticks_usec();
 	_detect_area_overlaps();
 
+	GodotProfileZoneGrouped(_px_step, "PhysX: simulate");
+	const uint64_t t_simulate = os->get_ticks_usec();
 	flush_material_releases(); // (see defer_material_release: removals reach this scene's sync below)
 	px_scene->simulate((PxReal)p_step);
+	GodotProfileZoneGrouped(_px_step, "PhysX: fetchResults");
+	const uint64_t t_fetch = os->get_ticks_usec();
 	px_scene->fetchResults(true); // fills body contact buffers via g_contact_callback
+
+	GodotProfileZoneGrouped(_px_step, "PhysX: sync back");
+	const uint64_t t_sync = os->get_ticks_usec();
 
 	// Pull back actors that moved this step (eENABLE_ACTIVE_ACTORS), plus one
 	// final pull for bodies that just went to sleep so their resting pose and
@@ -428,7 +451,7 @@ void GodotPhysXSpace3D::step(real_t p_step) {
 		if (!active[i]->is<PxRigidDynamic>()) {
 			continue;
 		}
-		if (active[i]->getName() == GodotPhysXArea3D::ACTOR_NAME) {
+		if (GodotPhysXArea3D::is_area_actor(active[i])) {
 			continue; // an area (kinematic): its userData is the area
 		}
 		GodotPhysXBody3D *body = static_cast<GodotPhysXBody3D *>(active[i]->userData);
@@ -475,6 +498,16 @@ void GodotPhysXSpace3D::step(real_t p_step) {
 	}
 
 	awake_bodies = now_awake;
+
+	const uint64_t t_end = os->get_ticks_usec();
+	step_stats.step_usec = t_end - t_start;
+	step_stats.pre_solve_usec = t_overrides - t_start;
+	step_stats.area_overrides_usec = t_overlaps - t_overrides;
+	step_stats.area_overlaps_usec = t_simulate - t_overlaps;
+	step_stats.simulate_usec = t_fetch - t_simulate;
+	step_stats.fetch_results_usec = t_sync - t_fetch;
+	step_stats.sync_back_usec = t_end - t_sync;
+	step_stats.synced_bodies = sync_bodies.size();
 }
 
 void GodotPhysXSpace3D::body_actor_gone(GodotPhysXBody3D *p_body) {
@@ -495,8 +528,26 @@ void GodotPhysXSpace3D::body_removed_from_areas(GodotPhysXBody3D *p_body) {
 	}
 }
 
+void GodotPhysXSpace3D::update_area_role(GodotPhysXArea3D *p_area) {
+	if (!areas.has(p_area)) {
+		return;
+	}
+	if (p_area->has_monitor_callbacks()) {
+		monitoring_areas.insert(p_area);
+	} else {
+		monitoring_areas.erase(p_area);
+	}
+	if (p_area->has_force_override()) {
+		override_areas.insert(p_area);
+	} else {
+		override_areas.erase(p_area);
+	}
+}
+
 void GodotPhysXSpace3D::unregister_area(GodotPhysXArea3D *p_area) {
 	areas.erase(p_area);
+	monitoring_areas.erase(p_area);
+	override_areas.erase(p_area);
 	for (GodotPhysXArea3D *area : areas) {
 		area->area_removed(p_area);
 	}
@@ -512,7 +563,7 @@ void GodotPhysXSpace3D::_detect_area_overlaps() {
 	LocalVector<GodotPhysXArea3D *> monitoring;
 	uint32_t monitoring_layers = 0;
 	uint32_t monitoring_masks = 0;
-	for (GodotPhysXArea3D *area : areas) {
+	for (GodotPhysXArea3D *area : monitoring_areas) {
 		if (area->wants_area_monitoring()) {
 			monitoring.push_back(area);
 			monitoring_layers |= area->get_collision_layer();
@@ -554,7 +605,7 @@ void GodotPhysXSpace3D::set_default_damping(real_t p_linear, real_t p_angular) {
 void GodotPhysXSpace3D::_apply_area_overrides() {
 	// Gather, per body, the areas that impose a gravity/damp/wind override.
 	HashMap<GodotPhysXBody3D *, LocalVector<GodotPhysXArea3D *>> affected;
-	for (GodotPhysXArea3D *area : areas) {
+	for (GodotPhysXArea3D *area : override_areas) {
 		if (!area->has_force_override()) {
 			continue;
 		}
@@ -654,13 +705,69 @@ void GodotPhysXSpace3D::_apply_area_overrides() {
 }
 
 void GodotPhysXSpace3D::call_queries() {
+	GodotProfileZone("PhysX: callbacks");
+	const uint64_t t_start = OS::get_singleton()->get_ticks_usec();
 	// Notify bodies that moved or that just went to sleep this step.
 	for (GodotPhysXBody3D *body : sync_bodies) {
 		body->call_queries();
 	}
-	for (GodotPhysXArea3D *area : areas) {
+	for (GodotPhysXArea3D *area : monitoring_areas) {
 		area->call_queries();
 	}
+	step_stats.callbacks_usec = OS::get_singleton()->get_ticks_usec() - t_start;
+}
+
+Dictionary GodotPhysXSpace3D::get_step_stats_dictionary() const {
+	Dictionary d;
+	const StepStats &st = step_stats;
+	d["step_usec"] = (int64_t)st.step_usec;
+	d["pre_solve_usec"] = (int64_t)st.pre_solve_usec;
+	d["area_overrides_usec"] = (int64_t)st.area_overrides_usec;
+	d["area_overlaps_usec"] = (int64_t)st.area_overlaps_usec;
+	d["simulate_usec"] = (int64_t)st.simulate_usec;
+	d["fetch_results_usec"] = (int64_t)st.fetch_results_usec;
+	d["sync_back_usec"] = (int64_t)st.sync_back_usec;
+	d["callbacks_usec"] = (int64_t)st.callbacks_usec;
+	d["actors_added"] = st.actors_added;
+	d["actors_removed"] = st.actors_removed;
+	d["synced_bodies"] = st.synced_bodies;
+	d["bodies"] = bodies.size();
+	d["areas"] = areas.size();
+	if (!px_scene) {
+		return d;
+	}
+	// PhysX gathers these on every step in every build (PX_ENABLE_SIM_STATS); this only copies them out.
+	PxSimulationStatistics ps;
+	px_scene->getSimulationStatistics(ps);
+	// On GPU dynamics the narrow phase runs on the device and the contact pair counts only cover the pairs it leaves
+	// to the CPU.
+	d["gpu_dynamics"] = px_scene->getFlags().isSet(PxSceneFlag::eENABLE_GPU_DYNAMICS);
+	d["active_dynamic_bodies"] = ps.nbActiveDynamicBodies;
+	d["active_kinematic_bodies"] = ps.nbActiveKinematicBodies;
+	d["dynamic_bodies"] = ps.nbDynamicBodies;
+	d["kinematic_bodies"] = ps.nbKinematicBodies;
+	d["static_bodies"] = ps.nbStaticBodies;
+	d["active_constraints"] = ps.nbActiveConstraints;
+	d["aggregates"] = ps.nbAggregates;
+	d["broadphase_adds"] = ps.getNbBroadPhaseAdds();
+	d["broadphase_removes"] = ps.getNbBroadPhaseRemoves();
+	d["contact_pairs"] = ps.nbDiscreteContactPairsTotal;
+	d["contact_pairs_cache_hits"] = ps.nbDiscreteContactPairsWithCacheHits;
+	d["contact_pairs_touching"] = ps.nbDiscreteContactPairsWithContacts;
+	d["new_pairs"] = ps.nbNewPairs;
+	d["lost_pairs"] = ps.nbLostPairs;
+	d["new_touches"] = ps.nbNewTouches;
+	d["lost_touches"] = ps.nbLostTouches;
+	d["solver_partitions"] = ps.nbPartitions;
+	d["axis_solver_constraints"] = ps.nbAxisSolverConstraints;
+	PxU32 trigger_pairs = 0;
+	for (int a = 0; a < PxGeometryType::eGEOMETRY_COUNT; a++) {
+		for (int b = a; b < PxGeometryType::eGEOMETRY_COUNT; b++) {
+			trigger_pairs += ps.getRbPairStats(PxSimulationStatistics::eTRIGGER_PAIRS, (PxGeometryType::Enum)a, (PxGeometryType::Enum)b);
+		}
+	}
+	d["trigger_pairs"] = trigger_pairs;
+	return d;
 }
 
 GodotPhysXDirectSpaceState3D *GodotPhysXSpace3D::get_direct_state() {
@@ -687,7 +794,7 @@ public:
 		if (p_actor == self_actor) {
 			return PxQueryHitType::eNONE;
 		}
-		if (p_shape && (p_shape->getFlags() & PxShapeFlag::eTRIGGER_SHAPE)) {
+		if (GodotPhysXArea3D::is_area_actor(p_actor)) {
 			return PxQueryHitType::eNONE;
 		}
 		GodotPhysXBody3D *b = p_actor ? static_cast<GodotPhysXBody3D *>(p_actor->userData) : nullptr;
@@ -825,8 +932,8 @@ enum RoundContact {
 // and how far the round shape is in (<= 0: only touching). PhysX's own result
 // for a sweep that starts overlapping a mesh isn't that contact -- its depth is
 // the push along whichever axis it picked (32 cm back along the walk for a
-// 3.5 cm lip between two floor pieces) and its position can be a vertex a metre
-// away -- so a walking character was snapped sideways by tens of centimetres.
+// 3.5 cm lip between two floor pieces) and its position can be a vertex a meter
+// away -- so a walking character was snapped sideways by tens of centimeters.
 RoundContact round_mesh_contact(const PxGeometry &p_geom, const PxTransform &p_pose, const PxVec3 &p_a, const PxVec3 &p_b, PxReal p_radius,
 		const PxShape *p_mesh_shape, const PxTransform &p_mesh_pose, PxVec3 &r_normal, PxReal &r_depth, PxVec3 &r_point) {
 	const PxGeometry &mesh = p_mesh_shape->getGeometry();
@@ -1085,15 +1192,15 @@ bool GodotPhysXSpace3D::test_body_motion(GodotPhysXBody3D *p_body, const PS3DT::
 					const PxGeometryType::Enum mover_type = sg.geom.any().getType();
 					if (hit.block.actor && hit.block.shape && (mover_type == PxGeometryType::eCAPSULE || mover_type == PxGeometryType::eSPHERE) &&
 							(hit.block.shape->getGeometry().getType() == PxGeometryType::eTRIANGLEMESH || hit.block.shape->getGeometry().getType() == PxGeometryType::eHEIGHTFIELD)) {
-						const PxVec3 centre = pose.p + unit_dir * PxMax(hit.block.distance, 0.0f);
-						PxVec3 a = centre;
+						const PxVec3 center = pose.p + unit_dir * PxMax(hit.block.distance, 0.0f);
+						PxVec3 a = center;
 						PxVec3 ab(0.0f);
 						PxReal radius;
 						if (mover_type == PxGeometryType::eCAPSULE) {
 							// PhysX capsules lie along their local X axis.
 							const PxCapsuleGeometry &capsule = static_cast<const PxCapsuleGeometry &>(sg.geom.any());
 							const PxVec3 half = pose.q.getBasisVector0() * capsule.halfHeight;
-							a = centre - half;
+							a = center - half;
 							ab = half * 2.0f;
 							radius = capsule.radius;
 						} else {

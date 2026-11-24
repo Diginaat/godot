@@ -355,12 +355,18 @@ multiple bounces.
   scene see the sky (or the background colour).
 - A body's look comes from the mesh under it, or else the mesh it sits
   under (a model with its collision body as a child), or else the first
-  mesh beside it in a small group (up to 8 children): its albedo from the first surface with a
-  `StandardMaterial3D`, its glow from its brightest surface. PXTGI can't
-  read a `ShaderMaterial`; give one a `pxtgi_albedo` and/or
+  mesh beside it in a small group (up to 8 children): its albedo the colors
+  of its surfaces averaged by their areas (a wall's thin colored trim tints
+  it only as much as it covers; a surface PXTGI can't read is left out), its
+  glow from its brightest surface, given off only where that surface is on
+  the shape (a pot's thin light strip glows as a band, not the whole pot;
+  a glow given in a node's metadata covers the whole shape). PXTGI reads a
+  `StandardMaterial3D`'s albedo color but not its albedo texture's colors,
+  and can't read a `ShaderMaterial` at all; give one a `pxtgi_albedo` and/or
   `pxtgi_emission` Color in its metadata (or put them on the
-  `MeshInstance3D` or the physics body), or it bounces as neutral gray with
-  no glow off screen.
+  `MeshInstance3D` or the physics body), or off screen it bounces as its
+  albedo color (neutral gray for a `ShaderMaterial`) with no glow. The tags
+  are read only by PXTGI: they don't change how the material draws.
 - A `pxtgi_emission` Color must say how bright the material actually draws.
   It's read as sRGB, like an albedo color; its linear value is the glow's
   strength in the material's own units (nits with physical light units on):
@@ -370,21 +376,75 @@ multiple bounces.
   `EMISSION` by a hidden factor, say, as some importers' converted materials
   do), probes and reflections disagree with PXTGI's light: a probe capturing
   far brighter lamps than the tag says blows out what it lights.
-- **Find Emissive Materials** (a button on a `PXTGI3D`'s inspector) does the
-  tagging for a scene: it lists the `ShaderMaterial`s that have no
-  `pxtgi_emission` tag (on the material or its mesh), each measured by
-  drawing it with no light (`PXTGIEmissionMeter`), so the glow shown is what
-  the shader really draws, hidden multipliers included. The ones that glow
-  come ticked; edit a value to override it, untick what shouldn't light the
-  scene, and Tag Selected writes the tags (undoable) and saves materials kept
-  in their own files. Double-click a row to go to a mesh using it. A glow
-  that changes over time is tagged with its mean; a material inside an
-  imported file can't be tagged (the tag would be lost on reimport), make it
-  unique or save it to a file first.
+- **Measure Materials** (a button on a `PXTGI3D`'s inspector) does the
+  tagging for a scene: it lists the materials PXTGI can't read in full
+  (`ShaderMaterial`s with no `pxtgi_emission` tag on the material or its
+  mesh, and `ShaderMaterial`s or textured `StandardMaterial3D`s with no
+  `pxtgi_albedo`), each measured by drawing it (`PXTGIEmissionMeter`): with
+  no light, so the glow shown is what the shader really draws, hidden
+  multipliers included; then under an even white light and in a white sky's
+  reflections, so the albedo shown is the share of light it bounces,
+  textures and tints averaged over the surface: a dielectric's diffuse color,
+  a metal's reflection (about its color when glossy, dimmer when rough, as
+  Godot draws it). The ones that
+  glow come ticked for a glow tag, and every one for an albedo tag; edit a
+  glow to override it, untick what you don't want, and Tag Selected writes
+  the tags (undoable) and saves materials kept in their own files.
+  Double-click a row to go to a mesh using it. A glow that changes over time
+  is tagged with its mean; a material inside an imported file can't be
+  tagged (the tag would be lost on reimport), make it unique or save it to a
+  file first. The tags are measured once: measure again after changing a
+  material's textures or glow. Nothing is measured at run time, so the tags
+  cost nothing in a game.
 - A material's `AO` output above 1 multiplies all of its indirect light
   (PXTGI's included) instead of darkening it; keep it within 0–1.
   Converted materials can carry intensities far above 1 that their source
   engine clamps.
+- **Characters** off screen (a character seen in a mirror, its shadow from a
+  light behind the camera): by default PXTGI sees a character only through
+  its collision shapes, which for a character with physical bones (a ragdoll)
+  are the bones' capsules, following the animation while it isn't limp, in
+  neutral gray (a bone isn't next to the character's mesh, so it takes no
+  color from it). They shadow and block bounce light roughly; a character
+  without physical bones isn't seen at all. To trace the character as
+  itself, give its skinned `MeshInstance3D` a `pxtgi_traced` of `true` in
+  its metadata (Inspector > Metadata; on a mesh inside an imported model,
+  turn on Editable Children first): PXTGI then traces that mesh's own
+  triangles, skinned to its pose every frame, and leaves out the capsules of
+  that mesh's skeleton (the physics still uses them). Each triangle has
+  its surface's color (its albedo color times its albedo texture at the
+  triangle's middle, or a `pxtgi_albedo` tag), so a mirror shows the
+  character's shape and colors, not its texture's fine detail or normal
+  maps. It also shadows and blocks bounce light by its shape. Reflections
+  don't take the screen's view inside its bounds (the side of the character
+  the camera sees, its back from a camera behind it): they trace the mesh
+  there, so a mirror in front of a third-person character shows its front.
+  Its glow, if it has one, isn't traced. With reflections set to traced +
+  probes, what a mirror shows of static surfaces takes its color from the
+  probes' captures, which don't have a moving character where it is now:
+  there a character's shadow doesn't show on the floor in the mirror (leave
+  moving characters out of a probe's `cull_mask`, or the capture keeps them
+  where they stood when it was made).
+- Which triangles a traced mesh uses: its own **LODs**, the ones Godot's
+  importer generates (the Import dock's *Generate LODs*, on by default for
+  meshes in glTF, FBX and other scenes). PXTGI doesn't simplify meshes
+  itself. For each surface it takes the coarsest LOD that still has that
+  surface's share of a triangle budget: about 3000 for `true`, or the number
+  given as `pxtgi_traced` (an int, e.g. `1500`); if every LOD has fewer, it
+  uses the full surface. A LOD only drops triangles, so the vertices, bone
+  weights and UVs stay the mesh's own and the skinning is exact. A mesh
+  with no LODs (imported with Generate LODs off, or built in code) is traced
+  at full detail: correct, but more triangles to trace and more vertices to
+  skin each frame. The demo's mannequin has 13744 triangles; a budget of
+  1000 lands on a 1716-triangle LOD, about the same shape in a mirror.
+- Cost: the mesh is read once (its LODs, vertices, bone weights,
+  textures; a GPU readback, so a brief hitch when it is first tagged), then
+  each frame its vertices are skinned on the CPU and only its part of the
+  geometry is uploaded. Tracing it costs GPU time where rays reach it (on
+  an RTX 5070, about 0.3 ms more than its capsules with the character
+  filling a large mirror, of which about 0.08 ms is tracing triangle meshes
+  at all, which a scene with trimesh colliders pays already); the triangle
+  budget changes that little.
 - Lights: the sun is the brightest visible `DirectionalLight3D` that lights
   surfaces; of omni and spot lights, the 8 of each Godot draws that come
   nearest the camera, chosen every frame. Nodes added or removed are picked
@@ -418,7 +478,98 @@ multiple bounces.
   in a scene with many of them. More is steadier and costs a little more of the
   trace pass; a scene with no emissives pays nothing.
 - Demos: `demo/editor/rendering/gi_courtyard.tscn`, `gi_courtyard_night.tscn`,
-  `gi_cornell_box.tscn`, `demo/cpu/physx_playground_gi.tscn` (key `G`).
+  `gi_cornell_box.tscn`, `demo/cpu/physx_playground_gi.tscn` (key `G`),
+  `gi_mirror_character.tscn` (a traced character in a mirror, first person).
+
+## Mirrors — `PhysXMirror3D`
+
+A flat mirror drawn by a scene capture, as Unreal's `SceneCaptureComponent2D`
+draws one: a second camera renders the world into a texture, and the mirror's
+glass shows it. It shows the real render (textures, normal maps, Godot's
+lights and shadows, characters as drawn), at the cost of rendering what the
+mirror sees again.
+
+- Add a `PhysXMirror3D` on the mirror's surface: the glass is a rectangle of
+  `size` in the node's XY plane, facing its +Z, and the node draws it. Each
+  frame the capture camera sits at the viewing camera's eye mirrored through
+  the glass, its near plane on the glass, so nothing behind the mirror is
+  drawn into it. It renders in linear HDR and the glass shows it unshaded:
+  the viewing camera tone maps it with the rest of the frame.
+- It renders only while the glass is seen (in the camera's frustum, from its
+  front), at `resolution_scale` of the camera's height (at most
+  `max_resolution`), every `update_interval` frames. `cull_mask`, `far` and
+  `lod_threshold` keep what it draws down.
+- `gi`: with a `PXTGI3D` in the scene, PXTGI lights the capture as it lights
+  the room, which costs PXTGI again at the capture's resolution. Off, the
+  capture has direct light only and PXTGI doesn't run for it. The lens
+  effects (flare, dirt, shafts) aren't drawn in the capture.
+- `material`: a `ShaderMaterial` for the glass gets the capture as its
+  `mirror_texture` uniform (sample it at `vec2(1.0 - UV.x, UV.y)`), to tint
+  it, dim it or add dirt.
+- The glass is on its own render layer (`glass_layers`) that the capture
+  leaves out. In the editor the glass is a plain mirror-like surface: the
+  capture follows the game's camera. One camera, not one per eye (XR shows
+  both eyes the same view).
+
+**Which to use** for a character in a mirror:
+
+| | PXTGI traced (`pxtgi_traced`) | `PhysXMirror3D` |
+| --- | --- | --- |
+| Looks | The character's LOD, one color per triangle, lit by PXTGI | The real render |
+| Surfaces | Any smooth surface, any number (curved metal, glossy floors) | One flat rectangle |
+| Costs | Rays that reach the character | Drawing what the mirror sees again |
+| Also | The character shadows and bounces PXTGI's light | Shows things without collision shapes |
+
+In the demo's mirror room (`demo/editor/rendering/gi_mirror_character.tscn`,
+P switches between them) on an RTX 5070 at 1280×720, the mannequin dancing
+1.4 m from a 2.4 × 2.2 m mirror, GPU time for the frame including the capture:
+PXTGI traced 1.3–1.4 ms; `PhysXMirror3D` lit by PXTGI 2.2–2.4 ms at the view's
+full height, 1.7 ms at half, 1.55 ms at a quarter; without PXTGI in the capture
+1.2 ms at full height (but what only bounce light lights reads dark). A
+larger scene costs the capture more (it draws what the mirror sees), not
+PXTGI's traced reflection. Both can be in one scene: a `PhysXMirror3D` for a
+mirror to look into, `pxtgi_traced` for the character in glossy floors and
+for its shadows.
+
+## Optimize Shaders (editor tool)
+
+**Project > Tools > Optimize Shaders...** finds the shaders a project's
+materials use that could be one shader, and merges them. Every shader Godot
+compiles is a set of render pipelines the graphics driver keeps in system
+memory (tens of MB for a big one) that take time to compile and to free, and
+two `Shader` resources with the same code are compiled twice. Exporters that
+write a shader per material leave many: an Unreal project's material
+instances, each baked into its own `VisualShader`, came to 313 shaders in a
+test scene where 192 do the same.
+
+- It reads the `ShaderMaterial`s saved in their own files (`.tres`, `.res`)
+  under `res://` and groups the shaders whose code is the same, or differs
+  only in its parameters' default values. Each group keeps the shader most
+  of its materials use; the others' materials are moved onto it.
+- Nothing looks different: a material that relied on a default the kept
+  shader doesn't share gets that value set on itself. (Godot writes every
+  parameter's value when it saves a material, so materials it saved don't
+  rely on defaults.)
+- Not merged: shaders whose code differs in anything else, a differing
+  `instance uniform` or `global uniform` default (it can't be set on a
+  material), shaders whose default textures differ (a `VisualShader`'s
+  texture nodes: Godot hides those parameters from materials, so a material
+  can't be given its own; shaders with the same textures still merge; the
+  dialog counts these, as changing those nodes to Texture2D Parameter nodes
+  would let them merge), and groups with no shader in its own file (one
+  built into a file can't be used from another; save one as a `.tres`).
+- Merge Selected moves the ticked groups' materials as one undoable action
+  and saves them, keeping their UIDs. The changes are written to disk and can
+  touch many files: back up the project or track it in version control first.
+- The shaders no longer used stay on disk unless **Delete the shaders left
+  unused** is ticked: then, after merging, a confirmation lists those no
+  other file in the project depends on, and Delete moves them (and their
+  `.uid` files) to the system trash; Keep Unused leaves them. Once they're
+  deleted, undoing the merge needs them restored from the trash.
+- Double-click a shader to find it in the FileSystem dock.
+- Scripts can do the same with `PhysXShaderOptimizer` (`find_materials`,
+  `find_groups`, `merge_group`); it needs a rendering device (not
+  `--headless`), and a save made outside the editor may drop the files' UIDs.
 
 ## Characters on debris piles
 
@@ -437,6 +588,14 @@ this with a `debris` layer.
 Areas detect rigid, kinematic and static bodies (`body_entered`,
 `get_overlapping_bodies()`), as Godot Physics and Jolt do, moving areas
 included.
+
+A passive area (`monitoring` off and no gravity, damping or wind override:
+interaction volumes, hurtboxes) costs the physics step nothing. Its shapes are
+PhysX triggers only while something uses them; otherwise they're query-only.
+Raycasts and shape queries with `collide_with_areas` still find it, and
+monitoring areas still see it. Turning `monitoring` on reports the bodies
+already inside, as usual. An override switched on at runtime on such an area
+acts from the step after (its overlaps are found during that step).
 
 `Area3D` gravity, damping and wind overrides are applied to the rigid bodies
 that overlap the area, each physics step, folded across overlapping areas in
@@ -1341,7 +1500,6 @@ For deterministic lockstep multiplayer, use the Jolt backend.
   running motor keeps its bodies awake. SLERP and acceleration drives, spring
   force limits and drive targets are on the `PhysX` singleton, see
   [Active ragdolls](#active-ragdolls--joint-drives).)
-  Unsupported shapes are treated as having no collision and log a warning once.
 - **Bounce between two bouncy bodies.** Godot Physics and Jolt combine two
   bodies' `bounce` as their sum, clamped to 0..1. PhysX can only pick one
   side's value, so this backend uses the larger one: exact whenever one side's
@@ -1360,7 +1518,7 @@ For deterministic lockstep multiplayer, use the Jolt backend.
   see it. On the Mobile renderer with MSAA the effects that read depth (the
   hair's own test against the scene, Flow, the light shafts) get none, and
   draw over what's in front of them. Unreal's groom attributes (per-strand
-  colour, root UVs, guide strands) aren't read.
+  color, root UVs, guide strands) aren't read.
 - **`SeparationRayShape3D`** has no PhysX geometry: it's cast as a ray. In
   `move_and_slide` it lifts a character until its tip sits on what it hits
   (stairs), as on Godot Physics and Jolt. On a rigid body it's applied before
@@ -1370,13 +1528,14 @@ For deterministic lockstep multiplayer, use the Jolt backend.
 - **Area-to-area detection** (`Area3D` monitoring another `Area3D`) works, but
   unlike every other collision pair in this module it costs real per-step
   work: PhysX never reports trigger-trigger pairs (only trigger-vs-rigid), so
-  `GodotPhysXSpace3D` polls it manually every step with a naive O(n²) pass
-  over every `(monitoring, monitorable)` area pair, each a real shape-vs-shape
-  `PxGeometryQuery::overlap()` test. Both `monitoring` and `monitorable`
-  default to `true` on every `Area3D`, so this runs for every area pair by
-  default unless a scene explicitly opts areas out with `monitorable = false`.
-  Fine for the handful of areas a scene typically wants this on; revisit with
-  a broad-phase pre-filter if a scene ever has many mutually-monitoring areas.
+  it's polled every step. Each monitoring area is checked against every
+  monitorable area whose collision layer and mask can meet it, and only pairs
+  whose world bounds overlap get an exact shape test, but the pair loop itself
+  grows with monitoring × monitorable areas: 930 monitoring areas among 9,300
+  cost about 52 ms a step ([#38](https://github.com/uno1982/godot/issues/38)).
+  `monitoring` defaults to `true`, so turn it off on areas that don't need
+  `area_entered` / `body_entered`: a passive area (monitoring off, no override)
+  costs the step nothing (see [Area3D overrides](#area3d-overrides)).
 - **`HeightMapShape3D`** works — a `PxHeightField` quantized to 16 bits over the
   map's height range (so vertical resolution is `(max_height − min_height) /
   65535`). Like concave (trimesh) shapes, it is static/kinematic only. The GPU
@@ -1426,7 +1585,15 @@ For deterministic lockstep multiplayer, use the Jolt backend.
   - it draws after transparent geometry, so an additive mesh inside the gas
     is painted over — use an opaque glowing mesh for a flame core;
   - NanoVDB (volume) emitters aren't supported;
+  - creating a grid (a flow entering the scene) holds up the main thread for
+    one frame, 65–91 ms measured ([#33](https://github.com/uno1982/godot/issues/33));
   - Flow doesn't build on macOS.
+- **XR (stereo):** these are worked out once with the combined camera, not per
+  eye, so they're wrong in a headset: `PXTGI3D`
+  ([#30](https://github.com/uno1982/godot/issues/30)), the screen-space fluid
+  surface ([#29](https://github.com/uno1982/godot/issues/29)), and Screen Space
+  hair ([#28](https://github.com/uno1982/godot/issues/28); use Mesh mode in
+  VR). The light shafts and lens effects are per eye.
 - Windows and Linux x86-64 are the only platforms built and tested.
 
 ## Layout
