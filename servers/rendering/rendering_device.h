@@ -1774,6 +1774,10 @@ private:
 		uint64_t operations_submitted = 0;
 		uint64_t operations_counter = 0;
 		BinaryMutex operations_mutex;
+		// _trim_transfer_workers(): operations_counter at the last check, and
+		// how many checks in a row saw no new operation.
+		uint64_t trim_operations = 0;
+		uint32_t trim_idle_checks = 0;
 	};
 
 	TightLocalVector<TransferWorker *> transfer_worker_pool;
@@ -1792,6 +1796,7 @@ private:
 	void _submit_transfer_worker(TransferWorker *p_transfer_worker, VectorView<RDD::SemaphoreID> p_signal_semaphores = VectorView<RDD::SemaphoreID>());
 	void _wait_for_transfer_worker(TransferWorker *p_transfer_worker);
 	void _flush_barriers_for_transfer_worker(TransferWorker *p_transfer_worker);
+	void _trim_transfer_workers();
 	void _check_transfer_worker_operation(uint32_t p_transfer_worker_index, uint64_t p_transfer_worker_operation);
 	void _check_transfer_worker_buffer(Buffer *p_buffer);
 	void _draw_list_draw_indirect(DrawListID p_list, bool p_use_indices, RID p_buffer, uint32_t p_offset, RID p_count_buffer, uint32_t p_count_offset, uint32_t p_draw_count, uint32_t p_stride);

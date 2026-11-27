@@ -89,8 +89,9 @@ per-object member lookup handles. scene_bench script 100k -6%.
 ## OD9 (2026-11-27): buffers and the staging ring shrink after a large scene is gone
 
 GPU instance slots, the GPU instance buffers, the CPU render list instance
-buffers and the RenderingDevice upload staging ring only grew. A small
-scene after a 100,000-node one kept 228 MB of VRAM it did not use. Now:
+buffers, the RenderingDevice upload staging ring and the transfer worker
+staging buffers only grew. A small scene after a 100,000-node one kept
+228 MB of VRAM it did not use. Now:
 
 - Slots are taken lowest first, and the slot range ends at the highest
   slot in use.
@@ -100,8 +101,12 @@ scene after a 100,000-node one kept 228 MB of VRAM it did not use. Now:
 - Render list instance buffers shrink after 120 frames under a quarter.
 - `_trim_staging_blocks()` frees upload staging blocks past twice the
   busiest frame of the last 300, never one a frame in flight can read.
+- `_trim_transfer_workers()` frees a transfer worker's staging buffer
+  (sized for the largest transfer it ever made) after 300 frames without
+  a transfer.
 
 The thresholds leave a factor of four (two for staging) between growing
-and shrinking, so steady content never resizes. The staging trim changes
+and shrinking, so steady content never resizes. Both trims change
 upstream code in `RenderingDevice`. small_1k after massive_100k 300 to
-115 MB; GPU time unchanged.
+83 MB; level bench city_extreme 415 to 287 MB, forest 221 to 165 MB;
+GPU time unchanged.

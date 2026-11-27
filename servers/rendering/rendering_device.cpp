@@ -7775,12 +7775,47 @@ void RenderingDevice::_wait_for_transfer_workers() {
 	}
 }
 
+// A worker's staging buffer is sized for the largest transfer it ever made
+// (the next power of two), so one large buffer or texture created with data
+// kept that much CPU-visible memory for good. Every 60 frames: a worker with
+// no new operation for 5 checks (300 frames) and a staging buffer over 64 KB
+// frees it. The next transfer creates one of the size it needs.
+void RenderingDevice::_trim_transfer_workers() {
+	if (frames_drawn % 60 != 30) {
+		return;
+	}
+	MutexLock transfer_worker_lock(transfer_worker_pool_mutex);
+	for (uint32_t i = 0; i < transfer_worker_pool_size; i++) {
+		TransferWorker *worker = transfer_worker_pool[i];
+		if (!worker->thread_mutex.try_lock()) {
+			continue; // In use by another thread.
+		}
+		if (worker->operations_counter != worker->trim_operations || worker->recording) {
+			worker->trim_operations = worker->operations_counter;
+			worker->trim_idle_checks = 0;
+		} else if (++worker->trim_idle_checks >= 5 && worker->staging_buffer_size_allocated > 64 * 1024) {
+			if (worker->submitted) {
+				// Submitted 300 frames ago, so this does not block.
+				_wait_for_transfer_worker(worker);
+			}
+			driver->buffer_free(worker->staging_buffer);
+			worker->staging_buffer = RDD::BufferID();
+			worker->staging_buffer_size_allocated = 0;
+			worker->max_transfer_size = 0;
+			worker->trim_idle_checks = 0;
+		}
+		worker->thread_mutex.unlock();
+	}
+}
+
 void RenderingDevice::_free_transfer_workers() {
 	MutexLock transfer_worker_lock(transfer_worker_pool_mutex);
 	for (uint32_t i = 0; i < transfer_worker_pool_size; i++) {
 		TransferWorker *worker = transfer_worker_pool[i];
 		driver->fence_free(worker->command_fence);
-		driver->buffer_free(worker->staging_buffer);
+		if (worker->staging_buffer.id != 0) {
+			driver->buffer_free(worker->staging_buffer);
+		}
 		driver->command_pool_free(worker->command_pool);
 		memdelete(worker);
 	}
@@ -8576,6 +8611,7 @@ void RenderingDevice::_begin_frame(bool p_presented) {
 	}
 	// Download blocks are left alone: pending readbacks can refer to them.
 	_trim_staging_blocks(upload_staging_buffers);
+	_trim_transfer_workers();
 
 	if (download_staging_buffers.used) {
 		download_staging_buffers.current = (download_staging_buffers.current + 1) % download_staging_buffers.blocks.size();

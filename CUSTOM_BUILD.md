@@ -274,9 +274,10 @@ straight.
     [docs/optimization/DECISIONS.md](docs/optimization/DECISIONS.md)):
     lowest-first `GPUInstanceSlots` with `get_capacity()` as the highest
     slot in use, `gpu_buffer_fits()` in `gpu_buffer_capacity.h`, the
-    shrink in `SceneState::grow_instance_buffer()`, and
-    `RenderingDevice::_trim_staging_blocks()` (upstream code; drop it if
-    upstream frees staging blocks itself). See
+    shrink in `SceneState::grow_instance_buffer()`,
+    `RenderingDevice::_trim_staging_blocks()` and
+    `_trim_transfer_workers()` (upstream code; drop them if upstream
+    frees staging memory itself). See
     [kb/project/vram-shrink-after-unload.md](kb/project/vram-shrink-after-unload.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and

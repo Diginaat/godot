@@ -35,11 +35,23 @@ video / buffer MB:
 
 | Run | Before | After OD9 (Vulkan) | After OD9 (D3D12) |
 | --- | --- | --- | --- |
-| small_1k, fresh | 72.2 / 15.0 | 72.2 / 15.0 | 72.7 / 15.0 |
-| massive_100k, second run | 244.3 / 99.4 | 167.9 / 78.1 | 168.4 / 78.1 |
-| small_1k after massive_100k | 300 / 84-104 | 115.2 / 25.4 | 115.8 / 25.4 |
+| small_1k, fresh | 72.2 / 15.0 | 70.2 / 15.0 | 70.7 / 15.0 |
+| massive_100k, second run | 244.3 / 99.4 | 135.9 / 78.1 | 136.4 / 78.1 |
+| small_1k after massive_100k | 300 / 84-104 | 83.2 / 25.4 | 83.8 / 25.4 |
 
 GPU p50 unchanged: small_1k 0.166 ms, massive_100k 0.78-0.95 ms.
+
+Level bench, `--frames=300`, VRAM MB, the build before OD9 and after it
+run in the same session:
+
+| Preset | Stock 4.7.2 | Before OD9 | After OD9 | GPU p50 before / after (ms) |
+| --- | --- | --- | --- | --- |
+| town | 167 | 192 | 186 | - / 0.712 |
+| forest | 158 | 221 | 165 | 1.678 / 1.679 |
+| city_extreme | 188 | 415 | 287 | 3.486 / 3.490 |
+
+GPU p50 in this session is higher than in the OD1/OD2 table above for
+both builds (clocks); the A/B is from one session.
 
 ## O2 and O5: process loop (2026-11-27)
 

@@ -4,9 +4,10 @@
 
 * **Added**: [VRAM after an unload](/project/vram-shrink-after-unload.md):
   lowest-first GPU instance slots, `gpu_buffer_fits()` shrink rule, CPU
-  render list instance buffers and the RenderingDevice upload staging
-  ring shrink. small_1k after massive_100k 300 to 115 MB (fresh 72),
-  massive_100k 244 to 168 MB.
+  render list instance buffers, the RenderingDevice upload staging ring
+  and the transfer worker staging buffers shrink. small_1k after
+  massive_100k 300 to 83 MB (fresh 70), level bench city_extreme 415 to
+  287 MB, forest 221 to 165 MB.
 
 ## 2026-11-27 (native property access, O5)
 
