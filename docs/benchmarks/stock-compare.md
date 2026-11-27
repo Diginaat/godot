@@ -94,6 +94,72 @@ limits.
 | Stall of the spawn frame (ms), per run | 32,414 / 30,342 | 36,533 / 33,656 |
 | Steady frame after (ms) | 0.79-0.85 | 0.82-0.83 |
 
+## Run of 2026-11-27 on the development branch
+
+The same runner and machine, later the same day, on `dev-renderer-next`
+at `338ea26f32` (after 0.10.3: previous transforms only for moved
+instances, no lightmap UV scale in the instance table, global transforms
+of dirty chains without recursion, moving instance bounds without
+`fmodf`). The chart
+above is still the 0.10.3 run. Raw results:
+[stock-compare-2026-11-27b/](stock-compare-2026-11-27b/) (one CSV per
+suite, decimals with commas). Three rounds for level, physics and scene,
+two for instance and shader.
+
+| Level preset | Stock / fork frame (ms) | Speed-up | p99 stock / fork | Render CPU stock / fork | GPU stock / fork | VRAM stock / fork (MB) |
+| --- | --- | --- | --- | --- | --- | --- |
+| town | 3.43 / 1.17 | 2.9x | 5.42 / 1.74 | 2.43 / 0.62 | 0.87 / 0.72 | 167 / 174 |
+| forest | 6.83 / 1.57 | 4.3x | 13.8 / 4.50 | 6.09 / 0.60 | 2.43 / 1.54 | 158 / 145 |
+| city_extreme | 51.4 / 8.63 | 6.0x | 65.5 / 10.3 | 40.9 / 5.23 | 6.84 / 3.50 | 188 / 219 |
+
+| Instance case (static view) | Stock / fork frame (ms) | Speed-up | Render CPU stock / fork | GPU stock / fork | VRAM stock / fork (MB) |
+| --- | --- | --- | --- | --- | --- |
+| small_1k | 0.401 / 0.350 | 1.1x | 0.233 / 0.147 | 0.139 / 0.167 | 117 / 91 |
+| unique_lod_2k | 2.25 / 1.33 | 1.7x | 1.55 / 0.63 | 0.257 / 0.260 | 149 / 136 |
+| shared_20k | 2.67 / 0.72 | 3.7x | 2.46 / 0.30 | 0.631 / 0.698 | 127 / 97 |
+| unique_10k | 6.39 / 0.42 | 15.1x | 4.82 / 0.23 | 0.468 / 0.276 | 129 / 102 |
+| massive_100k | 9.46 / 0.86 | 11.0x | 9.06 / 0.64 | 0.719 / 0.738 | 149 / 116 |
+| dynamic_20k | 3.83 / 1.18 | 3.2x | 2.90 / 0.58 | 0.635 / 0.711 | 149 / 103 |
+| lights_20k | 2.76 / 0.82 | 3.3x | 2.53 / 0.32 | 0.753 / 0.801 | 165 / 118 |
+| churn_100k | 12.1 / 1.64 | 7.4x | 11.4 / 1.17 | 0.694 / 0.806 | 165 / 151 |
+
+The instance bench runs its cases in one process, so its VRAM column is
+the process total after each case, not the case alone.
+
+| Scene runtime (ms per frame) | 10k stock / fork | 100k stock / fork | 100k speed-up |
+| --- | --- | --- | --- |
+| instance | 27.5 / 8.01 | 2,462 / 122 | 20.2x |
+| churn | 0.99 / 0.29 | 89.8 / 5.16 | 17.4x |
+| churn_read | 1.17 / 0.32 | 99.3 / 6.20 | 16.0x |
+| parents | 0.107 / 0.021 | 2.16 / 0.25 | 8.7x |
+| wide | 0.106 / 0.024 | 1.78 / 0.29 | 6.1x |
+| script | 2.38 / 1.10 | 45.2 / 23.3 | 1.9x |
+| heavy | 1.65 / 0.76 | 38.4 / 21.1 | 1.8x |
+| native | 0.120 / 0.141 | 4.16 / 2.75 | 1.5x |
+| deep | 0.539 / 0.430 | 24.8 / 16.7 | 1.5x |
+| mixed | 0.031 / 0.020 | 0.62 / 0.47 | 1.3x |
+| sparse | 0.023 / 0.017 | 0.61 / 0.46 | 1.3x |
+| reparent | 0.079 / 0.074 | 1.39 / 1.28 | 1.1x |
+
+| Physics (ms per tick) | Stock Jolt | Stock GodotPhysics3D | Fork PhysX GPU | Fork PhysX CPU | Fork Jolt |
+| --- | --- | --- | --- | --- | --- |
+| crates_2k | 0.95 | 4.87 | 1.95 | 0.66 | 0.63 |
+| mixed_8k | 12.4 | 54.5 | 4.23 | 5.50 | 9.46 |
+| extreme_30k | 64.8 | 345 | 23.7 | 36.4 | 50.2 |
+
+No body was lost in any run.
+
+Cold shader stall (120 materials, spawn frame): stock 30.0 and 31.2 s,
+fork 30.8 and 31.3 s; steady frame 0.74-0.80 / 0.78 ms; VRAM 117 / 119 MB.
+
+Against the 0.10.3 run: the fork now uses less video memory than stock in
+every instance case (it used up to 144 MB more), forest 236 to 145 MB and
+city_extreme 472 to 219 MB (loading buffers freed after use, OD9, and a
+smaller instance table, OD10 to OD13, in
+[DECISIONS.md](../optimization/DECISIONS.md)). The scene runtime's deep and script scenarios are
+1.5x and 1.9x stock (were 1.1x and 1.2x). The cold shader stall is now
+within 3% of stock (was about 10% longer).
+
 ## Where the fork is not better
 
 - **Physics with few bodies on the GPU:** PhysX GPU has a fixed cost per
@@ -106,10 +172,14 @@ limits.
 - **Cold shader stall:** about 10% longer than stock (two runs each). The
   fork's 0.10.2 permutation work was measured against the older fork, not
   against stock.
-- **VRAM:** +35 to +285 MB (instance table, HZB, GPU culling buffers);
-  +144 MB already in the 1k-node case.
+- **VRAM:** in the 0.10.3 run +35 to +285 MB (instance table, HZB, GPU
+  culling buffers; +144 MB already in the 1k-node case). On the
+  development branch: town +7 MB and city_extreme +31 MB; forest and the
+  instance cases use less than stock.
 - **GPU time in tiny scenes:** small_1k GPU 0.14 to 0.21 ms (the frame is
-  still faster through the CPU side).
+  still faster through the CPU side); 0.139 to 0.167 ms on the development
+  branch. The GPU paths' culling passes also cost shared_20k, dynamic_20k,
+  lights_20k and churn_100k 0.05-0.11 ms of GPU time.
 - **scene_bench native at 10k:** 0.122 to 0.154 ms (+0.03 ms); 100k is faster.
 
 Fork Jolt is faster than stock Jolt in the 8k and 30k cases (10.9 vs 12.6,

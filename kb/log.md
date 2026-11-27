@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-27 (stock comparison on the development branch)
+
+* **Updated**: docs/benchmarks/stock-compare.md has a second run on
+  `dev-renderer-next` (`338ea26f32`): VRAM below stock in every instance
+  case, city_extreme +31 MB; deep and script scene runtime 1.5x and 1.9x
+  stock; cold shader stall within 3% of stock.
+
 ## 2026-11-27 (mistake: a case run alone hid a leak)
 
 * **Added**: [case alone hid the leak](/mistakes/case-alone-hid-the-leak.md):
