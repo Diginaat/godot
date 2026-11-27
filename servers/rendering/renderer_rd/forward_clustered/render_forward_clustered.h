@@ -50,6 +50,7 @@
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_clod_select.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_occlude.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_reduce.glsl.gen.h"
+#include "servers/rendering/renderer_rd/shaders/forward_clustered/shadow_receivers.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_occlusion.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/gpu_instance_cull.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/multimesh_cull.glsl.gen.h"
@@ -1294,8 +1295,45 @@ protected:
 		uint32_t command_offset;
 		uint32_t ids_offset;
 		uint32_t visible_offset;
-		uint32_t pad[3];
+		uint32_t receiver_grid; // Index into shadow_receivers.grids, or UINT32_MAX.
+		uint32_t pad[2];
 	};
+
+	// Receiver culling of directional shadow casters on the GPU path
+	// (shadow_receivers.glsl, kb shadow-receiver-culling). The camera's depth
+	// pyramid of this render, when built before the shadow passes, and one
+	// receiver mask per cascade that the GPU path draws.
+	static constexpr uint32_t SHADOW_RECEIVER_GRID_SIZE = 64; // RECEIVER_GRID_SIZE.
+	static constexpr uint32_t SHADOW_RECEIVER_GRID_WORDS = 64 * 64 + 2 * 8 * 8; // RECEIVER_GRID_WORDS.
+	static constexpr uint32_t SHADOW_RECEIVER_GRID_FLOATS = 5 * 4; // RECEIVER_GRID_VEC4S.
+	static constexpr uint32_t SHADOW_RECEIVER_MAX_GRIDS = 64; // Cascades of every directional light, with room.
+	static constexpr uint32_t SHADOW_RECEIVER_MAX_BOXES = 4096; // More transparent instances: volumetric fog's mode.
+	struct ShadowReceivers {
+		// Set by _build_hzb() for a single-view camera render without MSAA
+		// (the depth pre-pass is complete before the shadow passes), cleared
+		// when a render starts.
+		bool view_valid = false;
+		RID depth_texture;
+		Size2i size; // Internal size in pixels.
+		Projection cam_projection;
+		Transform3D cam_transform;
+		bool volumetric_fog = false;
+
+		LocalVector<float> grids; // SHADOW_RECEIVER_GRID_FLOATS per grid.
+		LocalVector<float> boxes; // World AABB minimum and maximum, 8 floats per box.
+		ShadowReceiversShaderRD shader;
+		RID version;
+		RID pipelines[2]; // Tiles, transparent boxes.
+		RID cells_buffer;
+		uint32_t cells_capacity = 0; // Grids.
+		RID grids_buffer;
+		uint32_t grids_capacity = 0; // Grids.
+		RID boxes_buffer;
+		uint32_t boxes_capacity = 0; // Boxes.
+	} shadow_receivers;
+	uint32_t _shadow_receiver_grid(const RenderShadowData *p_shadow_data, const RenderSceneDataRD &p_scene_data);
+	bool _build_shadow_receivers(); // False: no masks could be built (the passes must not use theirs).
+
 	// The GPU path's shadow passes since the last _render_shadow_process():
 	// their LOD inputs and offsets, and their visible bits.
 	LocalVector<GPUInstanceShadowPassData> gpu_instances_shadow_batch;
@@ -1392,6 +1430,11 @@ protected:
 		uint32_t shadow_primitives = 0;
 		uint64_t shadow_frame = UINT64_MAX; // The frame the shadow sums are of.
 		uint64_t frame = 0;
+		// Shadow receiver masks: the casters tested and the primitives culled
+		// in the last render that built masks, and the last frame that built them.
+		uint32_t receivers_tested = 0;
+		uint32_t receivers_culled_primitives = 0;
+		uint64_t receivers_frame = 0;
 	};
 	HashMap<uint64_t, GPUInstanceViewInfo> gpu_instances_view_info;
 	uint64_t gpu_instances_view_key = 0;

@@ -232,6 +232,15 @@ straight.
     `command_begin_render_pass()`, and `max_texel_size = min_texel_size`.
     Upstream has the bugs these fix; take upstream's fix if it lands.
     See [kb/project/d3d12-vrs-attachment.md](kb/project/d3d12-vrs-attachment.md).
+  - Receiver culling of directional shadow casters
+    (`rendering/lights_and_shadows/directional_shadow/receiver_culling`):
+    `RenderShadowData::camera_receiver_near/far` set by
+    `RendererSceneCull` for cascades rendered this frame only,
+    `shadow_receivers.glsl` built in `_gpu_instances_shadow_flush()` from
+    the depth recorded by `_build_hzb()`, and the test in
+    `gpu_instance_cull.glsl` (`MODE_SHADOW_BATCH`). If upstream changes
+    how cascades are set up or culled, keep the receiver range. See
+    [kb/project/shadow-receiver-culling.md](kb/project/shadow-receiver-culling.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).

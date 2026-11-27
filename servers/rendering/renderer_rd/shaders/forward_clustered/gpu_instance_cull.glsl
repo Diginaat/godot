@@ -125,11 +125,19 @@ command_primitives;
 layout(set = 0, binding = 8, std430) restrict buffer Stats {
 	uint objects; // As the CPU lists count them (moved surfaces twice in a view with a motion pass).
 	uint primitives;
+#ifdef MODE_SHADOW_BATCH
+	uint receivers_tested; // Members tested against a receiver mask.
+	uint receivers_culled; // Primitives of the members it culled.
+#endif
 }
 stats;
 
 shared uint group_objects;
 shared uint group_primitives;
+#ifdef MODE_SHADOW_BATCH
+shared uint group_receivers_tested;
+shared uint group_receivers_culled;
+#endif
 #endif
 
 #define VIEW_FLAG_USE_GI_BUFFERS 1
@@ -220,7 +228,7 @@ struct ShadowPass { // RenderForwardClustered::GPUInstanceShadowPassData, 48 byt
 	uint command_offset; // Added to the bucket's command.
 	uint ids_offset; // Added to the bucket's first visible ID.
 	uint visible_offset; // Words of the visible bits before the pass's.
-	uint pad0;
+	uint receiver_grid; // Directional cascade's receiver mask, or 0xFFFFFFFF.
 	uint pad1;
 	uint pad2;
 };
@@ -229,6 +237,19 @@ layout(set = 0, binding = 10, std430) restrict readonly buffer ShadowPasses {
 	ShadowPass data[];
 }
 shadow_passes;
+
+layout(set = 0, binding = 11, std430) restrict readonly buffer ReceiverCells {
+	uint data[];
+}
+cells;
+
+layout(set = 0, binding = 12, std430) restrict readonly buffer ReceiverGrids {
+	mat4 clip_to_world;
+	vec4 data[];
+}
+grids;
+
+#include "shadow_receivers_inc.glsl"
 #endif
 
 #ifdef MODE_OCCLUDE
@@ -347,6 +368,19 @@ uint cull_member(uint index, out uint r_primitives) {
 	}
 #endif
 	Record record = table.records[member.x];
+#ifdef MODE_SHADOW_BATCH
+	// Casters whose shadow reaches no receiver the camera sees.
+	if (pass.receiver_grid != 0xFFFFFFFFu) {
+		atomicAdd(group_receivers_tested, 1u);
+		if (!receivers_reachable(pass.receiver_grid, record.aabb_position, record.aabb_size)) {
+			// What the pass would have drawn: the measure of the mask's worth.
+			Bucket culled_bucket = buckets.data[member.y];
+			uint culled_command = member_command(record, culled_bucket, pass.lod_threshold, pass.lod_distance_multiplier, pass.lod_camera, pass.view_flags);
+			atomicAdd(group_receivers_culled, command_primitives.data[culled_bucket.command + culled_command]);
+			return 0;
+		}
+	}
+#endif
 	Bucket bucket = buckets.data[member.y];
 #ifdef MODE_SHADOW_BATCH
 	uint view_flags = pass.view_flags;
@@ -430,6 +464,10 @@ void main() {
 	if (gl_LocalInvocationIndex == 0) {
 		group_objects = 0;
 		group_primitives = 0;
+#ifdef MODE_SHADOW_BATCH
+		group_receivers_tested = 0;
+		group_receivers_culled = 0;
+#endif
 	}
 	barrier();
 	uint primitives;
@@ -443,6 +481,12 @@ void main() {
 		atomicAdd(stats.objects, group_objects);
 		atomicAdd(stats.primitives, group_primitives);
 	}
+#ifdef MODE_SHADOW_BATCH
+	if (gl_LocalInvocationIndex == 0 && group_receivers_tested > 0) {
+		atomicAdd(stats.receivers_tested, group_receivers_tested);
+		atomicAdd(stats.receivers_culled, group_receivers_culled);
+	}
+#endif
 }
 
 #endif

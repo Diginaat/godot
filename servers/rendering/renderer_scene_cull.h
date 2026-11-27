@@ -1252,6 +1252,9 @@ public:
 				Vector2 uv_scale;
 				// Kept from an earlier frame: not culled, not rendered.
 				bool reused = false;
+				// RenderShadowData::camera_receiver_near/far.
+				real_t camera_receiver_near = 0.0;
+				real_t camera_receiver_far = 0.0;
 
 			} cascades[RendererSceneRender::MAX_DIRECTIONAL_LIGHT_CASCADES]; //max 4 cascades
 			uint32_t cascade_count;

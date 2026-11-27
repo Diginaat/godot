@@ -1,5 +1,18 @@
 # Update log
 
+## 2026-11-27 (shadow receiver culling, G4)
+
+* **Added**: [receiver culling of directional shadow casters](/project/shadow-receiver-culling.md):
+  per-cascade light-space receiver masks from the final depth pre-pass
+  (4 x 4 pixel blocks) and visible transparent bounds; the GPU-path shadow
+  cull skips casters with no receiver behind them. Adaptive (masks only
+  while they cull at least 2^20 primitives). Same image in the new
+  `shadow_receivers` test. City bench with every cascade rendered per
+  frame: GPU frame 0.764 to 0.609 ms (street), 0.830 to 0.647 (rooftop);
+  neutral with the default far-cascade cache and in the valley.
+  Failed first versions: 16-pixel tiles from the slice start (nearly
+  nothing culled), a culled-fraction rule (lost 0.02 ms on few cheap casters).
+
 ## 2026-11-27 (VRS on D3D12)
 
 * **Fixed**: [attachment VRS on D3D12](/project/d3d12-vrs-attachment.md):

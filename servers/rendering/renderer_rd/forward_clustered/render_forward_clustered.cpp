@@ -1896,9 +1896,9 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 	}
 
 	RENDER_TIMESTAMP("Setup Shadows");
-	// Stage timestamps while cluster LOD is active, as around the depth and
-	// opaque passes (benchmarks; RENDER_TIMESTAMP needs the profiler).
-	const bool shadow_timestamps = rb_data.is_valid() && rb_data->mesh_clod.active;
+	// Stage timestamps for camera renders, as around the depth and opaque
+	// passes (benchmarks; RENDER_TIMESTAMP needs the profiler).
+	const bool shadow_timestamps = rb_data.is_valid();
 	if (shadow_timestamps) {
 		RD::get_singleton()->capture_timestamp("GPU Geometry Shadows");
 	}
@@ -2394,6 +2394,8 @@ void RenderForwardClustered::_update_gpu_instance_table() {
 
 void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Color &p_default_bg_color) {
 	scene_state.used_uniform_buffer_count = 0;
+	shadow_receivers.view_valid = false; // _build_hzb() sets it for this render.
+	shadow_receivers.grids.clear();
 
 	_update_gpu_instance_table();
 
@@ -6512,6 +6514,19 @@ RenderForwardClustered::~RenderForwardClustered() {
 		if (buffer.is_valid()) {
 			RD::get_singleton()->free_rid(buffer);
 		}
+	}
+	for (RID buffer : { shadow_receivers.cells_buffer, shadow_receivers.grids_buffer, shadow_receivers.boxes_buffer }) {
+		if (buffer.is_valid()) {
+			RD::get_singleton()->free_rid(buffer);
+		}
+	}
+	if (shadow_receivers.version.is_valid()) {
+		for (RID pipeline : shadow_receivers.pipelines) {
+			if (pipeline.is_valid()) {
+				RD::get_singleton()->free_rid(pipeline);
+			}
+		}
+		shadow_receivers.shader.version_free(shadow_receivers.version);
 	}
 	if (mesh_hiz.reduce_version.is_valid()) {
 		for (RID pipeline : mesh_hiz.reduce_pipelines) {

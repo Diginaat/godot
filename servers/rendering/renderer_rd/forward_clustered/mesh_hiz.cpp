@@ -185,6 +185,16 @@ void RenderForwardClustered::_build_hzb(const RenderDataRD *p_render_data, Rende
 		}
 	}
 	rd->compute_list_end();
+
+	// The directional shadow passes run after the depth pre-pass (phase 2
+	// included): their receiver masks read its final depth. The pyramid's
+	// conditions (no MSAA, no custom depth) hold for it too.
+	shadow_receivers.view_valid = p_render_data->scene_data->view_count == 1;
+	shadow_receivers.depth_texture = rb->get_depth_texture(0);
+	shadow_receivers.size = size;
+	shadow_receivers.volumetric_fog = p_render_data->environment.is_valid() && environment_get_volumetric_fog_enabled(p_render_data->environment);
+	shadow_receivers.cam_projection = p_render_data->scene_data->get_cam_projection();
+	shadow_receivers.cam_transform = p_render_data->scene_data->cam_transform;
 }
 
 bool RenderForwardClustered::_setup_mesh_clod_occlusion(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {

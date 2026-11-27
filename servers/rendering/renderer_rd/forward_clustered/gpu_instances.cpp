@@ -39,6 +39,8 @@
 #include "core/config/project_settings.h"
 #include "core/math/math_funcs_binary.h"
 #include "core/object/callable_mp.h"
+#include "servers/rendering/renderer_rd/storage_rd/light_storage.h"
+#include "servers/rendering/renderer_rd/storage_rd/material_storage.h"
 #include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
 #include "servers/rendering/renderer_rd/uniform_set_cache_rd.h"
 #include "servers/rendering/rendering_server_globals.h"
@@ -1237,6 +1239,7 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 	data.command_offset = pass * command_count;
 	data.ids_offset = pass * scenario->id_count;
 	data.visible_offset = pass * words;
+	data.receiver_grid = _shadow_receiver_grid(p_shadow_data, p_scene_data);
 	gpu_instances_shadow_batch.push_back(data);
 
 	// One element per bucket level in the pass's range that the cull can fill.
@@ -1311,7 +1314,195 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 		gpu_instances_shadow_check_command_indices = scenario->command_indices;
 		gpu_instances_shadow_check_emitted_copy = emitted;
 		gpu_instances_shadow_check_batch_pass = pass;
+		// The check counts every caster the scene cull listed.
+		gpu_instances_shadow_batch[pass].receiver_grid = UINT32_MAX;
 	}
+	return true;
+}
+
+uint32_t RenderForwardClustered::_shadow_receiver_grid(const RenderShadowData *p_shadow_data, const RenderSceneDataRD &p_scene_data) {
+	if (!shadow_receivers.view_valid || !p_shadow_data || p_shadow_data->camera_receiver_far <= 0.0f || !GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/directional_shadow/receiver_culling")) {
+		return UINT32_MAX;
+	}
+	// Adaptive: the masks cost about 0.02-0.04 ms at 1080p, about what
+	// drawing a million shadow triangles costs (RTX 5070; both scale with
+	// the GPU). When the last masks culled fewer (open terrain, a view from
+	// above, only a few casters in the cascades rendered every frame), the
+	// view goes without them for 30 frames, then tries again.
+	GPUInstanceViewInfo *info = gpu_instances_view_info.getptr(gpu_instances_view_key);
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	if (info) {
+		const bool useful = info->receivers_tested == 0 || info->receivers_culled_primitives >= (1u << 20);
+		if (!useful && info->receivers_frame != frame && frame - info->receivers_frame < 30) {
+			return UINT32_MAX;
+		}
+		info->receivers_frame = frame;
+	}
+	const Projection &light_projection = p_scene_data.view_projection[0];
+	if (!light_projection.is_orthogonal() || light_projection.columns[0][0] == 0.0 || light_projection.columns[1][1] == 0.0) {
+		return UINT32_MAX;
+	}
+	const Transform3D world_to_light = p_scene_data.cam_transform.affine_inverse();
+	const float half_grid = SHADOW_RECEIVER_GRID_SIZE * 0.5f;
+	const uint32_t index = shadow_receivers.grids.size() / SHADOW_RECEIVER_GRID_FLOATS;
+	shadow_receivers.grids.resize(shadow_receivers.grids.size() + SHADOW_RECEIVER_GRID_FLOATS);
+	float *grid = shadow_receivers.grids.ptr() + index * SHADOW_RECEIVER_GRID_FLOATS;
+	// Light camera xy to cells: the orthogonal projection to [-1, 1], then
+	// to [0, SHADOW_RECEIVER_GRID_SIZE].
+	grid[0] = light_projection.columns[0][0] * half_grid;
+	grid[1] = light_projection.columns[1][1] * half_grid;
+	grid[2] = (light_projection.columns[3][0] + 1.0) * half_grid;
+	grid[3] = (light_projection.columns[3][1] + 1.0) * half_grid;
+	for (int row = 0; row < 3; row++) {
+		grid[4 + row * 4 + 0] = world_to_light.basis.rows[row].x;
+		grid[4 + row * 4 + 1] = world_to_light.basis.rows[row].y;
+		grid[4 + row * 4 + 2] = world_to_light.basis.rows[row].z;
+		grid[4 + row * 4 + 3] = world_to_light.origin[row];
+	}
+	// The cascade's view depths as the camera's clip depth (reverse Z).
+	const Projection &camera = shadow_receivers.cam_projection;
+	const real_t z_near = camera.get_z_near();
+	auto clip_depth = [&camera](real_t p_distance) -> real_t {
+		const Vector4 clip = camera.xform(Vector4(0.0, 0.0, -p_distance, 1.0));
+		return clip.w != 0.0 ? clip.z / clip.w : 1.0;
+	};
+	grid[16] = CLAMP(clip_depth(MAX(real_t(p_shadow_data->camera_receiver_near), z_near)), real_t(0.0), real_t(1.0));
+	grid[17] = CLAMP(clip_depth(MAX(real_t(p_shadow_data->camera_receiver_far), z_near)), real_t(0.0), real_t(1.0));
+	// Dilation: one cell (32 texels of a 2048 cascade, more than any filter
+	// kernel and the normal offset reach), plus the soft shadow blocker
+	// search (as the scene cull widens the caster region for it).
+	const float cell_size = 2.0f / (float(light_projection.columns[0][0]) * SHADOW_RECEIVER_GRID_SIZE);
+	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
+	const RID base = light_storage->light_instance_get_base_light(p_shadow_data->light);
+	const float soft_angle = light_storage->light_get_param(base, RSE::LIGHT_PARAM_SIZE);
+	const float soft_expand = soft_angle > 0.0f ? Math::tan(Math::deg_to_rad(soft_angle)) * float(p_scene_data.z_far) : 0.0f;
+	grid[18] = 1.0f + Math::ceil(soft_expand / MAX(Math::abs(cell_size), 1e-6f));
+	grid[19] = 2.0f * Math::abs(cell_size); // Caster depth margin (biases move the compared depths).
+	return index;
+}
+
+bool RenderForwardClustered::_build_shadow_receivers() {
+	RD *rd = RD::get_singleton();
+	const uint32_t count = shadow_receivers.grids.size() / SHADOW_RECEIVER_GRID_FLOATS;
+	const uint32_t needed = MAX(count, 1u); // The cull binds the buffers in every batch.
+	if (shadow_receivers.cells_capacity < needed || shadow_receivers.cells_buffer.is_null()) {
+		if (shadow_receivers.cells_buffer.is_valid()) {
+			rd->free_rid(shadow_receivers.cells_buffer);
+		}
+		shadow_receivers.cells_capacity = Math::next_power_of_2(needed);
+		shadow_receivers.cells_buffer = rd->storage_buffer_create(shadow_receivers.cells_capacity * SHADOW_RECEIVER_GRID_WORDS * sizeof(uint32_t));
+	}
+	if (shadow_receivers.grids_capacity < needed || shadow_receivers.grids_buffer.is_null()) {
+		if (shadow_receivers.grids_buffer.is_valid()) {
+			rd->free_rid(shadow_receivers.grids_buffer);
+		}
+		shadow_receivers.grids_capacity = Math::next_power_of_2(needed);
+		shadow_receivers.grids_buffer = rd->storage_buffer_create(16 * sizeof(float) + shadow_receivers.grids_capacity * SHADOW_RECEIVER_GRID_FLOATS * sizeof(float));
+	}
+	if (count == 0) {
+		return true;
+	}
+	if (count > SHADOW_RECEIVER_MAX_GRIDS || shadow_receivers.depth_texture.is_null()) {
+		return false;
+	}
+	if (shadow_receivers.version.is_null()) {
+		Vector<String> modes;
+		modes.push_back("");
+		modes.push_back("\n#define MODE_BOXES\n");
+		shadow_receivers.shader.initialize(modes);
+		shadow_receivers.version = shadow_receivers.shader.version_create();
+		for (uint32_t mode = 0; mode < 2; mode++) {
+			shadow_receivers.pipelines[mode] = rd->compute_pipeline_create(shadow_receivers.shader.version_get_shader(shadow_receivers.version, mode));
+		}
+	}
+	if (shadow_receivers.pipelines[0].is_null() || shadow_receivers.pipelines[1].is_null() || shadow_receivers.cells_buffer.is_null() || shadow_receivers.grids_buffer.is_null()) {
+		return false;
+	}
+
+	// Receivers missing from the depth pre-pass: the visible transparent
+	// instances. Too many of them: receivers along whole view rays instead.
+	LocalVector<float> &boxes = shadow_receivers.boxes;
+	boxes.clear();
+	bool full_rays = shadow_receivers.volumetric_fog;
+	const RenderList &alpha_list = render_list[RENDER_LIST_ALPHA];
+	const GeometryInstanceForwardClustered *last_owner = nullptr;
+	for (uint32_t i = 0; i < alpha_list.elements.size() && !full_rays; i++) {
+		const GeometryInstanceForwardClustered *owner = alpha_list.elements[i]->owner;
+		if (owner == last_owner) {
+			continue; // Its surfaces are often listed together.
+		}
+		last_owner = owner;
+		if (boxes.size() / 8 >= SHADOW_RECEIVER_MAX_BOXES) {
+			full_rays = true;
+			break;
+		}
+		const AABB &aabb = owner->transformed_aabb;
+		const Vector3 end = aabb.get_end();
+		const float box[8] = { float(aabb.position.x), float(aabb.position.y), float(aabb.position.z), 0.0f, float(end.x), float(end.y), float(end.z), 0.0f };
+		for (float value : box) {
+			boxes.push_back(value);
+		}
+	}
+	const uint32_t box_count = full_rays ? 0 : boxes.size() / 8;
+	if (box_count > 0 && (shadow_receivers.boxes_capacity < box_count || shadow_receivers.boxes_buffer.is_null())) {
+		if (shadow_receivers.boxes_buffer.is_valid()) {
+			rd->free_rid(shadow_receivers.boxes_buffer);
+		}
+		shadow_receivers.boxes_capacity = Math::next_power_of_2(box_count);
+		shadow_receivers.boxes_buffer = rd->storage_buffer_create(shadow_receivers.boxes_capacity * 8 * sizeof(float));
+		if (shadow_receivers.boxes_buffer.is_null()) {
+			return false;
+		}
+	}
+
+	const Projection clip_to_world = (shadow_receivers.cam_projection * Projection(shadow_receivers.cam_transform.affine_inverse())).inverse();
+	float header[16];
+	RendererRD::MaterialStorage::store_camera(clip_to_world, header);
+	rd->buffer_update(shadow_receivers.grids_buffer, 0, sizeof(header), header);
+	rd->buffer_update(shadow_receivers.grids_buffer, sizeof(header), count * SHADOW_RECEIVER_GRID_FLOATS * sizeof(float), shadow_receivers.grids.ptr());
+	rd->buffer_clear(shadow_receivers.cells_buffer, 0, count * SHADOW_RECEIVER_GRID_WORDS * sizeof(uint32_t));
+	if (box_count > 0) {
+		rd->buffer_update(shadow_receivers.boxes_buffer, 0, box_count * 8 * sizeof(float), boxes.ptr());
+	}
+
+	// Blocks of 4 x 4 pixels: 480 x 270 at 1080p.
+	const Size2i size = shadow_receivers.size;
+	const int32_t level = 2;
+	const Size2i tiles((size.width + (1 << level) - 1) >> level, (size.height + (1 << level) - 1) >> level);
+	const int32_t push[8] = { tiles.width, tiles.height, size.width, size.height, level, int32_t(count), full_rays ? 1 : 0, int32_t(box_count) };
+
+	// Direct timestamps (not RENDER_TIMESTAMP): benches read them without the profiler.
+	rd->capture_timestamp("Shadow Receivers");
+	RD::ComputeListID compute_list = rd->compute_list_begin();
+	{
+		const RID shader = shadow_receivers.shader.version_get_shader(shadow_receivers.version, 0);
+		LocalVector<RD::Uniform> uniforms;
+		RD::Uniform depth;
+		depth.binding = 0;
+		depth.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
+		depth.append_id(RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
+		depth.append_id(shadow_receivers.depth_texture);
+		uniforms.push_back(depth);
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, shadow_receivers.grids_buffer));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, shadow_receivers.cells_buffer));
+		rd->compute_list_bind_compute_pipeline(compute_list, shadow_receivers.pipelines[0]);
+		rd->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
+		rd->compute_list_set_push_constant(compute_list, push, sizeof(push));
+		rd->compute_list_dispatch(compute_list, (tiles.width + 7) / 8, (tiles.height + 7) / 8, 1);
+	}
+	if (box_count > 0) {
+		const RID shader = shadow_receivers.shader.version_get_shader(shadow_receivers.version, 1);
+		LocalVector<RD::Uniform> uniforms;
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 1, shadow_receivers.grids_buffer));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 2, shadow_receivers.cells_buffer));
+		uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 3, shadow_receivers.boxes_buffer));
+		rd->compute_list_bind_compute_pipeline(compute_list, shadow_receivers.pipelines[1]);
+		rd->compute_list_bind_uniform_set(compute_list, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
+		rd->compute_list_set_push_constant(compute_list, push, sizeof(push));
+		rd->compute_list_dispatch(compute_list, (box_count + 63) / 64, count, 1);
+	}
+	rd->compute_list_end();
+	rd->capture_timestamp("Shadow Receivers End");
 	return true;
 }
 
@@ -1325,6 +1516,7 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 		// Nothing listed, or the batch's scenario is not the current view's
 		// any more: its passes keep no GPU path buffers and draw no casters.
 		gpu_instances_shadow_batch.clear();
+		shadow_receivers.grids.clear();
 		if (check_pass != UINT32_MAX) {
 			gpu_instances_shadow_check_pending = false;
 		}
@@ -1366,6 +1558,15 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 		batch.stats = rd->storage_buffer_create(4 * sizeof(uint32_t));
 	}
 
+	// Receiver masks of the directional cascades (before the passes' data
+	// goes up: without masks no pass may read one).
+	if (!_build_shadow_receivers()) {
+		for (GPUInstanceShadowPassData &data : gpu_instances_shadow_batch) {
+			data.receiver_grid = UINT32_MAX;
+		}
+	}
+	shadow_receivers.grids.clear();
+
 	// Every pass starts from zeroed commands, cleared on the GPU; the cull
 	// writes the index count of each command it fills.
 	rd->buffer_clear(batch.commands, 0, passes * command_words * sizeof(uint32_t));
@@ -1387,6 +1588,8 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 		uniform.append_id(resources[binding]);
 		uniforms.push_back(uniform);
 	}
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 11, shadow_receivers.cells_buffer));
+	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 12, shadow_receivers.grids_buffer));
 	uniforms.push_back(RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 13, scenario->command_indices_buffer));
 	GPUInstanceCullParams params = {};
 	params.member_count = scenario->member_count;
@@ -1404,7 +1607,7 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 	rd->compute_list_end();
 	RENDER_TIMESTAMP("GPU Instances Shadow Cull End");
 	if (gpu_instances_view_key != 0) {
-		rd->buffer_get_data_async(batch.stats, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_stats_received).bind(gpu_instances_view_key, RSG::rasterizer->get_frame_number()), 0, 2 * sizeof(uint32_t));
+		rd->buffer_get_data_async(batch.stats, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_stats_received).bind(gpu_instances_view_key, RSG::rasterizer->get_frame_number()), 0, 4 * sizeof(uint32_t));
 	}
 	if (check_pass < passes) {
 		rd->buffer_get_data_async(batch.commands, callable_mp_static(&RenderForwardClustered::_gpu_instances_shadow_check_received), check_pass * command_words * sizeof(uint32_t), command_words * sizeof(uint32_t));
@@ -1474,6 +1677,10 @@ void RenderForwardClustered::_gpu_instances_shadow_stats_received(const Vector<u
 		}
 		info->shadow_objects += words[0];
 		info->shadow_primitives += words[1];
+		if (p_data.size() >= int(4 * sizeof(uint32_t)) && words[2] > 0) {
+			info->receivers_tested = words[2];
+			info->receivers_culled_primitives = words[3];
+		}
 	}
 }
 

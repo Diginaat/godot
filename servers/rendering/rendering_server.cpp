@@ -3738,6 +3738,7 @@ void RenderingServer::init() {
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/size", PROPERTY_HINT_RANGE, "256,16384"), 4096);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/lights_and_shadows/directional_shadow/far_cascade_update_interval", PROPERTY_HINT_RANGE, "1,8,1"), 4);
+	GLOBAL_DEF("rendering/lights_and_shadows/directional_shadow/receiver_culling", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/mesh_lod/lod_change/shadow_threshold_scale", PROPERTY_HINT_RANGE, "1,16,0.1"), 4.0);
 
 	// GPU-driven geometry (Forward+). Registered here, not by the renderer, so

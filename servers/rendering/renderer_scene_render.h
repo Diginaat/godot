@@ -313,6 +313,13 @@ public:
 		// apart like the camera's (set_gpu_instance_view).
 		PagedArray<RenderGeometryInstance *> gpu_instances;
 		LocalVector<uint32_t> gpu_slots;
+		// Directional cascade rendered for this frame only: the camera's view
+		// distances its receivers lie between (the shader picks the cascade by
+		// view depth). The renderer may skip casters whose shadow reaches no
+		// receiver the camera sees there. Far 0: no such range (positional
+		// lights, far cascades kept for later frames).
+		float camera_receiver_near = 0.0;
+		float camera_receiver_far = 0.0;
 	};
 
 	struct RenderSDFGIData {

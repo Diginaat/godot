@@ -2423,6 +2423,12 @@ void RendererSceneCull::_light_instance_setup_directional_shadow(int p_shadow_in
 		InstanceLightData::DirectionalCascadeCache &cache = light->directional_cascade_cache[i];
 		Cull::Shadow::Cascade &cascade = cull.shadows[p_shadow_index].cascades[i];
 		cascade.reused = false;
+		// Receivers of this cascade: the view depths whose pixels sample it
+		// (with split blending, also the previous cascade's range, which
+		// blends into this one). A cached cascade must keep casters for the
+		// receivers of later frames too.
+		cascade.camera_receiver_near = cacheable ? 0.0 : distances[(i == 0 || !overlap) ? i : i - 1];
+		cascade.camera_receiver_far = cacheable ? 0.0 : distances[i + 1];
 
 		// setup a camera matrix for that range!
 		Projection camera_matrix;
@@ -4234,6 +4240,8 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 				render_shadow_data[max_shadows_used].instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_geometry_instances[j]);
 				render_shadow_data[max_shadows_used].gpu_instances.merge_unordered(scene_cull_result.directional_shadows[i].cascade_gpu_instances[j]);
 				render_shadow_data[max_shadows_used].gpu_slots = scene_cull_result.directional_shadows[i].cascade_gpu_slots[j];
+				render_shadow_data[max_shadows_used].camera_receiver_near = c.camera_receiver_near;
+				render_shadow_data[max_shadows_used].camera_receiver_far = c.camera_receiver_far;
 				max_shadows_used++;
 			}
 		}
@@ -4484,6 +4492,8 @@ void RendererSceneCull::_render_scene(const RendererSceneRender::CameraData *p_c
 		render_shadow_data[i].instances.clear();
 		render_shadow_data[i].gpu_instances.clear();
 		render_shadow_data[i].gpu_slots.clear();
+		render_shadow_data[i].camera_receiver_near = 0.0;
+		render_shadow_data[i].camera_receiver_far = 0.0;
 	}
 	max_shadows_used = 0;
 
