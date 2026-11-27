@@ -901,3 +901,13 @@ editor, and the next open shows no warning. The dialog gets its width at
 construction (`set_min_size`); with the width only passed to
 `popup_centered()`, its first popup was about 600 px tall with empty space.
 The several-projects path builds but was not clicked through.
+
+## D041 — Cluster LOD is off by default
+
+2026-11-27, at the maintainer's request. `rendering/geometry/cluster_lod/enabled`
+now defaults to false (D035 had it on). Meshes with cluster data draw their
+normal index buffers, in camera and shadow passes, until a project turns
+it on. `cluster_lod/occlusion_enabled`, `cluster_lod/shadows` and
+`cluster_lod/streaming/enabled` keep their defaults; they take effect only
+with `cluster_lod/enabled`. Projects that saved a value keep it. The
+large-world test project sets it to true, so the suite still covers CLOD.

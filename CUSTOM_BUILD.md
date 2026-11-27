@@ -168,9 +168,11 @@ straight.
     step with the pass routing. See
     [docs/shader-permutations/memory.md](docs/shader-permutations/memory.md).
   - The GPU geometry paths are on by default (`rendering/geometry/gpu_instances/*`,
-    `gpu_instance_table`, `multimesh_gpu_culling/*`, `cluster_lod/*` and its
-    streaming; `GLOBAL_DEF`s in `render_forward_clustered.cpp` and
-    `mesh_storage.cpp`, defaults in `ProjectSettings.xml`). See D035 in
+    `gpu_instance_table`, `multimesh_gpu_culling/*`, `cluster_lod/*`
+    streaming and occlusion; `GLOBAL_DEF`s in `render_forward_clustered.cpp`,
+    `mesh_storage.cpp` and `rendering_server.cpp`, defaults in
+    `ProjectSettings.xml`), except `cluster_lod/enabled`, which is off
+    (D041). See D035 and D041 in
     [knowledge/TECHNICAL_DECISIONS.md](knowledge/TECHNICAL_DECISIONS.md).
   - Far directional cascades kept between frames
     (`directional_shadow/far_cascade_update_interval`): the cache in

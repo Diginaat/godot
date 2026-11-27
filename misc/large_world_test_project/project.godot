@@ -15,3 +15,5 @@ window/vsync/vsync_mode=0
 renderer/rendering_method="forward_plus"
 rendering_device/driver.windows="vulkan"
 environment/defaults/default_clear_color=Color(0, 0, 0, 1)
+; Cluster LOD is off by default (D041); the suite tests it, so it is on here.
+geometry/cluster_lod/enabled=true

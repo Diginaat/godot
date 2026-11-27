@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-27 (cluster LOD off by default)
+
+* **Changed**: `rendering/geometry/cluster_lod/enabled` defaults to false
+  (D041, maintainer's request). The large-world test project turns it on.
+
 ## 2026-11-27 (valley test after G1)
 
 * **Fixed**: the valley smoke (`forest_map.gd`) failed since the HZB
