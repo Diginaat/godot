@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (lights over the cluster limit)
+
+* **Fixed**: [light cap](/project/light-cap-nearest.md): more visible omni,
+  spot or area lights than `max_clustered_elements` dropped the last ones
+  the cull listed (a near light could vanish); now the ones whose range is
+  nearest to the camera are kept, with a one-time warning. Test
+  `light_cap` (fails on the old code, passes on Vulkan and D3D12).
+
 ## 2026-11-27 (cluster LOD in shadow passes)
 
 * **Added**: [shadow CLOD](/project/shadow-clod.md): shadow passes select

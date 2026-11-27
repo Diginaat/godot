@@ -171,12 +171,22 @@ private:
 
 	struct LightInstanceDepthSort {
 		float depth;
+		float reach; // Distance from the camera to the light's range (negative inside it).
 		LightInstance *light_instance;
 		Light *light;
 		bool operator<(const LightInstanceDepthSort &p_sort) const {
 			return depth < p_sort.depth;
 		}
 	};
+	struct LightInstanceReachCompare {
+		bool operator()(const LightInstanceDepthSort &p_a, const LightInstanceDepthSort &p_b) const {
+			return p_a.reach < p_b.reach;
+		}
+	};
+	// Every visible light of a type this frame. When there are more than
+	// max_lights, the ones whose range is nearest to the camera are kept.
+	LocalVector<LightInstanceDepthSort> light_candidates[3]; // Omni, spot, area.
+	uint32_t _select_light_candidates(LocalVector<LightInstanceDepthSort> &p_candidates, LightInstanceDepthSort *r_sort, const char *p_type);
 
 	uint32_t max_lights;
 	uint32_t omni_light_count = 0;

@@ -704,6 +704,22 @@ void LightStorage::free_light_data() {
 	}
 }
 
+uint32_t LightStorage::_select_light_candidates(LocalVector<LightInstanceDepthSort> &p_candidates, LightInstanceDepthSort *r_sort, const char *p_type) {
+	uint32_t count = p_candidates.size();
+	if (count > max_lights) {
+		// Keep the lights nearest to the camera by their range, not the first
+		// ones the cull listed: a far light is the one to leave out.
+		SortArray<LightInstanceDepthSort, LightInstanceReachCompare> selector;
+		selector.nth_element(0, count, max_lights, p_candidates.ptr());
+		WARN_PRINT_ONCE(vformat("%d %s lights are visible, more than rendering/limits/cluster_builder/max_clustered_elements (%d): the ones farthest from the camera are not drawn. Raise the limit to draw them.", count, p_type, max_lights));
+		count = max_lights;
+	}
+	if (count > 0) {
+		memcpy(r_sort, p_candidates.ptr(), count * sizeof(LightInstanceDepthSort));
+	}
+	return count;
+}
+
 void LightStorage::set_max_lights(const uint32_t p_max_lights) {
 	max_lights = p_max_lights;
 
@@ -738,6 +754,9 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	omni_light_count = 0;
 	spot_light_count = 0;
 	area_light_count = 0;
+	for (LocalVector<LightInstanceDepthSort> &candidates : light_candidates) {
+		candidates.clear();
+	}
 	uint32_t directional_contact_shadows_count = 0;
 
 	r_directional_light_soft_shadows = false;
@@ -884,10 +903,6 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 				r_directional_light_count++;
 			} break;
 			case RSE::LIGHT_OMNI: {
-				if (omni_light_count >= max_lights) {
-					continue;
-				}
-
 				Transform3D light_transform = light_instance->transform;
 				const real_t distance = p_camera_transform.origin.distance_to(light_transform.origin);
 
@@ -903,16 +918,14 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					}
 				}
 
-				omni_light_sort[omni_light_count].light_instance = light_instance;
-				omni_light_sort[omni_light_count].light = light;
-				omni_light_sort[omni_light_count].depth = distance;
-				omni_light_count++;
+				LightInstanceDepthSort candidate;
+				candidate.light_instance = light_instance;
+				candidate.light = light;
+				candidate.depth = distance;
+				candidate.reach = distance - (light->param[RSE::LIGHT_PARAM_RANGE]);
+				light_candidates[0].push_back(candidate);
 			} break;
 			case RSE::LIGHT_SPOT: {
-				if (spot_light_count >= max_lights) {
-					continue;
-				}
-
 				Transform3D light_transform = light_instance->transform;
 				const real_t distance = p_camera_transform.origin.distance_to(light_transform.origin);
 
@@ -928,16 +941,14 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					}
 				}
 
-				spot_light_sort[spot_light_count].light_instance = light_instance;
-				spot_light_sort[spot_light_count].light = light;
-				spot_light_sort[spot_light_count].depth = distance;
-				spot_light_count++;
+				LightInstanceDepthSort candidate;
+				candidate.light_instance = light_instance;
+				candidate.light = light;
+				candidate.depth = distance;
+				candidate.reach = distance - (light->param[RSE::LIGHT_PARAM_RANGE]);
+				light_candidates[1].push_back(candidate);
 			} break;
 			case RSE::LIGHT_AREA: {
-				if (area_light_count >= max_lights) {
-					continue;
-				}
-
 				Transform3D light_transform = light_instance->transform;
 				const real_t distance = p_camera_transform.origin.distance_to(light_transform.origin);
 
@@ -953,15 +964,21 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					}
 				}
 
-				area_light_sort[area_light_count].light_instance = light_instance;
-				area_light_sort[area_light_count].light = light;
-				area_light_sort[area_light_count].depth = distance;
-				area_light_count++;
+				LightInstanceDepthSort candidate;
+				candidate.light_instance = light_instance;
+				candidate.light = light;
+				candidate.depth = distance;
+				candidate.reach = distance - (light->param[RSE::LIGHT_PARAM_RANGE] + light->area_size.length() * 0.5f);
+				light_candidates[2].push_back(candidate);
 			}
 		}
 
 		light_instance->last_pass = RSG::rasterizer->get_frame_number();
 	}
+
+	omni_light_count = _select_light_candidates(light_candidates[0], omni_light_sort, "omni");
+	spot_light_count = _select_light_candidates(light_candidates[1], spot_light_sort, "spot");
+	area_light_count = _select_light_candidates(light_candidates[2], area_light_sort, "area");
 
 	if (omni_light_count) {
 		SortArray<LightInstanceDepthSort> sorter;
