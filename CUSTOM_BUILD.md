@@ -213,6 +213,11 @@ straight.
     exports of selected scenes include the cells' scenes. If upstream
     changes how exports gather dependencies, keep the hook in the new
     code. See [docs/level-streaming.md](docs/level-streaming.md).
+  - The timestamp fence after DDGI (`capture_timestamp("After DDGI")` at the
+    end of `RenderForwardClusteredPT::_ddgi_process()`): without it the
+    render graph reorders later work into DDGI and the probes flicker in
+    spots. See
+    [kb/ddgi/findings/render-graph-bounce-loss.md](kb/ddgi/findings/render-graph-bounce-loss.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).
@@ -352,7 +357,7 @@ expected log line.
 
 | Check | Command | Expect |
 | --- | --- | --- |
-| PhysX GPU, D3D12 | `--verbose --path <godot-physx-example> --quit-after 600` (and again with `--editor`) | `PhysX 5.10.0 initialized [GPU]` |
+| PhysX GPU, D3D12 | `--verbose --disable-vsync --path <godot-physx-example> --quit-after 600` (and again with `--editor`) | `PhysX 5.10.0 initialized [GPU]` |
 | Path tracer, Vulkan | The DDGI test project's room with `--pt=1`, `--rendering-driver vulkan` | Noisy path-traced image; no "Raytracing not supported" warning |
 | DDGI | The DDGI test project's interior with `--measure` | Renders and measures without errors |
 

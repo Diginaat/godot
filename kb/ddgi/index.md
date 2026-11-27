@@ -4,7 +4,7 @@
 
 # Findings
 
-* [Render graph ordering can drop the bounce light](/ddgi/findings/render-graph-bounce-loss.md) - open issue: compute work recorded before the DDGI apply pass made probes lose their bounce light
+* [Render graph ordering can drop the bounce light](/ddgi/findings/render-graph-bounce-loss.md) - compute work around the DDGI passes made probes lose their bounce light (2026-10) and flicker in spots (0.10.1, fixed 2026-11-27 with a timestamp fence after DDGI); the untracked access is not identified
 * [Compare DDGI only after convergence](/ddgi/findings/measure-after-convergence.md) - at 120 frames the budgeted scheduler hasn't settled; differences there aren't bugs
 * [Extra code in the apply pass costs even when it does no work](/ddgi/findings/shader-code-cost-without-work.md) - per-pixel side work belongs in a separate small pass
 * [Favoring visible probes too much adds flicker](/ddgi/findings/scheduler-favored-set-stability.md) - 3x the update rate added flicker, 2x does not

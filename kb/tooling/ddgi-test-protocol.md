@@ -29,6 +29,11 @@ sources:
 
 # Tests (DDGI test project, `misc/ddgi_test_project`)
 
+A run quits by itself only with `--shot`, `--measure`, `--bench` or
+`--bake`; with `--frames` alone the window stays open (interactive use).
+For a scripted run that needs none of them, add `--measure=10` or the
+engine argument `--quit-after <frames>`.
+
 | What | Command (user args) | Read |
 | --- | --- | --- |
 | Converged brightness | `--view=interior --debug=1 --frames=600 --shot=...` | Image mean; only compare at 600+ frames (see [the convergence finding](/ddgi/findings/measure-after-convergence.md)) |

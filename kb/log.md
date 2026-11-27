@@ -1,5 +1,21 @@
 # Update log
 
+## 2026-11-27 (DDGI flicker since 0.10.1)
+
+* **Seen again**: [render graph finding](/ddgi/findings/render-graph-bounce-loss.md):
+  DDGI probes flicker in spots since 0.10.1 (`flicker_px` 8-16%, baseline
+  0.18%); `GODOT_RG_REORDER=0` or `GODOT_RG_FULL_BARRIERS=1` restore it.
+  Release editors 0.8.1 and 0.9.1 clean. Fixed with a timestamp fence
+  after `_ddgi_process()` (6 runs 0.19-0.26%, GPU cost unchanged); the
+  untracked access is still open. Smoke fails above 1% `flicker_px`.
+* **Added**: [sync points at labels](/successes/sync-point-at-labels.md).
+* **Mistake**: [bisected before reading the KB](/mistakes/bisected-before-reading-the-kb.md).
+* **Protocol**: a DDGI test run with `--frames` alone never quits; noted in
+  [the protocol](/tooling/ddgi-test-protocol.md).
+* **Smoke**: PhysX runs use `--disable-vsync`, and the PhysX example
+  project is imported on first run (a fresh clone failed on `class_name`
+  parse errors).
+
 ## 2026-11-27 (stock 4.7.2 vs the fork)
 
 * **Added**: [stock compare](/project/stock-compare-2026-11.md):

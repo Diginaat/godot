@@ -597,6 +597,14 @@ void RenderForwardClusteredPT::_ddgi_process(RenderDataRD *p_render_data, const 
 		}
 	}
 	ddgi->apply(p_render_data, p_normal_roughness_slices, gi.half_resolution, tlas, tlas.is_valid() ? &raytracing->ddgi_emitters : nullptr, tlas.is_valid() ? raytracing : nullptr, rt_state, rt_flags);
+	// Fence: a timestamp is a synchronization point in the render graph, so
+	// work recorded after DDGI can't be reordered into it. Without it the
+	// probes flickered in spots once the GPU geometry passes (0.10.1) changed
+	// the graph's levels: something the probe passes read is changed by later
+	// work without a dependency the graph can see (the ray tracing shaders
+	// read geometry and materials through buffer addresses). Which access is
+	// not identified yet; see kb/ddgi/findings/render-graph-bounce-loss.md.
+	RD::get_singleton()->capture_timestamp("After DDGI");
 	RD::get_singleton()->draw_command_end_label();
 }
 

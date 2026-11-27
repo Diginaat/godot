@@ -54,6 +54,11 @@ Rates depend on the previous frame, so images are history-dependent like
 TAA. Fixtures that compare captures pixel for pixel pin
 `vrs_mode = VRS_DISABLED` (`hzb_two_pass`, `multimesh_occlusion`,
 `clod_raster`). The DDGI flicker measure is unchanged (0.00% pixels).
+Note (2026-11-27): that figure doesn't match the interior flicker test of
+the same period, which gave 8-16% with and without VRS because of a render
+graph hazard (fixed since; see
+[render-graph-bounce-loss](/ddgi/findings/render-graph-bounce-loss.md)).
+It was probably a shorter run; treat it as unverified.
 
 # Not done
 

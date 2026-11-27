@@ -41,8 +41,15 @@ Write-Host "Editor: $(& $editor --version 2>$null)"
 
 if (Test-Path (Join-Path $PhysXExample "project.godot")) {
 	$physxCheck = { param($l) $m = $l | Where-Object { $_ -match "PhysX 5.*initialized" } | Select-Object -First 1; if ($m) { $m.Trim() } else { "missing 'PhysX ... initialized'" } }
-	Run-Test "PhysX, game" @("--verbose", "--path", $PhysXExample, "--quit-after", "600") $physxCheck
-	Run-Test "PhysX, editor" @("--editor", "--verbose", "--path", $PhysXExample, "--quit-after", "600") $physxCheck
+	# A fresh clone has no .godot cache: until an import registers its
+	# class_name scripts, the game fails with parse errors.
+	if (-not (Test-Path (Join-Path $PhysXExample ".godot"))) {
+		Write-Host "Importing $PhysXExample (first run)"
+		$ErrorActionPreference = "Continue"
+		& $editor --headless --import --path $PhysXExample 2>&1 | Out-Null
+	}
+	Run-Test "PhysX, game" @("--verbose", "--disable-vsync", "--path", $PhysXExample, "--quit-after", "600") $physxCheck
+	Run-Test "PhysX, editor" @("--editor", "--verbose", "--disable-vsync", "--path", $PhysXExample, "--quit-after", "600") $physxCheck
 } else {
 	Write-Host "SKIP  PhysX tests: no example project at $PhysXExample" -ForegroundColor Yellow
 }
@@ -56,7 +63,12 @@ Run-Test "Path tracer, Vulkan" @("--rendering-driver", "vulkan", "--path", $proj
 Run-Test "DDGI, interior" @("--path", $project, "--", "--view=interior", "--gi=ddgi", "--tod=0", "--anim=0", "--res=640x360", "--frames=300", "--measure=30") {
 	param($l)
 	$m = $l | Where-Object { $_ -match "^MEASURE" } | Select-Object -First 1
-	if ($m) { ($m -replace '^MEASURE\s+', '') } else { "missing MEASURE line" }
+	# A still view: pixels that change by more than 2 levels between frames.
+	# 0.00% when the probes are stable; 10-13% when they flickered in spots
+	# (kb/ddgi/findings/render-graph-bounce-loss.md).
+	if (-not $m) { "missing MEASURE line" }
+	elseif ($m -match "flicker_px=([0-9.]+)%" -and [double]$Matches[1] -gt 1.0) { "missing stable probes: flicker_px=$($Matches[1])% (over 1%)" }
+	else { ($m -replace '^MEASURE\s+', '') }
 }
 
 if ($failed -gt 0) { Write-Host "$failed test(s) failed; logs in $logs" -ForegroundColor Red; exit 1 }
