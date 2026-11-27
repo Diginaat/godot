@@ -19,3 +19,8 @@
   OD4 (process loop prefetch): script 100k 36.1 to 23.6 ms, script 10k
   1.486 to 1.141 ms. Native 10k is still 0.02 ms behind stock; two
   prefetch variants that slowed it were dropped (REGRESSIONS.md).
+- O4: the cold stall waits for ubershader pipelines. Two fork additions
+  were compiled into all of them: OD5 (instance data loaded once) and OD6
+  (DDGI probe capture as a pipeline constant). Stall 48.4 to 44.3 s, same
+  images (forced-ubershader comparison against specialized pipelines,
+  with a negative control).

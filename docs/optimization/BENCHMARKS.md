@@ -39,3 +39,14 @@ debug_symbols=yes`. Stock: Godot 4.7.2 official, 2 rounds, same machine.
 | script 100k | 44.4-45.6 | 36.1 | 33.1 | 23.6 |
 | native 10k | 0.123-0.127 | 0.148 | 0.148 | 0.145 |
 | native 100k | 4.16-4.20 | 2.71 | 2.70 | 2.53 |
+
+## O4: cold shader stall (2026-11-27)
+
+`devtools/test/shader_bench.ps1 -Cold -Mv` (120 materials), Vulkan. The
+driver's disk caches were emptied before every run.
+
+| Build | Ubershader driver CPU (s) | Specialized (s) | Add-frame stall (s) |
+| --- | --- | --- | --- |
+| Before | 548.5, 544.7, 543.9 | 68.7, 68.3, 67.8 | 48.8, 48.3, 48.4 |
+| OD5 | 529.9, 528.2, 532.9 | 68.1, 68.2, 68.1 | 47.4, 47.2, 47.5 |
+| OD5 and OD6 | 495.9, 497.4 | 67.7, 68.2 | 44.4, 44.3 |

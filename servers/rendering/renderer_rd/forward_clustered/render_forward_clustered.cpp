@@ -586,6 +586,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 
 			if (pipeline_key.ubershader) {
 				pipeline_key.shader_specialization = {};
+				// The one bit an ubershader pipeline keeps (sc_ddgi_probe_capture());
+				// only color passes read it.
+				pipeline_key.shader_specialization.ddgi_probe_capture = pipeline_key.version == SceneShaderForwardClustered::PIPELINE_VERSION_COLOR_PASS && pipeline_specialization.ddgi_probe_capture;
 				pipeline_key.cull_mode = RD::POLYGON_CULL_DISABLED;
 			} else {
 				pipeline_key.shader_specialization = pipeline_specialization;
@@ -2894,6 +2897,13 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 	{
 		RID ddgi_resources[4];
 		base_specialization.ddgi_probe_capture = _probe_capture_ddgi(p_render_data, ddgi_resources);
+		// Reflection probes captured with DDGI light have their own ubershader
+		// pipelines (sc_ddgi_probe_capture()): asked for as soon as a view uses
+		// DDGI, so they compile in the background before a capture needs them.
+		const RID env = p_render_data->environment;
+		if (base_specialization.ddgi_probe_capture || (env.is_valid() && environment_get_ddgi_enabled(env) && GLOBAL_GET_CACHED(bool, "rendering/global_illumination/reflections/probe_capture_ddgi"))) {
+			global_pipeline_data_required.use_ddgi_probe_capture = true;
+		}
 	}
 
 	if (depth_pre_pass) { //depth pre pass
@@ -5764,6 +5774,12 @@ void RenderForwardClustered::_mesh_compile_pipelines_for_surface(const SurfacePi
 					// Reflection probe can't be rendered in multiview.
 					pipeline_key.framebuffer_format_id = _get_reflection_probe_color_framebuffer_format_for_pipeline(octmap_use_storage);
 					_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
+					if (p_global.use_ddgi_probe_capture) {
+						// Captures with DDGI light draw with their own ubershader pipelines.
+						pipeline_key.shader_specialization.ddgi_probe_capture = true;
+						_mesh_compile_pipeline_for_surface(p_surface.shader, p_surface.mesh_surface, true, p_surface.instanced, p_source, pipeline_key, r_pipeline_pairs);
+						pipeline_key.shader_specialization.ddgi_probe_capture = false;
+					}
 				}
 
 				// View count is assumed to be 2 as the configuration is dependent on the viewport. It's likely a safe assumption for stereo rendering.

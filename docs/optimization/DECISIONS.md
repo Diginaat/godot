@@ -47,3 +47,21 @@ the script instance pointer and prefetches the script instance, the
 instance ID and a Node3D's local transform. Extra lines go only to
 scripted nodes: prefetching more for every node slowed native processing
 of 100k nodes by 20-25% (more misses in flight than the core keeps).
+
+## OD5 (2026-11-27): the ubershader loads the drawn instance once per stage
+
+`SCENE_INSTANCE(field)` chose the CPU or the GPU path's instance buffer
+at each of its 57 uses. The ubershader can't fold that choice, so every
+use compiled two loads. In the ubershader each stage now copies the drawn
+instance once (`scene_instance_load()`). Specialized pipelines are
+unchanged. Ubershader driver CPU -3.4% on the cold shader bench.
+
+## OD6 (2026-11-27): DDGI probe capture is a pipeline constant of its own ubershaders
+
+The DDGI sampling for reflection probe captures was a draw-time branch in
+every ubershader pipeline. It is now pipeline constant 1 in the
+ubershader. Ubershader keys of color passes keep that bit, and
+`GlobalPipelineData::use_ddgi_probe_capture` precompiles the capture
+ubershaders for the reflection probe format once a view uses DDGI. A
+further -6% ubershader driver CPU. Cost: one more ubershader pipeline per
+surface, compiled only in projects that capture probes with DDGI.

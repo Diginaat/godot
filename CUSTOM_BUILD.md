@@ -247,6 +247,14 @@ straight.
     light bits. Also `Light::linear_color` and
     `LightStorage::_sort_lights_by_depth()`. See
     [kb/project/light-fill-cpu.md](kb/project/light-fill-cpu.md).
+  - In the Forward+ ubershader, `scene_instance_load()` (the drawn instance
+    loaded once per stage; `SCENE_INSTANCE()` reads that copy) and
+    `sc_ddgi_probe_capture()` as pipeline constant 1
+    (`pso_ubershader_packed_1`). The C++ side is the ubershader key's
+    `ddgi_probe_capture` bit in `_render_list_template()` and
+    `GlobalPipelineData::use_ddgi_probe_capture`. If upstream adds
+    ubershader pipeline constants, keep constant 1 free or move this one.
+    See [kb/project/ubershader-cold-compile.md](kb/project/ubershader-cold-compile.md).
   - The process loop's prefetch in `SceneTree::_process_group()` (two
     stages: node lines 8 ahead, the script instance and a Node3D's local
     transform 4 ahead, through the address accessors in `Object` and

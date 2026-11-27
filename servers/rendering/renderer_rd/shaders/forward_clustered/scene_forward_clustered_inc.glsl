@@ -60,6 +60,10 @@ uint uc_cull_mode() {
 	return (draw_call.uc_packed_0 >> 0) & 3U;
 }
 
+// The specialization bits an ubershader pipeline keeps (see
+// sc_ddgi_probe_capture()); the others come from the draw call.
+layout(constant_id = 1) const uint pso_ubershader_packed_1 = 0;
+
 #else
 
 // Pull the constants from the pipeline's specialization constants.
@@ -153,7 +157,15 @@ bool sc_use_lightmap_specular() {
 }
 
 bool sc_ddgi_probe_capture() {
+#ifdef UBERSHADER
+	// A pipeline constant even in the ubershader: only reflection probe
+	// captures under DDGI use this code, and as a draw-time choice it made
+	// every ubershader pipeline about 6% more work for the driver. Capture
+	// draws get their own ubershader pipelines.
+	return ((pso_ubershader_packed_1 >> 8) & 1U) != 0;
+#else
 	return ((sc_packed_1() >> 8) & 1U) != 0;
+#endif
 }
 
 bool sc_multimesh_gpu_culling() {
@@ -429,7 +441,25 @@ layout(set = 1, binding = 48, std430) buffer restrict readonly GPUInstanceIDs {
 gpu_instance_ids;
 
 // One field of the drawn instance's data, from whichever buffer holds it.
+#ifdef UBERSHADER
+// The ubershader can't fold sc_gpu_instances(): a field read from either
+// buffer per use compiled two loads at every use, and the driver's work on
+// the ubershader pipelines (the cold stall) grew with them. Each stage loads
+// the drawn instance once instead (scene_instance_load()).
+InstanceData scene_instance;
+
+void scene_instance_load(uint p_instance_index) {
+	if (sc_gpu_instances()) {
+		scene_instance = gpu_instances.data[p_instance_index];
+	} else {
+		scene_instance = instances.data[p_instance_index];
+	}
+}
+
+#define SCENE_INSTANCE(m_field) (scene_instance.m_field)
+#else
 #define SCENE_INSTANCE(m_field) (sc_gpu_instances() ? gpu_instances.data[instance_index].m_field : instances.data[instance_index].m_field)
+#endif
 
 #ifdef USE_RADIANCE_OCTMAP_ARRAY
 

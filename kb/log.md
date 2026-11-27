@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-27 (ubershader cold compile, O4)
+
+* **Added**: [fork code in the ubershader](/project/ubershader-cold-compile.md):
+  the ubershader loads the drawn instance once per stage instead of
+  choosing a buffer at each of 57 field reads, and the DDGI probe capture
+  bit is a pipeline constant of capture ubershaders (precompiled once a
+  view uses DDGI). Cold shader bench: ubershader driver CPU 545 to 496 s,
+  stall 48.4 to 44.3 s; images the same, checked with every draw forced
+  through the ubershader.
+
 ## 2026-11-27 (process loop, O2/O5)
 
 * **Added**: [scripted node processing](/project/process-loop-misses.md):

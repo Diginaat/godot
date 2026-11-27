@@ -244,3 +244,7 @@ load (`mesh_generate_pipelines`), not in a frame. Decide with the user.
   per-shader skipped variants (Vulkan variants 762 -> 472, warm stall 0.72
   -> 0.65 s); ubershader vs specialized pipeline cost measured, scheduling
   change written up as a proposal.
+- 2026-11-27: smaller ubershader pipelines (instance data loaded once per
+  stage, DDGI probe capture as a pipeline constant): RTX 5070, `-Mv`,
+  ubershader driver CPU 545 -> 496 s, cold stall 48.4 -> 44.3 s
+  ([kb/project/ubershader-cold-compile.md](../../kb/project/ubershader-cold-compile.md)).

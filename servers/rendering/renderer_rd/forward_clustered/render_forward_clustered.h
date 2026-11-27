@@ -1475,6 +1475,7 @@ protected:
 				uint32_t use_32_bit_shadows : 1;
 				uint32_t use_shadow_cubemaps : 1;
 				uint32_t use_shadow_dual_paraboloid : 1;
+				uint32_t use_ddgi_probe_capture : 1; // Reflection probes captured with DDGI light.
 			};
 		};
 	};
