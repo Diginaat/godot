@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-27 (HZB build, O3)
+
+* **Added**: [HZB build bound by barriers](/project/hzb-fused-reduce.md):
+  small_1k GPU time per pass against stock (gap 0.039 ms, HZB build 0.018
+  of it); the reduction now writes four levels per dispatch. HZB 0.018 to
+  0.010 ms (small_1k), 0.033 to 0.021 ms (forest_map). `hzb.gd` checks a
+  second, multi-group pyramid. `instance_bench.gd --case=NAME` and
+  `gpu_intervals.gd --prof-min=MS` for profiling one case.
+
 ## 2026-11-27 (ubershader cold compile, O4)
 
 * **Added**: [fork code in the ubershader](/project/ubershader-cold-compile.md):

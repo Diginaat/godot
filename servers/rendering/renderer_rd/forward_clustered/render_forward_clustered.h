@@ -536,7 +536,9 @@ protected:
 	struct MeshHiZ {
 		MeshHizReduceShaderRD reduce_shader;
 		RID reduce_version;
-		RID reduce_pipelines[2];
+		// mesh_hiz_reduce.glsl: [first level ? 0 : 1][levels per dispatch - 1].
+		static constexpr uint32_t REDUCE_LEVELS = 4;
+		RID reduce_pipelines[2][REDUCE_LEVELS];
 		MeshHizOccludeShaderRD occlude_shader;
 		RID occlude_version;
 		RID occlude_pipeline;

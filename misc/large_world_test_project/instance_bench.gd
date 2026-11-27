@@ -291,6 +291,11 @@ func _run() -> void:
 	var table := OS.get_cmdline_user_args().has("--table")
 	var gpu_instances := OS.get_cmdline_user_args().has("--gpu-instances")
 	var occlusion := OS.get_cmdline_user_args().has("--occlusion")
+	# --case=NAME runs only that case (profiling one case, e.g. with gpu_intervals.gd).
+	var only_case := ""
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--case="):
+			only_case = arg.get_slice("=", 1)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", occlusion)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instance_table/enabled", table)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", gpu_instances)
@@ -298,6 +303,8 @@ func _run() -> void:
 	for repeat in 1 if stages else 2:
 		for c in CASES.size():
 			var spec: Array = CASES[c if repeat == 0 else CASES.size() - 1 - c]
+			if not only_case.is_empty() and spec[0] != only_case:
+				continue
 			var started := Time.get_ticks_msec()
 			_build(spec)
 			await RenderingServer.frame_post_draw

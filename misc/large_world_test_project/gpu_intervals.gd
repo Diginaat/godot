@@ -7,7 +7,8 @@ extends Node
 ## (with --gpu-profile, so the engine's own RENDER_TIMESTAMP labels record too).
 ##
 ## User arguments: --prof-scene=res://... (default forest_map.tscn),
-## --prof-start=N (frames to skip, default 600), --prof-frames=N (default 300);
+## --prof-start=N (frames to skip, default 600), --prof-frames=N (default 300),
+## --prof-min=MS (shortest interval printed, default 0.01);
 ## everything else goes to the profiled scene.
 
 var _sums := {}
@@ -16,6 +17,7 @@ var _total := 0.0
 var _frame := 0
 var _start := 600
 var _frames := 300
+var _min_ms := 0.01
 
 
 func _ready() -> void:
@@ -25,6 +27,8 @@ func _ready() -> void:
 			scene_path = arg.get_slice("=", 1)
 		elif arg.begins_with("--prof-start="):
 			_start = arg.get_slice("=", 1).to_int()
+		elif arg.begins_with("--prof-min="):
+			_min_ms = arg.get_slice("=", 1).to_float()
 		elif arg.begins_with("--prof-frames="):
 			_frames = maxi(1, arg.get_slice("=", 1).to_int())
 	add_child(load(scene_path).instantiate())
@@ -50,7 +54,7 @@ func _process(_delta: float) -> void:
 	if _frame == _start + _frames:
 		for label in _order:
 			var ms: float = _sums[label] / _frames
-			if ms >= 0.01:
+			if ms >= _min_ms:
 				print("GPU_INTERVAL: %7.3f ms  %s" % [ms, label])
 		print("GPU_INTERVAL_TOTAL: %.3f ms over %d frames" % [_total / _frames, _frames])
 		get_tree().quit()

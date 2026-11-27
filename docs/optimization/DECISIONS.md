@@ -65,3 +65,12 @@ ubershader. Ubershader keys of color passes keep that bit, and
 ubershaders for the reflection probe format once a view uses DDGI. A
 further -6% ubershader driver CPU. Cost: one more ubershader pipeline per
 surface, compiled only in projects that capture probes with DDGI.
+
+## OD7 (2026-11-27): the HZB reduces four levels per dispatch
+
+One dispatch and one barrier per pyramid level made the HZB build
+barrier-bound (11 levels, 0.018 ms in a 1k-node scene). Each 8 x 8 group
+now also reduces its tile in shared memory to the next three levels;
+`LEVELS` is a shader variant (eight pipelines), so a dispatch binds only
+the levels it writes, never one image twice. Results are bit-identical
+(`hzb.gd`). small_1k HZB 0.010 ms, forest_map 0.033 to 0.021 ms.

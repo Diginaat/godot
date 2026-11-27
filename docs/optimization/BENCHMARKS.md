@@ -50,3 +50,18 @@ driver's disk caches were emptied before every run.
 | Before | 548.5, 544.7, 543.9 | 68.7, 68.3, 67.8 | 48.8, 48.3, 48.4 |
 | OD5 | 529.9, 528.2, 532.9 | 68.1, 68.2, 68.1 | 47.4, 47.2, 47.5 |
 | OD5 and OD6 | 495.9, 497.4 | 67.7, 68.2 | 44.4, 44.3 |
+
+## O3: small_1k GPU time per pass (2026-11-27)
+
+`gpu_intervals.gd` (`--gpu-profile`) on `instance_bench.gd --case=small_1k`,
+static view, frames 150-350, Vulkan. Fork with `--table --gpu-instances
+--occlusion` (its defaults).
+
+| Build | Whole frame (ms) | HZB build (ms) |
+| --- | --- | --- |
+| Stock 4.7.2 | 0.142 | - |
+| Fork before OD7 | 0.181 | 0.018 |
+| Fork with OD7 | 0.173, 0.174 | 0.010 |
+
+forest_map (default `gpu_intervals.gd` scene): HZB 0.033 to 0.021 ms,
+frame 1.490 to 1.462 ms.

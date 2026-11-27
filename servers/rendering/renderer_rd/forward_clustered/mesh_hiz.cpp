@@ -122,12 +122,17 @@ bool RenderForwardClustered::_setup_hzb(const RenderDataRD *p_render_data, Rende
 	}
 	if (mesh_hiz.reduce_version.is_null()) {
 		Vector<String> modes;
-		modes.push_back("\n#define MODE_FIRST\n");
-		modes.push_back("");
+		for (uint32_t mode = 0; mode < 2; mode++) {
+			for (uint32_t levels = 1; levels <= MeshHiZ::REDUCE_LEVELS; levels++) {
+				modes.push_back(vformat("\n%s#define LEVELS %d\n", mode == 0 ? "#define MODE_FIRST\n" : "", levels));
+			}
+		}
 		mesh_hiz.reduce_shader.initialize(modes);
 		mesh_hiz.reduce_version = mesh_hiz.reduce_shader.version_create();
 		for (uint32_t mode = 0; mode < 2; mode++) {
-			mesh_hiz.reduce_pipelines[mode] = rd->compute_pipeline_create(mesh_hiz.reduce_shader.version_get_shader(mesh_hiz.reduce_version, mode));
+			for (uint32_t levels = 0; levels < MeshHiZ::REDUCE_LEVELS; levels++) {
+				mesh_hiz.reduce_pipelines[mode][levels] = rd->compute_pipeline_create(mesh_hiz.reduce_shader.version_get_shader(mesh_hiz.reduce_version, mode * MeshHiZ::REDUCE_LEVELS + levels));
+			}
 		}
 		Vector<String> occlude_modes;
 		occlude_modes.push_back("");
@@ -137,7 +142,17 @@ bool RenderForwardClustered::_setup_hzb(const RenderDataRD *p_render_data, Rende
 		mesh_hiz.occlude_pipeline = rd->compute_pipeline_create(mesh_hiz.occlude_shader.version_get_shader(mesh_hiz.occlude_version, 0));
 		mesh_hiz.split_pipeline = rd->compute_pipeline_create(mesh_hiz.occlude_shader.version_get_shader(mesh_hiz.occlude_version, 1));
 	}
-	if (mesh_hiz.reduce_pipelines[0].is_null() || mesh_hiz.reduce_pipelines[1].is_null() || mesh_hiz.occlude_pipeline.is_null() || mesh_hiz.split_pipeline.is_null()) {
+	for (const RID &pipeline : mesh_hiz.reduce_pipelines[0]) {
+		if (pipeline.is_null()) {
+			return false;
+		}
+	}
+	for (const RID &pipeline : mesh_hiz.reduce_pipelines[1]) {
+		if (pipeline.is_null()) {
+			return false;
+		}
+	}
+	if (mesh_hiz.occlude_pipeline.is_null() || mesh_hiz.split_pipeline.is_null()) {
 		return false;
 	}
 	p_buffers->hzb.mipmaps = mipmaps;
@@ -158,11 +173,12 @@ void RenderForwardClustered::_build_hzb(const RenderDataRD *p_render_data, Rende
 	const RID sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	rd->capture_timestamp("Mesh CLOD HZB");
 	RD::ComputeListID compute = rd->compute_list_begin();
-	for (uint32_t mip = 0; mip < mipmaps; mip++) {
+	// Up to four levels per dispatch (mesh_hiz_reduce.glsl).
+	for (uint32_t mip = 0; mip < mipmaps; mip += MeshHiZ::REDUCE_LEVELS) {
 		const uint32_t mode = mip == 0 ? 0 : 1;
-		const RID shader = mesh_hiz.reduce_shader.version_get_shader(mesh_hiz.reduce_version, mode);
+		const uint32_t levels = MIN(MeshHiZ::REDUCE_LEVELS, mipmaps - mip);
+		const RID shader = mesh_hiz.reduce_shader.version_get_shader(mesh_hiz.reduce_version, mode * MeshHiZ::REDUCE_LEVELS + levels - 1);
 		const RID source = mip == 0 ? rb->get_depth_texture(0) : rb->get_texture_slice(hzb_scope(), hzb_name(), 0, mip - 1);
-		const RID target = rb->get_texture_slice(hzb_scope(), hzb_name(), 0, mip);
 		const Size2i source_size = mip == 0 ? size : Size2i(MAX(1, padded.width >> (mip - 1)), MAX(1, padded.height >> (mip - 1)));
 		const Size2i target_size(MAX(1, padded.width >> mip), MAX(1, padded.height >> mip));
 		const int32_t push[4] = { source_size.width, source_size.height, target_size.width, target_size.height };
@@ -173,16 +189,18 @@ void RenderForwardClustered::_build_hzb(const RenderDataRD *p_render_data, Rende
 		source_uniform.append_id(sampler);
 		source_uniform.append_id(source);
 		uniforms.push_back(source_uniform);
-		RD::Uniform target_uniform;
-		target_uniform.binding = 1;
-		target_uniform.uniform_type = RD::UNIFORM_TYPE_IMAGE;
-		target_uniform.append_id(target);
-		uniforms.push_back(target_uniform);
-		rd->compute_list_bind_compute_pipeline(compute, mesh_hiz.reduce_pipelines[mode]);
+		for (uint32_t level = 0; level < levels; level++) {
+			RD::Uniform target_uniform;
+			target_uniform.binding = 1 + level;
+			target_uniform.uniform_type = RD::UNIFORM_TYPE_IMAGE;
+			target_uniform.append_id(rb->get_texture_slice(hzb_scope(), hzb_name(), 0, mip + level));
+			uniforms.push_back(target_uniform);
+		}
+		rd->compute_list_bind_compute_pipeline(compute, mesh_hiz.reduce_pipelines[mode][levels - 1]);
 		rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
 		rd->compute_list_set_push_constant(compute, push, sizeof(push));
 		rd->compute_list_dispatch(compute, (target_size.width + 7) / 8, (target_size.height + 7) / 8, 1);
-		if (mip + 1 < mipmaps) {
+		if (mip + levels < mipmaps) {
 			rd->compute_list_add_barrier(compute);
 		}
 	}

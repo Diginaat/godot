@@ -24,3 +24,5 @@
   (DDGI probe capture as a pipeline constant). Stall 48.4 to 44.3 s, same
   images (forced-ubershader comparison against specialized pipelines,
   with a negative control).
+- O3: small_1k GPU time per pass against stock; the gap is the GPU paths'
+  fixed costs. OD7 (HZB four levels per dispatch) took 0.008 ms off it.

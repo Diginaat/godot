@@ -6563,9 +6563,11 @@ RenderForwardClustered::~RenderForwardClustered() {
 		shadow_receivers.shader.version_free(shadow_receivers.version);
 	}
 	if (mesh_hiz.reduce_version.is_valid()) {
-		for (RID pipeline : mesh_hiz.reduce_pipelines) {
-			if (pipeline.is_valid()) {
-				RD::get_singleton()->free_rid(pipeline);
+		for (const auto &pipelines : mesh_hiz.reduce_pipelines) {
+			for (RID pipeline : pipelines) {
+				if (pipeline.is_valid()) {
+					RD::get_singleton()->free_rid(pipeline);
+				}
 			}
 		}
 		mesh_hiz.reduce_shader.version_free(mesh_hiz.reduce_version);

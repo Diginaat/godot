@@ -20,9 +20,11 @@ func _test_gpu() -> void:
 	var rd := RenderingServer.get_rendering_device()
 	var shaders: Array[RID] = []
 	var pipelines: Array[RID] = []
-	for variant in ["first", "reduce", "occlude", "split"]:
+	# The reduction as _build_hzb() runs it: up to four levels per dispatch,
+	# the first from the depth buffer (MODE_FIRST).
+	for variant in ["first", "reduce3", "occlude", "split"]:
 		var path := "res://../../servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_%s.glsl" % ("occlude" if variant == "occlude" or variant == "split" else "reduce")
-		var defines := {"first": "#define MODE_FIRST", "split": "#define MODE_SPLIT"}
+		var defines := {"first": "#define MODE_FIRST\n#define LEVELS 4", "reduce3": "#define LEVELS 3", "split": "#define MODE_SPLIT"}
 		var source := RDShaderSource.new()
 		# The engine's shader builder resolves #include; this compiler does not.
 		var include := FileAccess.get_file_as_string(ProjectSettings.globalize_path(path.get_base_dir().path_join("mesh_hiz_inc.glsl")))
@@ -104,13 +106,14 @@ func _test_gpu() -> void:
 	const PHASE2 := 5
 	const SELECTION := 6
 	const COUNTS := 7
+	_test_pyramid(rd, shaders, pipelines, sampler, failures)
 	var sets: Array[RID] = []
+	var reduce_uniforms: Array[RDUniform] = [_uniform(0, RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, [sampler, source_depth])]
 	for level in LEVELS:
-		var uniforms: Array[RDUniform] = [
-			_uniform(0, RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, [sampler, source_depth if level == 0 else views[level - 1]]),
-			_uniform(1, RenderingDevice.UNIFORM_TYPE_IMAGE, [views[level]]),
-		]
-		sets.append(rd.uniform_set_create(uniforms, shaders[0 if level == 0 else 1], 0))
+		reduce_uniforms.append(_uniform(1 + level, RenderingDevice.UNIFORM_TYPE_IMAGE, [views[level]]))
+	sets.append(rd.uniform_set_create(reduce_uniforms, shaders[0], 0))
+	const OCCLUDE_SET := 1
+	const SPLIT_SET := 2
 	var occlude_uniforms: Array[RDUniform] = [
 		_uniform(0, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[0]]),
 		_uniform(1, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[1]]),
@@ -150,21 +153,18 @@ func _test_gpu() -> void:
 		var list := rd.compute_list_begin()
 		# Phase-1 split against the history left by the previous round.
 		rd.compute_list_bind_compute_pipeline(list, pipelines[3])
-		rd.compute_list_bind_uniform_set(list, sets[LEVELS + 1], 0)
+		rd.compute_list_bind_uniform_set(list, sets[SPLIT_SET], 0)
 		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, compact, 1]).to_byte_array(), 16)
 		rd.compute_list_dispatch(list, 1, 1, 1)
 		rd.compute_list_add_barrier(list)
-		for level in LEVELS:
-			var size := PADDED >> level
-			var source_width := WIDTH if level == 0 else size * 2
-			var source_height := HEIGHT if level == 0 else size * 2
-			rd.compute_list_bind_compute_pipeline(list, pipelines[0 if level == 0 else 1])
-			rd.compute_list_bind_uniform_set(list, sets[level], 0)
-			rd.compute_list_set_push_constant(list, PackedInt32Array([source_width, source_height, size, size]).to_byte_array(), 16)
-			rd.compute_list_dispatch(list, (size + 7) / 8, (size + 7) / 8, 1)
-			rd.compute_list_add_barrier(list)
+		# All four levels in one dispatch.
+		rd.compute_list_bind_compute_pipeline(list, pipelines[0])
+		rd.compute_list_bind_uniform_set(list, sets[0], 0)
+		rd.compute_list_set_push_constant(list, PackedInt32Array([WIDTH, HEIGHT, PADDED, PADDED]).to_byte_array(), 16)
+		rd.compute_list_dispatch(list, 1, 1, 1)
+		rd.compute_list_add_barrier(list)
 		rd.compute_list_bind_compute_pipeline(list, pipelines[2])
-		rd.compute_list_bind_uniform_set(list, sets[LEVELS], 0)
+		rd.compute_list_bind_uniform_set(list, sets[OCCLUDE_SET], 0)
 		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, compact, 1]).to_byte_array(), 16)
 		rd.compute_list_dispatch(list, 1, 1, 1)
 		rd.compute_list_end()
@@ -252,6 +252,90 @@ func _test_gpu() -> void:
 	for resource in sets + pipelines + shaders + buffers + views + [pyramid, source_depth, sampler]:
 		rd.free_rid(resource)
 	_finish.call_deferred(failures)
+
+
+# A wide, short depth (75 x 9) as _build_hzb() reduces it: a 64 x 8
+# pyramid of 7 levels in two dispatches (levels 0-3 in 8 groups, 4-6 from
+# level 3), with sides that reach 1 texel before the others. Every level
+# must equal the per-level reduction exactly.
+func _test_pyramid(rd: RenderingDevice, shaders: Array[RID], pipelines: Array[RID], sampler: RID, failures: Array[String]) -> void:
+	const WIDTH := 75
+	const HEIGHT := 9
+	const PADDED := Vector2i(64, 8)
+	const LEVELS := 7
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var depths := PackedFloat32Array()
+	depths.resize(WIDTH * HEIGHT)
+	for i in depths.size():
+		depths[i] = rng.randf()
+	var format := RDTextureFormat.new()
+	format.width = WIDTH
+	format.height = HEIGHT
+	format.format = RenderingDevice.DATA_FORMAT_R32_SFLOAT
+	format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
+	var source_depth := rd.texture_create(format, RDTextureView.new(), [depths.to_byte_array()])
+	format.width = PADDED.x
+	format.height = PADDED.y
+	format.mipmaps = LEVELS
+	format.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
+	var pyramid := rd.texture_create(format, RDTextureView.new())
+	var views: Array[RID] = []
+	for level in LEVELS:
+		views.append(rd.texture_create_shared_from_slice(RDTextureView.new(), pyramid, 0, level))
+	var first_uniforms: Array[RDUniform] = [_uniform(0, RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, [sampler, source_depth])]
+	for level in 4:
+		first_uniforms.append(_uniform(1 + level, RenderingDevice.UNIFORM_TYPE_IMAGE, [views[level]]))
+	var rest_uniforms: Array[RDUniform] = [_uniform(0, RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, [sampler, views[3]])]
+	for level in 3:
+		rest_uniforms.append(_uniform(1 + level, RenderingDevice.UNIFORM_TYPE_IMAGE, [views[4 + level]]))
+	var sets: Array[RID] = [rd.uniform_set_create(first_uniforms, shaders[0], 0), rd.uniform_set_create(rest_uniforms, shaders[1], 0)]
+	var list := rd.compute_list_begin()
+	rd.compute_list_bind_compute_pipeline(list, pipelines[0])
+	rd.compute_list_bind_uniform_set(list, sets[0], 0)
+	rd.compute_list_set_push_constant(list, PackedInt32Array([WIDTH, HEIGHT, PADDED.x, PADDED.y]).to_byte_array(), 16)
+	rd.compute_list_dispatch(list, PADDED.x / 8, 1, 1)
+	rd.compute_list_add_barrier(list)
+	rd.compute_list_bind_compute_pipeline(list, pipelines[1])
+	rd.compute_list_bind_uniform_set(list, sets[1], 0)
+	rd.compute_list_set_push_constant(list, PackedInt32Array([PADDED.x >> 3, maxi(1, PADDED.y >> 3), PADDED.x >> 4, maxi(1, PADDED.y >> 4)]).to_byte_array(), 16)
+	rd.compute_list_dispatch(list, 1, 1, 1)
+	rd.compute_list_end()
+	# The per-level reduction on the CPU: level 0 from the depth with clear
+	# depth (0) past it, each next level from the one before, clamped.
+	var expected := PackedFloat32Array()
+	var size := PADDED
+	expected.resize(size.x * size.y)
+	for y in size.y:
+		for x in size.x:
+			var farthest := 1.0
+			for sy in 2:
+				for sx in 2:
+					var px := x * 2 + sx
+					var py := y * 2 + sy
+					farthest = minf(farthest, depths[py * WIDTH + px] if px < WIDTH and py < HEIGHT else 0.0)
+			expected[y * size.x + x] = farthest
+	var mip_data := rd.texture_get_data(pyramid, 0).to_float32_array()
+	var offset := 0
+	for level in LEVELS:
+		var actual := mip_data.slice(offset, offset + size.x * size.y)
+		offset += size.x * size.y
+		if actual != expected:
+			failures.append("pyramid %d x %d level %d differs: first=%s/%s" % [PADDED.x, PADDED.y, level, actual.slice(0, 4), expected.slice(0, 4)])
+		var next_size := Vector2i(maxi(1, size.x >> 1), maxi(1, size.y >> 1))
+		var next := PackedFloat32Array()
+		next.resize(next_size.x * next_size.y)
+		for y in next_size.y:
+			for x in next_size.x:
+				var farthest := 1.0
+				for sy in 2:
+					for sx in 2:
+						farthest = minf(farthest, expected[mini(y * 2 + sy, size.y - 1) * size.x + mini(x * 2 + sx, size.x - 1)])
+				next[y * next_size.x + x] = farthest
+		expected = next
+		size = next_size
+	for resource in sets + views + [pyramid, source_depth]:
+		rd.free_rid(resource)
 
 
 func _finish(failures: Array) -> void:
