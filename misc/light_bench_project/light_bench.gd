@@ -75,6 +75,10 @@ func _read_stages() -> void:
 	var end: int = times.get("GPU Geometry Opaque Pass End", -1)
 	if start >= 0 and end >= start:
 		stages.opaque = (end - start) / 1.0e6
+	var vrs_start: int = times.get("VRS Adaptive", -1)
+	var vrs_end: int = times.get("VRS Adaptive End", -1)
+	if vrs_start >= 0 and vrs_end >= vrs_start:
+		stages.vrs = (vrs_end - vrs_start) / 1.0e6
 	stages_ready.emit.call_deferred(stages)
 
 
@@ -107,6 +111,7 @@ func _run() -> void:
 		var gpu: Array[float] = []
 		var cpu: Array[float] = []
 		var opaque: Array[float] = []
+		var vrs: Array[float] = []
 		for frame in FRAMES:
 			await RenderingServer.frame_post_draw
 			gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(rid))
@@ -115,8 +120,10 @@ func _run() -> void:
 			var stages: Dictionary = await stages_ready
 			if stages.has("opaque"):
 				opaque.append(stages.opaque)
+			if stages.has("vrs"):
+				vrs.append(stages.vrs)
 		if OS.get_cmdline_user_args().has("--dump-ts"):
 			RenderingServer.call_on_render_thread(_dump_timestamps.bind(count))
 			await stages_ready
-		print("LIGHT_BENCH: %s limit=%d lights=%d gpu_p50=%.3f gpu_p95=%.3f cpu_p50=%.3f opaque_p50=%.3f" % [driver, limit, count, _percentile(gpu, 0.5), _percentile(gpu, 0.95), _percentile(cpu, 0.5), _percentile(opaque, 0.5)])
+		print("LIGHT_BENCH: %s limit=%d lights=%d gpu_p50=%.3f gpu_p95=%.3f cpu_p50=%.3f opaque_p50=%.3f vrs_p50=%.3f" % [driver, limit, count, _percentile(gpu, 0.5), _percentile(gpu, 0.95), _percentile(cpu, 0.5), _percentile(opaque, 0.5), _percentile(vrs, 0.5)])
 	get_tree().quit(0)

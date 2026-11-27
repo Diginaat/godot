@@ -3312,6 +3312,13 @@ D3D12_DEPTH_STENCIL_VIEW_DESC RenderingDeviceDriverD3D12::_make_dsv_for_texture(
 RDD::FramebufferID RenderingDeviceDriverD3D12::_framebuffer_create(RenderPassID p_render_pass, VectorView<TextureID> p_attachments, uint32_t p_width, uint32_t p_height, bool p_is_screen) {
 	const RenderPassInfo *pass_info = (const RenderPassInfo *)p_render_pass.id;
 
+	uint32_t vrs_index = UINT32_MAX;
+	for (const Subpass &E : pass_info->subpasses) {
+		if (E.fragment_shading_rate_reference.attachment != AttachmentReference::UNUSED) {
+			vrs_index = E.fragment_shading_rate_reference.attachment;
+		}
+	}
+
 	uint32_t num_color = 0;
 	uint32_t num_depth_stencil = 0;
 	for (uint32_t i = 0; i < p_attachments.size(); i++) {
@@ -3320,13 +3327,6 @@ RDD::FramebufferID RenderingDeviceDriverD3D12::_framebuffer_create(RenderPassID 
 			num_color++;
 		} else if ((tex_info->desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) {
 			num_depth_stencil++;
-		}
-	}
-
-	uint32_t vrs_index = UINT32_MAX;
-	for (const Subpass &E : pass_info->subpasses) {
-		if (E.fragment_shading_rate_reference.attachment != AttachmentReference::UNUSED) {
-			vrs_index = E.fragment_shading_rate_reference.attachment;
 		}
 	}
 
@@ -3364,6 +3364,14 @@ RDD::FramebufferID RenderingDeviceDriverD3D12::_framebuffer_create(RenderPassID 
 			fb_info->size = Size2i(tex_info->desc.Width, tex_info->desc.Height);
 		}
 
+		if (i == vrs_index) {
+			// The shading rate image can also allow render target use (VRS
+			// texture mode draws into it). It stays in the attachment list,
+			// which is indexed like the render pass's attachments, but it must
+			// be known as the rate image: taken as a plain colour attachment,
+			// the pass was never given it.
+			fb_info->vrs_attachment = p_attachments[i];
+		}
 		if ((tex_info->desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET)) {
 			D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = _make_rtv_for_texture(tex_info, 0, 0, UINT32_MAX);
 			device->CreateRenderTargetView(tex_info->resource, &rtv_desc, get_cpu_handle(fb_info->rtv_alloc.cpu_handle, color_idx, rtv_descriptor_heap_pool.increment_size));
@@ -3379,13 +3387,13 @@ RDD::FramebufferID RenderingDeviceDriverD3D12::_framebuffer_create(RenderPassID 
 			fb_info->attachments.push_back(p_attachments[i]);
 			depth_stencil_idx++;
 		} else if (i == vrs_index) {
-			fb_info->vrs_attachment = p_attachments[i];
+			fb_info->attachments.push_back(p_attachments[i]);
 		} else {
 			DEV_ASSERT(false);
 		}
 	}
 
-	DEV_ASSERT(fb_info->attachments.size() == color_idx + depth_stencil_idx);
+	DEV_ASSERT(fb_info->attachments.size() == p_attachments.size());
 	DEV_ASSERT((fb_info->vrs_attachment.id != 0) == (vrs_index != UINT32_MAX));
 
 	return FramebufferID(fb_info);
@@ -4600,6 +4608,11 @@ void RenderingDeviceDriverD3D12::command_begin_render_pass(CommandBufferID p_cmd
 			D3D12_SHADING_RATE_COMBINER_OVERRIDE,
 		};
 		cmd_buf_info->cmd_list_5->RSSetShadingRate(D3D12_SHADING_RATE_1X1, COMBINERS);
+		// The combiners take the rate from the image, which must also be bound:
+		// without it the pass shaded at full rate. RD writes the same rate
+		// values as D3D12_SHADING_RATE ((log2 width << 2) | log2 height).
+		const TextureInfo *vrs_info = (const TextureInfo *)fb_info->vrs_attachment.id;
+		cmd_buf_info->cmd_list_5->RSSetShadingRateImage(vrs_info->resource);
 	}
 
 	cmd_buf_info->render_pass_state.current_subpass = UINT32_MAX;
@@ -6502,8 +6515,11 @@ Error RenderingDeviceDriverD3D12::_check_capabilities() {
 			if (options6.VariableShadingRateTier >= D3D12_VARIABLE_SHADING_RATE_TIER_2) {
 				fsr_capabilities.primitive_supported = true;
 				fsr_capabilities.attachment_supported = true;
+				// D3D12 has one fixed tile size. A smaller maximum (8 was used)
+				// made RD build the rate image for 8 pixel tiles that the GPU
+				// read as 16 pixel ones, so rates landed on the wrong pixels.
 				fsr_capabilities.min_texel_size = Size2i(options6.ShadingRateImageTileSize, options6.ShadingRateImageTileSize);
-				fsr_capabilities.max_texel_size = Size2i(8, 8);
+				fsr_capabilities.max_texel_size = fsr_capabilities.min_texel_size;
 			}
 		}
 	}

@@ -226,6 +226,12 @@ straight.
     `_render_shadow_end()`), and `RenderingDevice::draw_list_draw_indirect_count()`.
     If upstream restructures the shadow passes, keep the three calls.
     See [kb/project/shadow-clod.md](kb/project/shadow-clod.md).
+  - Attachment VRS on D3D12 (`drivers/d3d12/rendering_device_driver_d3d12.cpp`):
+    the shading rate attachment recognized in `_framebuffer_create()`
+    (kept in the attachment list), `RSSetShadingRateImage()` in
+    `command_begin_render_pass()`, and `max_texel_size = min_texel_size`.
+    Upstream has the bugs these fix; take upstream's fix if it lands.
+    See [kb/project/d3d12-vrs-attachment.md](kb/project/d3d12-vrs-attachment.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).

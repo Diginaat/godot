@@ -207,6 +207,8 @@ void VRS::update_vrs_texture_adaptive(RenderSceneBuffersRD *p_render_buffers) {
 
 	const RID sampler = material_storage->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	rd->draw_command_begin_label("VRS Adaptive");
+	// Direct timestamps (not RENDER_TIMESTAMP): benches read them without the profiler.
+	rd->capture_timestamp("VRS Adaptive");
 	for (uint32_t layer = 0; layer < p_render_buffers->get_view_count(); layer++) {
 		// Without a source the shader writes full rate and never reads it; any texture will do.
 		const RID source = has_source ? p_render_buffers->get_internal_texture(layer) : TextureStorage::get_singleton()->texture_rd_get_default(TextureStorage::DEFAULT_RD_TEXTURE_BLACK);
@@ -219,5 +221,6 @@ void VRS::update_vrs_texture_adaptive(RenderSceneBuffersRD *p_render_buffers) {
 		rd->compute_list_dispatch(compute_list, rate_size.width, rate_size.height, 1);
 		rd->compute_list_end();
 	}
+	rd->capture_timestamp("VRS Adaptive End");
 	rd->draw_command_end_label();
 }

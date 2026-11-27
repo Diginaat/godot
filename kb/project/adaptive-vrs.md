@@ -18,8 +18,9 @@ again (D042), so a project opts in. SubViewports keep their own `vrs_mode`
 2026-11-27, `light_bench` at 1080p on an RTX 5070, GPU frame with Adaptive
 against Disabled: Vulkan 0.243 against 0.238 ms with no lights (the opaque
 pass 0.036 against 0.095 ms); D3D12 0.433 against 0.228 ms, with the same
-opaque pass time either way (the rate image does not seem to take effect
-there; under investigation).
+opaque pass time either way. Cause: two D3D12 driver bugs, fixed the same
+day ([d3d12-vrs-attachment](/project/d3d12-vrs-attachment.md)); D3D12 now
+matches Vulkan quality.
 
 # How
 

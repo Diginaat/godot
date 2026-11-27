@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-27 (VRS on D3D12)
+
+* **Fixed**: [attachment VRS on D3D12](/project/d3d12-vrs-attachment.md):
+  the rate image was filed as a colour attachment and never bound, and the
+  driver's maximum texel size (8) made RD build 8 pixel tiles for a 16
+  pixel GPU tile. Both also in upstream. Adaptive VRS on D3D12 went from
+  27-39 dB (fails) to 47.5-47.9 dB at threshold 0.1, like Vulkan. The
+  adaptive kernel reduces with subgroup sums (two barriers instead of
+  eight) and has direct "VRS Adaptive" timestamps.
+
 ## 2026-11-27 (VRS off by default)
 
 * **Changed**: `rendering/vrs/mode` defaults to Disabled (D042, the

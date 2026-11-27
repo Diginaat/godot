@@ -4,6 +4,9 @@
 
 #VERSION_DEFINES
 
+#extension GL_KHR_shader_subgroup_basic : enable
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+
 // Content-adaptive shading rate (Viewport VRS mode Adaptive). One workgroup
 // per shading rate texel (a tile of pixels): it measures how much the
 // previous frame's image changes between neighboring pixels in the tile and
@@ -76,38 +79,47 @@ void main() {
 		ivec2 region = params.tile_size + 2 * MARGIN;
 		int stride = region.x + 1;
 		ivec2 origin = tile * params.tile_size - MARGIN;
-		uint loaded = uint(stride * (region.y + 1));
-		for (uint i = local; i < loaded; i += 64u) {
-			ivec2 offset = ivec2(int(i) % stride, int(i) / stride);
-			luma[i] = perceptual_luma(origin + offset);
+		// 2D loops over the region: no integer division per pixel, which
+		// some shader compilers (D3D12) turn into long sequences.
+		ivec2 thread = ivec2(gl_LocalInvocationID.xy);
+		for (int y = thread.y; y <= region.y; y += 8) {
+			for (int x = thread.x; x < stride; x += 8) {
+				luma[y * stride + x] = perceptual_luma(origin + ivec2(x, y));
+			}
 		}
 		barrier();
 
 		vec4 sums = vec4(0.0);
 		vec2 maxima = vec2(0.0);
-		uint pixels = uint(region.x * region.y);
-		for (uint i = local; i < pixels; i += 64u) {
-			ivec2 offset = ivec2(int(i) % region.x, int(i) / region.x);
-			ivec2 p = origin + offset;
-			if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, params.source_size))) {
-				continue;
+		for (int y = thread.y; y < region.y; y += 8) {
+			for (int x = thread.x; x < region.x; x += 8) {
+				ivec2 p = origin + ivec2(x, y);
+				if (any(lessThan(p, ivec2(0))) || any(greaterThanEqual(p, params.source_size))) {
+					continue;
+				}
+				int at = y * stride + x;
+				float l = luma[at];
+				float dx = luma[at + 1] - l;
+				float dy = luma[at + stride] - l;
+				sums += vec4(dx * dx, dy * dy, 1.0, l);
+				maxima = max(maxima, abs(vec2(dx, dy)));
 			}
-			uint at = uint(offset.y * stride + offset.x);
-			float l = luma[at];
-			float dx = luma[at + 1u] - l;
-			float dy = luma[at + uint(stride)] - l;
-			sums += vec4(dx * dx, dy * dy, 1.0, l);
-			maxima = max(maxima, abs(vec2(dx, dy)));
 		}
-		partial[local] = sums;
-		partial_max[local] = maxima;
+		// Subgroup sums, then one shared slot per subgroup: two barriers per
+		// workgroup instead of eight (a barrier costs much more than the
+		// arithmetic here, notably on D3D12).
+		sums = subgroupAdd(sums);
+		maxima = subgroupMax(maxima);
+		if (subgroupElect()) {
+			partial[gl_SubgroupID] = sums;
+			partial_max[gl_SubgroupID] = maxima;
+		}
 		barrier();
-		for (uint width = 32u; width > 0u; width >>= 1u) {
-			if (local < width) {
-				partial[local] += partial[local + width];
-				partial_max[local] = max(partial_max[local], partial_max[local + width]);
+		if (local == 0u) {
+			for (uint i = 1u; i < gl_NumSubgroups; i++) {
+				partial[0] += partial[i];
+				partial_max[0] = max(partial_max[0], partial_max[i]);
 			}
-			barrier();
 		}
 		if (local == 0u && partial[0].z > 0.0) {
 			float count = partial[0].z;
