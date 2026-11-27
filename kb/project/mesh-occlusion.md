@@ -103,5 +103,35 @@ pass. `clod_raster` asserts that only CLOD builds the HZB; it now pins
 mesh occlusion off, like the other occlusion settings (D035). Path tracer
 and DDGI smoke pass; the PhysX example project was not on this machine.
 
-No frame-time number yet: needs a bench scene with expensive CPU-list
-materials behind occluders.
+## Local batches and the frame-time number (2026-11-27)
+
+`mesh_occlusion_bench.tscn` (roadmap G9): 12 x 12 walled courtyards, each
+with 9 spheres of about 4 k triangles and a subsurface scattering material.
+SSS keeps them on the CPU list; a visibility range no longer does, since
+the GPU instance path takes those. The walls hide the courtyards from the
+street; from above they are open.
+
+The first run found nothing tested: `meshes_occluded` 0. The CPU list
+draws equal consecutive elements as one instanced draw, and the HZB test
+uses one box around the whole batch. Batches only break at the 16 sort
+depth layers, so a batch spans the town's width at one distance, and its
+box covers the open street. With mesh occlusion on,
+`_fill_instance_data()` now ends a batch (`p_local_batches`) before its
+merged box gets longer than 8 times its first member's. Equal keys come in
+cull (BVH) order, so the batches stay local. The depth pre-pass already
+keeps hidden pixels from shading: the saving is vertex and raster work in
+the depth and colour passes.
+
+RTX 5070, Vulkan, 1920x1080, p50 ms, mesh occlusion off / on:
+
+| View | GPU frame | Depth pass | Opaque pass | Render CPU |
+| --- | --- | --- | --- | --- |
+| street | 1.043 / 0.570 | 0.413 / 0.182 | 0.462 / 0.217 | 0.198 / 0.251 |
+| aerial (all visible) | 1.078 / 1.095 | 0.441 / 0.454 | 0.466 / 0.467 | 0.198 / 0.253 |
+
+D3D12: street GPU 1.017 / 0.546, aerial 1.042 / 1.060. In the street
+view 199 batches are occluded. The cost of smaller batches
+is about 0.055 ms of render CPU for about 200 more draws, paid in every
+view. Images are identical with occlusion off and on (the bench fails
+otherwise). The depth and opaque stage timestamps are now taken for every
+camera render, not only with CLOD or MultiMesh culling.

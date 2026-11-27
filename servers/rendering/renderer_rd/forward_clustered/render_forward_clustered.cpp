@@ -943,7 +943,7 @@ void RenderForwardClustered::SceneState::grow_instance_buffer(RenderListType p_r
 	}
 }
 
-void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, int *p_render_info, uint32_t p_offset, int32_t p_max_elements, bool p_update_buffer, bool p_unbatch_clod) {
+void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, int *p_render_info, uint32_t p_offset, int32_t p_max_elements, bool p_update_buffer, bool p_unbatch_clod, bool p_local_batches) {
 	RenderList *rl = &render_list[p_render_list];
 	uint32_t element_total = p_max_elements >= 0 ? uint32_t(p_max_elements) : rl->elements.size();
 
@@ -970,6 +970,13 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 
 	uint32_t repeats = 0;
 	GeometryInstanceSurfaceDataCache *prev_surface = nullptr;
+	// p_local_batches (mesh occlusion): the HZB tests a batch of repeats with
+	// one box around all of them, which is never hidden once it spans the
+	// view. A batch ends before its box gets longer than this many times
+	// its first member's, so each one stays local (kb mesh-occlusion).
+	constexpr real_t LOCAL_BATCH_SCALE = 8.0;
+	AABB batch_box;
+	real_t batch_limit = 0.0;
 	for (uint32_t i = 0; i < element_total; i++) {
 		if (unlikely(i < earlier_elements && rl->element_info[i].gpu_bucket != UINT32_MAX)) {
 			// A GPU path draw of an earlier pass: it has no instance data here
@@ -1045,10 +1052,19 @@ void RenderForwardClustered::_fill_instance_data(RenderListType p_render_list, i
 		// draw it stay separate elements (one shared mesh in many nodes).
 		const bool cant_repeat = instance_data.flags & INSTANCE_DATA_FLAG_MULTIMESH || inst->mesh_instance.is_valid() || (p_unbatch_clod && _mesh_clod_surface_eligible(surface));
 
-		if (prev_surface != nullptr && !cant_repeat && prev_surface->sort.sort_key1 == surface->sort.sort_key1 && prev_surface->sort.sort_key2 == surface->sort.sort_key2 && prev_surface->uses_lightmap_specular == surface->uses_lightmap_specular && inst->mirror == prev_surface->owner->mirror && repeats < RenderElementInfo::MAX_REPEATS) {
+		bool local = true;
+		AABB merged_box;
+		if (p_local_batches && prev_surface != nullptr) {
+			merged_box = batch_box.merge(inst->transformed_aabb);
+			local = merged_box.get_longest_axis_size() <= batch_limit;
+		}
+		if (prev_surface != nullptr && !cant_repeat && local && prev_surface->sort.sort_key1 == surface->sort.sort_key1 && prev_surface->sort.sort_key2 == surface->sort.sort_key2 && prev_surface->uses_lightmap_specular == surface->uses_lightmap_specular && inst->mirror == prev_surface->owner->mirror && repeats < RenderElementInfo::MAX_REPEATS) {
 			//this element is the same as the previous one, count repeats to draw it using instancing
 			repeats++;
+			batch_box = merged_box;
 		} else {
+			batch_box = inst->transformed_aabb;
+			batch_limit = batch_box.get_longest_axis_size() * LOCAL_BATCH_SCALE;
 			if (repeats > 0) {
 				for (uint32_t j = 1; j <= repeats; j++) {
 					rl->element_info[p_offset + i - j].repeat = j;
@@ -2636,7 +2652,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	int *render_info = p_render_data->render_info ? p_render_data->render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_VISIBLE] : (int *)nullptr;
 	RENDER_TIMESTAMP("Fill Instance Data");
-	_fill_instance_data(RENDER_LIST_OPAQUE, render_info, 0, -1, true, _mesh_clod_frame_enabled(p_render_data, rb_data.ptr()));
+	_fill_instance_data(RENDER_LIST_OPAQUE, render_info, 0, -1, true, _mesh_clod_frame_enabled(p_render_data, rb_data.ptr()), rb_data.is_valid() && GLOBAL_GET_CACHED(bool, "rendering/geometry/mesh_occlusion/enabled"));
 	_fill_instance_data(RENDER_LIST_MOTION, render_info);
 	_fill_instance_data(RENDER_LIST_ALPHA, render_info);
 	RENDER_TIMESTAMP("Prepare GPU Geometry");
@@ -2656,7 +2672,9 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		multimesh_visible_ids = rb_data->multimesh_cull.visible_ids;
 		multimesh_cull_commands = rb_data->multimesh_cull.commands;
 	}
-	const bool gpu_geometry_timestamps = mesh_clod_commands.is_valid() || multimesh_cull_commands.is_valid();
+	// Every camera render with render buffers (four timestamps per frame), so
+	// benchmarks of the CPU list and the GPU instance path read them too.
+	const bool gpu_geometry_timestamps = rb_data.is_valid() || mesh_clod_commands.is_valid() || multimesh_cull_commands.is_valid();
 	// After the GPU geometry preparation above, which reads the CPU elements.
 	_gpu_instances_append(render_info, p_render_data->scene_data->screen_mesh_lod_threshold);
 

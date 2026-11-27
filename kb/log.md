@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (mesh occlusion bench, G9)
+
+* **Updated**: [mesh occlusion](/project/mesh-occlusion.md): new
+  `mesh_occlusion_bench.tscn` (SSS spheres in walled courtyards). It found
+  CPU-list batches whose one merged box never hid. Batches now stay local
+  (8x a member's size) while mesh occlusion is on. Street GPU frame 1.043
+  to 0.570 ms; open view +0.017 ms GPU, +0.055 ms CPU; same images.
+
 ## 2026-11-27 (light fill CPU, G7)
 
 * **Added**: [render-thread cost of many lights halved](/project/light-fill-cpu.md):
