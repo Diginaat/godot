@@ -25,7 +25,8 @@
   the CRT fmodf (same values for power-of-two units, OD14). city_extreme
   frame 8.55 to 8.42 ms. Also records the shadow-dirty loop over
   unshadowed lights as not done, and a dropped attempt at finer scene
-  cull chunks (no gain, small scenes slower).
+  cull chunks (no gain, small scenes slower) and the main thread culling
+  one chunk itself (no change).
 
 ## 2026-11-27 (no lightmap UV scale in the instance table, O1)
 

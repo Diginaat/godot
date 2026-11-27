@@ -57,7 +57,8 @@ lock contention (all in `_scene_cull`, `in_frustum` and vector math), and
 5 to 145 samples per worker. Four chunks per worker, taken as workers
 finish, gave nothing in city and cost forest and town 0.03-0.05 ms of
 render CPU, so it was dropped: the cull is compute bound, about 8 ns per
-instance.
+instance. Letting the main thread cull one chunk itself instead of
+waiting changed nothing measurable either.
 
 # Not done
 
