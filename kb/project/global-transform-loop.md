@@ -49,6 +49,13 @@ calls the loop only when the node is dirty.
 The dirty walk is unchanged and is now most of deep: one recursion per
 node and a miss on each node and its child array.
 
+Tried after this: prefetching the dirty bits, child array and
+`xform_change` lines of the child two ahead in
+`_propagate_transform_changed_walk()`. Deep 100k moved by -0.1 ms
+(within spread), but wide 100k got 34% and parents 100k 43% slower:
+with many children per parent the hardware already streams them, and
+the extra loads only cost. Dropped.
+
 # Tests
 
 `[SceneTree][Node3D] Global transforms of chains longer than the update
