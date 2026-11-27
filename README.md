@@ -29,7 +29,7 @@ NVIDIA's RTX team, and the PhysX module's author. This fork merges them,
 fixes the conflicts between them, and keeps them building against the latest
 Godot `master`.
 
-## Godot Diginaat fork vs Stock Godot. benchmartk
+## Godot Diginaat fork vs Stock Godot. benchmark
 
 <p align="center">
   <img src="docs/benchmarks/stock-compare.png" width="100%">
