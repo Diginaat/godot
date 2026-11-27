@@ -28,6 +28,10 @@ Status per proposal in the last column.
 | 11 | [Least-squares baking with a smoothness regularizer](/ddgi/improvements/least-squares-bake.md) | Interpolation error, seams and noise in baked data | Medium | CoD: Infinite Warfare | Done (`dev-ddgi-quality`) |
 | 12 | [Near-field rays for the apply pass](/ddgi/improvements/near-field-rays.md) | Bounce light from nearby objects as a lagging blob at the probes | Medium | Hybrid probe + per-pixel ray GI | Removed 2026-10-31 (camera-dependent spots) |
 
+Stability research of 2026-11-27, checked against the shaders:
+[stability research](/ddgi/improvements/stability-research.md) (perceptual
+irradiance encoding is the main technique not in yet).
+
 Small ideas not worth their own page yet:
 
 - **Baked sky visibility separate from the rest** (Unity APV): sky light =

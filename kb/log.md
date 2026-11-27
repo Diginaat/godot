@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-27 (DDGI stability research)
+
+* **Added**: [DDGI stability research](/ddgi/improvements/stability-research.md):
+  the DDGI suite on the current branch (static view 0.00% flicker) and
+  the literature's stability techniques checked against the shaders.
+
 ## 2026-11-27 (stock comparison infographic)
 
 * **Updated**: docs/benchmarks/stock-compare.md: a fresh run against stock

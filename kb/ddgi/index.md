@@ -19,3 +19,4 @@
 # Improvement proposals
 
 * [Improvement proposals, ranked](/ddgi/improvements/index.md) - what the papers suggest for this DDGI, by value and cost
+* [Stability research](/ddgi/improvements/stability-research.md) - flicker-free DDGI techniques from RTXGI and the papers against what is built; perceptual irradiance encoding is missing
