@@ -14,3 +14,8 @@
   - a 1k-node scene 80.2 to 72.2 MB (stock 68.8)
 
   GPU time is slightly lower.
+- O2 and O5: sampling profiles of the script and native scenarios
+  (debug-symbol build). OD3 (no allocation per GDScript notification) and
+  OD4 (process loop prefetch): script 100k 36.1 to 23.6 ms, script 10k
+  1.486 to 1.141 ms. Native 10k is still 0.02 ms behind stock; two
+  prefetch variants that slowed it were dropped (REGRESSIONS.md).

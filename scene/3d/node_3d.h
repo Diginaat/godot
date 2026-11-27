@@ -265,6 +265,9 @@ public:
 	void set_global_rotation_degrees(const Vector3 &p_euler_degrees);
 
 	Vector3 get_position() const;
+	// Where the local transform is, for prefetching
+	// (SceneTree::_process_group()). Reads nothing.
+	_FORCE_INLINE_ const void *_get_local_transform_address() const { return &data.local_transform; }
 
 	EulerOrder get_rotation_order() const;
 	Vector3 get_rotation() const;

@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-27 (process loop, O2/O5)
+
+* **Added**: [scripted node processing](/project/process-loop-misses.md):
+  `GDScriptInstance::notification()` no longer allocates when no script in
+  the chain has `_notification()`, and the process loop prefetches the
+  script instance and a Node3D's local transform. scene_bench script
+  10k 1.486 to 1.141 ms, 100k 36.1 to 23.6; native unchanged (10k still
+  0.02 ms behind stock). Two prefetch variants that slowed native
+  processing are recorded.
+
 ## 2026-11-27 (GPU buffer VRAM, O1)
 
 * **Added**: [VRAM of the GPU-driven systems cut](/project/gpu-buffer-vram.md):

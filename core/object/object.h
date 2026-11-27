@@ -768,6 +768,11 @@ public:
 
 	void set_script_instance(ScriptInstance *p_instance);
 	_FORCE_INLINE_ ScriptInstance *get_script_instance() const { return script_instance; }
+	// Where the instance ID and flags (read when a Variant holds the object)
+	// and the script instance pointer are, far from the object's start: for
+	// prefetching (SceneTree::_process_group()). Reads nothing.
+	_FORCE_INLINE_ const void *_get_instance_id_address() const { return &_instance_id; }
+	_FORCE_INLINE_ const void *_get_script_instance_address() const { return &script_instance; }
 
 	void add_user_signal(const MethodInfo &p_signal);
 

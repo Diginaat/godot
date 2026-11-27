@@ -1305,8 +1305,18 @@ void SceneTree::_process_group(ProcessGroup *p_group, bool p_physics) {
 	// process owner, the process mode and flags): asking for those of a node
 	// some places ahead overlaps the misses (docs/implementation/scene-runtime-roadmap.md, M6).
 	// Only addresses are computed; a node freed by an earlier callback is not
-	// read.
+	// read. Also asked for: the script instance pointer (Object's dispatch
+	// reads it), and the line after Node, where the first subclass's fields
+	// start (a Timer's state). More lines here cost native processing of
+	// large lists (more misses in flight than the core keeps).
+	// A few nodes later, once its first lines have arrived, a node still in
+	// the tree (removed nodes are listed while the lock is held) has its
+	// script instance read and asked for too: script processing starts there.
+	// For such a node also its instance ID (a script's `self` reads it) and a
+	// Node3D's local transform (scripts move nodes); testing the class reads
+	// lines that have arrived.
 	constexpr uint32_t PREFETCH_AHEAD = 8;
+	constexpr uint32_t SCRIPT_PREFETCH_AHEAD = 4;
 
 	for (uint32_t i = 0; i < node_count; i++) {
 		if (i + PREFETCH_AHEAD < node_count) {
@@ -1315,9 +1325,27 @@ void SceneTree::_process_group(ProcessGroup *p_group, bool p_physics) {
 			_prefetch(&ahead->data.tree);
 			_prefetch(&ahead->data.process_owner);
 			_prefetch(&ahead->data.process_priority); // Next to the process mode and flags (bit-fields).
+			_prefetch(ahead->_get_script_instance_address());
+			_prefetch(reinterpret_cast<const char *>(ahead) + sizeof(Node));
+		}
+		if (i + SCRIPT_PREFETCH_AHEAD < node_count) {
+			Node *soon = nodes_ptr[i + SCRIPT_PREFETCH_AHEAD];
+			if (nodes_removed_on_group_call.is_empty() || !nodes_removed_on_group_call.has(soon)) {
+				const ScriptInstance *script_instance = soon->get_script_instance();
+				if (script_instance) {
+					_prefetch(script_instance);
+					_prefetch(soon->_get_instance_id_address());
+#ifndef _3D_DISABLED
+					const Node3D *node_3d = Object::cast_to<Node3D>(soon);
+					if (node_3d) {
+						_prefetch(node_3d->_get_local_transform_address());
+					}
+#endif
+				}
+			}
 		}
 		Node *n = nodes_ptr[i];
-		if (nodes_removed_on_group_call.has(n)) {
+		if (!nodes_removed_on_group_call.is_empty() && nodes_removed_on_group_call.has(n)) {
 			// Node may have been removed during process, skip it.
 			// Keep in mind removals can only happen on the main thread.
 			continue;

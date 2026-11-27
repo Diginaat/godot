@@ -26,3 +26,16 @@ runs each, the same VRAM in both runs):
 
 The "OD1 only" runs come from a control build with the HZB change taken
 out.
+
+## O2 and O5: process loop (2026-11-27)
+
+`devtools/test/scene_bench.gd`, headless, frame ms, medians of 3 rounds
+with the builds alternated. Editor build `production=yes
+debug_symbols=yes`. Stock: Godot 4.7.2 official, 2 rounds, same machine.
+
+| Scenario | Stock 4.7.2 | Before | After OD3 | After OD3 and OD4 |
+| --- | --- | --- | --- | --- |
+| script 10k | 2.33 | 1.486 | 1.178 | 1.141 |
+| script 100k | 44.4-45.6 | 36.1 | 33.1 | 23.6 |
+| native 10k | 0.123-0.127 | 0.148 | 0.148 | 0.145 |
+| native 100k | 4.16-4.20 | 2.71 | 2.70 | 2.53 |

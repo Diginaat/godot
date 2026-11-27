@@ -247,6 +247,12 @@ straight.
     light bits. Also `Light::linear_color` and
     `LightStorage::_sort_lights_by_depth()`. See
     [kb/project/light-fill-cpu.md](kb/project/light-fill-cpu.md).
+  - The process loop's prefetch in `SceneTree::_process_group()` (two
+    stages: node lines 8 ahead, the script instance and a Node3D's local
+    transform 4 ahead, through the address accessors in `Object` and
+    `Node3D`), and `GDScriptInstance::notification()` returning before it
+    builds the script chain when no script has `_notification()`. See
+    [kb/project/process-loop-misses.md](kb/project/process-loop-misses.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).

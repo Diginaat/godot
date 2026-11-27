@@ -30,3 +30,20 @@ farther or equal depth, so the test stays conservative.
 - Speed: the level bench was slightly faster on the GPU in all three
   levels.
 - Occlusion: the counts in `mesh_occlusion_bench` did not change.
+
+## OD3 (2026-11-27): GDScript notifications allocate only for scripts with `_notification()`
+
+`GDScriptInstance::notification()` built a list of the inheritance chain
+(a heap allocation) for every notification, before it looked for
+`_notification()`. It now looks first and returns when no script in the
+chain defines it. The order of the calls is unchanged when one does.
+
+## OD4 (2026-11-27): the process loop prefetches what dispatch and scripts read
+
+`SceneTree::_process_group()` prefetches two more lines of a node eight
+places ahead: the script instance pointer and the first line after
+`Node`. Four places ahead, for a node that is still in the tree, it reads
+the script instance pointer and prefetches the script instance, the
+instance ID and a Node3D's local transform. Extra lines go only to
+scripted nodes: prefetching more for every node slowed native processing
+of 100k nodes by 20-25% (more misses in flight than the core keeps).

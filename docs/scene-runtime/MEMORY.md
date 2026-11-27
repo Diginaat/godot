@@ -49,6 +49,13 @@ short; details go in the linked files.
 - Group scans were the whole quadratic cost: after M1 and M3, `churn` at
   100k is 97.1 to 9.05 ms, `instance` 2,000 to 247 ms.
 
+- 2026-11-27 (engine performance brief, `docs/optimization/`): the M6
+  prefetch missed the script instance pointer, the script instance and
+  Node3D's local transform; GDScript notifications allocated per call.
+  `script` 100k 36.1 to 23.6 ms. Adding prefetches for every node slows
+  `native` at 100k: extra lines only for scripted nodes
+  ([kb/project/process-loop-misses.md](../../kb/project/process-loop-misses.md)).
+
 ## Known issues
 
 - Editor builds measure with `DEBUG_ENABLED` allocation accounting; use the

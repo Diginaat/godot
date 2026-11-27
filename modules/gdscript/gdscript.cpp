@@ -1982,9 +1982,24 @@ void GDScriptInstance::notification(int p_notification, bool p_reversed) {
 	}
 
 	//notification is not virtual, it gets called at ALL levels just like in C.
+	const StringName &notification_str = GDScriptLanguage::get_singleton()->strings._notification;
+
+	// Most scripts define no _notification(): find out before building the
+	// chain, which costs an allocation (every notification of every scripted
+	// node, such as each process frame, otherwise).
+	bool has_notification = false;
+	for (GDScript *sptr = script.ptr(); sptr; sptr = sptr->base.ptr()) {
+		if (sptr->valid && sptr->member_functions.has(notification_str)) {
+			has_notification = true;
+			break;
+		}
+	}
+	if (!has_notification) {
+		return;
+	}
+
 	Variant value = p_notification;
 	const Variant *args[1] = { &value };
-	const StringName &notification_str = GDScriptLanguage::get_singleton()->strings._notification;
 
 	LocalVector<GDScript *> script_stack;
 	uint32_t script_count = 0;
