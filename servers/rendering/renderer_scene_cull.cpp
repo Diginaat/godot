@@ -51,6 +51,28 @@
 #include "core/os/os.h"
 #endif
 
+// AABB::quantize() for a power-of-two unit, as _update_instance() uses it
+// for moving instances. There x - floor(x / unit) * unit equals
+// Math::fposmodp(x, unit) exactly (scaling by a power of two and floor are
+// exact; the subtraction gives the same real number as fposmodp's fmod
+// plus unit), without the CRT's fmodf, which was 15% of _update_instance()
+// with six calls per moving instance. Tiny units (where x / unit could
+// overflow) take AABB::quantize().
+static _FORCE_INLINE_ void _aabb_quantize_pow2(AABB &r_aabb, real_t p_unit) {
+	if (unlikely(!(p_unit >= real_t(CMP_EPSILON)))) {
+		r_aabb.quantize(p_unit);
+		return;
+	}
+	const real_t inv_unit = real_t(1.0) / p_unit; // Exact: p_unit is a power of two.
+	Vector3 end = r_aabb.position + r_aabb.size;
+	for (int axis = 0; axis < 3; axis++) {
+		const real_t start = r_aabb.position[axis];
+		r_aabb.position[axis] = start - (start - Math::floor(start * inv_unit) * p_unit);
+		end[axis] = end[axis] - (end[axis] - Math::floor(end[axis] * inv_unit) * p_unit) + p_unit;
+	}
+	r_aabb.size = end - r_aabb.position;
+}
+
 /* HALTON SEQUENCE */
 
 #ifndef _3D_DISABLED
@@ -1943,7 +1965,7 @@ void RendererSceneCull::_update_instance(Instance *p_instance) const {
 			int exponent;
 			const float mantissa = std::frexp(motion_longest_axis, &exponent);
 			const float quantize_size = std::ldexp(1.0f, mantissa == 0.5f ? exponent - 2 : exponent - 1);
-			bvh_aabb.quantize(quantize_size);
+			_aabb_quantize_pow2(bvh_aabb, quantize_size);
 		}
 	}
 

@@ -95,6 +95,15 @@ Same method; OD12 against OD13:
 | massive_100k | 101.8 / 100.1 | 0.886-0.910 / 0.884-0.903 |
 | churn_100k | 120.3 / 116.6 | 0.828-0.974 / 0.826-0.971 |
 
+## Moving instance bounds (OD14, 2026-11-27)
+
+`level_bench.gd --frames=600`, three rounds, builds alternated, medians:
+
+| Preset | Frame before / after (ms) | Render CPU before / after (ms) |
+| --- | --- | --- |
+| town | 1.165 / 1.169 | 0.630 / 0.621 |
+| city_extreme | 8.553 / 8.421 | 5.225 / 5.103 |
+
 ## O2: deep chains (OD11, 2026-11-27)
 
 `scene_bench.ps1`, 3 rounds, builds alternated (stock: same machine, 2 rounds):

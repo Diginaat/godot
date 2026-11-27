@@ -158,3 +158,13 @@ the only reader of records, takes no lightmapped instances. Dropped:
 219 MB, churn_100k 120.3 to 116.6 MB; GPU time within spread. If the GPU
 path ever takes lightmapped instances, the scale goes back (or into a
 side table like OD12's).
+
+## OD14 (2026-11-27): moving instance bounds quantized without fmodf
+
+`RendererSceneCull::_update_instance()` quantizes a moving instance's
+BVH bounds with a power-of-two unit; `AABB::quantize()` did it with six
+CRT `fmodf` calls (15% of `_update_instance()` in city_extreme).
+`_aabb_quantize_pow2()` uses `x - floor(x / unit) * unit`, the same
+value for a power-of-two unit (checked over 259 million float32 values),
+with `AABB::quantize()` kept for units below `CMP_EPSILON`. city_extreme
+frame 8.55 to 8.42 ms, render CPU 5.23 to 5.10 ms; town unchanged.

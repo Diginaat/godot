@@ -48,5 +48,10 @@
 - O1: no lightmap UV scale in the record (OD13): 112 to 96 bytes, city
   222 to 219 MB. City buffers now (`--frames=300`): table 21 MB, upstream
   cluster buffer 9.3 MB, members 5 MB, shadow IDs 4.9 MB, IDs and the two
-  phase ID buffers 2.4 MB each. A gizmo flag for the transform walk was tried and
+  phase ID buffers 2.4 MB each.
+- O6 (profile of city_extreme, main thread): render 63% (scene cull and
+  render 36%, `update_dirty_instances` 23%), `SceneTree::process` 22%.
+  OD14: moving instance bounds quantized without the CRT fmodf, frame
+  8.55 to 8.42 ms. The shadow-dirty loop over unshadowed lights (3%) is
+  left: shadow toggles would need tracking. A gizmo flag for the transform walk was tried and
   dropped (REGRESSIONS.md).

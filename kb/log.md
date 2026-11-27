@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (moving instance bounds without fmodf, O6 profile)
+
+* **Added**: [moving instance quantize](/project/moving-instance-quantize.md):
+  the BVH bounds of moving instances are quantized with floor instead of
+  the CRT fmodf (same values for power-of-two units, OD14). city_extreme
+  frame 8.55 to 8.42 ms. Also records the shadow-dirty loop over
+  unshadowed lights as not done.
+
 ## 2026-11-27 (no lightmap UV scale in the instance table, O1)
 
 * **Updated**: [previous transform table](/project/prev-transform-table.md):
