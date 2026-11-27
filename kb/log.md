@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (skinned crowd)
+
+* **Added**: [skinned crowd costs](/project/skinned-crowd-costs.md) and
+  `devtools/test/skin_bench.ps1`: GPU skinning already runs only for
+  culled-in instances; setup CPU is about 0.5 ms per 1000 characters,
+  whatever is in view. Bone AABBs are precomputed in skeleton space
+  (identical results; within noise end to end).
+
 ## 2026-11-27 (cluster LOD off by default)
 
 * **Changed**: `rendering/geometry/cluster_lod/enabled` defaults to false

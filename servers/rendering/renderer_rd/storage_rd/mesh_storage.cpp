@@ -462,6 +462,12 @@ void MeshStorage::mesh_add_surface(RID p_mesh, const RenderingServerTypes::Surfa
 	s->aabb = new_surface.aabb;
 	s->bone_aabbs = new_surface.bone_aabbs; //only really useful for returning them.
 	s->mesh_to_skeleton_xform = p_surface.mesh_to_skeleton_xform;
+	s->skeleton_to_mesh_xform = s->mesh_to_skeleton_xform.affine_inverse();
+	s->skeleton_bone_aabbs.resize(s->bone_aabbs.size());
+	for (int i = 0; i < s->bone_aabbs.size(); i++) {
+		const AABB &bone_aabb = s->bone_aabbs[i];
+		s->skeleton_bone_aabbs[i] = bone_aabb.size == Vector3(-1, -1, -1) ? bone_aabb : s->mesh_to_skeleton_xform.xform(bone_aabb);
+	}
 
 	s->uv_scale = new_surface.uv_scale;
 
@@ -795,8 +801,8 @@ AABB MeshStorage::mesh_get_aabb(RID p_mesh, RID p_skeleton) {
 		AABB laabb;
 		const Mesh::Surface &surface = *mesh->surfaces[i];
 		if ((surface.format & RSE::ARRAY_FORMAT_BONES) && surface.bone_aabbs.size()) {
-			int bs = surface.bone_aabbs.size();
-			const AABB *skbones = surface.bone_aabbs.ptr();
+			int bs = surface.skeleton_bone_aabbs.size();
+			const AABB *skbones = surface.skeleton_bone_aabbs.ptr();
 
 			int sbs = skeleton->size;
 			ERR_CONTINUE(bs > sbs);
@@ -822,9 +828,8 @@ AABB MeshStorage::mesh_get_aabb(RID p_mesh, RID p_skeleton) {
 					mtx.basis.rows[1][1] = dataptr[5];
 					mtx.origin.y = dataptr[7];
 
-					// Transform bounds to skeleton's space before applying animation data.
-					AABB baabb = surface.mesh_to_skeleton_xform.xform(skbones[j]);
-					baabb = mtx.xform(baabb);
+					// The bounds are already in the skeleton's space.
+					AABB baabb = mtx.xform(skbones[j]);
 
 					if (!found_bone_aabb) {
 						laabb = baabb;
@@ -856,9 +861,8 @@ AABB MeshStorage::mesh_get_aabb(RID p_mesh, RID p_skeleton) {
 					mtx.basis.rows[2][2] = dataptr[10];
 					mtx.origin.z = dataptr[11];
 
-					// Transform bounds to skeleton's space before applying animation data.
-					AABB baabb = surface.mesh_to_skeleton_xform.xform(skbones[j]);
-					baabb = mtx.xform(baabb);
+					// The bounds are already in the skeleton's space.
+					AABB baabb = mtx.xform(skbones[j]);
 
 					if (!found_bone_aabb) {
 						laabb = baabb;
@@ -871,7 +875,7 @@ AABB MeshStorage::mesh_get_aabb(RID p_mesh, RID p_skeleton) {
 
 			if (found_bone_aabb) {
 				// Transform skeleton bounds back to mesh's space if any animated AABB applied.
-				laabb = surface.mesh_to_skeleton_xform.affine_inverse().xform(laabb);
+				laabb = surface.skeleton_to_mesh_xform.xform(laabb);
 			}
 
 			if (laabb.size == Vector3()) {
@@ -1336,6 +1340,8 @@ void MeshStorage::update_mesh_instances() {
 	//process skeletons and blend shapes
 	uint64_t frame = RSG::rasterizer->get_frame_number();
 	bool uses_motion_vectors = (RSG::viewport->get_num_viewports_with_motion_vectors() > 0) || (RendererCompositorStorage::get_singleton()->get_num_compositor_effects_with_motion_vectors() > 0);
+	// Direct timestamps (not RENDER_TIMESTAMP): benches read them without the profiler.
+	RD::get_singleton()->capture_timestamp("Skinning");
 	RD::ComputeListID compute_list = RD::get_singleton()->compute_list_begin();
 
 	while (dirty_mesh_instance_arrays.first()) {
@@ -1434,6 +1440,7 @@ void MeshStorage::update_mesh_instances() {
 	}
 
 	RD::get_singleton()->compute_list_end();
+	RD::get_singleton()->capture_timestamp("Skinning End");
 }
 
 RD::VertexFormatID MeshStorage::_mesh_surface_generate_vertex_format(uint64_t p_surface_format, uint64_t p_input_mask, bool p_instanced_surface, bool p_input_motion_vectors, bool p_point_size_emulated, uint32_t &r_position_stride) {

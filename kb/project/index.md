@@ -23,6 +23,7 @@
 * [Two-pass MultiMesh occlusion](/project/multimesh-two-pass.md) - hidden-last-frame instances left out of the depth pre-pass; exact; street grid 7-12% faster, open valley 1-7% slower
 * [Cluster LOD skips repeat-batched elements](/project/clod-skipped-for-batched-elements.md) - shared meshes with same-shader materials batched since material tables, so no CLOD; fixed (G5): CLOD-eligible surfaces are not batched
 * [CLOD two-pass costs more than it saves](/project/clod-two-pass-zero-draws.md) - one indirect record per group in every pass, mostly empty; two_pass 27-32% slower than off in hzb_bench; resolved by compact command streams
+* [Where a skinned crowd's renderer cost goes](/project/skinned-crowd-costs.md) - GPU skinning is visibility-driven already (0.15 ms for 1000 characters); setup CPU about 0.5 ms regardless of view; bone AABBs kept in skeleton space
 * [Keep the TLAS in frames where nothing changed](/project/tlas-static-skip.md) - DDGI and path tracer skip the TLAS build when instances and BLASes are unchanged; static interior AS stage 0.094 to 0.007 ms
 * [The cluster render buffer sized by the limit cost 0.27 ms](/project/cluster-render-buffer-used-size.md) - the intermediate cluster buffer was cleared at the full limit every frame (172 MB at 1080p, limit 4096); now laid out for the used elements
 * [Lights over the cluster limit keep the nearest](/project/light-cap-nearest.md) - visible positional lights above `max_clustered_elements` were dropped in cull order; now the farthest by range are left out, with a warning

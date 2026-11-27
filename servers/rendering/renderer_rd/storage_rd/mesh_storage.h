@@ -174,6 +174,12 @@ private:
 			// Transform used in runtime bone AABBs compute.
 			// As bone AABBs are saved in Mesh space, but bones animation is in Skeleton space.
 			Transform3D mesh_to_skeleton_xform;
+			// Both fixed when the surface is added: the bone AABBs already in
+			// skeleton space (an unused bone keeps size -1), and the way back.
+			// The skinned AABB of every instance, every frame, needs only the
+			// bone transform then.
+			LocalVector<AABB> skeleton_bone_aabbs;
+			Transform3D skeleton_to_mesh_xform;
 
 			Vector4 uv_scale;
 
