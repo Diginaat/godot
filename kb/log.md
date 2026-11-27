@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-27 (stock comparison infographic)
+
+* **Updated**: docs/benchmarks/stock-compare.md: a fresh run against stock
+  4.7.2 on `dev-renderer-next` (`957eff26cf`) with an infographic made by
+  the new `devtools/test/stock_compare_chart.py` (levels 2.8-6.1x,
+  scene runtime up to 20x, VRAM below stock in all instance cases).
+
 ## 2026-11-27 (occlusion cost measured)
 
 * **Added**: [GPU-path occlusion cost](/project/gpu-occlusion-cost.md):
