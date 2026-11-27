@@ -116,7 +116,10 @@ second small_1k run from 82.9 to 78.7 MB and town from 174 to 169 MB,
 but town's render CPU went from 0.603 to about 0.63 ms (10 alternated
 rounds). Each list shrank once, at frame 123, and never grew back, so
 the cost is not reallocation; the cause was not found, and the change
-was dropped.
+was dropped. Two copies of the same exe later gave town 0.603-0.623 and
+0.610-0.638 ms over four rounds, so town's render CPU spreads by about
+0.03 ms between runs; the change was slower in 8 of 10 rounds (medians
+0.602 and 0.631), so it may be worth measuring again with more rounds.
 
 # Settings
 

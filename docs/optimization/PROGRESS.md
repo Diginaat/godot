@@ -55,3 +55,15 @@
   8.55 to 8.42 ms. The shadow-dirty loop over unshadowed lights (3%) is
   left: shadow toggles would need tracking. A gizmo flag for the transform walk was tried and
   dropped (REGRESSIONS.md).
+- O6, dropped (REGRESSIONS.md): finer scene cull chunks, the main thread
+  culling one chunk, and the separate render thread (city wall equal,
+  p95 worse). The cull is compute bound, about 8 ns per instance.
+- O1, dropped: render list buffers shrinking to 4,096 elements (4-5 MB,
+  town render CPU possibly +0.03 ms).
+- Stock comparison on the development branch (docs/benchmarks/stock-compare.md):
+  instance cases now use less VRAM than stock (91-151 MB against
+  117-165), city_extreme +31 MB; scene runtime deep 1.5x and script 1.9x
+  stock; cold shader stall within 3% of stock.
+- O3: the fork's extra GPU time in open instance cases (0.02-0.03 ms) is
+  GPU-path occlusion with nothing to hide; levels save 0.9-3.4 ms GPU
+  with it, so the defaults stay (kb gpu-occlusion-cost).
