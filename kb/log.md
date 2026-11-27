@@ -1,5 +1,32 @@
 # Update log
 
+## 2026-11-27 (stock 4.7.2 vs the fork)
+
+* **Added**: [stock compare](/project/stock-compare-2026-11.md):
+  `devtools/test/stock_compare.ps1`, `misc/stock_compare_project`
+  (game-level and physics benches on stock 4.7 API), results in
+  `docs/benchmarks/stock-compare.md`. Game levels 2.9-6.0x, instances
+  1.1-15.9x, scene runtime up to 19x at 100k, PhysX GPU 2.6-2.7x over
+  Jolt from 8k bodies, 2.1x slower at 2k; cold shader stall 10% longer.
+* **Mistakes**: [engine limit capped the workload](/mistakes/engine-limit-capped-the-workload.md),
+  [SDK build outside the developer shell](/mistakes/sdk-build-outside-the-dev-shell.md).
+* **Seen again**: [single-arg splat](/mistakes/powershell-single-arg-splat.md):
+  `-File ... -Suites a,b` arrived as one string; the runner now splits.
+
+## 2026-11-26 (O3DE Atom renderer research)
+
+* **Added**: [O3DE Atom renderer](/research/o3de-atom-renderer.md): frame
+  graph transient aliasing, depth-binned tile light culling, CPU
+  auto-instancing, job pipelining, shader variant fallback. Ideas
+  (draft): depth occupancy mask for the cluster builder, transient pool
+  for per-frame intermediates. Nothing measured.
+
+## 2026-11-26 (mesh shader research)
+
+* **Added**: [mesh shaders](/research/mesh-shaders.md): API limits,
+  vendor meshlet sizing, culling efficiency, platform coverage, state of
+  Godot PR 88934. Nothing measured; D002 unchanged.
+
 ## 2026-11-24 (built-in level streamer)
 
 * **Added**: [built-in level streamer](/project/level-streaming.md)

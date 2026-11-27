@@ -40,3 +40,8 @@ ideas; check the license before taking any code.
 # What they mean for DDGI
 
 * [DDGI improvement proposals, ranked](/ddgi/improvements/index.md)
+
+# Rendering pipeline (read 2026-11-26)
+
+* [Mesh shaders](/research/mesh-shaders.md) - D3D12/Vulkan/Metal limits, vendor meshlet sizes, culling vs meshlet size, platform coverage, Godot RD PR 88934; D002 still holds
+* [O3DE Atom renderer](/research/o3de-atom-renderer.md) - frame graph transient aliasing and load/store elision, depth-binned tile light culling, CPU auto-instancing, job pipelining, shader variant fallback; ideas for this fork

@@ -1,0 +1,32 @@
+; Stock Godot vs this fork (devtools/test/stock_compare.ps1, docs/benchmarks/stock-compare.md).
+; Uses only stock 4.7 API, so the same scripts run on both. The runner copies
+; this project once per engine and physics backend; don't run it in place.
+
+config_version=5
+
+[application]
+
+config/name="Stock Compare Bench"
+run/main_scene="res://level_bench.tscn"
+run/low_processor_mode_sleep_usec=0
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/vsync/vsync_mode=0
+
+[physics]
+
+common/physics_ticks_per_second=60
+common/max_physics_steps_per_frame=1
+; Jolt's defaults (10240 bodies) are below the 30k-body case.
+jolt_physics_3d/limits/max_bodies=65536
+jolt_physics_3d/limits/max_body_pairs=1048576
+jolt_physics_3d/limits/max_contact_constraints=524288
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+rendering_device/driver.windows="vulkan"

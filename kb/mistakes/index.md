@@ -60,3 +60,5 @@ What worked is in [successes](/successes/).
 * [Separate runs had an order bias; a draw count was taken for the cost](/mistakes/separate-runs-order-bias.md) - alternate A/B settings inside one process with an A/A floor; remove the suspected counter and measure again before naming a cause
 * [Warm A/B runs on a new exe measured the driver cache](/mistakes/warm-runs-on-a-new-exe.md) - cold run first for every build; NVIDIA's driver cache is per exe
 * [The export template was built before the new module](/mistakes/template-older-than-the-module.md) - build the template after the module's last config change; check the class is in the template before an exported run
+* [An engine limit capped the benchmark workload](/mistakes/engine-limit-capped-the-workload.md) - check ERROR lines and a workload sanity value before reading numbers; one CSV per row shape
+* [SDK build outside the developer shell](/mistakes/sdk-build-outside-the-dev-shell.md) - build PhysX/Blast/Flow inside vcvars64 -vcvars_ver=14.44; CUDA 12.8 rejects v145
