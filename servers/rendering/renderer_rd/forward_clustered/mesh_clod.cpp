@@ -262,7 +262,7 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 				rd->free_rid(*buffer);
 			}
 		}
-		buffers.group_capacity = Math::next_power_of_2(total_groups);
+		buffers.group_capacity = gpu_buffer_capacity(total_groups);
 		buffers.commands = rd->storage_buffer_create(buffers.group_capacity * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 		buffers.selection = rd->storage_buffer_create(buffers.group_capacity * sizeof(uint32_t));
 		if (buffers.commands.is_null() || buffers.selection.is_null()) {
@@ -276,7 +276,7 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 				rd->free_rid(*buffer);
 			}
 		}
-		buffers.draw_capacity = Math::next_power_of_2(inputs.size());
+		buffers.draw_capacity = gpu_buffer_capacity(inputs.size());
 		buffers.inputs = rd->storage_buffer_create(buffers.draw_capacity * sizeof(MeshCLODInput));
 		buffers.counts = rd->storage_buffer_create(buffers.draw_capacity * RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_MAX * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 		if (buffers.inputs.is_null() || buffers.counts.is_null()) {
@@ -388,7 +388,7 @@ void RenderForwardClustered::_mesh_clod_shadow_dispatch() {
 				rd->free_rid(*buffer);
 			}
 		}
-		shadow.group_capacity = Math::next_power_of_2(shadow.total_groups);
+		shadow.group_capacity = gpu_buffer_capacity(shadow.total_groups);
 		shadow.commands = rd->storage_buffer_create(shadow.group_capacity * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 		shadow.selection = rd->storage_buffer_create(shadow.group_capacity * sizeof(uint32_t));
 		valid = shadow.commands.is_valid() && shadow.selection.is_valid();
@@ -402,7 +402,7 @@ void RenderForwardClustered::_mesh_clod_shadow_dispatch() {
 				rd->free_rid(*buffer);
 			}
 		}
-		shadow.draw_capacity = Math::next_power_of_2(shadow.inputs.size());
+		shadow.draw_capacity = gpu_buffer_capacity(shadow.inputs.size());
 		shadow.inputs_buffer = rd->storage_buffer_create(shadow.draw_capacity * sizeof(MeshCLODInput));
 		shadow.counts = rd->storage_buffer_create(shadow.draw_capacity * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 		valid = shadow.inputs_buffer.is_valid() && shadow.counts.is_valid();

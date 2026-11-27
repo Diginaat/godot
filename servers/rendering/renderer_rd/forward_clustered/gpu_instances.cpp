@@ -310,6 +310,7 @@ bool RenderForwardClustered::_gpu_instances_prepare_two_pass(GPUInstanceScenario
 		uint32_t needed;
 		uint32_t element_size;
 		bool indirect;
+		const char *name;
 	};
 	const uint32_t command_count = p_scenario.commands.size() / 5;
 	// Phase-1 and phase-2 lists share their capacity: grown together.
@@ -317,8 +318,8 @@ bool RenderForwardClustered::_gpu_instances_prepare_two_pass(GPUInstanceScenario
 	const uint32_t id_capacity = p_scenario.phase_id_capacity;
 	const uint32_t history_capacity = p_scenario.history_capacity;
 	const Grow grows[] = {
-		{ &p_scenario.history_buffer, &p_scenario.history_capacity, gpu_instance_slots.get_capacity(), sizeof(uint32_t), false },
-		{ &p_scenario.phase1_buffer, &p_scenario.phase1_capacity, p_scenario.member_count, sizeof(uint32_t), false },
+		{ &p_scenario.history_buffer, &p_scenario.history_capacity, gpu_instance_slots.get_capacity(), sizeof(uint32_t), false, "GPU Instances History" },
+		{ &p_scenario.phase1_buffer, &p_scenario.phase1_capacity, p_scenario.member_count, sizeof(uint32_t), false, "GPU Instances Phase 1" },
 	};
 	for (const Grow &grow : grows) {
 		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
@@ -327,12 +328,13 @@ bool RenderForwardClustered::_gpu_instances_prepare_two_pass(GPUInstanceScenario
 		if (grow.buffer->is_valid()) {
 			rd->free_rid(*grow.buffer);
 		}
-		*grow.capacity = Math::next_power_of_2(MAX(grow.needed, 64u));
+		*grow.capacity = gpu_buffer_capacity(grow.needed, 64u);
 		*grow.buffer = rd->storage_buffer_create(*grow.capacity * grow.element_size);
 		if (grow.buffer->is_null()) {
 			*grow.capacity = 0;
 			return false;
 		}
+		rd->set_resource_name(*grow.buffer, grow.name);
 	}
 	if (p_scenario.history_capacity != history_capacity) {
 		// Grown empty: every slot counts as visible, so phase 1 draws it.
@@ -355,6 +357,10 @@ bool RenderForwardClustered::_gpu_instances_prepare_two_pass(GPUInstanceScenario
 			p_scenario.phase_id_capacity = 0;
 			return false;
 		}
+		rd->set_resource_name(p_scenario.phase1_commands_buffer, "GPU Instances Phase 1 Commands");
+		rd->set_resource_name(p_scenario.phase2_commands_buffer, "GPU Instances Phase 2 Commands");
+		rd->set_resource_name(p_scenario.phase1_ids_buffer, "GPU Instances Phase 1 IDs");
+		rd->set_resource_name(p_scenario.phase2_ids_buffer, "GPU Instances Phase 2 IDs");
 	}
 	// Zeroed on the GPU (a clear, not a copy); the camera run appends.
 	rd->buffer_clear(p_scenario.phase1_commands_buffer, 0, command_count * 5 * sizeof(uint32_t));
@@ -707,15 +713,16 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		uint32_t minimum;
 		uint32_t element_size;
 		bool indirect;
+		const char *name;
 	};
 	const Grow grows[] = {
-		{ &p_scenario.members_buffer, &p_scenario.member_capacity, p_scenario.member_count, 64, GPU_INSTANCE_MEMBER_WORDS * sizeof(uint32_t), false },
-		{ &p_scenario.buckets_buffer, &p_scenario.bucket_capacity, p_scenario.buckets.size(), 16, sizeof(GPUInstanceBucketData), false },
-		{ &p_scenario.commands_buffer, &p_scenario.command_capacity, p_scenario.commands.size() / 5, 16, 5 * sizeof(uint32_t), true },
-		{ &p_scenario.lod_edges_buffer, &p_scenario.lod_edge_capacity, p_scenario.lod_edges.size(), 16, sizeof(float), false },
-		{ &p_scenario.ids_buffer, &p_scenario.id_capacity, id_count, 64, sizeof(uint32_t), false },
-		{ &p_scenario.command_primitives_buffer, &p_scenario.command_primitive_capacity, p_scenario.commands.size() / 5, 16, sizeof(uint32_t), false },
-		{ &p_scenario.command_indices_buffer, &p_scenario.command_index_capacity, p_scenario.command_indices.size(), 16, sizeof(uint32_t), false },
+		{ &p_scenario.members_buffer, &p_scenario.member_capacity, p_scenario.member_count, 64, GPU_INSTANCE_MEMBER_WORDS * sizeof(uint32_t), false, "GPU Instances Members" },
+		{ &p_scenario.buckets_buffer, &p_scenario.bucket_capacity, p_scenario.buckets.size(), 16, sizeof(GPUInstanceBucketData), false, "GPU Instances Buckets" },
+		{ &p_scenario.commands_buffer, &p_scenario.command_capacity, p_scenario.commands.size() / 5, 16, 5 * sizeof(uint32_t), true, "GPU Instances Commands" },
+		{ &p_scenario.lod_edges_buffer, &p_scenario.lod_edge_capacity, p_scenario.lod_edges.size(), 16, sizeof(float), false, "GPU Instances LOD Edges" },
+		{ &p_scenario.ids_buffer, &p_scenario.id_capacity, id_count, 64, sizeof(uint32_t), false, "GPU Instances IDs" },
+		{ &p_scenario.command_primitives_buffer, &p_scenario.command_primitive_capacity, p_scenario.commands.size() / 5, 16, sizeof(uint32_t), false, "GPU Instances Command Primitives" },
+		{ &p_scenario.command_indices_buffer, &p_scenario.command_index_capacity, p_scenario.command_indices.size(), 16, sizeof(uint32_t), false, "GPU Instances Command Indices" },
 	};
 	for (const Grow &grow : grows) {
 		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
@@ -724,18 +731,20 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		if (grow.buffer->is_valid()) {
 			rd->free_rid(*grow.buffer);
 		}
-		*grow.capacity = Math::next_power_of_2(MAX(grow.needed, grow.minimum));
+		*grow.capacity = gpu_buffer_capacity(grow.needed, grow.minimum);
 		BitField<RD::StorageBufferUsage> usage = {};
 		if (grow.indirect) {
 			usage.set_flag(RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 		}
 		*grow.buffer = rd->storage_buffer_create(*grow.capacity * grow.element_size, {}, usage);
+		rd->set_resource_name(*grow.buffer, grow.name);
 		if (grow.buffer == &p_scenario.members_buffer) {
 			// The instance data has one record per member.
 			if (p_scenario.output_buffer.is_valid()) {
 				rd->free_rid(p_scenario.output_buffer);
 			}
 			p_scenario.output_buffer = rd->storage_buffer_create(*grow.capacity * sizeof(SceneState::InstanceData));
+			rd->set_resource_name(p_scenario.output_buffer, "GPU Instances Instance Data");
 		}
 	}
 	if (p_scenario.member_count > 0) {
@@ -925,8 +934,9 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		if (scenario->visible_buffer.is_valid()) {
 			rd->free_rid(scenario->visible_buffer);
 		}
-		scenario->visible_capacity = Math::next_power_of_2(MAX(words, 64u));
+		scenario->visible_capacity = gpu_buffer_capacity(words, 64u);
 		scenario->visible_buffer = rd->storage_buffer_create(scenario->visible_capacity * sizeof(uint32_t));
+		rd->set_resource_name(scenario->visible_buffer, "GPU Instances Visible");
 	}
 	rd->buffer_update(scenario->visible_buffer, 0, words * sizeof(uint32_t), bits.ptr());
 
@@ -1533,12 +1543,13 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 		uint32_t minimum;
 		uint32_t element_size;
 		bool indirect;
+		const char *name;
 	};
 	const Grow grows[] = {
-		{ &batch.commands, &batch.command_capacity, passes * (command_words / 5), 16, 5 * sizeof(uint32_t), true },
-		{ &batch.ids, &batch.id_capacity, passes * scenario->id_count, 64, sizeof(uint32_t), false },
-		{ &batch.visible, &batch.visible_capacity, passes * words, 64, sizeof(uint32_t), false },
-		{ &batch.passes, &batch.pass_capacity, passes, 8, sizeof(GPUInstanceShadowPassData), false },
+		{ &batch.commands, &batch.command_capacity, passes * (command_words / 5), 16, 5 * sizeof(uint32_t), true, "GPU Instances Shadow Commands" },
+		{ &batch.ids, &batch.id_capacity, passes * scenario->id_count, 64, sizeof(uint32_t), false, "GPU Instances Shadow IDs" },
+		{ &batch.visible, &batch.visible_capacity, passes * words, 64, sizeof(uint32_t), false, "GPU Instances Shadow Visible" },
+		{ &batch.passes, &batch.pass_capacity, passes, 8, sizeof(GPUInstanceShadowPassData), false, "GPU Instances Shadow Passes" },
 	};
 	for (const Grow &grow : grows) {
 		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
@@ -1547,12 +1558,13 @@ void RenderForwardClustered::_gpu_instances_shadow_flush() {
 		if (grow.buffer->is_valid()) {
 			rd->free_rid(*grow.buffer);
 		}
-		*grow.capacity = Math::next_power_of_2(MAX(grow.needed, grow.minimum));
+		*grow.capacity = gpu_buffer_capacity(grow.needed, grow.minimum);
 		BitField<RD::StorageBufferUsage> usage = {};
 		if (grow.indirect) {
 			usage.set_flag(RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 		}
 		*grow.buffer = rd->storage_buffer_create(*grow.capacity * grow.element_size, {}, usage);
+		rd->set_resource_name(*grow.buffer, grow.name);
 	}
 	if (batch.stats.is_null()) {
 		batch.stats = rd->storage_buffer_create(4 * sizeof(uint32_t));

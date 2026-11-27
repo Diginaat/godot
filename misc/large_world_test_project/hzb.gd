@@ -20,9 +20,9 @@ func _test_gpu() -> void:
 	var rd := RenderingServer.get_rendering_device()
 	var shaders: Array[RID] = []
 	var pipelines: Array[RID] = []
-	for variant in ["copy", "reduce", "occlude", "split"]:
+	for variant in ["first", "reduce", "occlude", "split"]:
 		var path := "res://../../servers/rendering/renderer_rd/shaders/forward_clustered/mesh_hiz_%s.glsl" % ("occlude" if variant == "occlude" or variant == "split" else "reduce")
-		var defines := {"copy": "#define MODE_COPY", "split": "#define MODE_SPLIT"}
+		var defines := {"first": "#define MODE_FIRST", "split": "#define MODE_SPLIT"}
 		var source := RDShaderSource.new()
 		# The engine's shader builder resolves #include; this compiler does not.
 		var include := FileAccess.get_file_as_string(ProjectSettings.globalize_path(path.get_base_dir().path_join("mesh_hiz_inc.glsl")))
@@ -38,8 +38,10 @@ func _test_gpu() -> void:
 		pipelines.append(rd.compute_pipeline_create(shader))
 	const WIDTH := 13
 	const HEIGHT := 9
-	const PADDED := 16
-	const LEVELS := 5
+	# The pyramid starts at half the depth's resolution (mesh_hiz_inc.glsl):
+	# 13 x 9 pixels pad to 16 x 16, so mip 0 is 8 x 8.
+	const PADDED := 8
+	const LEVELS := 4
 	var format := RDTextureFormat.new()
 	format.width = WIDTH
 	format.height = HEIGHT
@@ -166,12 +168,20 @@ func _test_gpu() -> void:
 		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, compact, 1]).to_byte_array(), 16)
 		rd.compute_list_dispatch(list, 1, 1, 1)
 		rd.compute_list_end()
-		# Verify every mip against the exact padded min-depth CPU reduction.
+		# Verify every mip against the exact padded min-depth CPU reduction:
+		# mip 0 holds the farthest of each 2 x 2 pixels, clear depth (0) past
+		# the image.
 		var expected := PackedFloat32Array()
 		expected.resize(PADDED * PADDED)
-		for y in HEIGHT:
-			for x in WIDTH:
-				expected[y * PADDED + x] = depths[y * WIDTH + x]
+		for y in PADDED:
+			for x in PADDED:
+				var farthest := 1.0
+				for sy in 2:
+					for sx in 2:
+						var px := x * 2 + sx
+						var py := y * 2 + sy
+						farthest = minf(farthest, depths[py * WIDTH + px] if px < WIDTH and py < HEIGHT else 0.0)
+				expected[y * PADDED + x] = farthest
 		var mip_data := rd.texture_get_data(pyramid, 0).to_float32_array()
 		var mip_offset := 0
 		for level in LEVELS:

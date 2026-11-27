@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-27 (GPU buffer VRAM, O1)
+
+* **Added**: [VRAM of the GPU-driven systems cut](/project/gpu-buffer-vram.md):
+  growing GPU buffers get an eighth of headroom above 65,536 elements
+  instead of the next power of two, and the HZB starts at half
+  resolution. city_extreme 475 to 415 MB, forest 237 to 221, town 201
+  to 192, a 1k-node scene 80.2 to 72.2 (stock 68.8); GPU time slightly
+  lower. Start of the engine performance brief in `docs/optimization/`.
+
 ## 2026-11-27 (mesh occlusion bench, G9)
 
 * **Updated**: [mesh occlusion](/project/mesh-occlusion.md): new

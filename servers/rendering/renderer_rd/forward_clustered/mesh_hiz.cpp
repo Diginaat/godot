@@ -66,7 +66,7 @@ bool ensure_buffer(RID &r_buffer, uint32_t &r_capacity, uint32_t p_needed, uint3
 	if (r_buffer.is_valid()) {
 		rd->free_rid(r_buffer);
 	}
-	r_capacity = Math::next_power_of_2(MAX(p_needed, 1u));
+	r_capacity = gpu_buffer_capacity(p_needed);
 	r_buffer = rd->storage_buffer_create(r_capacity * p_element_size, {}, p_usage);
 	if (r_buffer.is_null()) {
 		r_capacity = 0;
@@ -100,7 +100,8 @@ bool RenderForwardClustered::_setup_hzb(const RenderDataRD *p_render_data, Rende
 	}
 	const Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
 	const Size2i size = rb->get_internal_size();
-	const Size2i padded(Math::next_power_of_2(uint32_t(size.width)), Math::next_power_of_2(uint32_t(size.height)));
+	// Half the depth buffer's resolution (mesh_hiz_inc.glsl), padded to powers of two.
+	const Size2i padded(MAX(1u, Math::next_power_of_2(uint32_t(size.width)) >> 1), MAX(1u, Math::next_power_of_2(uint32_t(size.height)) >> 1));
 	// Twice the base image bounds the full mip chain even for 1-pixel strips.
 	if (uint64_t(padded.width) * padded.height * 8 > 64 * 1024 * 1024) {
 		return false;
@@ -121,7 +122,7 @@ bool RenderForwardClustered::_setup_hzb(const RenderDataRD *p_render_data, Rende
 	}
 	if (mesh_hiz.reduce_version.is_null()) {
 		Vector<String> modes;
-		modes.push_back("\n#define MODE_COPY\n");
+		modes.push_back("\n#define MODE_FIRST\n");
 		modes.push_back("");
 		mesh_hiz.reduce_shader.initialize(modes);
 		mesh_hiz.reduce_version = mesh_hiz.reduce_shader.version_create();
@@ -151,7 +152,8 @@ void RenderForwardClustered::_build_hzb(const RenderDataRD *p_render_data, Rende
 	const Ref<RenderSceneBuffersRD> rb = p_render_data->render_buffers;
 	RD *rd = RD::get_singleton();
 	const Size2i size = rb->get_internal_size();
-	const Size2i padded(Math::next_power_of_2(uint32_t(size.width)), Math::next_power_of_2(uint32_t(size.height)));
+	// Half the depth buffer's resolution (mesh_hiz_inc.glsl), padded to powers of two.
+	const Size2i padded(MAX(1u, Math::next_power_of_2(uint32_t(size.width)) >> 1), MAX(1u, Math::next_power_of_2(uint32_t(size.height)) >> 1));
 	const uint32_t mipmaps = p_buffers->hzb.mipmaps;
 	const RID sampler = RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_NEAREST_WITH_MIPMAPS, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED);
 	rd->capture_timestamp("Mesh CLOD HZB");
@@ -230,7 +232,7 @@ bool RenderForwardClustered::_setup_mesh_clod_occlusion(const RenderDataRD *p_re
 		if (buffers.history.is_valid()) {
 			rd->free_rid(buffers.history);
 		}
-		const uint32_t capacity = Math::next_power_of_2(MAX(all_groups * 2, 1024u));
+		const uint32_t capacity = gpu_buffer_capacity(all_groups * 2, 1024u);
 		buffers.history = rd->storage_buffer_create(capacity * sizeof(uint32_t));
 		buffers.history_capacity = buffers.history.is_valid() ? capacity : 0;
 		buffers.history_used = 0;
@@ -453,7 +455,7 @@ bool RenderForwardClustered::_setup_multimesh_occlusion(const RenderDataRD *p_re
 				rd->free_rid(buffer);
 			}
 		}
-		cull.history_capacity = Math::next_power_of_2(MAX(history_words, 1u));
+		cull.history_capacity = gpu_buffer_capacity(history_words);
 		for (RID &buffer : cull.history) {
 			buffer = rd->storage_buffer_create(cull.history_capacity * sizeof(uint32_t));
 		}

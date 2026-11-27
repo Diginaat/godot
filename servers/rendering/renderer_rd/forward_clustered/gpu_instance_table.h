@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include "servers/rendering/renderer_rd/forward_clustered/gpu_buffer_capacity.h"
+
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/gpu_instance_scatter.glsl.gen.h"
 #include "servers/rendering/rendering_device.h"

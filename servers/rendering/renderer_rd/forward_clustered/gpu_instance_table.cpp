@@ -70,7 +70,7 @@ GPUInstanceTable::UploadStats GPUInstanceTable::upload(bool p_skip_one) {
 		// replaces every pending range. RD keeps the old buffer alive until
 		// the frames that read it have finished.
 		free_buffer();
-		buffer_capacity = MAX(MIN_CAPACITY, Math::next_power_of_2(MAX(records.size(), 1u)));
+		buffer_capacity = gpu_buffer_capacity(records.size(), MIN_CAPACITY);
 		Vector<uint8_t> initial;
 		initial.resize(buffer_capacity * sizeof(Record));
 		memset(initial.ptrw(), 0, initial.size());

@@ -286,7 +286,7 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 				rd->free_rid(resource);
 			}
 		}
-		r_buffers.id_capacity = Math::next_power_of_2(p_batch.total_ids);
+		r_buffers.id_capacity = gpu_buffer_capacity(p_batch.total_ids);
 		r_buffers.visible_ids = rd->storage_buffer_create(r_buffers.id_capacity * sizeof(uint32_t));
 		r_buffers.ranks = rd->storage_buffer_create(r_buffers.id_capacity * sizeof(uint32_t));
 		r_buffers.blocks = rd->storage_buffer_create((r_buffers.id_capacity / 64) * sizeof(uint32_t));
@@ -302,7 +302,7 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 				rd->free_rid(resource);
 			}
 		}
-		r_buffers.draw_capacity = Math::next_power_of_2(draw_count);
+		r_buffers.draw_capacity = gpu_buffer_capacity(draw_count);
 		// Up to four LOD command records per draw.
 		r_buffers.commands = rd->storage_buffer_create(r_buffers.draw_capacity * 4 * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 		r_buffers.inputs = rd->storage_buffer_create(r_buffers.draw_capacity * sizeof(MultiMeshCullInput));
@@ -344,7 +344,7 @@ bool RenderForwardClustered::_dispatch_multimesh_culling(MultiMeshCullBatch &p_b
 		if (r_buffers.group_draws.is_valid()) {
 			rd->free_rid(r_buffers.group_draws);
 		}
-		r_buffers.group_capacity = Math::next_power_of_2(MAX(group_count, 1u));
+		r_buffers.group_capacity = gpu_buffer_capacity(group_count);
 		r_buffers.group_draws = rd->storage_buffer_create(r_buffers.group_capacity * 2 * sizeof(uint32_t));
 		if (r_buffers.group_draws.is_null()) {
 			r_buffers.group_capacity = 0;

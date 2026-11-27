@@ -1,6 +1,8 @@
 // Conservative HZB box test shared by CLOD group and MultiMesh instance
 // occlusion. The includer declares `depth_pyramid`: the reverse-Z farthest
-// (minimum) depth pyramid, power-of-two padded with clear depth zero.
+// (minimum) depth pyramid, power-of-two padded with clear depth zero. Its
+// mip 0 is at half the depth buffer's resolution (a quarter of the memory):
+// level L below counts in depth buffer pixels and reads mip L - 1.
 
 // True only if the box is proven behind the depth pyramid. Every uncertain
 // case (clipping, near plane, non-finite bounds, screen edges, ties) is visible.
@@ -41,7 +43,7 @@ bool hzb_box_occluded(vec3 origin, vec3 size, mat4 local_to_clip, vec4 error, iv
 	}
 	ivec2 first = max(ivec2(floor(uv_min * vec2(depth_size))) - 1, ivec2(0));
 	ivec2 last = min(ivec2(ceil(uv_max * vec2(depth_size))) + 1, depth_size - 1);
-	int level = 0;
+	int level = 1;
 	while (any(greaterThan((last >> level) - (first >> level), ivec2(1)))) {
 		level++;
 	}
@@ -50,7 +52,7 @@ bool hzb_box_occluded(vec3 origin, vec3 size, mat4 local_to_clip, vec4 error, iv
 	float farthest_occluder = 1.0;
 	for (int y = low.y; y <= high.y; y++) {
 		for (int x = low.x; x <= high.x; x++) {
-			farthest_occluder = min(farthest_occluder, texelFetch(depth_pyramid, ivec2(x, y), level).r);
+			farthest_occluder = min(farthest_occluder, texelFetch(depth_pyramid, ivec2(x, y), level - 1).r);
 		}
 	}
 	return nearest_depth + 0.00001 < farthest_occluder;

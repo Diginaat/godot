@@ -21,10 +21,16 @@ void main() {
 		return;
 	}
 	float depth = 0.0;
-#ifdef MODE_COPY
-	// Padding is reverse-Z clear depth: missing pixels cannot prove occlusion.
-	if (all(lessThan(pixel, params.source_size))) {
-		depth = texelFetch(source_depth, pixel, 0).r;
+#ifdef MODE_FIRST
+	// The first level, at half the depth buffer's resolution: the farthest
+	// of each 2 x 2 pixels. Padding is reverse-Z clear depth: missing pixels
+	// cannot prove occlusion.
+	depth = 1.0;
+	for (int y = 0; y < 2; y++) {
+		for (int x = 0; x < 2; x++) {
+			ivec2 sample_pixel = pixel * 2 + ivec2(x, y);
+			depth = min(depth, all(lessThan(sample_pixel, params.source_size)) ? texelFetch(source_depth, sample_pixel, 0).r : 0.0);
+		}
 	}
 #else
 	depth = 1.0;
