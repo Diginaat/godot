@@ -41,6 +41,7 @@
 #include "core/string/print_string.h"
 #include "core/string/translation_server.h"
 #include "core/variant/typed_array.h"
+#include "core/variant/variant_internal.h"
 
 #ifdef DEBUG_ENABLED
 
@@ -346,6 +347,20 @@ Variant Object::get(const StringName &p_name, bool *r_valid) const {
 	}
 }
 
+// A native property's getter or setter can skip MethodBind::call()'s argument
+// checks when the arguments are known to fit: the getter's (none, or the
+// int index) always do, the setter's value when its type is the declared
+// one. Objects, arrays and dictionaries keep call(), which checks the class
+// and the element types.
+static bool _property_accessor_validated(const MethodBind *p_method, int p_value_args, bool p_returns) {
+	const int index_args = p_method->get_argument_count() - p_value_args;
+	return !p_method->is_vararg() && p_method->has_return() == p_returns && (index_args == 0 || (index_args == 1 && p_method->get_argument_type(0) == Variant::INT));
+}
+
+static bool _property_value_validated(Variant::Type p_declared, Variant::Type p_value) {
+	return p_declared == Variant::NIL || (p_declared == p_value && p_value != Variant::OBJECT && p_value != Variant::ARRAY && p_value != Variant::DICTIONARY);
+}
+
 bool Object::set_native(const StringName &p_name, const Variant &p_value, bool *r_valid) {
 	const GDType::Member *member = get_gdtype().members().getptr(p_name);
 	if (member) {
@@ -361,7 +376,12 @@ bool Object::set_native(const StringName &p_name, const Variant &p_value, bool *
 
 				Callable::CallError ce;
 
-				if (psg.index >= 0) {
+				const int index_args = psg.index >= 0 ? 1 : 0;
+				if (psg.setter->get_argument_count() == index_args + 1 && _property_accessor_validated(psg.setter, 1, false) && _property_value_validated(psg.setter->get_argument_type(index_args), p_value.get_type())) {
+					Variant index = psg.index;
+					const Variant *arg[2] = { &index, &p_value };
+					psg.setter->validated_call(this, index_args ? arg : arg + 1, nullptr);
+				} else if (psg.index >= 0) {
 					Variant index = psg.index;
 					const Variant *arg[2] = { &index, &p_value };
 					//p_object->call(psg->setter,arg,2,ce);
@@ -407,7 +427,12 @@ bool Object::get_native(const StringName &p_name, Variant &r_value, bool *r_vali
 				}
 
 				Callable::CallError ce;
-				if (psg.index >= 0) {
+				if (psg.getter->get_argument_count() == (psg.index >= 0 ? 1 : 0) && _property_accessor_validated(psg.getter, 0, true)) {
+					VariantInternal::initialize(&r_value, psg.getter->get_argument_type(-1));
+					Variant index = psg.index;
+					const Variant *arg[1] = { &index };
+					psg.getter->validated_call(const_cast<Object *>(this), psg.index >= 0 ? arg : nullptr, &r_value);
+				} else if (psg.index >= 0) {
 					Variant index = psg.index;
 					const Variant *arg[1] = { &index };
 					r_value = psg.getter->call(const_cast<Object *>(this), arg, 1, ce);

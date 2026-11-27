@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (native property access, O5)
+
+* **Added**: [native property access](/project/native-property-validated-call.md):
+  `Object::get_native()` and `set_native()` call getters and exactly typed
+  setters with `validated_call()`; objects, arrays, dictionaries and
+  converted values keep `call()`. scene_bench script 10k 1.132 to 1.075 ms,
+  100k 23.6 to 22.1 ms.
+
 ## 2026-11-27 (HZB build, O3)
 
 * **Added**: [HZB build bound by barriers](/project/hzb-fused-reduce.md):

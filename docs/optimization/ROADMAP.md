@@ -13,7 +13,7 @@ the log in [PROGRESS.md](PROGRESS.md).
 | O2 | Scene runtime where the fork gains little: reparent 1.0x, deep tree 1.1x, script processing 1.2x, native processing 1.3x, sparse transforms 1.4x (100k nodes) | `scene_bench.gd` | Started 2026-11-27: script processing (OD3, OD4) 36.1 to 23.6 ms at 100k, now 1.9x stock; native 10k still 0.02 ms behind stock (explained in part). Next: reparent, deep |
 | O3 | Rendering of small scenes: small_1k 1.1x (GPU 0.14 to 0.21 ms), unique_lod_2k 1.7x | `instance_bench.gd` | Started 2026-11-27: GPU per pass against stock (gap 0.039 ms); HZB build four levels per dispatch (OD7), 0.018 to 0.010 ms. Left: the GPU paths' fixed culling cost (about 0.02 ms) |
 | O4 | Cold shader compilation about 10% slower than stock | `shader_bench.gd`: 32.4 / 36.5 s | Done 2026-11-27 (OD5, OD6): ubershader driver CPU -9%, stall -8.5% (`-Mv`: 48.4 to 44.3 s). Not rerun against stock |
-| O5 | GDScript VM: call and property access costs in `_process` | `scene_bench.gd` script | Notification allocation removed (OD3). Open: native property access with validated calls (about 13% of script 100k) |
+| O5 | GDScript VM: call and property access costs in `_process` | `scene_bench.gd` script | Notification allocation removed (OD3); native property access through validated calls (OD8): script 100k 23.6 to 22.1 ms. Open: compile-time property calls in GDScript (need a run-time guard for subclasses) |
 | O6 | Threading: work that stays on the main or render thread | Profiles of O2 and O3 | Planned |
 
 Rules:

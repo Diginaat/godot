@@ -65,3 +65,9 @@ static view, frames 150-350, Vulkan. Fork with `--table --gpu-instances
 
 forest_map (default `gpu_intervals.gd` scene): HZB 0.033 to 0.021 ms,
 frame 1.490 to 1.462 ms.
+
+## O5: native property access (2026-11-27)
+
+`scene_bench.ps1`, 3 alternated rounds, median frame ms (before / after
+OD8): script 10k 1.132 / 1.075, script 100k 23.59 / 22.13, native 10k
+0.147 / 0.147, native 100k 2.53 / 2.50; sparse and mixed within spread.

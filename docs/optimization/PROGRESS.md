@@ -26,3 +26,5 @@
   with a negative control).
 - O3: small_1k GPU time per pass against stock; the gap is the GPU paths'
   fixed costs. OD7 (HZB four levels per dispatch) took 0.008 ms off it.
+- O5: native property get and set through validated calls (OD8), script
+  processing 100k 23.6 to 22.1 ms.

@@ -74,3 +74,14 @@ now also reduces its tile in shared memory to the next three levels;
 `LEVELS` is a shader variant (eight pipelines), so a dispatch binds only
 the levels it writes, never one image twice. Results are bit-identical
 (`hzb.gd`). small_1k HZB 0.010 ms, forest_map 0.033 to 0.021 ms.
+
+## OD8 (2026-11-27): native properties use validated calls when the types fit
+
+`Object::get_native()` and `set_native()` called getters and setters with
+`MethodBind::call()`, which checks and converts every argument. Getters
+now use `validated_call()` (their arguments are known), and setters do
+when the value has the declared type. Objects, arrays, dictionaries,
+converted values, vararg binds, default arguments and returning setters
+keep `call()`. Done in core, not as compile-time calls in GDScript: a
+script on a subclass can meet a property registered again, which the
+per-object member lookup handles. scene_bench script 100k -6%.
