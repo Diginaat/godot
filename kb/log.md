@@ -1,5 +1,10 @@
 # Update log
 
+## 2026-11-27 (mistake: a case run alone hid a leak)
+
+* **Added**: [case alone hid the leak](/mistakes/case-alone-hid-the-leak.md):
+  the OD12 span leak showed only when dynamic_20k ran after another case.
+
 ## 2026-11-27 (moving instance bounds without fmodf, O6 profile)
 
 * **Added**: [moving instance quantize](/project/moving-instance-quantize.md):

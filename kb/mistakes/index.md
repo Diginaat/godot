@@ -14,6 +14,8 @@ something goes wrong: a false claim, a wasted rebuild, a test that
 measured the wrong thing, a correction from the user.
 What worked is in [successes](/successes/).
 
+* [A case run alone hid a per-frame cost](/mistakes/case-alone-hid-the-leak.md) - rerun the regressing sequence before calling it an artifact; print a new table's live count and span once
+
 * [Bisected before reading the KB](/mistakes/bisected-before-reading-the-kb.md) - search kb/ for the symptom before any rebuild; GPU regressions: render graph switches first
 
 * [GUI clicks on a shared desktop](/mistakes/gui-clicks-on-a-shared-desktop.md) - only drive and capture the test window; stop when other apps are on screen
