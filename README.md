@@ -31,6 +31,9 @@ Godot `master`.
 
 ## Godot Diginaat fork vs Stock Godot. benchmartk
 
+<p align="center">
+  <img src="docs/benchmarks/stock-compare.png" width="100%">
+</p>
 
 
 ## PhysX module by Wild Ox Studios
