@@ -123,6 +123,12 @@ Other notes:
 
 Newest first. Note the date, the commit, the view and what you saw or changed.
 
+- 2026-11-27: The TLAS is no longer rebuilt in frames where the instance list
+  and every BLAS are unchanged (`build_acceleration_structures()`,
+  [kb/project/tlas-static-skip.md](kb/project/tlas-static-skip.md)). Smoke
+  tests pass: the PT room, the DDGI interior and PhysX. Animated scenes still
+  rebuild every frame.
+
 - 2026-11-05: Native raster MultiMesh frustum-culling integration changes shared
   Forward+ draw constants and bindings, not the ray tracer. Standard smoke tests
   pass on the `b23737c64e` working tree with integration changes: Vulkan PT room

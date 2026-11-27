@@ -2031,12 +2031,14 @@ void RenderRaytracing::build_acceleration_structures(RTViewportState *p_state, c
 	for (const RID &blas_rid : p_dirty_blas_list) {
 		if (blas_rid.is_valid()) {
 			RD::get_singleton()->blas_build(blas_rid);
+			blas_generation++;
 		}
 	}
 
 	for (const RID &blas_rid : p_dirty_blas_update_list) {
 		if (blas_rid.is_valid()) {
 			RD::get_singleton()->blas_update(blas_rid);
+			blas_generation++;
 		}
 	}
 
@@ -2050,6 +2052,7 @@ void RenderRaytracing::build_acceleration_structures(RTViewportState *p_state, c
 		p_state->tlas_max_instances = needed * 2;
 		p_state->tlas = RD::get_singleton()->tlas_create(p_state->tlas_max_instances, RD::ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT);
 		RD::get_singleton()->set_resource_name(p_state->tlas, "RT TLAS");
+		p_state->tlas_blas_generation = 0;
 	}
 
 	LocalVector<RD::AccelerationStructureInstance> instances;
@@ -2065,7 +2068,22 @@ void RenderRaytracing::build_acceleration_structures(RTViewportState *p_state, c
 		inst.hit_sbt_range = RD::HitShaderBindingTableRange((1ULL << 32) | uint64_t(sbt_off));
 	}
 
+	// A static frame (same instances, no BLAS built or refit anywhere since)
+	// keeps the TLAS it has: the build is most of the acceleration structure
+	// time of a still scene.
+	bool unchanged = p_state->tlas_blas_generation == blas_generation && p_state->tlas_instances.size() == instances.size();
+	for (uint32_t i = 0; unchanged && i < instances.size(); i++) {
+		const RD::AccelerationStructureInstance &a = instances[i];
+		const RD::AccelerationStructureInstance &b = p_state->tlas_instances[i];
+		unchanged = a.blas == b.blas && a.transform == b.transform && a.id == b.id && a.mask == b.mask && a.hit_sbt_range == b.hit_sbt_range && uint32_t(a.flags) == uint32_t(b.flags);
+	}
+	if (unchanged) {
+		return;
+	}
+
 	RD::get_singleton()->tlas_build(p_state->tlas, instances);
+	p_state->tlas_instances = instances;
+	p_state->tlas_blas_generation = blas_generation;
 }
 
 void RenderRaytracing::finalize_buffers(RTViewportState *p_state) {

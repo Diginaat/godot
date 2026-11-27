@@ -294,7 +294,7 @@ breakdown:
 | G4b | Cluster LOD in shadow passes: each cascade, spot and cube face selects its own cut, error in shadow-map texels | Shadows of CLOD meshes (source triangles before) | Done 2026-11-27 ([kb](../../kb/project/shadow-clod.md)): shadow stage 9-11x faster, GPU frame 2.2-2.6x in `shadow_clod_bench` |
 | G6 | Half-resolution and temporal post: SSR and SSAO/SSIL at half resolution with temporal accumulation by default where quality allows; glow and tonemap merged where possible | Post-processing (~0.8 ms) | Planned |
 | G7 | Light culling and shadow atlas scheduling at 128-2048 lights (Phase 7), positional shadow updates only when casters in range moved | Many-light scenes | Started 2026-11-27: `light_bench`; lights over the limit keep the nearest ([kb](../../kb/project/light-cap-nearest.md)); cluster render buffer laid out for the used elements, 0.27 ms less at limit 4096 ([kb](../../kb/project/cluster-render-buffer-used-size.md)). Next: render-thread light buffer fill (0.84 ms at 4096 lights), cluster rasterization |
-| G8 | DDGI and path tracer TLAS refit instead of rebuild when only transforms changed (Phase 9) | GI frames with moving objects | Measure first |
+| G8 | DDGI and path tracer TLAS refit instead of rebuild when only transforms changed (Phase 9) | GI frames with moving objects | Measured 2026-11-27: the rebuild is 0.09 ms (DDGI interior, 1080p). A refit is not done because NVIDIA recommends rebuilds. Static frames now skip the build ([kb](../../kb/project/tlas-static-skip.md)): 0.094 to 0.007 ms |
 | G9 | Bench scene with expensive materials behind occluders, for G1-G4 numbers | Evidence | Needed for G1's frame-time number |
 
 Not planned (still true): async compute (RD has one queue), mesh shaders

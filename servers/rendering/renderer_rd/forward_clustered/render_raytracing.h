@@ -351,6 +351,9 @@ struct RTMaterialCacheEntry {
 struct RTViewportState {
 	RID tlas;
 	uint32_t tlas_max_instances = 0;
+	// What the TLAS was last built from: an unchanged frame skips the build.
+	LocalVector<RD::AccelerationStructureInstance> tlas_instances;
+	uint64_t tlas_blas_generation = 0;
 
 	RID geometry_buffer;
 	uint32_t geometry_buffer_capacity = 0;
@@ -462,6 +465,9 @@ class RenderRaytracing {
 	MeshShape _ddgi_mesh_shape(RID p_mesh, uint32_t p_surface);
 	void _ddgi_add_moving(RID p_mesh, uint32_t p_surface, const Transform3D &p_transform, const AABB &p_world_bounds);
 	LocalVector<RID> blass;
+	// Counts BLAS builds and refits. BLASes are shared by every viewport, so
+	// a TLAS is current only if none was rebuilt since it was built.
+	uint64_t blas_generation = 1;
 	LocalVector<Transform3D> blas_transforms;
 	LocalVector<uint32_t> instance_flags;
 	LocalVector<uint8_t> instance_masks; // Per-instance ray mask (0x00 = invisible to rays, 0xFF = normal, RT_INSTANCE_MASK_MOVING)

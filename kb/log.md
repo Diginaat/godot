@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (TLAS kept in static frames)
+
+* **Added**: [TLAS static skip](/project/tlas-static-skip.md): the TLAS is
+  built only when the instances changed or a BLAS was rebuilt or refit
+  (generation counter shared by all viewports). DDGI static interior AS
+  stage 0.094 to 0.007 ms. TLAS refit (roadmap G8) is not done: NVIDIA
+  recommends rebuilds.
+
 ## 2026-11-27 (cluster render buffer, light bench)
 
 * **Added**: [cluster render buffer used size](/project/cluster-render-buffer-used-size.md):
