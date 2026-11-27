@@ -1,0 +1,22 @@
+; Many-light benchmark (devtools/test/light_bench.ps1). The script writes
+; override.cfg with rendering/limits/cluster_builder/max_clustered_elements
+; for each run (read only at startup).
+
+config_version=5
+
+[application]
+
+config/name="Light Benchmark"
+run/main_scene="res://light_bench.tscn"
+config/features=PackedStringArray("4.8", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/vsync/vsync_mode=0
+
+[rendering]
+
+renderer/rendering_method="forward_plus"
+rendering_device/driver.windows="vulkan"

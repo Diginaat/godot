@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (cluster render buffer, light bench)
+
+* **Added**: [cluster render buffer used size](/project/cluster-render-buffer-used-size.md):
+  the intermediate cluster buffer is laid out and cleared for the frame's
+  elements, not the limit; at `max_clustered_elements` 4096 and 128 lights
+  the GPU frame went from 0.583 to 0.309 ms (Vulkan). New bench
+  `devtools/test/light_bench.ps1` (`misc/light_bench_project`).
+
 ## 2026-11-27 (lights over the cluster limit)
 
 * **Fixed**: [light cap](/project/light-cap-nearest.md): more visible omni,

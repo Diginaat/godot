@@ -23,6 +23,7 @@
 * [Two-pass MultiMesh occlusion](/project/multimesh-two-pass.md) - hidden-last-frame instances left out of the depth pre-pass; exact; street grid 7-12% faster, open valley 1-7% slower
 * [Cluster LOD skips repeat-batched elements](/project/clod-skipped-for-batched-elements.md) - shared meshes with same-shader materials batched since material tables, so no CLOD; fixed (G5): CLOD-eligible surfaces are not batched
 * [CLOD two-pass costs more than it saves](/project/clod-two-pass-zero-draws.md) - one indirect record per group in every pass, mostly empty; two_pass 27-32% slower than off in hzb_bench; resolved by compact command streams
+* [The cluster render buffer sized by the limit cost 0.27 ms](/project/cluster-render-buffer-used-size.md) - the intermediate cluster buffer was cleared at the full limit every frame (172 MB at 1080p, limit 4096); now laid out for the used elements
 * [Lights over the cluster limit keep the nearest](/project/light-cap-nearest.md) - visible positional lights above `max_clustered_elements` were dropped in cull order; now the farthest by range are left out, with a warning
 * [Cluster LOD in shadow passes](/project/shadow-clod.md) - every cascade, spot and cube face selects its own cut with the error in shadow-map texels; shadow stage 9-11x faster, GPU frame 2.2-2.6x in shadow_clod_bench
 * [Compact CLOD command streams](/project/compact-clod-commands.md) - selection and HZB kernels append only drawn groups, passes draw with a GPU count; hzb_bench GPU frame 2.2-5.5x faster on Vulkan, 1.6-3.3x on D3D12

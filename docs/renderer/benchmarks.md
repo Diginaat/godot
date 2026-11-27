@@ -421,6 +421,18 @@ alternating, 2 x 240 frames, medians. ms, source -> CLOD
 | D3D12 ground | 1.412 -> 0.632 | 1.544 -> 0.640 | 0.858 -> 0.080 |
 | D3D12 aerial | 1.526 -> 0.691 | 1.714 -> 0.697 | 0.926 -> 0.091 |
 
+### Many lights: cluster render buffer, 2026-11-27
+
+`devtools/test/light_bench.ps1`: 1600 boxes, omni lights of range 6 in
+stages, 1920x1080, RTX 5070, Vulkan, 240 frames per stage, GPU frame p50
+in ms, before -> after laying out the cluster render buffer for the used
+elements ([kb](../../kb/project/cluster-render-buffer-used-size.md)):
+
+| Limit | 128 lights | 1024 lights | 4096 lights |
+| --- | --- | --- | --- |
+| 512 | 0.317 -> 0.307 | 0.507 -> 0.499 | 0.515 -> 0.507 (512 drawn) |
+| 4096 | 0.583 -> 0.309 | 0.890 -> 0.630 | 1.942 -> 1.715 |
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

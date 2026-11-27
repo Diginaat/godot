@@ -444,8 +444,15 @@ void ClusterBuilderRD::bake_cluster() {
 	RD::get_singleton()->buffer_clear(cluster_buffer, 0, cluster_buffer_size);
 
 	if (render_element_count > 0) {
+		// The render buffer is laid out for this frame's elements only (tag
+		// bits, then a depth word per element, per cluster), so the clear and
+		// the store pass touch what is used, not the whole limit's size (172
+		// MB per frame at 1080p with 4096 elements per type).
+		const uint32_t used_elements = Math::division_round_up(render_element_count, 32U) * 32;
+		const uint32_t used_data_size = used_elements / 32 + used_elements;
+
 		// Clear render buffer.
-		RD::get_singleton()->buffer_clear(cluster_render_buffer, 0, cluster_render_buffer_size);
+		RD::get_singleton()->buffer_clear(cluster_render_buffer, 0, cluster_screen_size.x * cluster_screen_size.y * used_data_size * 4);
 
 		{ // Fill state uniform.
 
@@ -457,8 +464,8 @@ void ClusterBuilderRD::bake_cluster() {
 			state.screen_to_clusters_shift -= divisor; //screen is smaller, shift one less
 
 			state.cluster_screen_width = cluster_screen_size.x;
-			state.cluster_depth_offset = (render_element_max / 32);
-			state.cluster_data_size = state.cluster_depth_offset + render_element_max;
+			state.cluster_depth_offset = used_elements / 32;
+			state.cluster_data_size = used_data_size;
 
 			RD::get_singleton()->buffer_update(state_uniform, 0, sizeof(StateUniform), &state);
 		}
@@ -524,8 +531,8 @@ void ClusterBuilderRD::bake_cluster() {
 			RD::get_singleton()->compute_list_bind_uniform_set(compute_list, cluster_store_uniform_set, 0);
 
 			ClusterBuilderSharedDataRD::ClusterStore::PushConstant push_constant;
-			push_constant.cluster_render_data_size = render_element_max / 32 + render_element_max;
-			push_constant.max_render_element_count_div_32 = render_element_max / 32;
+			push_constant.cluster_render_data_size = used_data_size;
+			push_constant.max_render_element_count_div_32 = used_elements / 32;
 			push_constant.cluster_screen_size[0] = cluster_screen_size.x;
 			push_constant.cluster_screen_size[1] = cluster_screen_size.y;
 
