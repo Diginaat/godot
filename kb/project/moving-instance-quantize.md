@@ -48,6 +48,17 @@ ranges do not overlap for city):
 | town (400 moving) | 1.165 / 1.169 | 0.630 / 0.621 |
 | city_extreme (5,000 moving) | 8.553 / 8.421 | 5.225 / 5.103 |
 
+# Also measured in this profile
+
+The main thread waits for the threaded scene cull 14% of the frame. The
+12 workers (6 cores with SMT) spend 1,114 samples in
+`_scene_cull_threaded` against the main thread's 237 waiting, with no
+lock contention (all in `_scene_cull`, `in_frustum` and vector math), and
+5 to 145 samples per worker. Four chunks per worker, taken as workers
+finish, gave nothing in city and cost forest and town 0.03-0.05 ms of
+render CPU, so it was dropped: the cull is compute bound, about 8 ns per
+instance.
+
 # Not done
 
 The loop that marks every paired light's shadow dirty for a moving
