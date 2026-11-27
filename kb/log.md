@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-27 (global transforms in a loop, O2)
+
+* **Added**: [global transform loop](/project/global-transform-loop.md):
+  `Node3D::get_global_transform()` updates the dirty ancestors in a loop
+  instead of recursing (OD11). scene_bench deep 100k 18.7 to 15.1 ms
+  (stock 18.2), deep 10k 0.465 to 0.432 ms.
+
 ## 2026-11-27 (GPU instance data built in the scene shader, O1)
 
 * **Added**: [instance data built in the shader](/project/gpu-instance-data-in-shader.md):

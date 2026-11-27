@@ -261,4 +261,52 @@ TEST_CASE("[SceneTree][Node3D] A dirty child that starts to want notifications i
 	memdelete(parent);
 }
 
+TEST_CASE("[SceneTree][Node3D] Global transforms of chains longer than the update loop's buffer") {
+	// _update_global_transform_chain() updates up to 64 dirty levels per
+	// pass; longer chains resolve the rest first. Scaled, top-level and
+	// disable_scale links check each level's own rule.
+	SceneTree *tree = SceneTree::get_singleton();
+	Node3D *root = memnew(Node3D);
+	tree->get_root()->add_child(root);
+	LocalVector<Node3D *> chain;
+	Node3D *parent = root;
+	for (int i = 0; i < 150; i++) {
+		Node3D *n = memnew(Node3D);
+		n->set_position(Vector3(1, 0, 0));
+		n->set_rotation(Vector3(0, 0.01, 0));
+		if (i == 10) {
+			n->set_scale(Vector3(2, 2, 2));
+		}
+		if (i == 70) {
+			n->set_disable_scale(true);
+		}
+		parent->add_child(n);
+		chain.push_back(n);
+		parent = n;
+	}
+	Node3D *top = chain[120];
+	top->set_as_top_level(true);
+
+	for (int pass = 0; pass < 2; pass++) {
+		root->set_position(Vector3(0, pass, 0));
+		// Read level 119 first (120 dirty levels above the root), then compare
+		// each level with its parent's global times its own local transform.
+		const Transform3D deep = chain[119]->get_global_transform();
+		Transform3D expected = root->get_global_transform();
+		for (uint32_t i = 0; i < chain.size(); i++) {
+			Node3D *n = chain[i];
+			expected = n == top ? n->get_transform() : expected * n->get_transform();
+			if (n->is_scale_disabled()) {
+				expected.basis.orthonormalize();
+			}
+			if (i == 119) {
+				CHECK(deep.is_equal_approx(expected));
+			}
+			CHECK_MESSAGE(n->get_global_transform().is_equal_approx(expected), vformat("level %d", i));
+		}
+	}
+
+	memdelete(root);
+}
+
 } // namespace TestNode3D

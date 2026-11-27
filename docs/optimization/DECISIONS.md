@@ -123,3 +123,14 @@ city_extreme 287 to 232 MB, massive_100k GPU -5%, cold shader stall
 unchanged, images and motion vectors equal to the CPU path (also with
 the ubershader forced). Cost: three more storage buffer bindings in the
 render pass set.
+
+## OD11 (2026-11-27): global transforms of dirty chains update in a loop
+
+`Node3D::get_global_transform()` recursed into the parent for each dirty
+level (a call, a 48-byte return copy and a dirty check per level).
+`_update_global_transform_chain()` collects the node and its dirty
+ancestors (64 per pass; longer chains resolve their upper part first)
+and updates them top down in place, with the same local, top-level and
+`disable_scale` rules. scene_bench deep 100k 18.7 to 15.1 ms, deep 10k
+-7%, other scenarios within spread. A unit test covers chains over 64
+levels (it fails with the overflow step removed).

@@ -69,6 +69,19 @@ Same session, builds alternated, two rounds (VRAM identical in both):
 Cold stall (`shader_bench.ps1 -Cold -Mv`): 44.9, 44.6 s before; 44.4,
 45.2 s after. Stock 4.7.2: town 167, forest 158, city_extreme 188 MB.
 
+## O2: deep chains (OD11, 2026-11-27)
+
+`scene_bench.ps1`, 3 rounds, builds alternated (stock: same machine, 2 rounds):
+
+| Scenario | Stock 4.7.2 | Before | After |
+| --- | --- | --- | --- |
+| deep 10k | 0.547 | 0.465 | 0.432 |
+| deep 100k | 18.15 | 18.67 | 15.09 |
+| reparent 10k | 0.076 | 0.072 | - |
+| reparent 100k | 1.398 | 1.328 | - |
+
+wide, parents, sparse, heavy, script and native: unchanged within spread.
+
 ## O2 and O5: process loop (2026-11-27)
 
 `devtools/test/scene_bench.gd`, headless, frame ms, medians of 3 rounds

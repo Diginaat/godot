@@ -199,6 +199,7 @@ protected:
 	void set_ignore_transform_notification(bool p_ignore);
 
 	_FORCE_INLINE_ void _update_local_transform() const;
+	void _update_global_transform_chain() const;
 	_FORCE_INLINE_ void _update_rotation_and_scale() const;
 
 	void _set_vi_visible(bool p_visible) { data.vi_visible = p_visible; }

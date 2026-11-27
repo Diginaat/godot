@@ -35,5 +35,9 @@
   city_extreme 415 to 287 MB, forest 221 to 165 MB.
 - O1: the scene shader builds the GPU path's instance data (OD10): no
   176-byte copy per member. city_extreme 287 to 232 MB, forest 165 to
-  149 MB (stock 158), massive_100k GPU 0.948 to 0.903 ms. A gizmo flag for the transform walk was tried and
+  149 MB (stock 158), massive_100k GPU 0.948 to 0.903 ms.
+- O2: reparent (1.05x stock) and deep (1.08x) measured; deep profiled.
+  OD11: global transforms of dirty chains in a loop, deep 100k 18.7 to
+  15.1 ms (stock 18.2). Reparent is already O(1) per call (1.3 us at
+  100k); nothing found to take. A gizmo flag for the transform walk was tried and
   dropped (REGRESSIONS.md).

@@ -677,28 +677,51 @@ Transform3D Node3D::get_global_transform() const {
 	 * the dirty/update process is thread safe by utilizing atomic copies.
 	 */
 
-	uint32_t dirty = _read_dirty_mask();
-	if (dirty & DIRTY_GLOBAL_TRANSFORM) {
-		if (dirty & DIRTY_LOCAL_TRANSFORM) {
-			_update_local_transform(); // Update local transform atomically.
-		}
-
-		Transform3D new_global;
-		if (data.parent && !data.top_level) {
-			new_global = data.parent->get_global_transform() * data.local_transform;
-		} else {
-			new_global = data.local_transform;
-		}
-
-		if (data.disable_scale) {
-			new_global.basis.orthonormalize();
-		}
-
-		data.global_transform = new_global;
-		_clear_dirty_bits(DIRTY_GLOBAL_TRANSFORM);
+	if (_read_dirty_mask() & DIRTY_GLOBAL_TRANSFORM) {
+		_update_global_transform_chain();
 	}
 
 	return data.global_transform;
+}
+
+// Updates the global transform of this node and of its dirty ancestors, top
+// down, in a loop: a recursive get_global_transform() per level cost a call,
+// a 48-byte return copy and a dirty check each (deep chains, scene_bench deep).
+void Node3D::_update_global_transform_chain() const {
+	constexpr uint32_t MAX_CHAIN = 64;
+	const Node3D *chain[MAX_CHAIN];
+	uint32_t count = 0;
+	const Node3D *n = this;
+	// This node, then its ancestors up to the first one that is clean, the
+	// root, or top-level.
+	while (true) {
+		chain[count++] = n;
+		const Node3D *parent = n->data.parent;
+		if (!parent || n->data.top_level || !(parent->_read_dirty_mask() & DIRTY_GLOBAL_TRANSFORM)) {
+			break;
+		}
+		if (count == MAX_CHAIN) {
+			parent->get_global_transform(); // Longer chains: the rest first.
+			break;
+		}
+		n = parent;
+	}
+
+	for (uint32_t i = count; i-- > 0;) {
+		const Node3D *node = chain[i];
+		if (node->_read_dirty_mask() & DIRTY_LOCAL_TRANSFORM) {
+			node->_update_local_transform(); // Update local transform atomically.
+		}
+		if (node->data.parent && !node->data.top_level) {
+			node->data.global_transform = node->data.parent->data.global_transform * node->data.local_transform;
+		} else {
+			node->data.global_transform = node->data.local_transform;
+		}
+		if (node->data.disable_scale) {
+			node->data.global_transform.basis.orthonormalize();
+		}
+		node->_clear_dirty_bits(DIRTY_GLOBAL_TRANSFORM);
+	}
 }
 
 #ifdef TOOLS_ENABLED
