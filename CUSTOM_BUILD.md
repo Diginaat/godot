@@ -241,6 +241,12 @@ straight.
     `gpu_instance_cull.glsl` (`MODE_SHADOW_BATCH`). If upstream changes
     how cascades are set up or culled, keep the receiver range. See
     [kb/project/shadow-receiver-culling.md](kb/project/shadow-receiver-culling.md).
+  - Instanced cluster element draws in `ClusterBuilderRD::bake_cluster()`
+    (`_element_shape()`) and the helper-lane merge by cluster and element
+    in `cluster_render.glsl`. Without the shader change, instancing loses
+    light bits. Also `Light::linear_color` and
+    `LightStorage::_sort_lights_by_depth()`. See
+    [kb/project/light-fill-cpu.md](kb/project/light-fill-cpu.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).

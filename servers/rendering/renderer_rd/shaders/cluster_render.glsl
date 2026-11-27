@@ -131,21 +131,24 @@ void main() {
 			uvec4 mask;
 
 			while (true) {
-				// find the cluster offset of the first active thread
+				// find the cluster offset and element of the first active thread
 				// threads that did break; go inactive and no longer count
-				uint first = subgroupBroadcastFirst(cluster_offset);
-				// update the mask for thread that match this cluster
-				mask = subgroupBallot(first == cluster_offset);
-				if (first == cluster_offset) {
+				// (one draw holds many elements: bake_cluster() instances them)
+				uint first_cluster = subgroupBroadcastFirst(cluster_offset);
+				uint first_element = subgroupBroadcastFirst(element_index);
+				bool match = first_cluster == cluster_offset && first_element == element_index;
+				// update the mask for thread that match this cluster and element
+				mask = subgroupBallot(match);
+				uint group_z = subgroupOr(match ? z_write_bit : 0u); // merge the group's Zs
+				if (match) {
 					// This thread belongs to the group of threads that match this offset,
 					// so exit the loop.
+					z_write_bit = group_z;
 					break;
 				}
 			}
 
 			uint cluster_thread_group_index = subgroupBallotExclusiveBitCount(mask);
-
-			z_write_bit = subgroupOr(z_write_bit); //merge all Zs
 
 			if (cluster_thread_group_index == 0) {
 				aux = atomicOr(cluster_render.data[usage_write_offset], usage_write_bit);

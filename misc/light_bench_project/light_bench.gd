@@ -2,7 +2,8 @@ extends Node3D
 ## Many omni lights over a field of boxes (devtools/test/light_bench.ps1).
 ## Light counts grow in stages; each stage waits, then records the GPU and
 ## render CPU frame times and the opaque pass time (direct RD timestamps,
-## present while a MultiMesh is GPU-culled). Not a correctness test.
+## present while a MultiMesh is GPU-culled). Not a correctness test;
+## --image-dir=<dir> saves each count's frame to compare two builds.
 
 signal stages_ready(stages: Dictionary)
 
@@ -122,6 +123,11 @@ func _run() -> void:
 				opaque.append(stages.opaque)
 			if stages.has("vrs"):
 				vrs.append(stages.vrs)
+		# --image-dir=<dir>: the frame of each light count as a PNG, to compare
+		# two builds.
+		for argument in OS.get_cmdline_user_args():
+			if argument.begins_with("--image-dir="):
+				get_viewport().get_texture().get_image().save_png(argument.trim_prefix("--image-dir=").path_join("lights_%d.png" % count))
 		if OS.get_cmdline_user_args().has("--dump-ts"):
 			RenderingServer.call_on_render_thread(_dump_timestamps.bind(count))
 			await stages_ready

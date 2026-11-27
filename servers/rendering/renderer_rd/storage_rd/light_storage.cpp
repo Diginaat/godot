@@ -215,6 +215,7 @@ void LightStorage::light_set_color(RID p_light, const Color &p_color) {
 	ERR_FAIL_NULL(light);
 
 	light->color = p_color;
+	light->linear_color = p_color.srgb_to_linear();
 }
 
 void LightStorage::light_set_param(RID p_light, RSE::LightParam p_param, float p_value) {
@@ -720,6 +721,48 @@ uint32_t LightStorage::_select_light_candidates(LocalVector<LightInstanceDepthSo
 	return count;
 }
 
+void LightStorage::_sort_lights_by_depth(LightInstanceDepthSort *p_lights, uint32_t p_count) {
+	if (p_count < 64) {
+		SortArray<LightInstanceDepthSort> sorter;
+		sorter.sort(p_lights, p_count);
+		return;
+	}
+	// The key: the depth's bits (a float that is never negative orders as an
+	// unsigned integer) above the light's index. Four 8-bit passes over the
+	// depth bits; each pass is stable, so equal depths keep the cull's order.
+	light_sort_keys[0].resize(p_count);
+	light_sort_keys[1].resize(p_count);
+	uint64_t *keys = light_sort_keys[0].ptr();
+	uint64_t *other = light_sort_keys[1].ptr();
+	for (uint32_t i = 0; i < p_count; i++) {
+		const float depth = MAX(p_lights[i].depth, 0.0f); // Also turns -0.0 into 0.0.
+		uint32_t bits;
+		memcpy(&bits, &depth, sizeof(bits));
+		keys[i] = (uint64_t(bits) << 32) | i;
+	}
+	for (uint32_t shift = 32; shift < 64; shift += 8) {
+		uint32_t offsets[256] = {};
+		for (uint32_t i = 0; i < p_count; i++) {
+			offsets[(keys[i] >> shift) & 0xff]++;
+		}
+		uint32_t total = 0;
+		for (uint32_t &offset : offsets) {
+			const uint32_t count = offset;
+			offset = total;
+			total += count;
+		}
+		for (uint32_t i = 0; i < p_count; i++) {
+			other[offsets[(keys[i] >> shift) & 0xff]++] = keys[i];
+		}
+		SWAP(keys, other);
+	}
+	light_sort_scratch.resize(p_count);
+	for (uint32_t i = 0; i < p_count; i++) {
+		light_sort_scratch[i] = p_lights[keys[i] & 0xffffffff];
+	}
+	memcpy(p_lights, light_sort_scratch.ptr(), p_count * sizeof(LightInstanceDepthSort));
+}
+
 void LightStorage::set_max_lights(const uint32_t p_max_lights) {
 	max_lights = p_max_lights;
 
@@ -800,7 +843,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 					light_data.energy *= RSG::camera_attributes->camera_attributes_get_exposure_normalization_factor(p_render_data->camera_attributes);
 				}
 
-				Color linear_col = light->color.srgb_to_linear();
+				Color linear_col = light->linear_color;
 				light_data.color[0] = linear_col.r;
 				light_data.color[1] = linear_col.g;
 				light_data.color[2] = linear_col.b;
@@ -980,20 +1023,9 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 	spot_light_count = _select_light_candidates(light_candidates[1], spot_light_sort, "spot");
 	area_light_count = _select_light_candidates(light_candidates[2], area_light_sort, "area");
 
-	if (omni_light_count) {
-		SortArray<LightInstanceDepthSort> sorter;
-		sorter.sort(omni_light_sort, omni_light_count);
-	}
-
-	if (spot_light_count) {
-		SortArray<LightInstanceDepthSort> sorter;
-		sorter.sort(spot_light_sort, spot_light_count);
-	}
-
-	if (area_light_count) {
-		SortArray<LightInstanceDepthSort> sorter;
-		sorter.sort(area_light_sort, area_light_count);
-	}
+	_sort_lights_by_depth(omni_light_sort, omni_light_count);
+	_sort_lights_by_depth(spot_light_sort, spot_light_count);
+	_sort_lights_by_depth(area_light_sort, area_light_count);
 
 	bool using_forward_ids = forward_id_storage->uses_forward_ids();
 
@@ -1037,7 +1069,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		Transform3D light_transform = light_instance->transform;
 
 		float sign = light->negative ? -1 : 1;
-		Color linear_col = light->color.srgb_to_linear();
+		Color linear_col = light->linear_color;
 
 		light_data.attenuation = light->param[RSE::LIGHT_PARAM_ATTENUATION];
 

@@ -516,7 +516,13 @@ void ClusterBuilderRD::bake_cluster() {
 
 				RD::get_singleton()->draw_list_set_push_constant(draw_list, &push_constant, sizeof(ClusterBuilderSharedDataRD::ClusterRender::PushConstant));
 
+				// Following elements with the same shape go in the same draw
+				// (the vertex shader adds gl_InstanceIndex to base_index).
 				uint32_t instances = 1;
+				const uint32_t shape = _element_shape(render_elements[i]);
+				while (i + instances < render_element_count && _element_shape(render_elements[i + instances]) == shape) {
+					instances++;
+				}
 				RD::get_singleton()->draw_list_draw(draw_list, true, instances);
 				i += instances;
 			}

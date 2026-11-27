@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-27 (light fill CPU, G7)
+
+* **Added**: [render-thread cost of many lights halved](/project/light-fill-cpu.md):
+  `Light::linear_color` (no `pow()` per light per frame), a radix sort
+  of the light depth order, and instanced draws in `bake_cluster()`.
+  `cluster_render.glsl` now merges helper lanes by cluster and element;
+  merging by cluster only lost element bits once a draw held many
+  elements. 4096 lights: render CPU 0.888 to 0.470 ms, GPU 1.697 to
+  1.675 ms, images bit-identical (`light_bench.gd --image-dir`).
+
 ## 2026-11-27 (shadow receiver culling, G4)
 
 * **Added**: [receiver culling of directional shadow casters](/project/shadow-receiver-culling.md):

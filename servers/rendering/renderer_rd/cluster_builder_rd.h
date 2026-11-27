@@ -170,6 +170,18 @@ private:
 		uint32_t has_wide_spot_angle;
 	}; // Keep aligned to 32 bytes.
 
+	// The mesh bake_cluster() draws an element with: 0 sphere, 1 cone, 2 box.
+	static _FORCE_INLINE_ uint32_t _element_shape(const RenderElementData &p_element) {
+		switch (p_element.type) {
+			case ELEMENT_TYPE_OMNI_LIGHT:
+				return 0;
+			case ELEMENT_TYPE_SPOT_LIGHT:
+				return p_element.has_wide_spot_angle ? 0 : 1;
+			default:
+				return 2;
+		}
+	}
+
 	uint32_t cluster_count_by_type[ELEMENT_TYPE_MAX] = {};
 	uint32_t max_elements_by_type = 0;
 
