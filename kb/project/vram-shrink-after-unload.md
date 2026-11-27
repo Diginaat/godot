@@ -111,6 +111,13 @@ The second small_1k run still uses 13 MB more than a fresh one: about
 10 MB of buffers (six unnamed storage buffers of 0.4 to 2.8 MB, one of
 them a 16,384-element render list buffer, below the shrink size).
 
+Letting render list buffers shrink down to 4,096 elements took the
+second small_1k run from 82.9 to 78.7 MB and town from 174 to 169 MB,
+but town's render CPU went from 0.603 to about 0.63 ms (10 alternated
+rounds). Each list shrank once, at frame 123, and never grew back, so
+the cost is not reallocation; the cause was not found, and the change
+was dropped.
+
 # Settings
 
 None. Every fallback is kept: a buffer grows as before, and a staging

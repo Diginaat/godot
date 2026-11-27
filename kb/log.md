@@ -1,5 +1,11 @@
 # Update log
 
+## 2026-11-27 (dropped: smaller render list buffers)
+
+* **Updated**: [VRAM after unload](/project/vram-shrink-after-unload.md):
+  shrinking render list buffers to 4,096 elements saved 4-5 MB but cost
+  town 0.03 ms render CPU; dropped.
+
 ## 2026-11-27 (stock comparison on the development branch)
 
 * **Updated**: docs/benchmarks/stock-compare.md has a second run on
