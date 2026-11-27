@@ -31,10 +31,26 @@ layout(set = 0, binding = 1, std430) readonly buffer Inputs {
 }
 inputs;
 
+// Indirect draw records (5 words). Compact: the selected groups, appended at
+// the surface's offset and counted in counts.data[draw_index]. Otherwise one
+// record per group, with zero instances when the group is not drawn.
 layout(set = 0, binding = 2, std430) writeonly buffer Commands {
 	uint data[];
 }
 commands;
+
+// One word per group, from the surface's first group (command offset / 5):
+// the first index of a selected, frustum-visible group, UINT32_MAX otherwise.
+// The HZB occlusion kernels read it.
+layout(set = 0, binding = 7, std430) writeonly buffer SelectionWords {
+	uint data[];
+}
+selection;
+
+layout(set = 0, binding = 8, std430) buffer Counts {
+	uint data[];
+}
+counts;
 
 #ifdef MODE_RESIDENCY
 // Header entry: x=whole-surface coverage. Following entries: x=resident bit 0,
@@ -68,6 +84,7 @@ statistics;
 #endif
 layout(push_constant, std430) uniform Params {
 	uint draw_index;
+	uint compact;
 #ifdef MODE_RESIDENCY
 	uint request_offset; // This surface's first word in the shared request buffer.
 #endif
@@ -184,14 +201,25 @@ void main() {
 		}
 	}
 #endif
-	uint command = input_data.params.y + id * 5u;
-	commands.data[command] = group.draw.y;
-	commands.data[command + 1u] = selected && visible ? 1u : 0u;
 #ifdef MODE_RESIDENCY
-	commands.data[command + 2u] = residency.data[id + 1u].z;
+	uint first_index = residency.data[id + 1u].z;
 #else
-	commands.data[command + 2u] = group.draw.x;
+	uint first_index = group.draw.x;
 #endif
+	bool drawn = selected && visible;
+	selection.data[input_data.params.y / 5u + id] = drawn ? first_index : 0xffffffffu;
+	uint command;
+	if (params.compact != 0u) {
+		if (!drawn) {
+			return;
+		}
+		command = input_data.params.y + atomicAdd(counts.data[params.draw_index], 1u) * 5u;
+	} else {
+		command = input_data.params.y + id * 5u;
+	}
+	commands.data[command] = group.draw.y;
+	commands.data[command + 1u] = drawn ? 1u : 0u;
+	commands.data[command + 2u] = first_index;
 	commands.data[command + 3u] = 0u;
 	commands.data[command + 4u] = 0u;
 }

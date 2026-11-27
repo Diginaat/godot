@@ -179,6 +179,22 @@ func _run() -> void:
 	if (await _frame()).get_data() != references[0].get_data():
 		_failures.append("single pass: image differs from the reference")
 
+	# E. One command per group (compact_commands off) draws the same images as
+	# the compact streams the references were captured with, in every mode.
+	ProjectSettings.set_setting("rendering/geometry/cluster_lod/compact_commands", false)
+	var record_mismatches: Array[String] = []
+	for mode in 3:
+		_occlusion(mode > 0, mode == 2)
+		for view in 2:
+			_view(view)
+			for frame in 8:
+				await RenderingServer.frame_post_draw
+			if (await _frame()).get_data() != references[view].get_data():
+				record_mismatches.append("mode %d view %d" % [mode, view])
+	ProjectSettings.set_setting("rendering/geometry/cluster_lod/compact_commands", true)
+	if not record_mismatches.is_empty():
+		_failures.append("one command per group differs from the compact streams: %s" % ", ".join(record_mismatches))
+
 	# D. TAA and FSR2: occlusion is tested with the jittered projection of
 	# each frame, at the internal resolution.
 	var jittered := {}
@@ -200,7 +216,7 @@ func _run() -> void:
 	get_viewport().scaling_3d_scale = 1.0
 
 	if _failures.is_empty():
-		print("HZB_TWO_PASS_TEST_PASS: static view defers %d of %d occluded groups from phase-1 depth, 40 alternating frames equal the reference with %d groups recovered, single pass defers none; with TAA %d and FSR2 %d groups occluded, images equal" % [a.get("hzb_groups_deferred"), a.get("hzb_groups_occluded"), counts.recovered, jittered.TAA, jittered.FSR2])
+		print("HZB_TWO_PASS_TEST_PASS: static view defers %d of %d occluded groups from phase-1 depth, 40 alternating frames equal the reference with %d groups recovered, single pass defers none; one command per group draws the same images; with TAA %d and FSR2 %d groups occluded, images equal" % [a.get("hzb_groups_deferred"), a.get("hzb_groups_occluded"), counts.recovered, jittered.TAA, jittered.FSR2])
 	else:
 		for failure in _failures:
 			printerr("HZB_TWO_PASS_TEST_FAIL: ", failure)

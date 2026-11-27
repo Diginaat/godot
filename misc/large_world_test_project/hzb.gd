@@ -66,32 +66,42 @@ func _test_gpu() -> void:
 		AABB(Vector3(-0.1, -0.1, 0.2), Vector3(0.2, 0.2, 0.1)), # Already unselected.
 		AABB(Vector3(0.8, 0.7, 0.2), Vector3(0.1, 0.1, 0.1)), # Odd-edge padding.
 	]
+	# Selection words (mesh_clod_select.glsl): the first index of each selected
+	# group, UINT32_MAX (-1) for group 5. The surface's commands start at word
+	# 20, so its selection words start at 20 / 5.
+	const FIRST := 20
 	var group_bytes := PackedByteArray()
-	var commands := PackedInt32Array()
-	commands.resize(32 + boxes.size() * 5)
-	commands.fill(-1)
+	var selection := PackedInt32Array()
+	selection.resize(FIRST / 5 + boxes.size() + 4)
+	selection.fill(-1)
 	for group in boxes.size():
 		var box := boxes[group]
 		group_bytes.append_array(PackedFloat32Array([box.position.x, box.position.y, box.position.z, 0, box.size.x, box.size.y, box.size.z, 0]).to_byte_array())
 		group_bytes.append_array(PackedInt32Array([group * 3, 3, -1, 0]).to_byte_array())
-		var offset := 16 + group * 5
-		commands[offset] = 3
-		commands[offset + 1] = 0 if group == 5 else 1
-		commands[offset + 2] = group * 3
-		commands[offset + 3] = 0
-		commands[offset + 4] = 0
+		if group != 5:
+			selection[FIRST / 5 + group] = group * 3
 	var input := PackedFloat32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]).to_byte_array()
 	input.append_array(PackedFloat32Array([0, 0, 0, 0]).to_byte_array())
-	input.append_array(PackedInt32Array([boxes.size(), 16, WIDTH, HEIGHT]).to_byte_array())
-	input.append_array(PackedInt32Array([2, 0, 0, 0]).to_byte_array()) # History offset 2.
+	input.append_array(PackedInt32Array([boxes.size(), FIRST, WIDTH, HEIGHT]).to_byte_array())
+	input.append_array(PackedInt32Array([2, 0, 0, 0]).to_byte_array()) # History offset 2, draw (count slot) 0.
+	var uncertain := input.duplicate()
+	for axis in 4:
+		uncertain.encode_float(64 + axis * 4, 1.0)
 	var history := PackedInt32Array()
 	history.resize(2 + boxes.size() + 2)
 	history.fill(0)
-	var pass_init := PackedInt32Array()
-	pass_init.resize(commands.size())
-	pass_init.fill(-1)
-	var buffers: Array[RID] = [rd.storage_buffer_create(group_bytes.size(), group_bytes), rd.storage_buffer_create(input.size(), input), rd.storage_buffer_create(commands.size() * 4, commands.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT),
-			rd.storage_buffer_create(history.size() * 4, history.to_byte_array()), rd.storage_buffer_create(pass_init.size() * 4, pass_init.to_byte_array()), rd.storage_buffer_create(pass_init.size() * 4, pass_init.to_byte_array())]
+	# Colour, phase-1 and phase-2 streams, with 16 guard words at both ends.
+	var stream_init := PackedInt32Array()
+	stream_init.resize(FIRST * 2 + boxes.size() * 5)
+	stream_init.fill(-1)
+	var buffers: Array[RID] = [rd.storage_buffer_create(group_bytes.size(), group_bytes), rd.storage_buffer_create(input.size(), input), rd.storage_buffer_create(stream_init.size() * 4, stream_init.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT),
+			rd.storage_buffer_create(history.size() * 4, history.to_byte_array()), rd.storage_buffer_create(stream_init.size() * 4, stream_init.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT), rd.storage_buffer_create(stream_init.size() * 4, stream_init.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT),
+			rd.storage_buffer_create(selection.size() * 4, selection.to_byte_array()), rd.storage_buffer_create(4 * 4, PackedByteArray(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT)]
+	const COLOR := 2
+	const PHASE1 := 4
+	const PHASE2 := 5
+	const SELECTION := 6
+	const COUNTS := 7
 	var sets: Array[RID] = []
 	for level in LEVELS:
 		var uniforms: Array[RDUniform] = [
@@ -99,40 +109,47 @@ func _test_gpu() -> void:
 			_uniform(1, RenderingDevice.UNIFORM_TYPE_IMAGE, [views[level]]),
 		]
 		sets.append(rd.uniform_set_create(uniforms, shaders[0 if level == 0 else 1], 0))
-	var occlude_uniforms: Array[RDUniform] = []
-	for binding in 3:
-		occlude_uniforms.append(_uniform(binding, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[binding]]))
-	occlude_uniforms.append(_uniform(3, RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, [sampler, pyramid]))
-	occlude_uniforms.append(_uniform(5, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[3]]))
-	occlude_uniforms.append(_uniform(6, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[5]])) # Phase-2 commands.
+	var occlude_uniforms: Array[RDUniform] = [
+		_uniform(0, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[0]]),
+		_uniform(1, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[1]]),
+		_uniform(2, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[SELECTION]]),
+		_uniform(3, RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE, [sampler, pyramid]),
+		_uniform(5, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[3]]),
+		_uniform(6, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[PHASE2]]),
+		_uniform(7, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[COLOR]]),
+		_uniform(8, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[COUNTS]]),
+	]
 	sets.append(rd.uniform_set_create(occlude_uniforms, shaders[2], 0))
-	var split_uniforms: Array[RDUniform] = []
-	for binding in 3:
-		split_uniforms.append(_uniform(binding, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[binding]]))
-	split_uniforms.append(_uniform(5, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[3]]))
-	split_uniforms.append(_uniform(6, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[4]])) # Phase-1 depth commands.
+	var split_uniforms: Array[RDUniform] = [
+		_uniform(0, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[0]]),
+		_uniform(1, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[1]]),
+		_uniform(2, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[SELECTION]]),
+		_uniform(5, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[3]]),
+		_uniform(6, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[PHASE1]]),
+		_uniform(8, RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER, [buffers[COUNTS]]),
+	]
 	sets.append(rd.uniform_set_create(split_uniforms, shaders[3], 0))
 	# Two-pass expectations per round (groups 0..6). Group 0 is hidden except in
-	# round 1 (hole) and round 3 (uncertain bounds); group 5 is unselected.
+	# round 1 (hole) and round 3 (uncertain bounds); group 5 is unselected. The
+	# four rounds run with one record per group, then with compact records.
 	var history_before := [0, 0, 0, 0, 0, 0, 0]
-	for round_id in 4:
+	for pass_id in 8:
+		var round_id := pass_id % 4
+		var compact := pass_id / 4
 		var depths := PackedFloat32Array()
 		depths.resize(WIDTH * HEIGHT)
 		depths.fill(0.8)
 		if round_id == 1:
 			depths[4 * WIDTH + 6] = 0.0 # A one-pixel visibility hole must recover.
 		rd.texture_update(source_depth, 0, depths.to_byte_array())
-		if round_id == 3:
-			var uncertain := input.duplicate()
-			for axis in 4:
-				uncertain.encode_float(64 + axis * 4, 1.0)
-			rd.buffer_update(buffers[1], 0, uncertain.size(), uncertain)
-		rd.buffer_update(buffers[2], 0, commands.size() * 4, commands.to_byte_array())
+		var round_input := uncertain if round_id == 3 else input
+		rd.buffer_update(buffers[1], 0, round_input.size(), round_input)
+		rd.buffer_clear(buffers[COUNTS], 0, 4 * 4)
 		var list := rd.compute_list_begin()
 		# Phase-1 split against the history left by the previous round.
 		rd.compute_list_bind_compute_pipeline(list, pipelines[3])
 		rd.compute_list_bind_uniform_set(list, sets[LEVELS + 1], 0)
-		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, 0, 0]).to_byte_array(), 16)
+		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, compact, 1]).to_byte_array(), 16)
 		rd.compute_list_dispatch(list, 1, 1, 1)
 		rd.compute_list_add_barrier(list)
 		for level in LEVELS:
@@ -146,7 +163,7 @@ func _test_gpu() -> void:
 			rd.compute_list_add_barrier(list)
 		rd.compute_list_bind_compute_pipeline(list, pipelines[2])
 		rd.compute_list_bind_uniform_set(list, sets[LEVELS], 0)
-		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, 0, 0]).to_byte_array(), 16)
+		rd.compute_list_set_push_constant(list, PackedInt32Array([0, 1, compact, 1]).to_byte_array(), 16)
 		rd.compute_list_dispatch(list, 1, 1, 1)
 		rd.compute_list_end()
 		# Verify every mip against the exact padded min-depth CPU reduction.
@@ -170,39 +187,58 @@ func _test_gpu() -> void:
 					for x in size / 2:
 						next[y * (size / 2) + x] = minf(minf(expected[y * 2 * size + x * 2], expected[y * 2 * size + x * 2 + 1]), minf(expected[(y * 2 + 1) * size + x * 2], expected[(y * 2 + 1) * size + x * 2 + 1]))
 				expected = next
-		var result := rd.buffer_get_data(buffers[2]).to_int32_array()
+		# Per stream: the groups it must draw. Colour: selected and not proven
+		# hidden. Phase 1: selected groups not occluded when last tested. Phase 2:
+		# of the others, those visible now. History follows the test.
 		var wanted := [1 if round_id == 1 or round_id == 3 else 0, 1, 1, 1, 1, 0, 1]
+		var want_color: Array[int] = []
+		var want_phase1: Array[int] = []
+		var want_phase2: Array[int] = []
 		for group in boxes.size():
-			var offset := 16 + group * 5
-			if result[offset + 1] != wanted[group]:
-				failures.append("wrong conservative HZB visibility: group %d round %d" % [group, round_id])
-			for word in [0, 2, 3, 4]:
-				if result[offset + word] != commands[offset + word]:
-					failures.append("HZB changed source geometry command fields")
-		for guard in 16:
-			if result[guard] != -1 or result[result.size() - guard - 1] != -1:
-				failures.append("HZB wrote outside command capacity")
-		# Two passes: phase 1 leaves out selected groups occluded when last tested,
-		# phase 2 draws those of them that are visible now, history follows the test.
-		var depth_commands := rd.buffer_get_data(buffers[4]).to_int32_array()
-		var phase2 := rd.buffer_get_data(buffers[5]).to_int32_array()
-		var history_after := rd.buffer_get_data(buffers[3]).to_int32_array()
-		for group in boxes.size():
-			var offset := 16 + group * 5
 			var selected := group != 5
 			var deferred: bool = selected and history_before[group] != 0
-			var depth_wanted: int = 1 if selected and not deferred else 0
-			var phase2_wanted: int = 1 if deferred and wanted[group] == 1 else 0
+			if selected and wanted[group] == 1:
+				want_color.append(group)
+			if selected and not deferred:
+				want_phase1.append(group)
+			if deferred and wanted[group] == 1:
+				want_phase2.append(group)
+		var counts := rd.buffer_get_data(buffers[COUNTS]).to_int32_array()
+		var streams := {"colour": [COLOR, want_color, 1], "phase 1": [PHASE1, want_phase1, 2], "phase 2": [PHASE2, want_phase2, 3]}
+		for stream_name in streams:
+			var stream: Array = streams[stream_name]
+			var data := rd.buffer_get_data(buffers[stream[0]]).to_int32_array()
+			var drawn: Array[int] = []
+			var records: int = boxes.size() if compact == 0 else counts[stream[2]]
+			if records > boxes.size():
+				failures.append("%s: compact count %d above the group count, round %d" % [stream_name, records, round_id])
+				records = 0
+			for record in records:
+				var offset := FIRST + record * 5
+				var group: int = record if compact == 0 else data[offset + 2] / 3
+				var instances := data[offset + 1]
+				if instances == 1:
+					drawn.append(group)
+				elif instances != 0 or compact == 1:
+					failures.append("%s: unbounded instance count, round %d" % [stream_name, round_id])
+				var first_wanted := group * 3 if instances == 1 else 0
+				if data[offset] != 3 or data[offset + 2] != first_wanted or data[offset + 3] != 0 or data[offset + 4] != 0:
+					failures.append("%s: source geometry fields changed, round %d compact %d" % [stream_name, round_id, compact])
+			drawn.sort()
+			if drawn != stream[1]:
+				failures.append("%s round %d compact %d: drew %s, want %s" % [stream_name, round_id, compact, drawn, stream[1]])
+			for guard in 16:
+				if data[guard] != -1 or data[data.size() - guard - 1] != -1:
+					failures.append("%s: kernel wrote outside command capacity" % stream_name)
+		var history_after := rd.buffer_get_data(buffers[3]).to_int32_array()
+		for group in boxes.size():
+			var selected := group != 5
 			var history_wanted: int = history_before[group] if not selected else (0 if wanted[group] == 1 else 1)
-			if depth_commands[offset + 1] != depth_wanted or phase2[offset + 1] != phase2_wanted or history_after[2 + group] != history_wanted:
-				failures.append("two-pass round %d group %d: depth %d (want %d), phase 2 %d (want %d), history %d (want %d)" % [round_id, group, depth_commands[offset + 1], depth_wanted, phase2[offset + 1], phase2_wanted, history_after[2 + group], history_wanted])
-			for word in [0, 2, 3, 4]:
-				if depth_commands[offset + word] != commands[offset + word] or phase2[offset + word] != commands[offset + word]:
-					failures.append("two-pass commands changed source geometry fields")
+			if history_after[2 + group] != history_wanted:
+				failures.append("round %d compact %d group %d: history %d (want %d)" % [round_id, compact, group, history_after[2 + group], history_wanted])
 			history_before[group] = history_after[2 + group]
-		for guard in 16:
-			if depth_commands[guard] != -1 or phase2[guard] != -1 or history_after[0] != 0 or history_after[1] != 0 or history_after[history_after.size() - 1] != 0:
-				failures.append("two-pass kernels wrote outside their ranges")
+		if history_after[0] != 0 or history_after[1] != 0 or history_after[history_after.size() - 1] != 0:
+			failures.append("two-pass kernels wrote outside the history range")
 	for resource in sets + pipelines + shaders + buffers + views + [pyramid, source_depth, sampler]:
 		rd.free_rid(resource)
 	_finish.call_deferred(failures)

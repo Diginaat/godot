@@ -3,7 +3,7 @@ type: Finding
 title: CLOD two-pass occlusion costs more than it saves (zero-instance draws)
 description: Every CLOD pass issues one indirect record per group, selected or not; two-pass adds a third full set, about 1.1 ms in hzb_bench, so two_pass is 27-32% slower than no occlusion.
 tags: [geometry, clod, occlusion, hzb, indirect, rendering]
-status: open
+status: resolved
 generated: { by: claude-opus-5-5, at: 2026-11-24T00:00:00Z }
 ---
 
@@ -38,3 +38,9 @@ implement `command_render_draw_indexed_indirect_count`, but RenderingDevice
 has no `draw_list_draw_indirect_count` (it needs a draw-graph command). This
 would also cut the one-pass and colour cost. Until then the CLOD two-pass
 default should be reviewed (`rendering/geometry/cluster_lod/occlusion_two_pass`).
+
+# Resolved
+
+2026-11-27: [compact CLOD command streams](/project/compact-clod-commands.md)
+draw only the selected groups with `draw_list_draw_indirect_count()`; two_pass
+now equals off on street and corner and is 9% slower in the aerial view.

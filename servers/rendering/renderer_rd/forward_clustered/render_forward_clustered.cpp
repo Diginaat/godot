@@ -130,7 +130,7 @@ void RenderForwardClustered::RenderBufferDataForwardClustered::free_data() {
 		}
 		*cull = {};
 	}
-	for (RID resource : { mesh_clod.commands, mesh_clod.inputs, mesh_clod.occlusion_inputs, mesh_clod.depth_commands, mesh_clod.phase2_commands, mesh_clod.history }) {
+	for (RID resource : { mesh_clod.commands, mesh_clod.inputs, mesh_clod.selection, mesh_clod.counts, mesh_clod.occlusion_inputs, mesh_clod.color_commands, mesh_clod.depth_commands, mesh_clod.phase2_commands, mesh_clod.history }) {
 		if (resource.is_valid()) {
 			RD::get_singleton()->free_rid(resource);
 		}
@@ -694,7 +694,10 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 				// call; backends without it keep one call per record. The Cluster
 				// LOD debug view also draws per record, to push each group's id.
 				const bool debug_groups = p_pass_mode == PASS_MODE_COLOR && get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_LOD;
-				if (mesh_clod.multi_draw && !debug_groups) {
+				if (p_params->mesh_clod_counts.is_valid()) {
+					// Compact stream: only the drawn groups' records, counted on the GPU.
+					RD::get_singleton()->draw_list_draw_indirect_count(draw_list, true, p_params->mesh_clod_commands, element_info.mesh_clod_offset * sizeof(uint32_t), p_params->mesh_clod_counts, p_params->mesh_clod_count_offset + element_info.mesh_clod_draw * sizeof(uint32_t), group_count, 5 * sizeof(uint32_t));
+				} else if (mesh_clod.multi_draw && !debug_groups) {
 					RD::get_singleton()->draw_list_draw_indirect(draw_list, true, p_params->mesh_clod_commands, element_info.mesh_clod_offset * sizeof(uint32_t), group_count, 5 * sizeof(uint32_t));
 				} else {
 					for (uint32_t group = 0; group < group_count; group++) {
@@ -2915,7 +2918,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 		bool finish_depth = using_ssao || using_ssil || using_sdfgi || using_voxelgi || using_ddgi || using_planar || ce_pre_opaque_resolved_depth || ce_post_opaque_resolved_depth;
 		RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, depth_pass_mode, 0, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 		render_list_params.multimesh_cull_commands = multimesh_two_pass ? rb_data->multimesh_cull.phase1_commands : multimesh_cull_commands;
-		render_list_params.mesh_clod_commands = clod_two_pass ? rb_data->mesh_clod.depth_commands : mesh_clod_commands;
+		_set_mesh_clod_stream(render_list_params, rb_data.ptr(), clod_two_pass ? RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_PHASE1 : RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_SELECTED);
 		render_list_params.gpu_instance_commands = gpu_two_pass ? gpu_instances_view->phase1_commands_buffer : gpu_instance_commands;
 		if (mesh_two_pass) {
 			render_list_params.mesh_occlusion_commands = rb_data->mesh_occlusion.phase1_commands;
@@ -2946,7 +2949,12 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 				// Phase 2 adds what is visible now but was not drawn in phase 1.
 				RENDER_TIMESTAMP("Render Phase 2 Depth");
 				RD::get_singleton()->capture_timestamp("Mesh CLOD Phase 2 Depth");
-				render_list_params.mesh_clod_commands = clod_two_pass ? rb_data->mesh_clod.phase2_commands : RID();
+				if (clod_two_pass) {
+					_set_mesh_clod_stream(render_list_params, rb_data.ptr(), RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_PHASE2);
+				} else {
+					render_list_params.mesh_clod_commands = RID();
+					render_list_params.mesh_clod_counts = RID();
+				}
 				render_list_params.multimesh_cull_commands = multimesh_two_pass ? rb_data->multimesh_cull.phase2_commands : RID();
 				render_list_params.mesh_occlusion_commands = mesh_two_pass ? rb_data->mesh_occlusion.phase2_commands : RID();
 				render_list_params.mesh_occlusion_tested = mesh_two_pass ? rb_data->mesh_occlusion.tested.ptr() : nullptr;
@@ -3066,7 +3074,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			RID opaque_framebuffer = using_motion_pass ? rb_data->get_color_pass_fb(opaque_color_pass_flags) : color_framebuffer;
 			RenderListParameters render_list_params(render_list[RENDER_LIST_OPAQUE].elements.ptr(), render_list[RENDER_LIST_OPAQUE].element_info.ptr(), render_list[RENDER_LIST_OPAQUE].elements.size(), reverse_cull, PASS_MODE_COLOR, opaque_color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 			render_list_params.multimesh_cull_commands = multimesh_cull_commands;
-			render_list_params.mesh_clod_commands = mesh_clod_commands;
+			_set_mesh_clod_stream(render_list_params, rb_data.ptr(), rb_data.is_valid() && rb_data->mesh_clod.occlusion_ready ? RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_COLOR : RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_SELECTED);
 			render_list_params.gpu_instance_commands = gpu_instance_commands;
 			if (rb_data.is_valid() && rb_data->mesh_occlusion.ready) {
 				// Tested elements draw through their HZB-written commands.
@@ -3106,7 +3114,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 			RenderListParameters render_list_params(render_list[RENDER_LIST_MOTION].elements.ptr(), render_list[RENDER_LIST_MOTION].element_info.ptr(), render_list[RENDER_LIST_MOTION].elements.size(), reverse_cull, PASS_MODE_COLOR, color_pass_flags, rb_data.is_null(), p_render_data->directional_light_soft_shadows, rp_uniform_set, get_debug_draw_mode() == RSE::VIEWPORT_DEBUG_DRAW_WIREFRAME, Vector2(), p_render_data->scene_data->lod_distance_multiplier, p_render_data->scene_data->screen_mesh_lod_threshold, p_render_data->scene_data->view_count, 0, base_specialization, !is_reflection_probe);
 			render_list_params.multimesh_cull_commands = multimesh_cull_commands;
-			render_list_params.mesh_clod_commands = mesh_clod_commands;
+			_set_mesh_clod_stream(render_list_params, rb_data.ptr(), rb_data.is_valid() && rb_data->mesh_clod.occlusion_ready ? RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_COLOR : RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_SELECTED);
 			render_list_params.gpu_instance_commands = gpu_instance_commands;
 			_render_list_with_draw_list(&render_list_params, color_framebuffer);
 
@@ -6231,6 +6239,7 @@ RenderForwardClustered::RenderForwardClustered() {
 	singleton = this;
 	gpu_instances_readbacks_alive = true;
 	mesh_clod.multi_draw = RD::get_singleton()->has_feature(RD::SUPPORTS_MULTI_DRAW_INDIRECT);
+	mesh_clod.indirect_count = RD::get_singleton()->has_feature(RD::SUPPORTS_DRAW_INDIRECT_COUNT);
 
 	/* SCENE SHADER */
 

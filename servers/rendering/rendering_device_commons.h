@@ -1042,6 +1042,8 @@ public:
 		SUPPORTS_GPU_MAPPABLE_BUFFER,
 		// A single indirect draw call may consume more than one command record.
 		SUPPORTS_MULTI_DRAW_INDIRECT,
+		// draw_list_draw_indirect_count(): the draw count is read from a GPU buffer.
+		SUPPORTS_DRAW_INDIRECT_COUNT,
 	};
 
 	enum SubgroupOperations {

@@ -8,6 +8,9 @@ extends Node3D
 ## last tested are left out of depth too). Three fixed views,
 ## alternating mode order, pipelines warmed first. Prints GPU frame time and
 ## the depth-stage times from RD timestamps. Not a correctness test.
+## With the user argument --commands=ab every mode also runs with
+## rendering/geometry/cluster_lod/compact_commands off (one indirect record per
+## group), alternating with the compact streams in the same process.
 
 signal stages_ready(stages: Dictionary)
 
@@ -22,6 +25,8 @@ var _objects := 0
 var _source_triangles := 0
 var _props := 0
 var _prop_triangles := 0
+# [mode index, compact commands] pairs, run in this order and reversed.
+var _cases: Array[Array] = []
 
 
 func _dense_mesh() -> ArrayMesh:
@@ -128,6 +133,11 @@ func _ready() -> void:
 	_camera.far = 600.0
 	add_child(_camera)
 	_camera.current = true
+	var ab := OS.get_cmdline_user_args().has("--commands=ab")
+	for mode in MODES.size():
+		_cases.append([mode, true])
+		if ab:
+			_cases.append([mode, false])
 	_run.call_deferred()
 
 
@@ -148,7 +158,13 @@ func _view(index: int) -> void:
 		_camera.look_at(Vector3.ZERO)
 
 
-func _mode(index: int) -> void:
+func _case_name(test: Array) -> String:
+	return MODES[test[0]] + ("" if test[1] else "/records")
+
+
+func _mode(test: Array) -> void:
+	var index: int = test[0]
+	ProjectSettings.set_setting("rendering/geometry/cluster_lod/compact_commands", test[1])
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/occlusion_enabled", index > 0)
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/occlusion_two_pass", index >= 2)
 	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion", index >= 3)
@@ -206,29 +222,32 @@ func _run() -> void:
 	const KEYS: Array[String] = ["gpu", "depth", "phase1", "hzb", "phase2", "mm_occlusion", "opaque"]
 	for view in VIEWS.size():
 		_view(view)
-		for warm in MODES.size():
+		for warm in _cases:
 			_mode(warm)
 			for frame in 60:
 				await RenderingServer.frame_post_draw
 		var samples := {}
-		for mode in MODES:
+		for test in _cases:
+			var mode := _case_name(test)
 			samples[mode] = {}
 			for key in KEYS:
 				samples[mode][key] = [] as Array[float]
 		for repeat in 2:
-			for k in MODES.size():
-				var m := k if repeat == 0 else MODES.size() - 1 - k
-				_mode(m)
+			for k in _cases.size():
+				var test: Array = _cases[k if repeat == 0 else _cases.size() - 1 - k]
+				var mode := _case_name(test)
+				_mode(test)
 				for frame in 30:
 					await RenderingServer.frame_post_draw
 				for frame in FRAMES:
 					await RenderingServer.frame_post_draw
-					samples[MODES[m]].gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(rid))
+					samples[mode].gpu.append(RenderingServer.viewport_get_measured_render_time_gpu(rid))
 					RenderingServer.call_on_render_thread(_read_stages)
 					var stages: Dictionary = await stages_ready
 					for key in stages:
-						samples[MODES[m]][key].append(stages[key])
-		for mode in MODES:
+						samples[mode][key].append(stages[key])
+		for test in _cases:
+			var mode := _case_name(test)
 			var row := PackedStringArray()
 			for key in KEYS:
 				row.append("%s_p50=%.3f" % [key, _percentile(samples[mode][key], 0.5)])
@@ -236,11 +255,11 @@ func _run() -> void:
 			# A bench whose stages did not run measures nothing.
 			if _percentile(samples[mode].gpu, 0.5) <= 0.0 or _percentile(samples[mode].depth, 0.5) <= 0.0 or _percentile(samples[mode].opaque, 0.5) <= 0.0:
 				printerr("HZB_BENCH_FAIL: %s view=%s mode=%s has no GPU or stage times" % [driver, VIEWS[view], mode])
-			print("HZB_BENCH: %s view=%s mode=%-11s %s" % [driver, VIEWS[view], mode, " ".join(row)])
+			print("HZB_BENCH: %s view=%s mode=%-19s %s" % [driver, VIEWS[view], mode, " ".join(row)])
 		# Counters after timing: polling records for 120 frames, which the next
 		# view's warm-up (240 frames) covers.
 		for m in MODES.size():
-			_mode(m)
+			_mode([m, true])
 			for frame in 8:
 				await RenderingServer.frame_post_draw
 			var after := Engine.get_frames_drawn()

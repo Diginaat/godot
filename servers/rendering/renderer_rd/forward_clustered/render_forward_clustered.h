@@ -179,17 +179,34 @@ public:
 		MultiMeshCullBuffers multimesh_cull;
 		MultiMeshCullBuffers multimesh_shadow_cull;
 		struct MeshCLODBuffers {
+			// Command streams, 5-word indirect records in group_capacity slots
+			// at each surface's offset. Compact streams hold only the drawn
+			// groups, counted per surface in `counts`; otherwise every group has
+			// its record (zero instances when not drawn).
+			enum Stream {
+				STREAM_SELECTED, // `commands`: the selection's output.
+				STREAM_COLOR, // `color_commands`: selected minus HZB-occluded.
+				STREAM_PHASE1, // `depth_commands`: two-pass phase-1 depth.
+				STREAM_PHASE2, // `phase2_commands`: two-pass phase-2 depth.
+				STREAM_MAX,
+			};
 			RID commands;
 			RID inputs;
+			// One word per group: first index when selected, UINT32_MAX otherwise.
+			RID selection;
+			// STREAM_MAX regions of draw_capacity words: per-surface draw counts.
+			RID counts;
 			uint32_t group_capacity = 0;
 			uint32_t draw_capacity = 0;
 			RID occlusion_inputs;
 			uint32_t occlusion_capacity = 0;
 			bool active = false;
-			// Two-pass occlusion: phase-1 and phase-2 depth commands (same layout
-			// as `commands`), and one history word per group. History slots are
-			// keyed by surface cache and kept while the surface keeps its group
-			// count; a stale slot only costs a phase-2 draw.
+			bool compact = false;
+			RID color_commands;
+			// Two-pass occlusion: phase-1 and phase-2 depth commands, and one
+			// history word per group. History slots are keyed by surface cache
+			// and kept while the surface keeps its group count; a stale slot only
+			// costs a phase-2 draw.
 			RID depth_commands;
 			RID phase2_commands;
 			uint32_t pass_command_capacity = 0;
@@ -426,6 +443,7 @@ protected:
 		RID version;
 		RID pipelines[2]; // Resident selection, and residency-aware selection for streamed surfaces.
 		bool multi_draw = false;
+		bool indirect_count = false; // RD::SUPPORTS_DRAW_INDIRECT_COUNT: compact command streams.
 	} mesh_clod;
 	// HZB shared by CLOD and MultiMesh occlusion. _hzb_possible() is the cheap
 	// part of the conditions, known before culling; _setup_hzb() runs before the
@@ -542,6 +560,8 @@ protected:
 		bool use_material_feedback = false;
 		RID multimesh_cull_commands;
 		RID mesh_clod_commands;
+		RID mesh_clod_counts; // Compact CLOD streams: per-surface draw counts (invalid: one record per group).
+		uint32_t mesh_clod_count_offset = 0; // Bytes: the stream's region in mesh_clod_counts.
 		bool depth_phase2_only = false; // Draw only CLOD and GPU-culled MultiMesh elements (phase-2 depth of two-pass occlusion).
 		RID gpu_instance_commands; // GPU path draw buckets' indirect commands.
 		RID mesh_occlusion_commands; // CPU list elements tested against the HZB: one command per element.
@@ -825,6 +845,7 @@ protected:
 		uint32_t multimesh_cull_lod; // GPU LOD level count << 24 | visible IDs reserved per level.
 		uint32_t multimesh_cull_last_lod; // Index LOD of the last GPU LOD level; level 0 is lod_index.
 		uint32_t mesh_clod_offset;
+		uint32_t mesh_clod_draw; // The surface's index in the CLOD selection (its draw count slot).
 		uint32_t gpu_bucket; // GPU path draw bucket (UINT32_MAX: none); its indirect command.
 		uint32_t gpu_first; // The bucket's first record in the GPU path's instance data.
 	};
@@ -836,6 +857,8 @@ protected:
 	_FORCE_INLINE_ void _render_list_template(RenderingDevice::DrawListID p_draw_list, RenderingDevice::FramebufferFormatID p_framebuffer_Format, RenderListParameters *p_params, uint32_t p_from_element, uint32_t p_to_element);
 	void _render_list(RenderingDevice::DrawListID p_draw_list, RenderingDevice::FramebufferFormatID p_framebuffer_Format, RenderListParameters *p_params, uint32_t p_from_element, uint32_t p_to_element);
 	void _render_list_with_draw_list(RenderListParameters *p_params, RID p_framebuffer, BitField<RD::DrawFlags> p_draw_flags = RD::DRAW_DEFAULT_ALL, const Vector<Color> &p_clear_color_values = Vector<Color>(), float p_clear_depth_value = 0.0, uint32_t p_clear_stencil_value = 0, const Rect2 &p_region = Rect2());
+	// Points a render list at one CLOD command stream (none if CLOD is not active).
+	static void _set_mesh_clod_stream(RenderListParameters &r_params, const RenderBufferDataForwardClustered *p_buffers, uint32_t p_stream);
 
 	// Whether an opaque list surface may draw cluster LOD (instance, material, resident data).
 	bool _mesh_clod_surface_eligible(const GeometryInstanceSurfaceDataCache *p_surface) const;

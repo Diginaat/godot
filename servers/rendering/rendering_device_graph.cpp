@@ -1017,6 +1017,15 @@ void RenderingDeviceGraph::_run_draw_list_command(RDD::CommandBufferID p_command
 				driver->command_render_draw_indexed_indirect(p_command_buffer, draw_indexed_indirect_instruction->buffer, draw_indexed_indirect_instruction->offset, draw_indexed_indirect_instruction->draw_count, draw_indexed_indirect_instruction->stride);
 				instruction_data_cursor += sizeof(DrawListDrawIndexedIndirectInstruction);
 			} break;
+			case DrawListInstruction::TYPE_DRAW_INDIRECT_COUNT: {
+				const DrawListDrawIndirectCountInstruction *count_instruction = reinterpret_cast<const DrawListDrawIndirectCountInstruction *>(instruction);
+				if (count_instruction->indexed) {
+					driver->command_render_draw_indexed_indirect_count(p_command_buffer, count_instruction->buffer, count_instruction->offset, count_instruction->count_buffer, count_instruction->count_offset, count_instruction->max_draw_count, count_instruction->stride);
+				} else {
+					driver->command_render_draw_indirect_count(p_command_buffer, count_instruction->buffer, count_instruction->offset, count_instruction->count_buffer, count_instruction->count_offset, count_instruction->max_draw_count, count_instruction->stride);
+				}
+				instruction_data_cursor += sizeof(DrawListDrawIndirectCountInstruction);
+			} break;
 			case DrawListInstruction::TYPE_EXECUTE_COMMANDS: {
 				const DrawListExecuteCommandsInstruction *execute_commands_instruction = reinterpret_cast<const DrawListExecuteCommandsInstruction *>(instruction);
 				driver->command_buffer_execute_secondary(p_command_buffer, execute_commands_instruction->command_buffer);
@@ -1619,6 +1628,11 @@ void RenderingDeviceGraph::_print_draw_list(const uint8_t *p_instruction_data, u
 				const DrawListDrawIndexedIndirectInstruction *draw_indexed_indirect_instruction = reinterpret_cast<const DrawListDrawIndexedIndirectInstruction *>(instruction);
 				print_line("\tDRAW INDEXED INDIRECT BUFFER ID", itos(draw_indexed_indirect_instruction->buffer.id), "OFFSET", draw_indexed_indirect_instruction->offset, "DRAW COUNT", draw_indexed_indirect_instruction->draw_count, "STRIDE", draw_indexed_indirect_instruction->stride);
 				instruction_data_cursor += sizeof(DrawListDrawIndexedIndirectInstruction);
+			} break;
+			case DrawListInstruction::TYPE_DRAW_INDIRECT_COUNT: {
+				const DrawListDrawIndirectCountInstruction *count_instruction = reinterpret_cast<const DrawListDrawIndirectCountInstruction *>(instruction);
+				print_line(count_instruction->indexed ? "\tDRAW INDEXED INDIRECT COUNT BUFFER ID" : "\tDRAW INDIRECT COUNT BUFFER ID", itos(count_instruction->buffer.id), "OFFSET", count_instruction->offset, "COUNT BUFFER ID", itos(count_instruction->count_buffer.id), "COUNT OFFSET", count_instruction->count_offset, "MAX DRAW COUNT", count_instruction->max_draw_count, "STRIDE", count_instruction->stride);
+				instruction_data_cursor += sizeof(DrawListDrawIndirectCountInstruction);
 			} break;
 			case DrawListInstruction::TYPE_EXECUTE_COMMANDS: {
 				print_line("\tEXECUTE COMMANDS");
@@ -2317,6 +2331,19 @@ void RenderingDeviceGraph::add_draw_list_draw_indexed_indirect(RDD::BufferID p_b
 	instruction->offset = p_offset;
 	instruction->draw_count = p_draw_count;
 	instruction->stride = p_stride;
+	draw_instruction_list.stages.set_flag(RDD::PIPELINE_STAGE_DRAW_INDIRECT_BIT);
+}
+
+void RenderingDeviceGraph::add_draw_list_draw_indirect_count(bool p_indexed, RDD::BufferID p_buffer, uint32_t p_offset, RDD::BufferID p_count_buffer, uint32_t p_count_offset, uint32_t p_max_draw_count, uint32_t p_stride) {
+	DrawListDrawIndirectCountInstruction *instruction = reinterpret_cast<DrawListDrawIndirectCountInstruction *>(_allocate_draw_list_instruction(sizeof(DrawListDrawIndirectCountInstruction)));
+	instruction->type = DrawListInstruction::TYPE_DRAW_INDIRECT_COUNT;
+	instruction->buffer = p_buffer;
+	instruction->count_buffer = p_count_buffer;
+	instruction->offset = p_offset;
+	instruction->count_offset = p_count_offset;
+	instruction->max_draw_count = p_max_draw_count;
+	instruction->stride = p_stride;
+	instruction->indexed = p_indexed;
 	draw_instruction_list.stages.set_flag(RDD::PIPELINE_STAGE_DRAW_INDIRECT_BIT);
 }
 

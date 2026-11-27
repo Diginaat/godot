@@ -269,6 +269,7 @@ bool RenderForwardClustered::_setup_mesh_clod_occlusion(const RenderDataRD *p_re
 			buffers.history_used += resident.group_count;
 		}
 		input.history[0] = slot->value.offset;
+		input.history[1] = list.element_info[i].mesh_clod_draw;
 		groups_total = MAX(groups_total, input.params[1] / 5 + resident.group_count);
 		inputs.push_back(input);
 		buffers.occlusion_work.push_back({ resident.groups, resident.group_count });
@@ -279,24 +280,35 @@ bool RenderForwardClustered::_setup_mesh_clod_occlusion(const RenderDataRD *p_re
 	if (!ensure_buffer(buffers.occlusion_inputs, buffers.occlusion_capacity, inputs.size(), sizeof(OcclusionInput))) {
 		return false;
 	}
-	// Pass commands mirror the selection command buffer, word for word.
+	// Pass streams have the selection command buffer's layout. The colour
+	// stream is always needed; the depth streams only with two passes.
 	const uint32_t command_words = buffers.group_capacity * 5;
 	if (buffers.pass_command_capacity != command_words) {
-		for (RID *buffer : { &buffers.depth_commands, &buffers.phase2_commands }) {
+		for (RID *buffer : { &buffers.color_commands, &buffers.depth_commands, &buffers.phase2_commands }) {
 			if (buffer->is_valid()) {
 				rd->free_rid(*buffer);
+				*buffer = RID();
 			}
-			*buffer = rd->storage_buffer_create(command_words * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
 		}
 		buffers.pass_command_capacity = command_words;
 	}
-	if (buffers.depth_commands.is_null() || buffers.phase2_commands.is_null() || groups_total > buffers.group_capacity) {
-		buffers.pass_command_capacity = 0;
+	const bool two_pass = GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_two_pass");
+	RID *const streams[3] = { &buffers.color_commands, &buffers.depth_commands, &buffers.phase2_commands };
+	for (uint32_t stream = 0; stream < (two_pass ? 3u : 1u); stream++) {
+		if (streams[stream]->is_null()) {
+			*streams[stream] = rd->storage_buffer_create(command_words * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		}
+		if (streams[stream]->is_null()) {
+			buffers.pass_command_capacity = 0;
+			return false;
+		}
+	}
+	if (groups_total > buffers.group_capacity) {
 		return false;
 	}
 	rd->buffer_update(buffers.occlusion_inputs, 0, inputs.size() * sizeof(OcclusionInput), inputs.ptr());
 	buffers.occlusion_ready = true;
-	buffers.two_pass = GLOBAL_GET("rendering/geometry/cluster_lod/occlusion_two_pass");
+	buffers.two_pass = two_pass;
 	return true;
 }
 
@@ -312,9 +324,9 @@ void RenderForwardClustered::_split_mesh_clod_occlusion(RenderBufferDataForwardC
 	rd->compute_list_bind_compute_pipeline(compute, mesh_hiz.split_pipeline);
 	for (uint32_t draw = 0; draw < buffers.occlusion_work.size(); draw++) {
 		LocalVector<RD::Uniform> uniforms;
-		const RID resources[5] = { buffers.occlusion_work[draw].groups, buffers.occlusion_inputs, buffers.commands, buffers.history, buffers.depth_commands };
-		const uint32_t bindings[5] = { 0, 1, 2, 5, 6 };
-		for (uint32_t i = 0; i < 5; i++) {
+		const RID resources[6] = { buffers.occlusion_work[draw].groups, buffers.occlusion_inputs, buffers.selection, buffers.history, buffers.depth_commands, buffers.counts };
+		const uint32_t bindings[6] = { 0, 1, 2, 5, 6, 8 };
+		for (uint32_t i = 0; i < 6; i++) {
 			RD::Uniform uniform;
 			uniform.binding = bindings[i];
 			uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -327,7 +339,7 @@ void RenderForwardClustered::_split_mesh_clod_occlusion(RenderBufferDataForwardC
 		statistics.append_id(p_buffers->geometry_statistics.buffer);
 		uniforms.push_back(statistics);
 		rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
-		const uint32_t push[4] = { draw, 1, 0, 0 };
+		const uint32_t push[4] = { draw, 1, buffers.compact ? 1u : 0u, buffers.draw_capacity };
 		rd->compute_list_set_push_constant(compute, push, sizeof(push));
 		rd->compute_list_dispatch(compute, (buffers.occlusion_work[draw].count + 63) / 64, 1, 1);
 	}
@@ -613,9 +625,11 @@ void RenderForwardClustered::_occlude_mesh_clod(const RenderDataRD *p_render_dat
 	rd->compute_list_bind_compute_pipeline(compute, mesh_hiz.occlude_pipeline);
 	for (uint32_t draw = 0; draw < buffers.occlusion_work.size(); draw++) {
 		LocalVector<RD::Uniform> uniforms;
-		const RID resources[5] = { buffers.occlusion_work[draw].groups, buffers.occlusion_inputs, buffers.commands, buffers.history, buffers.phase2_commands };
-		const uint32_t bindings[5] = { 0, 1, 2, 5, 6 };
-		for (uint32_t i = 0; i < 5; i++) {
+		// Without two passes, nothing is written to the phase-2 stream; bind the colour stream in its place.
+		const RID resources[7] = { buffers.occlusion_work[draw].groups, buffers.occlusion_inputs, buffers.selection, buffers.history,
+			buffers.two_pass ? buffers.phase2_commands : buffers.color_commands, buffers.color_commands, buffers.counts };
+		const uint32_t bindings[7] = { 0, 1, 2, 5, 6, 7, 8 };
+		for (uint32_t i = 0; i < 7; i++) {
 			RD::Uniform uniform;
 			uniform.binding = bindings[i];
 			uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -634,7 +648,7 @@ void RenderForwardClustered::_occlude_mesh_clod(const RenderDataRD *p_render_dat
 		statistics.append_id(p_buffers->geometry_statistics.buffer);
 		uniforms.push_back(statistics);
 		rd->compute_list_bind_uniform_set(compute, UniformSetCacheRD::get_singleton()->get_cache_vec(shader, 0, uniforms), 0);
-		const uint32_t push[4] = { draw, buffers.two_pass ? 1u : 0u, 0, 0 };
+		const uint32_t push[4] = { draw, buffers.two_pass ? 1u : 0u, buffers.compact ? 1u : 0u, buffers.draw_capacity };
 		rd->compute_list_set_push_constant(compute, push, sizeof(push));
 		rd->compute_list_dispatch(compute, (buffers.occlusion_work[draw].count + 63) / 64, 1, 1);
 	}

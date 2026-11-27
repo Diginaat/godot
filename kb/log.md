@@ -1,5 +1,15 @@
 # Update log
 
+## 2026-11-27 (compact CLOD command streams)
+
+* **Added**: [compact CLOD commands](/project/compact-clod-commands.md):
+  `RenderingDevice::draw_list_draw_indirect_count()` and
+  `SUPPORTS_DRAW_INDIRECT_COUNT` (Vulkan `drawIndirectCount`, D3D12
+  `ExecuteIndirect` count buffer); CLOD selection and HZB kernels append
+  only drawn groups. `hzb_bench` GPU frame 2.2-5.5x faster on Vulkan,
+  1.6-3.3x on D3D12; setting `rendering/geometry/cluster_lod/compact_commands`.
+* **Resolved**: [CLOD two-pass zero draws](/project/clod-two-pass-zero-draws.md).
+
 ## 2026-11-27 (DDGI flicker since 0.10.1)
 
 * **Seen again**: [render graph finding](/ddgi/findings/render-graph-bounce-loss.md):

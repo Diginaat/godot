@@ -3744,6 +3744,7 @@ void RenderingServer::init() {
 	// they exist and show in Project Settings with every rendering method.
 	// All but streaming/enabled are read every frame and switch live.
 	GLOBAL_DEF("rendering/geometry/cluster_lod/enabled", true);
+	GLOBAL_DEF("rendering/geometry/cluster_lod/compact_commands", true);
 	GLOBAL_DEF(PropertyInfo(Variant::FLOAT, "rendering/geometry/cluster_lod/error_pixels", PROPERTY_HINT_RANGE, "0,64,0.1,or_greater"), 1.0);
 	GLOBAL_DEF("rendering/geometry/cluster_lod/mesh_instance_default", false);
 	GLOBAL_DEF("rendering/geometry/cluster_lod/occlusion_enabled", true);

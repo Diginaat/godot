@@ -128,7 +128,7 @@ func _test_gpu(surface: Dictionary) -> void:
 		cases.append({"camera": Vector3(24, 10, -20), "threshold": threshold, "ortho": false, "clip": 10000.0})
 	var inputs := _encode_inputs(cases, count)
 	var commands := PackedInt32Array()
-	commands.resize(32 + 2 * count * 5)
+	commands.resize(40 + 2 * count * 5)
 	commands.fill(-1)
 	var feedback := PackedInt32Array()
 	feedback.resize(count + 5)
@@ -141,13 +141,17 @@ func _test_gpu(surface: Dictionary) -> void:
 		rd.storage_buffer_create((count + 1) * 16),
 		rd.storage_buffer_create(surface.children.size() * 4, surface.children.to_byte_array()),
 		rd.storage_buffer_create(feedback.size() * 4, feedback.to_byte_array()),
+		# Selection words from command offset 20 / 5, and the compact counts (unused: one record per group).
+		rd.storage_buffer_create((4 + 2 * count) * 4),
+		rd.storage_buffer_create(2 * 4, PackedByteArray(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT),
 	]
+	const BINDINGS: Array[int] = [0, 1, 2, 3, 4, 5, 7, 8]
 	var uniforms: Array[RDUniform] = []
-	for binding in 6:
+	for i in BINDINGS.size():
 		var uniform := RDUniform.new()
-		uniform.binding = binding
+		uniform.binding = BINDINGS[i]
 		uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
-		uniform.add_id(buffers[binding])
+		uniform.add_id(buffers[i])
 		uniforms.append(uniform)
 	var uniform_set := rd.uniform_set_create(uniforms, shader, 0)
 	var random := RandomNumberGenerator.new()
@@ -182,8 +186,8 @@ func _test_gpu(surface: Dictionary) -> void:
 		rd.compute_list_bind_compute_pipeline(list, pipeline)
 		rd.compute_list_bind_uniform_set(list, uniform_set, 0)
 		for draw in 2:
-			# Residency push constant: draw index, first request word (0: own buffer).
-			rd.compute_list_set_push_constant(list, PackedInt32Array([draw, 0]).to_byte_array(), 8)
+			# Residency push constant: draw index, compact (off), first request word (0: own buffer).
+			rd.compute_list_set_push_constant(list, PackedInt32Array([draw, 0, 0]).to_byte_array(), 12)
 			rd.compute_list_dispatch(list, (count + 63) / 64, 1, 1)
 		rd.compute_list_end()
 		var actual := rd.buffer_get_data(buffers[2]).to_int32_array()
@@ -192,7 +196,7 @@ func _test_gpu(surface: Dictionary) -> void:
 			var expected := _resident_oracle(surface, mask, cases[draw].threshold)
 			var selected: Array[int] = []
 			for group in count:
-				var offset := 16 + draw * count * 5 + group * 5
+				var offset := 20 + draw * count * 5 + group * 5
 				if actual[offset + 1] == 1:
 					selected.append(group)
 					if mask[group] == 0:

@@ -1614,6 +1614,10 @@ public:
 
 	void draw_list_draw(DrawListID p_list, bool p_use_indices, uint32_t p_instances = 1, uint32_t p_procedural_vertices = 0);
 	void draw_list_draw_indirect(DrawListID p_list, bool p_use_indices, RID p_buffer, uint32_t p_offset = 0, uint32_t p_draw_count = 1, uint32_t p_stride = 0);
+	// Draws the first N records at p_offset; the GPU reads N from p_count_buffer
+	// at p_count_offset and clamps it to p_max_draw_count. Needs
+	// SUPPORTS_DRAW_INDIRECT_COUNT.
+	void draw_list_draw_indirect_count(DrawListID p_list, bool p_use_indices, RID p_buffer, uint32_t p_offset, RID p_count_buffer, uint32_t p_count_offset, uint32_t p_max_draw_count, uint32_t p_stride);
 
 	void draw_list_set_viewport(DrawListID p_list, const Rect2i &p_rect);
 	void draw_list_enable_scissor(DrawListID p_list, const Rect2 &p_rect);
@@ -1784,6 +1788,7 @@ private:
 	void _flush_barriers_for_transfer_worker(TransferWorker *p_transfer_worker);
 	void _check_transfer_worker_operation(uint32_t p_transfer_worker_index, uint64_t p_transfer_worker_operation);
 	void _check_transfer_worker_buffer(Buffer *p_buffer);
+	void _draw_list_draw_indirect(DrawListID p_list, bool p_use_indices, RID p_buffer, uint32_t p_offset, RID p_count_buffer, uint32_t p_count_offset, uint32_t p_draw_count, uint32_t p_stride);
 	void _check_transfer_worker_texture(Texture *p_texture);
 	void _check_transfer_worker_vertex_array(VertexArray *p_vertex_array);
 	void _check_transfer_worker_index_array(IndexArray *p_index_array);

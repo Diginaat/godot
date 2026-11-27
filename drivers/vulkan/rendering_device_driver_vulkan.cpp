@@ -1076,6 +1076,8 @@ Error RenderingDeviceDriverVulkan::_check_device_capabilities() {
 				vulkan_memory_model_support = device_features_vk_1_2.vulkanMemoryModel;
 				vulkan_memory_model_device_scope_support = device_features_vk_1_2.vulkanMemoryModelDeviceScope;
 			}
+			// Core in Vulkan 1.2, optional feature: draws with a GPU-written count.
+			draw_indirect_count_support = device_features_vk_1_2.drawIndirectCount;
 			// Descriptor indexing features (core in Vulkan 1.2).
 			descriptor_indexing_capabilities.shader_sampled_image_array_non_uniform_indexing = device_features_vk_1_2.shaderSampledImageArrayNonUniformIndexing;
 			descriptor_indexing_capabilities.descriptor_binding_partially_bound = device_features_vk_1_2.descriptorBindingPartiallyBound;
@@ -1539,6 +1541,7 @@ Error RenderingDeviceDriverVulkan::_initialize_device(const LocalVector<VkDevice
 		vulkan_1_2_features.vulkanMemoryModelDeviceScope = vulkan_memory_model_device_scope_support;
 		vulkan_1_2_features.shaderFloat16 = shader_capabilities.shader_float16_is_supported;
 		vulkan_1_2_features.shaderInt8 = shader_capabilities.shader_int8_is_supported;
+		vulkan_1_2_features.drawIndirectCount = draw_indirect_count_support;
 		// Descriptor indexing features for bindless textures.
 		vulkan_1_2_features.shaderSampledImageArrayNonUniformIndexing = descriptor_indexing_capabilities.shader_sampled_image_array_non_uniform_indexing;
 		vulkan_1_2_features.descriptorBindingPartiallyBound = descriptor_indexing_capabilities.descriptor_binding_partially_bound;
@@ -7750,6 +7753,8 @@ bool RenderingDeviceDriverVulkan::has_feature(Features p_feature) {
 		case SUPPORTS_MULTI_DRAW_INDIRECT:
 			// Enabled whenever available; the spec then guarantees maxDrawIndirectCount >= 65535.
 			return physical_device_features.multiDrawIndirect;
+		case SUPPORTS_DRAW_INDIRECT_COUNT:
+			return draw_indirect_count_support;
 		default:
 			return false;
 	}

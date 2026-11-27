@@ -61,7 +61,8 @@ func _encode_inputs(cases: Array[Dictionary], group_count: int) -> PackedByteArr
 		var camera: Vector3 = test.camera
 		inputs.append_array(PackedFloat32Array([camera.x, camera.y, camera.z, 500, 0, 0, 1, 0.1]).to_byte_array())
 		var threshold_bits := PackedFloat32Array([test.threshold]).to_byte_array().decode_s32(0)
-		inputs.append_array(PackedInt32Array([group_count, 16 + draw * group_count * 5, int(test.ortho), threshold_bits]).to_byte_array())
+		# Command offsets are multiples of 5 words: the selection words start at offset / 5.
+		inputs.append_array(PackedInt32Array([group_count, 20 + draw * group_count * 5, int(test.ortho), threshold_bits]).to_byte_array())
 	return inputs
 
 
@@ -104,56 +105,89 @@ func _test_gpu(surface: Dictionary) -> void:
 	cases.append({"camera": Vector3(24, 10, -20), "threshold": 0.0, "ortho": false, "clip": -10.0})
 	var inputs := _encode_inputs(cases, group_count)
 	var guards := PackedInt32Array()
-	guards.resize(32 + cases.size() * group_count * 5)
+	guards.resize(40 + cases.size() * group_count * 5)
 	guards.fill(-1)
+	# Selection words: 4 guards (offset 20 / 5), one word per group and case, guards.
+	var selection_guards := PackedInt32Array()
+	selection_guards.resize(4 + cases.size() * group_count + 16)
+	selection_guards.fill(-1)
 	var buffers: Array[RID] = [
 		rd.storage_buffer_create(group_bytes.size(), group_bytes),
 		rd.storage_buffer_create(inputs.size(), inputs),
 		rd.storage_buffer_create(guards.size() * 4, guards.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT),
+		rd.storage_buffer_create(selection_guards.size() * 4, selection_guards.to_byte_array()),
+		rd.storage_buffer_create(cases.size() * 4, PackedByteArray(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT),
 	]
+	const BINDINGS: Array[int] = [0, 1, 2, 7, 8]
 	var uniforms: Array[RDUniform] = []
-	for binding in 3:
+	for i in BINDINGS.size():
 		var uniform := RDUniform.new()
 		uniform.uniform_type = RenderingDevice.UNIFORM_TYPE_STORAGE_BUFFER
-		uniform.binding = binding
-		uniform.add_id(buffers[binding])
+		uniform.binding = BINDINGS[i]
+		uniform.add_id(buffers[i])
 		uniforms.append(uniform)
 	var uniform_set := rd.uniform_set_create(uniforms, shader, 0)
-	for round_id in 2:
-		if round_id == 1:
-			for test in cases:
-				test.threshold = 1000000.0 if test.threshold == 0.0 else 0.0
-			cases[0].clip = -10.0
-			cases[7].clip = 10000.0
-			inputs = _encode_inputs(cases, group_count)
-			rd.buffer_update(buffers[1], 0, inputs.size(), inputs)
-		# Repeat in reverse submission order without clearing the command buffer.
-		var list := rd.compute_list_begin()
-		rd.compute_list_bind_compute_pipeline(list, pipeline)
-		rd.compute_list_bind_uniform_set(list, uniform_set, 0)
-		for step in cases.size():
-			var draw := step if round_id == 0 else cases.size() - step - 1
-			rd.compute_list_set_push_constant(list, PackedInt32Array([draw]).to_byte_array(), 4)
-			rd.compute_list_dispatch(list, (group_count + 63) / 64, 1, 1)
-		rd.compute_list_end()
-		var result := rd.buffer_get_data(buffers[2])
-		for draw in cases.size():
-			var test := cases[draw]
-			var actual: Array[int] = []
-			for group in group_count:
-				var offset := (16 + draw * group_count * 5 + group * 5) * 4
-				var count := result.decode_u32(offset + 4)
-				if count == 1:
-					actual.append(group)
-				elif count != 0:
-					failures.append("unbounded instance count")
-				if result.decode_u32(offset) != ranges[group].y or result.decode_u32(offset + 8) != ranges[group].x or result.decode_u32(offset + 12) != 0 or result.decode_u32(offset + 16) != 0:
-					failures.append("source-index command fields corrupted")
-			if actual != _oracle(surface, test.camera, test.threshold, test.ortho, test.clip):
-				failures.append("GPU cut differs from exclusive-root oracle: draw %d round %d" % [draw, round_id])
-		for guard in 16:
-			if result.decode_u32(guard * 4) != 0xffffffff or result.decode_u32((guards.size() - 1 - guard) * 4) != 0xffffffff:
-				failures.append("GPU wrote outside command capacity")
+	var by_first_index := {}
+	for group in group_count:
+		by_first_index[ranges[group].x] = group
+	# One record per group, then compact records (only the drawn groups, counted).
+	for compact in 2:
+		for round_id in 2:
+			if round_id == 1:
+				for test in cases:
+					test.threshold = 1000000.0 if test.threshold == 0.0 else 0.0
+				cases[0].clip = -10.0
+				cases[7].clip = 10000.0
+				inputs = _encode_inputs(cases, group_count)
+				rd.buffer_update(buffers[1], 0, inputs.size(), inputs)
+			if compact == 1:
+				rd.buffer_clear(buffers[4], 0, cases.size() * 4)
+			# Repeat in reverse submission order without clearing the command buffer.
+			var list := rd.compute_list_begin()
+			rd.compute_list_bind_compute_pipeline(list, pipeline)
+			rd.compute_list_bind_uniform_set(list, uniform_set, 0)
+			for step in cases.size():
+				var draw := step if round_id == 0 else cases.size() - step - 1
+				rd.compute_list_set_push_constant(list, PackedInt32Array([draw, compact]).to_byte_array(), 8)
+				rd.compute_list_dispatch(list, (group_count + 63) / 64, 1, 1)
+			rd.compute_list_end()
+			var result := rd.buffer_get_data(buffers[2])
+			var selection := rd.buffer_get_data(buffers[3])
+			var counts := rd.buffer_get_data(buffers[4])
+			for draw in cases.size():
+				var test := cases[draw]
+				var expected := _oracle(surface, test.camera, test.threshold, test.ortho, test.clip)
+				var actual: Array[int] = []
+				var record_count := group_count if compact == 0 else counts.decode_u32(draw * 4)
+				if record_count > group_count:
+					failures.append("compact count above the group count: draw %d" % draw)
+					record_count = 0
+				for record in record_count:
+					var offset := (20 + draw * group_count * 5 + record * 5) * 4
+					var count := result.decode_u32(offset + 4)
+					var group: int = record if compact == 0 else by_first_index.get(result.decode_u32(offset + 8), -1)
+					if group < 0:
+						failures.append("compact record with an unknown first index")
+						continue
+					if count == 1:
+						actual.append(group)
+					elif count != 0 or compact == 1:
+						failures.append("unbounded instance count")
+					if result.decode_u32(offset) != ranges[group].y or result.decode_u32(offset + 8) != ranges[group].x or result.decode_u32(offset + 12) != 0 or result.decode_u32(offset + 16) != 0:
+						failures.append("source-index command fields corrupted")
+				actual.sort()
+				if actual != expected:
+					failures.append("GPU cut differs from exclusive-root oracle: draw %d round %d compact %d" % [draw, round_id, compact])
+				for group in group_count:
+					var word := selection.decode_u32((4 + draw * group_count + group) * 4)
+					if word != (ranges[group].x if expected.has(group) else 0xffffffff):
+						failures.append("selection word differs: draw %d group %d compact %d" % [draw, group, compact])
+						break
+			for guard in 16:
+				if result.decode_u32(guard * 4) != 0xffffffff or result.decode_u32((guards.size() - 1 - guard) * 4) != 0xffffffff:
+					failures.append("GPU wrote outside command capacity")
+				if (guard < 4 and selection.decode_u32(guard * 4) != 0xffffffff) or selection.decode_u32((selection_guards.size() - 1 - guard) * 4) != 0xffffffff:
+					failures.append("GPU wrote outside selection capacity")
 	for resource in [uniform_set, pipeline, shader] + buffers:
 		rd.free_rid(resource)
 	_finish.call_deferred(failures)
@@ -161,7 +195,7 @@ func _test_gpu(surface: Dictionary) -> void:
 
 func _finish(failures: Array) -> void:
 	if failures.is_empty():
-		print("CLOD_TEST_PASS: GPU hierarchy cuts, perspective/orthographic, per-view output, frustum rejection, bounded native commands, repeat submission")
+		print("CLOD_TEST_PASS: GPU hierarchy cuts, perspective/orthographic, per-view output, frustum rejection, bounded native commands, compact commands and selection words, repeat submission")
 	else:
 		for failure in failures:
 			printerr("CLOD_TEST_FAIL: ", failure)

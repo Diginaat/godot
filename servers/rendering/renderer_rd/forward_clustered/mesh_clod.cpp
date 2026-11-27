@@ -83,12 +83,33 @@ bool RenderForwardClustered::_mesh_clod_surface_eligible(const GeometryInstanceS
 	return true;
 }
 
+void RenderForwardClustered::_set_mesh_clod_stream(RenderListParameters &r_params, const RenderBufferDataForwardClustered *p_buffers, uint32_t p_stream) {
+	r_params.mesh_clod_commands = RID();
+	r_params.mesh_clod_counts = RID();
+	r_params.mesh_clod_count_offset = 0;
+	if (!p_buffers || !p_buffers->mesh_clod.active) {
+		return;
+	}
+	const auto &buffers = p_buffers->mesh_clod;
+	using Buffers = RenderBufferDataForwardClustered::MeshCLODBuffers;
+	ERR_FAIL_UNSIGNED_INDEX(p_stream, uint32_t(Buffers::STREAM_MAX));
+	const RID streams[Buffers::STREAM_MAX] = { buffers.commands, buffers.color_commands, buffers.depth_commands, buffers.phase2_commands };
+	r_params.mesh_clod_commands = streams[p_stream];
+	if (buffers.compact && streams[p_stream].is_valid()) {
+		r_params.mesh_clod_counts = buffers.counts;
+		r_params.mesh_clod_count_offset = p_stream * buffers.draw_capacity * sizeof(uint32_t);
+	}
+}
+
 void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers) {
 	if (!p_buffers) {
 		return;
 	}
 	auto &buffers = p_buffers->mesh_clod;
 	buffers.active = false;
+	// Set again by _setup_mesh_clod_occlusion() when this frame's depth pre-pass tests the groups.
+	buffers.occlusion_ready = false;
+	buffers.two_pass = false;
 	// The selection kernel always binds the statistics buffer; without it, keep source draws.
 	if (p_buffers->geometry_statistics.buffer.is_null() || !_mesh_clod_frame_enabled(p_render_data, p_buffers)) {
 		return;
@@ -173,26 +194,42 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 	}
 	RD *rd = RD::get_singleton();
 	if (buffers.group_capacity < total_groups) {
-		if (buffers.commands.is_valid()) {
-			rd->free_rid(buffers.commands);
+		for (RID *buffer : { &buffers.commands, &buffers.selection }) {
+			if (buffer->is_valid()) {
+				rd->free_rid(*buffer);
+			}
 		}
 		buffers.group_capacity = Math::next_power_of_2(total_groups);
 		buffers.commands = rd->storage_buffer_create(buffers.group_capacity * 5 * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
-		if (buffers.commands.is_null()) {
+		buffers.selection = rd->storage_buffer_create(buffers.group_capacity * sizeof(uint32_t));
+		if (buffers.commands.is_null() || buffers.selection.is_null()) {
 			buffers.group_capacity = 0;
 			return;
 		}
 	}
 	if (buffers.draw_capacity < uint32_t(inputs.size())) {
-		if (buffers.inputs.is_valid()) {
-			rd->free_rid(buffers.inputs);
+		for (RID *buffer : { &buffers.inputs, &buffers.counts }) {
+			if (buffer->is_valid()) {
+				rd->free_rid(*buffer);
+			}
 		}
 		buffers.draw_capacity = Math::next_power_of_2(uint32_t(inputs.size()));
 		buffers.inputs = rd->storage_buffer_create(buffers.draw_capacity * sizeof(Input));
-		if (buffers.inputs.is_null()) {
+		buffers.counts = rd->storage_buffer_create(buffers.draw_capacity * RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_MAX * sizeof(uint32_t), {}, RD::STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT);
+		if (buffers.inputs.is_null() || buffers.counts.is_null()) {
 			buffers.draw_capacity = 0;
 			return;
 		}
+	}
+	// Compact streams: the kernels append only the groups they draw and count
+	// them, and every pass draws with the GPU count, so the command processor
+	// never reads the empty records of the groups outside the cut (most of
+	// them). The Cluster LOD debug view pushes each group's id per record, so
+	// it keeps one record per group.
+	buffers.compact = mesh_clod.multi_draw && mesh_clod.indirect_count && get_debug_draw_mode() != RSE::VIEWPORT_DEBUG_DRAW_CLUSTER_LOD &&
+			GLOBAL_GET_CACHED(bool, "rendering/geometry/cluster_lod/compact_commands");
+	if (buffers.compact) {
+		rd->buffer_clear(buffers.counts, 0, buffers.draw_capacity * RenderBufferDataForwardClustered::MeshCLODBuffers::STREAM_MAX * sizeof(uint32_t));
 	}
 	if (mesh_clod.version.is_null()) {
 		Vector<String> modes;
@@ -234,6 +271,9 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 			uniform.append_id(resources[binding]);
 			uniforms.push_back(uniform);
 		}
+		for (const RD::Uniform &uniform : { RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 7, buffers.selection), RD::Uniform(RD::UNIFORM_TYPE_STORAGE_BUFFER, 8, buffers.counts) }) {
+			uniforms.push_back(uniform);
+		}
 		RD::Uniform statistics;
 		statistics.binding = 6;
 		statistics.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -246,10 +286,11 @@ void RenderForwardClustered::_prepare_mesh_clod(const RenderDataRD *p_render_dat
 			bound_set = set;
 		}
 		// The residency mode adds the surface's first word in the request buffer.
-		const uint32_t push_constant[2] = { draw, streaming ? streaming->request_offset : 0 };
-		rd->compute_list_set_push_constant(compute_list, push_constant, streaming ? sizeof(push_constant) : sizeof(uint32_t));
+		const uint32_t push_constant[3] = { draw, buffers.compact ? 1u : 0u, streaming ? streaming->request_offset : 0 };
+		rd->compute_list_set_push_constant(compute_list, push_constant, streaming ? sizeof(push_constant) : 2 * sizeof(uint32_t));
 		rd->compute_list_dispatch(compute_list, (work[draw].group_count + 63) / 64, 1, 1);
 		work[draw].element->mesh_clod_offset = inputs[draw].params[1];
+		work[draw].element->mesh_clod_draw = draw;
 		if (p_render_data->render_info) {
 			p_render_data->render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_VISIBLE][RSE::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME] += work[draw].group_count - 1;
 		}
