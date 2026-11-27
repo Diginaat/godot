@@ -62,7 +62,7 @@ Its street view stayed at about 0.53 ms of GPU time with occlusion on.
 
 # Open
 
-- The per-member instance data (55 MB at 200k nodes) differs per surface:
-  the mesh AABB, the material table slot and the UV scale. Sharing it per
-  instance would need a second indirection in the scene shader.
-- Buffers never shrink after a level is unloaded.
+- The per-member instance data (55 MB at 200k nodes): gone, the scene
+  shader builds it ([gpu-instance-data-in-shader](/project/gpu-instance-data-in-shader.md), OD10).
+- Buffers never shrink after a level is unloaded: done
+  ([vram-shrink-after-unload](/project/vram-shrink-after-unload.md), OD9).

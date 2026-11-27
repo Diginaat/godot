@@ -429,36 +429,132 @@ layout(set = 1, binding = 46, std430) readonly buffer MultiMeshVisibleIDs {
 }
 multimesh_visible_ids;
 
-layout(set = 1, binding = 47, std430) buffer restrict readonly GPUInstanceDataBuffer {
-	InstanceData data[];
-}
-gpu_instances;
+// The GPU path (sc_gpu_instances()) builds the drawn instance's data from
+// its instance table record, its member and bucket, and the view's flags
+// (gpu_instance_data()), as _fill_instance_data() would write it. No copy
+// per member is kept (OD10).
+struct GPUInstanceRecord { // GPUInstanceTable::Record, 160 bytes.
+	mat3x4 transform;
+	mat3x4 prev_transform;
+	uint flags;
+	uint instance_uniforms_ofs;
+	uint layer_mask;
+	uint generation;
+	vec4 lightmap_uv_scale;
+	vec3 aabb_position;
+	uint gpu_flags;
+	vec3 aabb_size;
+	float lod_scale;
+};
 
-// Per GPU path draw, the instances it draws (indices into gpu_instances).
+struct GPUInstanceBucket { // RenderForwardClustered::GPUInstanceBucketData, 80 bytes.
+	vec3 compressed_aabb_position;
+	uint ids_first;
+	vec3 compressed_aabb_size;
+	uint material_feedback_index;
+	vec4 uv_scale;
+	uint command;
+	uint capacity;
+	uint lod_count;
+	uint lod_edges_first;
+	uint depth_command;
+	uint pad0;
+	uint pad1;
+	uint pad2;
+};
+
+layout(set = 1, binding = 47, std430) buffer restrict readonly GPUInstanceTable {
+	GPUInstanceRecord records[];
+}
+gpu_instance_table;
+
+// Per GPU path draw, the instances it draws (member indices).
 layout(set = 1, binding = 48, std430) buffer restrict readonly GPUInstanceIDs {
 	uint data[];
 }
 gpu_instance_ids;
 
-// One field of the drawn instance's data, from whichever buffer holds it.
-#ifdef UBERSHADER
-// The ubershader can't fold sc_gpu_instances(): a field read from either
-// buffer per use compiled two loads at every use, and the driver's work on
-// the ubershader pipelines (the cold stall) grew with them. Each stage loads
-// the drawn instance once instead (scene_instance_load()).
+layout(set = 1, binding = 49, std430) buffer restrict readonly GPUInstanceMembers {
+	uvec4 data[]; // Table slot, bucket, material table slot, unused.
+}
+gpu_instance_members;
+
+layout(set = 1, binding = 50, std430) buffer restrict readonly GPUInstanceBuckets {
+	GPUInstanceBucket data[];
+}
+gpu_instance_buckets;
+
+layout(set = 1, binding = 51, std430) buffer restrict readonly GPUInstanceView {
+	uint flags; // GPU_INSTANCE_VIEW_* of the last camera view (gpu_instances.cpp).
+}
+gpu_instance_view;
+
+#define GPU_INSTANCE_FLAG_MOVED 1u
+#define GPU_INSTANCE_FLAG_CAN_SDFGI 2u
+#define GPU_INSTANCE_VIEW_USE_GI_BUFFERS 1u
+#define GPU_INSTANCE_VIEW_USE_SDFGI 2u
+#define GPU_INSTANCE_VIEW_MOTION 8u
+
+// What _fill_render_list() and _fill_instance_data() write for an opaque
+// instance without lightmap, VoxelGI, fade or motion pass. Shadow passes
+// read none of the view-dependent flags.
+InstanceData gpu_instance_data(uint p_member) {
+	uvec4 member = gpu_instance_members.data[p_member];
+	GPUInstanceRecord record = gpu_instance_table.records[member.x];
+	GPUInstanceBucket bucket = gpu_instance_buckets.data[member.y];
+	uint view_flags = gpu_instance_view.flags;
+
+	uint flags = (record.flags & ~(0xFFu << INSTANCE_FLAGS_FADE_SHIFT)) | (255u << INSTANCE_FLAGS_FADE_SHIFT);
+	if (bool(record.gpu_flags & GPU_INSTANCE_FLAG_MOVED) && !bool(view_flags & GPU_INSTANCE_VIEW_MOTION)) {
+		flags |= INSTANCE_FLAGS_DYNAMIC; // The motion pass computes motion vectors instead.
+	}
+	if (bool(view_flags & GPU_INSTANCE_VIEW_USE_GI_BUFFERS)) {
+		flags |= INSTANCE_FLAGS_USE_GI_BUFFERS;
+	}
+	if (bool(view_flags & GPU_INSTANCE_VIEW_USE_SDFGI) && bool(record.gpu_flags & GPU_INSTANCE_FLAG_CAN_SDFGI)) {
+		flags |= INSTANCE_FLAGS_USE_SDFGI;
+	}
+
+	InstanceData data;
+	data.transform = record.transform;
+	data.compressed_aabb_position_pad = vec4(bucket.compressed_aabb_position, uintBitsToFloat(member.z)); // .w: material table slot (D036).
+	data.compressed_aabb_size_pad = vec3(bucket.compressed_aabb_size);
+	data.material_feedback_index = bucket.material_feedback_index;
+	data.uv_scale = bucket.uv_scale;
+	data.flags = flags;
+	data.instance_uniforms_ofs = record.instance_uniforms_ofs;
+	data.gi_offset = 0xFFFFFFFFu;
+	data.layer_mask = record.layer_mask;
+	data.prev_transform = record.prev_transform;
+	data.lightmap_uv_scale = record.lightmap_uv_scale;
+#ifdef USE_DOUBLE_PRECISION
+	data.model_precision = vec4(0.0);
+	data.prev_model_precision = vec4(0.0);
+#endif
+	return data;
+}
+
+// The drawn instance's data, loaded once per stage (scene_instance_load())
+// for the GPU path, and in the ubershader for both paths: there a field
+// read from either buffer per use compiled two loads at every use, and the
+// driver's work on the ubershader pipelines (the cold stall) grew with them.
 InstanceData scene_instance;
 
 void scene_instance_load(uint p_instance_index) {
 	if (sc_gpu_instances()) {
-		scene_instance = gpu_instances.data[p_instance_index];
-	} else {
+		scene_instance = gpu_instance_data(p_instance_index);
+	}
+#ifdef UBERSHADER
+	else {
 		scene_instance = instances.data[p_instance_index];
 	}
+#endif
 }
 
+#ifdef UBERSHADER
 #define SCENE_INSTANCE(m_field) (scene_instance.m_field)
 #else
-#define SCENE_INSTANCE(m_field) (sc_gpu_instances() ? gpu_instances.data[instance_index].m_field : instances.data[instance_index].m_field)
+#define SCENE_INSTANCE(m_field) (sc_gpu_instances() ? scene_instance.m_field : instances.data[instance_index].m_field)
 #endif
 
 #ifdef USE_RADIANCE_OCTMAP_ARRAY

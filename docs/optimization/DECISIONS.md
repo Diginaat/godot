@@ -110,3 +110,16 @@ and shrinking, so steady content never resizes. Both trims change
 upstream code in `RenderingDevice`. small_1k after massive_100k 300 to
 83 MB; level bench city_extreme 415 to 287 MB, forest 221 to 165 MB;
 GPU time unchanged.
+
+## OD10 (2026-11-27): the scene shader builds the GPU path's instance data
+
+The GPU instance cull wrote a 176-byte `InstanceData` per member every
+frame, 55 MB at 200k nodes, all copied from the instance table record,
+the member and its bucket. The scene shader now reads those (bindings 47,
+49 and 50) and a 16-byte view flags buffer (51), and builds the data once
+per stage (`gpu_instance_data()`, `scene_instance_load()`). Specialized
+CPU-path pipelines are unchanged; the ubershader branches as before.
+city_extreme 287 to 232 MB, massive_100k GPU -5%, cold shader stall
+unchanged, images and motion vectors equal to the CPU path (also with
+the ubershader forced). Cost: three more storage buffer bindings in the
+render pass set.

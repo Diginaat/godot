@@ -53,6 +53,22 @@ run in the same session:
 GPU p50 in this session is higher than in the OD1/OD2 table above for
 both builds (clocks); the A/B is from one session.
 
+### Instance data built in the scene shader (OD10)
+
+Same session, builds alternated, two rounds (VRAM identical in both):
+
+| Preset or case | VRAM before / after (MB) | GPU p50 before / after (ms) |
+| --- | --- | --- |
+| town | 186 / 175 | 0.716 / 0.706-0.758 |
+| forest | 165 / 149 | 1.672 / 1.622 |
+| city_extreme | 287 / 232 | 3.455 / 3.313 |
+| small_1k (instance bench) | 70.2 / 69.9 | 0.167 / 0.166 |
+| massive_100k | 131.8 / 107.0 | 0.948 / 0.903 |
+| churn_100k | 160.4 / 135.7 | 0.872 / 0.823 |
+
+Cold stall (`shader_bench.ps1 -Cold -Mv`): 44.9, 44.6 s before; 44.4,
+45.2 s after. Stock 4.7.2: town 167, forest 158, city_extreme 188 MB.
+
 ## O2 and O5: process loop (2026-11-27)
 
 `devtools/test/scene_bench.gd`, headless, frame ms, medians of 3 rounds

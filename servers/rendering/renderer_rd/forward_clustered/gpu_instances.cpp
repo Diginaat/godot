@@ -380,7 +380,7 @@ void RenderForwardClustered::_gpu_instances_free_scenario(GPUInstanceScenario *p
 	if (gpu_instances_view == p_scenario) {
 		gpu_instances_view = nullptr;
 	}
-	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->output_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->command_indices_buffer, &p_scenario->stats_buffer,
+	gpu_instances_free_buffers({ &p_scenario->members_buffer, &p_scenario->buckets_buffer, &p_scenario->commands_buffer, &p_scenario->lod_edges_buffer, &p_scenario->view_buffer, &p_scenario->ids_buffer, &p_scenario->command_primitives_buffer, &p_scenario->command_indices_buffer, &p_scenario->stats_buffer,
 		&p_scenario->visible_buffer, &p_scenario->occluded_commands_buffer, &p_scenario->occluded_ids_buffer, &p_scenario->occlusion_buffer, &p_scenario->history_buffer, &p_scenario->phase1_buffer,
 		&p_scenario->phase1_commands_buffer, &p_scenario->phase1_ids_buffer, &p_scenario->phase2_commands_buffer, &p_scenario->phase2_ids_buffer });
 	RD *rd = RD::get_singleton();
@@ -738,14 +738,10 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		}
 		*grow.buffer = rd->storage_buffer_create(*grow.capacity * grow.element_size, {}, usage);
 		rd->set_resource_name(*grow.buffer, grow.name);
-		if (grow.buffer == &p_scenario.members_buffer) {
-			// The instance data has one record per member.
-			if (p_scenario.output_buffer.is_valid()) {
-				rd->free_rid(p_scenario.output_buffer);
-			}
-			p_scenario.output_buffer = rd->storage_buffer_create(*grow.capacity * sizeof(SceneState::InstanceData));
-			rd->set_resource_name(p_scenario.output_buffer, "GPU Instances Instance Data");
-		}
+	}
+	if (p_scenario.view_buffer.is_null()) {
+		p_scenario.view_buffer = rd->storage_buffer_create(4 * sizeof(uint32_t));
+		rd->set_resource_name(p_scenario.view_buffer, "GPU Instances View");
 	}
 	if (p_scenario.member_count > 0) {
 		rd->buffer_update(p_scenario.members_buffer, 0, p_scenario.members.size() * sizeof(uint32_t), p_scenario.members.ptr());
@@ -858,7 +854,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 		_gpu_instances_update_members(*scenario);
 	}
 	const uint64_t max_members = uint64_t(rd->limit_get(RD::LIMIT_MAX_COMPUTE_WORKGROUP_COUNT_X)) * 64;
-	if (scenario->member_count == 0 || scenario->member_count > max_members || scenario->members_buffer.is_null() || scenario->output_buffer.is_null() ||
+	if (scenario->member_count == 0 || scenario->member_count > max_members || scenario->members_buffer.is_null() || scenario->view_buffer.is_null() ||
 			scenario->buckets_buffer.is_null() || scenario->commands_buffer.is_null() || scenario->ids_buffer.is_null() || scenario->lod_edges_buffer.is_null() ||
 			scenario->command_primitives_buffer.is_null() || scenario->command_indices_buffer.is_null() || scenario->stats_buffer.is_null()) {
 		ERR_FAIL_COND_V_MSG(scenario->member_count > max_members, true, "Too many instance surfaces for the GPU instance path; they are not drawn.");
@@ -954,6 +950,10 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 			GLOBAL_GET_CACHED(bool, "rendering/geometry/gpu_instances/occlusion_two_pass") && _gpu_instances_prepare_two_pass(*scenario);
 	params.view_flags = (p_using_opaque_gi ? GPU_INSTANCE_VIEW_USE_GI_BUFFERS : 0) | (p_using_sdfgi ? GPU_INSTANCE_VIEW_USE_SDFGI : 0) | (scene->cam_orthogonal ? GPU_INSTANCE_VIEW_ORTHOGONAL : 0) |
 			(gpu_instances_view_motion ? GPU_INSTANCE_VIEW_MOTION : 0) | (scenario->two_pass ? GPU_INSTANCE_VIEW_TWO_PASS : 0);
+	// The flags the scene shader builds instance flags from (the shadow
+	// passes read none of them).
+	const uint32_t view_words[4] = { params.view_flags, 0, 0, 0 };
+	rd->buffer_update(scenario->view_buffer, 0, sizeof(view_words), view_words);
 	// The LOD inputs of _fill_render_list().
 	params.lod_threshold = scene->screen_mesh_lod_threshold;
 	const Vector3 lod_camera = scene->main_cam_transform.origin;
@@ -970,10 +970,14 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 	gpu_instances_view_lod.motion = gpu_instances_view_motion;
 
 	const RID shader = gpu_instance_cull.shader.version_get_shader(gpu_instance_cull.version, 0);
-	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, scenario->output_buffer, scenario->ids_buffer, scenario->lod_edges_buffer,
+	// Binding 4 (the instance data per member) is gone: Forward+ builds it (OD10).
+	const RID resources[10] = { gpu_instance_table.get_buffer(), scenario->members_buffer, scenario->buckets_buffer, scenario->commands_buffer, RID(), scenario->ids_buffer, scenario->lod_edges_buffer,
 		scenario->command_primitives_buffer, scenario->stats_buffer, scenario->visible_buffer };
 	LocalVector<RD::Uniform> uniforms;
 	for (uint32_t binding = 0; binding < 10; binding++) {
+		if (resources[binding].is_null()) {
+			continue;
+		}
 		RD::Uniform uniform;
 		uniform.binding = binding;
 		uniform.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -1300,7 +1304,7 @@ bool RenderForwardClustered::_gpu_instances_shadow_pass(const RenderShadowData *
 		p_render_info[RSE::VIEWPORT_RENDER_INFO_DRAW_CALLS_IN_FRAME] += draws;
 	}
 	r_pass.gpu_batch_pass = pass;
-	r_pass.gpu_instances = scenario->output_buffer;
+	r_pass.gpu_instances = GPUInstanceBindings{ scenario->members_buffer, scenario->buckets_buffer, scenario->view_buffer };
 
 	// Validation: what the pass drew against what the scene cull listed
 	// (read back by the flush, after the cull).

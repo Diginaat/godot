@@ -1,5 +1,14 @@
 # Update log
 
+## 2026-11-27 (GPU instance data built in the scene shader, O1)
+
+* **Added**: [instance data built in the shader](/project/gpu-instance-data-in-shader.md):
+  no per-member `InstanceData` copy; the scene shader reads the table
+  record, member, bucket and view flags (OD10). city_extreme 287 to 232 MB,
+  forest 165 to 149 MB, massive_100k GPU 0.948 to 0.903 ms.
+* **Updated**: [GPU buffer VRAM](/project/gpu-buffer-vram.md): the
+  per-member instance data is gone.
+
 ## 2026-11-27 (VRAM after an unload, O1)
 
 * **Added**: [VRAM after an unload](/project/vram-shrink-after-unload.md):

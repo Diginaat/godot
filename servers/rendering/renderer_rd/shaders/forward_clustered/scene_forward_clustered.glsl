@@ -785,9 +785,7 @@ void main() {
 	if (sc_gpu_instances()) {
 		instance_index = gpu_instance_ids.data[instance_index];
 	}
-#ifdef UBERSHADER
 	scene_instance_load(instance_index);
-#endif
 
 	instance_index_interp = instance_index;
 #ifdef MATERIAL_UNIFORMS_USED
@@ -1166,9 +1164,7 @@ vec3 encode24(vec3 v) {
 
 void fragment_shader(in SceneData scene_data) {
 	uint instance_index = instance_index_interp;
-#ifdef UBERSHADER
 	scene_instance_load(instance_index);
-#endif
 #ifdef MATERIAL_UNIFORMS_USED
 	material_slot = floatBitsToUint(SCENE_INSTANCE(compressed_aabb_position_pad).w);
 #endif

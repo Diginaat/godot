@@ -240,9 +240,11 @@ func _pct(p_values: Array[float], p_q: float) -> float:
 
 func _report() -> void:
 	var gpu_instances = ProjectSettings.get_setting("rendering/geometry/gpu_instances/enabled", "n/a")
-	print("LEVEL_BENCH: preset=%s nodes=%d engine=%s driver=%s adapter='%s' gpu_instances=%s build_ms=%d first_frame_ms=%.1f wall_p50=%.3f wall_p95=%.3f wall_p99=%.3f cpu_p50=%.3f cpu_p95=%.3f gpu_p50=%.3f gpu_p95=%.3f draws_p50=%d objects_p50=%d vram_mb=%.0f frames=%d" % [
+	print("LEVEL_BENCH: preset=%s nodes=%d engine=%s driver=%s adapter='%s' gpu_instances=%s build_ms=%d first_frame_ms=%.1f wall_p50=%.3f wall_p95=%.3f wall_p99=%.3f cpu_p50=%.3f cpu_p95=%.3f gpu_p50=%.3f gpu_p95=%.3f draws_p50=%d objects_p50=%d vram_mb=%.0f buffer_mb=%.0f texture_mb=%.0f frames=%d" % [
 		_preset, _spec[0], Engine.get_version_info().string, RenderingServer.get_current_rendering_driver_name(),
 		RenderingServer.get_video_adapter_name(), gpu_instances, _build_ms, _first_frame_ms,
 		_pct(_wall, 0.5), _pct(_wall, 0.95), _pct(_wall, 0.99), _pct(_cpu, 0.5), _pct(_cpu, 0.95),
 		_pct(_gpu, 0.5), _pct(_gpu, 0.95), int(_pct(_draws, 0.5)), int(_pct(_objects, 0.5)),
-		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0, _wall.size()])
+		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_VIDEO_MEM_USED) / 1048576.0,
+		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_BUFFER_MEM_USED) / 1048576.0,
+		RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TEXTURE_MEM_USED) / 1048576.0, _wall.size()])

@@ -351,7 +351,17 @@ protected:
 
 	void _update_render_base_uniform_set();
 	RID _setup_sdfgi_render_pass_uniform_set(RID p_albedo_texture, RID p_emission_texture, RID p_emission_aniso_texture, RID p_geom_facing_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index);
-	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, RID p_visible_ids = RID(), RID p_gpu_instances = RID(), RID p_gpu_instance_ids = RID());
+	// What the scene shader reads for GPU path draws (bindings 47 and 49 to
+	// 51, gpu_instance_data()): the instance table, a scenario's members and
+	// buckets, and its view flags. Invalid: no GPU path draws.
+	struct GPUInstanceBindings {
+		RID members;
+		RID buckets;
+		RID view;
+		bool is_valid() const { return members.is_valid() && buckets.is_valid() && view.is_valid(); }
+	};
+
+	RID _setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas = false, RID p_visible_ids = RID(), const GPUInstanceBindings &p_gpu_instances = GPUInstanceBindings(), RID p_gpu_instance_ids = RID());
 	void _prepare_multimesh_culling(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	void _prepare_multimesh_shadow_culling(RenderBufferDataForwardClustered *p_buffers);
 	// TAA and upscalers shift NDC x/y by the jitter (Projection::add_jitter_offset).
@@ -860,7 +870,7 @@ protected:
 			// GPU path draws of the pass (invalid: none).
 			RID gpu_commands;
 			RID gpu_ids;
-			RID gpu_instances;
+			GPUInstanceBindings gpu_instances;
 			uint32_t gpu_batch_pass = UINT32_MAX; // Its slot in the shadow batch, until _gpu_instances_shadow_flush() sets the buffers.
 		};
 
@@ -1246,7 +1256,7 @@ protected:
 			uint32_t visible_capacity = 0; // In words.
 			uint32_t pass_capacity = 0;
 		} shadow_batch;
-		RID output_buffer; // InstanceData per member, written per view.
+		RID view_buffer; // The view flags gpu_instance_data() reads, written per camera view.
 		RID ids_buffer; // Members drawn per bucket level, written per view.
 		// HZB occlusion: the colour passes' commands and IDs (same layout as
 		// commands_buffer and ids_buffer), and the test's camera.

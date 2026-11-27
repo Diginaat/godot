@@ -109,7 +109,9 @@ the CPU path.
   world bounds and two per-instance bits, D028); writes the existing
   176-byte `InstanceData` and appends to the bucket's indirect command.
   The scene shader reads it from binding 47 under a specialization bit
-  (D028), so it changes in one macro, not in its logic.
+  (D028), so it changes in one macro, not in its logic. Since 2026-11-27
+  (OD10 in docs/optimization) the shader builds that data itself from the
+  table, members and buckets (bindings 47, 49-51); the pass writes none.
 - 2.4 One indirect draw per bucket in the depth pre-pass and the opaque pass
   (done). Views with a motion list (temporal upscaling), reflection probes,
   mirrors, XR and debug draw modes use the CPU list. Multi-draw is Phase 3.

@@ -525,6 +525,10 @@ surface cache) is a separate, cheaper candidate for the CPU fallback path
 ## D028 — The GPU path writes its own instance buffer (binding 47)
 
 2026-11-10, Phase 2.3/2.4.
+Superseded in part on 2026-11-27 by OD10 (docs/optimization/DECISIONS.md):
+the specialization bit and `SCENE_INSTANCE(field)` stay, but binding 47 is
+now the instance table and the shader builds the instance data from it,
+the members and buckets (49, 50) and the view flags (51).
 Problem: D027 planned to keep the scene shader as it is, with the compute
 pass writing the 176-byte instance data where the shader already reads it
 (set 1, binding 2). That buffer is a dynamic persistent buffer, mapped by

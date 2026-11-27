@@ -2670,7 +2670,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 
 	_gpu_instances_begin_view(p_render_data, using_motion_pass, using_sdfgi, using_sdfgi || using_voxelgi || using_ddgi);
 	RID gpu_instance_commands = gpu_instances_view ? gpu_instances_view->commands_buffer : RID();
-	const RID gpu_instance_data = gpu_instances_view ? gpu_instances_view->output_buffer : RID();
+	const GPUInstanceBindings gpu_instance_data = gpu_instances_view ? GPUInstanceBindings{ gpu_instances_view->members_buffer, gpu_instances_view->buckets_buffer, gpu_instances_view->view_buffer } : GPUInstanceBindings();
 	RID gpu_instance_ids = gpu_instances_view ? gpu_instances_view->ids_buffer : RID();
 
 	RENDER_TIMESTAMP("Fill Render List");
@@ -4312,7 +4312,7 @@ bool RenderForwardClustered::_probe_capture_ddgi(const RenderDataRD *p_render_da
 	return _ddgi_get_capture_resources(r_resources[0], r_resources[1], r_resources[2], r_resources[3]);
 }
 
-RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas, RID p_visible_ids, RID p_gpu_instances, RID p_gpu_instance_ids) {
+RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_render_list, const RenderDataRD *p_render_data, bool p_is_multiview, RID p_radiance_texture, const RendererRD::MaterialStorage::Samplers &p_samplers, uint32_t p_uniform_buffer_index, bool p_use_directional_shadow_atlas, RID p_visible_ids, const GPUInstanceBindings &p_gpu_instances, RID p_gpu_instance_ids) {
 	RendererRD::TextureStorage *texture_storage = RendererRD::TextureStorage::get_singleton();
 	RendererRD::LightStorage *light_storage = RendererRD::LightStorage::get_singleton();
 
@@ -4778,20 +4778,18 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		uniforms.push_back(u);
 	}
 	{
-		// Instance data the GPU path wrote for this view.
-		RD::Uniform u;
-		u.binding = 47;
-		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
-		u.append_id(p_gpu_instances.is_valid() ? p_gpu_instances : scene_shader.default_vec4_xform_buffer);
-		uniforms.push_back(u);
-	}
-	{
-		// Which of those instances each GPU path draw reads (per bucket level).
-		RD::Uniform u;
-		u.binding = 48;
-		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
-		u.append_id(p_gpu_instance_ids.is_valid() ? p_gpu_instance_ids : scene_shader.default_vec4_xform_buffer);
-		uniforms.push_back(u);
+		// What the GPU path's draws build their instance data from
+		// (gpu_instance_data() in scene_forward_clustered_inc.glsl), and which
+		// members each draw reads (48, per bucket level).
+		const bool gpu = p_gpu_instances.is_valid() && gpu_instance_table.get_buffer().is_valid();
+		const RID gpu_buffers[5] = { gpu ? gpu_instance_table.get_buffer() : RID(), p_gpu_instance_ids, gpu ? p_gpu_instances.members : RID(), gpu ? p_gpu_instances.buckets : RID(), gpu ? p_gpu_instances.view : RID() };
+		for (uint32_t i = 0; i < 5; i++) {
+			RD::Uniform u;
+			u.binding = 47 + i;
+			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
+			u.append_id(gpu_buffers[i].is_valid() ? gpu_buffers[i] : scene_shader.default_vec4_xform_buffer);
+			uniforms.push_back(u);
+		}
 	}
 	return UniformSetCacheRD::get_singleton()->get_cache_vec(scene_shader.get_default_shader_rd(is_multiview), RENDER_PASS_UNIFORM_SET, uniforms);
 }
@@ -5024,7 +5022,7 @@ RID RenderForwardClustered::_setup_sdfgi_render_pass_uniform_set(RID p_albedo_te
 	}
 	// The GPU instance path's bindings (see _setup_render_pass_uniform_set); SDFGI
 	// draws don't use it, but the shader declares them.
-	for (uint32_t binding : { 47u, 48u }) {
+	for (uint32_t binding : { 47u, 48u, 49u, 50u, 51u }) {
 		RD::Uniform u;
 		u.binding = binding;
 		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;

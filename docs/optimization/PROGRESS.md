@@ -32,5 +32,8 @@
   buffers, CPU list instance buffers, the upload staging ring and the
   transfer worker staging buffers shrink. small_1k after massive_100k
   300 to 83 MB (fresh 70), massive_100k 244 to 136 MB, level bench
-  city_extreme 415 to 287 MB, forest 221 to 165 MB. A gizmo flag for the transform walk was tried and
+  city_extreme 415 to 287 MB, forest 221 to 165 MB.
+- O1: the scene shader builds the GPU path's instance data (OD10): no
+  176-byte copy per member. city_extreme 287 to 232 MB, forest 165 to
+  149 MB (stock 158), massive_100k GPU 0.948 to 0.903 ms. A gizmo flag for the transform walk was tried and
   dropped (REGRESSIONS.md).

@@ -5,13 +5,13 @@
 #VERSION_DEFINES
 
 // GPU path for eligible instances (docs/renderer, Phase 2). One thread per
-// bucket member (an instance surface): in camera views its instance data,
-// then, if the CPU scene cull found its instance visible (a bit per table
-// slot), the index LOD as the CPU render list chooses it, whether
-// the motion pass draws it, then the
-// instance data Forward+ draws with, at the member's own index, and the
-// member's index appended to its bucket level's draw. The commands were
-// cleared on the GPU; the first member of a command writes its index count.
+// bucket member (an instance surface): if the CPU scene cull found its
+// instance visible (a bit per table slot), the index LOD as the CPU render
+// list chooses it, whether the motion pass draws it, and the member's index
+// appended to its bucket level's draw. Forward+ builds the instance data
+// from the member, its table record and bucket (gpu_instance_data() in
+// scene_forward_clustered_inc.glsl, OD10). The commands were cleared on the
+// GPU; the first member of a command writes its index count.
 //
 // MODE_OCCLUDE runs after the depth pre-pass with the camera run's
 // parameters: it chooses the same command for each drawn member, tests the
@@ -65,20 +65,6 @@ struct Bucket { // RenderForwardClustered::GPUInstanceBucketData, 80 bytes.
 	uint pad2;
 };
 
-struct InstanceData { // SceneState::InstanceData, 176 bytes.
-	vec4 transform[3];
-	vec4 compressed_aabb_position_pad;
-	vec3 compressed_aabb_size;
-	uint material_feedback_index;
-	vec4 uv_scale;
-	uint flags;
-	uint instance_uniforms_ofs;
-	uint gi_offset;
-	uint layer_mask;
-	vec4 prev_transform[3];
-	vec4 lightmap_uv_scale;
-};
-
 layout(set = 0, binding = 0, std430) restrict readonly buffer Table {
 	Record records[];
 }
@@ -98,13 +84,6 @@ layout(set = 0, binding = 3, std430) restrict buffer Commands {
 	uint data[]; // Five words per bucket; word 1 is the instance count.
 }
 commands;
-
-#if !defined(MODE_OCCLUDE) && !defined(MODE_SHADOW_BATCH)
-layout(set = 0, binding = 4, std430) restrict writeonly buffer Output {
-	InstanceData data[]; // One per member.
-}
-output_instances;
-#endif
 
 layout(set = 0, binding = 5, std430) restrict writeonly buffer IDs {
 	uint data[];
@@ -149,14 +128,6 @@ shared uint group_receivers_culled;
 
 #define GPU_FLAG_MOVED 1
 #define GPU_FLAG_CAN_SDFGI 2
-
-// Same values as the instance flags in scene_forward_clustered_inc.glsl
-// (static_assert in gpu_instances.cpp).
-#define INSTANCE_FLAGS_DYNAMIC (1 << 3)
-#define INSTANCE_FLAGS_USE_GI_BUFFERS (1 << 5)
-#define INSTANCE_FLAGS_USE_SDFGI (1 << 6)
-#define INSTANCE_FLAGS_FADE_SHIFT 24
-#define INSTANCE_FLAGS_FADE_MASK (0xFFu << INSTANCE_FLAGS_FADE_SHIFT)
 
 layout(set = 0, binding = 9, std430) restrict readonly buffer Visible {
 	uint bits[]; // Per table slot: the scene cull found the instance visible in this view.
@@ -399,39 +370,6 @@ uint cull_member(uint index, out uint r_primitives) {
 #endif
 	bool moved = bool(record.gpu_flags & GPU_FLAG_MOVED);
 	bool motion_pass = bool(view_flags & VIEW_FLAG_MOTION);
-
-#ifndef MODE_SHADOW_BATCH
-	// A camera view writes every live member's instance data, visible or not:
-	// the shadow passes after it draw from the same data (they read none of
-	// the view-dependent flags) and write none.
-	if (!bool(view_flags & VIEW_FLAG_SHADOW)) {
-		// What _fill_render_list() and _fill_instance_data() write for an
-		// opaque instance without lightmap, VoxelGI, fade or motion pass.
-		uint flags = (record.flags & ~INSTANCE_FLAGS_FADE_MASK) | (255u << INSTANCE_FLAGS_FADE_SHIFT);
-		if (moved && !motion_pass) {
-			flags |= INSTANCE_FLAGS_DYNAMIC; // The motion pass computes motion vectors instead.
-		}
-		if (bool(view_flags & VIEW_FLAG_USE_GI_BUFFERS)) {
-			flags |= INSTANCE_FLAGS_USE_GI_BUFFERS;
-		}
-		if (bool(view_flags & VIEW_FLAG_USE_SDFGI) && bool(record.gpu_flags & GPU_FLAG_CAN_SDFGI)) {
-			flags |= INSTANCE_FLAGS_USE_SDFGI;
-		}
-		InstanceData data;
-		data.transform = record.transform;
-		data.compressed_aabb_position_pad = vec4(bucket.compressed_aabb_position, uintBitsToFloat(member.z)); // .w: material table slot (D036).
-		data.compressed_aabb_size = bucket.compressed_aabb_size;
-		data.material_feedback_index = bucket.material_feedback_index;
-		data.uv_scale = bucket.uv_scale;
-		data.flags = flags;
-		data.instance_uniforms_ofs = record.instance_uniforms_ofs;
-		data.gi_offset = 0xFFFFFFFFu;
-		data.layer_mask = record.layer_mask;
-		data.prev_transform = record.prev_transform;
-		data.lightmap_uv_scale = record.lightmap_uv_scale;
-		output_instances.data[index] = data;
-	}
-#endif
 
 #ifndef MODE_SHADOW_BATCH
 	// The scene cull's answer: frustum, layers, occluders (shadow passes

@@ -270,6 +270,14 @@ straight.
     `Node3D`), and `GDScriptInstance::notification()` returning before it
     builds the script chain when no script has `_notification()`. See
     [kb/project/process-loop-misses.md](kb/project/process-loop-misses.md).
+  - The GPU instance path's instance data built in the scene shader (OD10
+    in [docs/optimization/DECISIONS.md](docs/optimization/DECISIONS.md)):
+    `gpu_instance_data()` and `scene_instance_load()` in
+    `scene_forward_clustered_inc.glsl` (bindings 47 and 49 to 51), the
+    calls in every pipeline, `GPUInstanceBindings`, and the scenario's
+    `view_buffer`. If upstream adds an `InstanceData` field, set it in
+    `gpu_instance_data()` too. See
+    [kb/project/gpu-instance-data-in-shader.md](kb/project/gpu-instance-data-in-shader.md).
   - Memory given back after a large scene is unloaded (OD9 in
     [docs/optimization/DECISIONS.md](docs/optimization/DECISIONS.md)):
     lowest-first `GPUInstanceSlots` with `get_capacity()` as the highest
