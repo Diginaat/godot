@@ -423,9 +423,9 @@ void RenderForwardClustered::_render_list_template(RenderingDevice::DrawListID p
 			material_uniform_set = surf->material_uniform_set_shadow;
 			shader = surf->shader_shadow;
 			mesh_surface = surf->surface_shadow;
-			if (!shadow_pass && use_clod) {
-				// Main-view CLOD depth must index source vertices, not a separately
-				// welded shadow mesh. Actual shadow passes retain that shadow mesh.
+			if (use_clod) {
+				// CLOD groups index the source vertices, not a separately welded
+				// shadow mesh (main-view depth and shadow passes alike).
 				mesh_surface = surf->surface;
 			}
 
@@ -1896,6 +1896,12 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 	}
 
 	RENDER_TIMESTAMP("Setup Shadows");
+	// Stage timestamps while cluster LOD is active, as around the depth and
+	// opaque passes (benchmarks; RENDER_TIMESTAMP needs the profiler).
+	const bool shadow_timestamps = rb_data.is_valid() && rb_data->mesh_clod.active;
+	if (shadow_timestamps) {
+		RD::get_singleton()->capture_timestamp("GPU Geometry Shadows");
+	}
 
 	if (rb.is_valid() && p_use_gi && rb->has_custom_data(RB_SCOPE_SDFGI)) {
 		Ref<RendererRD::GI::SDFGI> sdfgi = rb->get_custom_data(RB_SCOPE_SDFGI);
@@ -1990,6 +1996,9 @@ void RenderForwardClustered::_pre_opaque_render(RenderDataRD *p_render_data, boo
 
 	if (render_shadows) {
 		_render_shadow_end();
+	}
+	if (shadow_timestamps) {
+		RD::get_singleton()->capture_timestamp("GPU Geometry Shadows End");
 	}
 
 	if (rb_data.is_valid() && ss_effects) {
@@ -3604,6 +3613,10 @@ void RenderForwardClustered::_render_shadow_begin() {
 	_update_render_base_uniform_set();
 
 	render_list[RENDER_LIST_SECONDARY].clear();
+	mesh_clod.shadow.inputs.clear();
+	mesh_clod.shadow.work.clear();
+	mesh_clod.shadow.total_groups = 0;
+	mesh_clod.shadow.active = false;
 	// No need to reset scene_state.curr_gpu_ptr or scene_state.instance_buffer[RENDER_LIST_SECONDARY]
 	// because _fill_instance_data will do that if it detects p_offset == 0u.
 }
@@ -3673,7 +3686,13 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 	RENDER_TIMESTAMP("Sort Shadow Render List");
 	render_list[RENDER_LIST_SECONDARY].sort_by_key_range(render_list_from, render_list_size);
 	RENDER_TIMESTAMP("Fill Shadow Instance Data");
-	_fill_instance_data(RENDER_LIST_SECONDARY, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr, render_list_from, render_list_size, false);
+	// Cluster LOD selects per instance, so its surfaces stay separate elements.
+	// Dual-paraboloid passes do not project linearly: they keep source draws.
+	const bool shadow_clod = !p_use_dp && _mesh_clod_shadows_enabled();
+	_fill_instance_data(RENDER_LIST_SECONDARY, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr, render_list_from, render_list_size, false, shadow_clod);
+	if (shadow_clod) {
+		_mesh_clod_shadow_append(render_list_from, render_list_size, p_projection, p_transform, viewport_size.height);
+	}
 	if (gpu_casters && render_data.gpu_instances_drawn) {
 		_gpu_instances_shadow_pass(p_shadow_data, scene_data, render_list_from + render_list_size, shadow_pass, p_render_info ? p_render_info->info[RSE::VIEWPORT_RENDER_INFO_TYPE_SHADOW] : (int *)nullptr);
 		render_list_size = render_list[RENDER_LIST_SECONDARY].elements.size() - render_list_from;
@@ -3716,6 +3735,7 @@ void RenderForwardClustered::_render_shadow_append(RID p_framebuffer, const Page
 void RenderForwardClustered::_render_shadow_process(RenderBufferDataForwardClustered *p_cull_buffers) {
 	RenderingDevice *rd = RenderingDevice::get_singleton();
 	_gpu_instances_shadow_flush(); // The GPU path's passes, culled together; sets their buffers.
+	_mesh_clod_shadow_dispatch(); // The cluster LOD selections of every pass.
 	if (scene_state.instance_buffer[RENDER_LIST_SECONDARY].get_size(0u) > 0u) {
 		rd->buffer_flush(scene_state.instance_buffer[RENDER_LIST_SECONDARY]._get(0u));
 	}
@@ -3741,6 +3761,12 @@ void RenderForwardClustered::_render_shadow_end() {
 		RenderListParameters render_list_parameters(render_list[RENDER_LIST_SECONDARY].elements.ptr() + shadow_pass.element_from, render_list[RENDER_LIST_SECONDARY].element_info.ptr() + shadow_pass.element_from, shadow_pass.element_count, shadow_pass.flip_cull, shadow_pass.pass_mode, 0, true, false, shadow_pass.rp_uniform_set, false, Vector2(), shadow_pass.lod_distance_multiplier, shadow_pass.screen_mesh_lod_threshold, 1, shadow_pass.element_from);
 		render_list_parameters.multimesh_cull_commands = scene_state.shadow_multimesh_cull_commands;
 		render_list_parameters.gpu_instance_commands = shadow_pass.gpu_commands;
+		if (mesh_clod.shadow.active) {
+			render_list_parameters.mesh_clod_commands = mesh_clod.shadow.commands;
+			if (mesh_clod.shadow.compact) {
+				render_list_parameters.mesh_clod_counts = mesh_clod.shadow.counts;
+			}
+		}
 		_render_list_with_draw_list(&render_list_parameters, shadow_pass.framebuffer, shadow_pass.clear_depth ? RD::DRAW_CLEAR_DEPTH : RD::DRAW_DEFAULT_ALL, Vector<Color>(), 0.0f, 0, shadow_pass.rect);
 	}
 
@@ -6481,6 +6507,11 @@ RenderForwardClustered::~RenderForwardClustered() {
 			}
 		}
 		mesh_clod.shader.version_free(mesh_clod.version);
+	}
+	for (RID buffer : { mesh_clod.shadow.commands, mesh_clod.shadow.selection, mesh_clod.shadow.inputs_buffer, mesh_clod.shadow.counts, mesh_clod.shadow.statistics }) {
+		if (buffer.is_valid()) {
+			RD::get_singleton()->free_rid(buffer);
+		}
 	}
 	if (mesh_hiz.reduce_version.is_valid()) {
 		for (RID pipeline : mesh_hiz.reduce_pipelines) {

@@ -44,6 +44,7 @@
 #include "servers/rendering/renderer_rd/forward_clustered/render_raytracing.h"
 #include "servers/rendering/renderer_rd/forward_clustered/scene_shader_forward_clustered.h"
 #include "servers/rendering/renderer_rd/renderer_scene_render_rd.h"
+#include "servers/rendering/renderer_rd/storage_rd/mesh_storage.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/best_fit_normal.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/integrate_dfg.glsl.gen.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/mesh_clod_select.glsl.gen.h"
@@ -438,12 +439,60 @@ protected:
 	void _prepare_mesh_clod(const RenderDataRD *p_render_data, RenderBufferDataForwardClustered *p_buffers);
 	// Whether this frame's opaque list may draw cluster LOD (settings, view).
 	bool _mesh_clod_frame_enabled(const RenderDataRD *p_render_data, const RenderBufferDataForwardClustered *p_buffers) const;
+	// One surface's view for the selection kernel (Selection in mesh_clod_select.glsl).
+	struct MeshCLODInput {
+		float planes[6][4];
+		float camera_projection[4];
+		float forward_near[4];
+		uint32_t params[4];
+	};
+	struct MeshCLODWork {
+		RID groups;
+		uint32_t group_count = 0;
+		const RendererRD::MeshStorage::ClusterStreaming *streaming = nullptr;
+	};
+	// The selection's view of one pass: frustum planes, eye, pixels per world
+	// unit at distance 1 (orthographic: per world unit) and the error bound.
+	struct MeshCLODView {
+		Vector<Plane> planes;
+		Vector3 eye;
+		Vector3 forward;
+		float projection_scale = 0.0f;
+		float z_near = 0.0001f;
+		bool orthogonal = false;
+		float error_pixels = 1.0f;
+	};
+	bool _mesh_clod_make_input(const Transform3D &p_transform, const MeshCLODView &p_view, uint32_t p_group_count, uint32_t p_command_offset, MeshCLODInput &r_input) const;
+	bool _mesh_clod_pipelines();
+	void _mesh_clod_dispatch(const LocalVector<MeshCLODWork> &p_work, RID p_inputs, RID p_commands, RID p_selection, RID p_counts, RID p_statistics, bool p_compact);
+	// Cluster LOD in shadow passes (rendering/geometry/cluster_lod/shadows):
+	// each pass's eligible elements get a selection against the pass's view
+	// with the error in shadow map texels; all passes of a batch are selected
+	// in one compute list by _render_shadow_process() and drawn from one
+	// command buffer.
+	bool _mesh_clod_shadows_enabled() const;
+	void _mesh_clod_shadow_append(uint32_t p_from, uint32_t p_count, const Projection &p_projection, const Transform3D &p_transform, uint32_t p_height);
+	void _mesh_clod_shadow_dispatch();
 	struct MeshCLOD {
 		MeshClodSelectShaderRD shader;
 		RID version;
 		RID pipelines[2]; // Resident selection, and residency-aware selection for streamed surfaces.
 		bool multi_draw = false;
 		bool indirect_count = false; // RD::SUPPORTS_DRAW_INDIRECT_COUNT: compact command streams.
+		struct Shadow {
+			LocalVector<MeshCLODInput> inputs;
+			LocalVector<MeshCLODWork> work;
+			uint32_t total_groups = 0;
+			RID commands;
+			RID selection;
+			RID inputs_buffer;
+			RID counts;
+			RID statistics; // The kernel's counters; not read back (shadow passes have no CLOD statistics).
+			uint32_t group_capacity = 0;
+			uint32_t draw_capacity = 0;
+			bool compact = false;
+			bool active = false; // Selected for this batch's passes.
+		} shadow;
 	} mesh_clod;
 	// HZB shared by CLOD and MultiMesh occlusion. _hzb_possible() is the cheap
 	// part of the conditions, known before culling; _setup_hzb() runs before the

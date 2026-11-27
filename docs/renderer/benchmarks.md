@@ -406,6 +406,21 @@ floor. Left as suspects: the vertex shader's visible-ID load before the
 instance data (D029; D3D12 has no base instance), and anything per draw
 that only a GPU profiler capture of a cube face would show.
 
+### Cluster LOD in shadow passes, 2026-11-27
+
+`devtools/test/shadow_clod_bench.ps1`: 144 dense CLOD spheres (9.5 M
+source triangles, one mesh and material), sun with 4 splits, a spot and an
+omni cube light, 1920x1080, RTX 5070, source and CLOD shadow passes
+alternating, 2 x 240 frames, medians. ms, source -> CLOD
+([kb](../../kb/project/shadow-clod.md)):
+
+| View | GPU frame p50 | GPU frame p95 | Shadow stage p50 |
+| --- | --- | --- | --- |
+| Vulkan ground | 1.249 -> 0.483 | 1.593 -> 0.507 | 0.861 -> 0.095 |
+| Vulkan aerial | 1.428 -> 0.594 | 1.773 -> 0.620 | 0.932 -> 0.098 |
+| D3D12 ground | 1.412 -> 0.632 | 1.544 -> 0.640 | 0.858 -> 0.080 |
+| D3D12 aerial | 1.526 -> 0.691 | 1.714 -> 0.697 | 0.926 -> 0.091 |
+
 ### Open items found by the baseline
 
 - `unique_10k` frame time is 3.6-4 ms above render CPU on both backends

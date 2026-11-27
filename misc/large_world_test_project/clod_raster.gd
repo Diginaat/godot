@@ -25,6 +25,10 @@ func _ready() -> void:
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", false)
 	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/occlusion", false)
 	ProjectSettings.set_setting("rendering/geometry/mesh_occlusion/enabled", false)
+	# Camera CLOD only: shadow passes keep the source mesh here, so the
+	# receiver pixels below show that camera cuts never reach them (shadow
+	# passes with their own cut: shadow_clod.gd).
+	ProjectSettings.set_setting("rendering/geometry/cluster_lod/shadows", false)
 	_camera = Camera3D.new()
 	_camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	_camera.size = 12

@@ -56,8 +56,8 @@ func _ready() -> void:
 	var world := WorldEnvironment.new()
 	world.environment = environment
 	add_child(world)
-	# No shadows: shadow passes draw CLOD meshes from source geometry, which
-	# would dominate the frame and does not depend on occlusion.
+	# No shadows: shadow passes do not depend on occlusion (shadow_clod.gd
+	# measures them).
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, 30, 0)
 	add_child(sun)

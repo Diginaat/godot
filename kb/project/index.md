@@ -23,6 +23,7 @@
 * [Two-pass MultiMesh occlusion](/project/multimesh-two-pass.md) - hidden-last-frame instances left out of the depth pre-pass; exact; street grid 7-12% faster, open valley 1-7% slower
 * [Cluster LOD skips repeat-batched elements](/project/clod-skipped-for-batched-elements.md) - shared meshes with same-shader materials batched since material tables, so no CLOD; fixed (G5): CLOD-eligible surfaces are not batched
 * [CLOD two-pass costs more than it saves](/project/clod-two-pass-zero-draws.md) - one indirect record per group in every pass, mostly empty; two_pass 27-32% slower than off in hzb_bench; resolved by compact command streams
+* [Cluster LOD in shadow passes](/project/shadow-clod.md) - every cascade, spot and cube face selects its own cut with the error in shadow-map texels; shadow stage 9-11x faster, GPU frame 2.2-2.6x in shadow_clod_bench
 * [Compact CLOD command streams](/project/compact-clod-commands.md) - selection and HZB kernels append only drawn groups, passes draw with a GPU count; hzb_bench GPU frame 2.2-5.5x faster on Vulkan, 1.6-3.3x on D3D12
 * [Adaptive variable rate shading](/project/adaptive-vrs.md) - GPU picks each tile's shading rate from the previous frame; main-viewport default; 2-5% on the valley, 3.6x on an expensive-shader floor, ~47 dB PSNR
 * [GPU occlusion for CPU render list meshes](/project/mesh-occlusion.md) - HZB-tested indirect draws for every opaque CPU-list mesh (lightmapped, skinned, fading...); exact images, 20 of 20 hidden meshes skipped

@@ -218,6 +218,12 @@ straight.
     render graph reorders later work into DDGI and the probes flicker in
     spots. See
     [kb/ddgi/findings/render-graph-bounce-loss.md](kb/ddgi/findings/render-graph-bounce-loss.md).
+  - Cluster LOD in shadow passes (`_mesh_clod_shadow_append()`,
+    `_mesh_clod_shadow_dispatch()` in `mesh_clod.cpp`, called from
+    `_render_shadow_append()`, `_render_shadow_process()` and
+    `_render_shadow_end()`), and `RenderingDevice::draw_list_draw_indirect_count()`.
+    If upstream restructures the shadow passes, keep the three calls.
+    See [kb/project/shadow-clod.md](kb/project/shadow-clod.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).

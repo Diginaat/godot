@@ -1,5 +1,17 @@
 # Update log
 
+## 2026-11-27 (cluster LOD in shadow passes)
+
+* **Added**: [shadow CLOD](/project/shadow-clod.md): shadow passes select
+  their own CLOD cut (error in shadow-map texels), one compute batch per
+  shadow batch, compact streams; settings `cluster_lod/shadows`,
+  `cluster_lod/shadow_error_texels`. `shadow_clod_bench`: shadow stage
+  0.86-0.93 to 0.08-0.10 ms, GPU frame 2.2-2.6x (Vulkan, D3D12). New
+  large-world test `shadow_clod`; `clod_raster` pins shadow CLOD off.
+* **Seen again**: [bench without the feature active](/mistakes/bench-without-the-feature-active.md):
+  the first bench read `RENDER_TIMESTAMP` names and got zeros; it now
+  reads direct `GPU Geometry Shadows` timestamps.
+
 ## 2026-11-27 (compact CLOD command streams)
 
 * **Added**: [compact CLOD commands](/project/compact-clod-commands.md):
