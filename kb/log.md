@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (valley test after G1)
+
+* **Fixed**: the valley smoke (`forest_map.gd`) failed since the HZB
+  occlusion of render list meshes (G1, 2026-11-24): its "disabled" mode
+  left `mesh_occlusion/enabled` and `gpu_instances/occlusion` on, so the
+  HZB was still built. It now turns them off too. Passes on Vulkan, D3D12
+  and night.
+
 ## 2026-11-27 (TLAS kept in static frames)
 
 * **Added**: [TLAS static skip](/project/tlas-static-skip.md): the TLAS is

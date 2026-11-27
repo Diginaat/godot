@@ -907,6 +907,10 @@ func _set_gpu_geometry(enabled: bool, clod := true, occlusion := true) -> void:
 	ProjectSettings.set_setting("rendering/geometry/multimesh_gpu_culling/shadows", enabled and OS.get_cmdline_user_args().has("--shadow-culling"))
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/enabled", enabled and clod)
 	ProjectSettings.set_setting("rendering/geometry/cluster_lod/occlusion_enabled", enabled and clod and occlusion)
+	# HZB occlusion of render list meshes and GPU path instances builds the
+	# same HZB; "disabled" means no GPU geometry pass at all.
+	ProjectSettings.set_setting("rendering/geometry/mesh_occlusion/enabled", enabled and occlusion)
+	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", enabled and occlusion)
 
 
 func _make_hud() -> void:
