@@ -433,9 +433,8 @@ multimesh_visible_ids;
 // its instance table record, its member and bucket, and the view's flags
 // (gpu_instance_data()), as _fill_instance_data() would write it. No copy
 // per member is kept (OD10).
-struct GPUInstanceRecord { // GPUInstanceTable::Record, 160 bytes.
+struct GPUInstanceRecord { // GPUInstanceTable::Record, 112 bytes.
 	mat3x4 transform;
-	mat3x4 prev_transform;
 	uint flags;
 	uint instance_uniforms_ofs;
 	uint layer_mask;
@@ -489,6 +488,15 @@ layout(set = 1, binding = 51, std430) buffer restrict readonly GPUInstanceView {
 }
 gpu_instance_view;
 
+// Previous transforms of the instances that moved last frame; a record
+// points to its entry from bit GPU_INSTANCE_PREV_SHIFT of gpu_flags (entry
+// plus one; 0: the previous transform is the transform).
+layout(set = 1, binding = 52, std430) buffer restrict readonly GPUInstancePrev {
+	mat3x4 data[];
+}
+gpu_instance_prev;
+
+#define GPU_INSTANCE_PREV_SHIFT 8u
 #define GPU_INSTANCE_FLAG_MOVED 1u
 #define GPU_INSTANCE_FLAG_CAN_SDFGI 2u
 #define GPU_INSTANCE_VIEW_USE_GI_BUFFERS 1u
@@ -525,7 +533,8 @@ InstanceData gpu_instance_data(uint p_member) {
 	data.instance_uniforms_ofs = record.instance_uniforms_ofs;
 	data.gi_offset = 0xFFFFFFFFu;
 	data.layer_mask = record.layer_mask;
-	data.prev_transform = record.prev_transform;
+	uint prev_entry = record.gpu_flags >> GPU_INSTANCE_PREV_SHIFT;
+	data.prev_transform = prev_entry != 0u ? gpu_instance_prev.data[prev_entry - 1u] : record.transform;
 	data.lightmap_uv_scale = record.lightmap_uv_scale;
 #ifdef USE_DOUBLE_PRECISION
 	data.model_precision = vec4(0.0);

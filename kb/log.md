@@ -1,5 +1,17 @@
 # Update log
 
+## 2026-11-27 (previous transforms out of the instance table, O1)
+
+* **Added**: [previous transform table](/project/prev-transform-table.md):
+  the instance table record drops its previous transform (160 to 112
+  bytes); instances that moved last frame have an entry in a separate
+  table (OD12). city_extreme 232 to 222 MB, churn_100k 131.5 to 120.3 MB,
+  GPU time unchanged. A first version without compaction uploaded 20,000
+  entries a frame for 2,000 movers (+5% GPU in dynamic_20k after another
+  case); recorded there.
+* **Updated**: [instance data built in the shader](/project/gpu-instance-data-in-shader.md):
+  "Still open" points to OD12.
+
 ## 2026-11-27 (global transforms in a loop, O2)
 
 * **Added**: [global transform loop](/project/global-transform-loop.md):

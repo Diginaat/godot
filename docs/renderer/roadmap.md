@@ -105,8 +105,9 @@ the CPU path.
   and shadow passes are unchanged. Scene cull eligibility: no visibility
   range or parent, not shadows-only, not exempt from culling.
 - 2.3 Compute pass per view (done, `gpu_instance_cull.glsl`): frustum (widened
-  for jitter) and camera layers from the table record (now 160 bytes with
-  world bounds and two per-instance bits, D028); writes the existing
+  for jitter) and camera layers from the table record (160 bytes with
+  world bounds and two per-instance bits, D028; 112 bytes since OD12 in
+  docs/optimization, which moved the previous transform to its own table); writes the existing
   176-byte `InstanceData` and appends to the bucket's indirect command.
   The scene shader reads it from binding 47 under a specialization bit
   (D028), so it changes in one macro, not in its logic. Since 2026-11-27

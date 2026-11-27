@@ -2320,18 +2320,18 @@ void RenderForwardClustered::_render_3d_upscaling(const RenderDataRD *p_render_d
 	}
 }
 
-void RenderForwardClustered::_gpu_instance_table_build_record(uint32_t p_slot, GPUInstanceTable::Record &r_record) const {
+bool RenderForwardClustered::_gpu_instance_table_build_record(uint32_t p_slot, GPUInstanceTable::Record &r_record, float *r_prev_transform) const {
 	memset(&r_record, 0, sizeof(r_record));
 	r_record.generation = gpu_instance_slots.get_generation(p_slot);
 	const GeometryInstanceForwardClustered *inst = p_slot < gpu_instance_owners.size() ? gpu_instance_owners[p_slot] : nullptr;
 	if (inst == nullptr) {
-		return; // Free slot: zeroes with an even generation.
+		return false; // Free slot: zeroes with an even generation.
 	}
 	// Same values as _fill_instance_data writes, minus the per-view flags
 	// (fade, motion, GI) that _fill_render_list adds for each pass.
 	const bool store_transform = inst->store_transform_cache;
 	RendererRD::MaterialStorage::store_transform_transposed_3x4(store_transform ? inst->transform : Transform3D(), r_record.transform);
-	RendererRD::MaterialStorage::store_transform_transposed_3x4(store_transform ? inst->prev_transform : Transform3D(), r_record.prev_transform);
+	RendererRD::MaterialStorage::store_transform_transposed_3x4(store_transform ? inst->prev_transform : Transform3D(), r_prev_transform);
 	r_record.flags = inst->base_flags | (inst->non_uniform_scale ? uint32_t(INSTANCE_DATA_FLAGS_NON_UNIFORM_SCALE) : 0u);
 	r_record.instance_uniforms_ofs = uint32_t(inst->shader_uniforms_offset);
 	r_record.layer_mask = inst->layer_mask;
@@ -2350,6 +2350,14 @@ void RenderForwardClustered::_gpu_instance_table_build_record(uint32_t p_slot, G
 		r_record.gpu_flags |= GPUInstanceTable::GPU_FLAG_CAN_SDFGI;
 	}
 	r_record.lod_scale = inst->lod_model_scale * inst->lod_bias;
+	return memcmp(r_prev_transform, r_record.transform, sizeof(r_record.transform)) != 0;
+}
+
+void RenderForwardClustered::_gpu_instance_table_release_prev(uint32_t p_slot) {
+	if (p_slot < gpu_instance_prev_entries.size() && gpu_instance_prev_entries[p_slot] != UINT32_MAX) {
+		gpu_instance_prev_table.free(gpu_instance_prev_entries[p_slot]);
+		gpu_instance_prev_entries[p_slot] = UINT32_MAX;
+	}
 }
 
 void RenderForwardClustered::_gpu_instance_table_check_element(const GeometryInstanceForwardClustered *p_instance, const SceneState::InstanceData &p_data) {
@@ -2361,8 +2369,12 @@ void RenderForwardClustered::_gpu_instance_table_check_element(const GeometryIns
 	const GPUInstanceTable::Record &record = gpu_instance_table.get_record(slot);
 	gpu_instance_table_elements_checked++;
 	// The record's flags are the view-independent part of the element's flags.
-	const bool same = memcmp(record.transform, p_data.transform, sizeof(record.transform)) == 0 &&
-			memcmp(record.prev_transform, p_data.prev_transform, sizeof(record.prev_transform)) == 0 &&
+	const uint32_t prev_entry = record.gpu_flags >> GPUInstanceTable::GPU_FLAG_PREV_SHIFT;
+	const GPUInstancePrevTable::Entry *prev = prev_entry ? gpu_instance_prev_table.get(prev_entry - 1) : nullptr;
+	const float *prev_transform = prev ? prev->transform : record.transform;
+	const bool same = (prev_entry == 0 || prev != nullptr) &&
+			memcmp(record.transform, p_data.transform, sizeof(record.transform)) == 0 &&
+			memcmp(prev_transform, p_data.prev_transform, sizeof(record.transform)) == 0 &&
 			memcmp(record.lightmap_uv_scale, p_data.lightmap_uv_scale, sizeof(record.lightmap_uv_scale)) == 0 &&
 			record.instance_uniforms_ofs == p_data.instance_uniforms_ofs &&
 			record.layer_mask == p_data.layer_mask &&
@@ -2388,6 +2400,8 @@ void RenderForwardClustered::_update_gpu_instance_table() {
 			gpu_instance_table_active = false;
 			gpu_instance_table_checking = false;
 			gpu_instance_table.free_buffer();
+			gpu_instance_prev_table.clear();
+			gpu_instance_prev_entries.clear();
 		}
 		return;
 	}
@@ -2401,7 +2415,27 @@ void RenderForwardClustered::_update_gpu_instance_table() {
 
 	_update_dirty_geometry_instances(); // Base flags and uniform offsets current.
 	// Slots past the highest in use hold no instance (the table can shrink).
-	gpu_instance_table.truncate(gpu_instance_slots.get_capacity());
+	const uint32_t slot_count = gpu_instance_slots.get_capacity();
+	for (uint32_t slot = slot_count; slot < gpu_instance_prev_entries.size(); slot++) {
+		_gpu_instance_table_release_prev(slot);
+	}
+	if (gpu_instance_prev_entries.size() > slot_count) {
+		gpu_instance_prev_entries.resize(slot_count);
+	}
+	gpu_instance_table.truncate(slot_count);
+	// Instances that stop moving free their entries and leave holes below
+	// the ones still moving (every instance has one on the frame it is
+	// created): the buffer and the per-frame upload span would keep the
+	// size of the largest burst. When fewer than half the entries in use
+	// are live, free them all; rebuilding their records packs them again.
+	if (gpu_instance_prev_table.get_used_count() > 2 * gpu_instance_prev_table.get_live_count() + GPUInstancePrevTable::MIN_CAPACITY) {
+		for (uint32_t slot = 0; slot < gpu_instance_prev_entries.size(); slot++) {
+			if (gpu_instance_prev_entries[slot] != UINT32_MAX) {
+				_gpu_instance_table_release_prev(slot);
+				gpu_instance_table.mark_dirty(slot);
+			}
+		}
+	}
 	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instance_table/validate");
 	// Self-test: leave the highest dirty slot's record stale (the element
 	// check must notice); upload() drops the lowest one (the buffer check must).
@@ -2418,11 +2452,29 @@ void RenderForwardClustered::_update_gpu_instance_table() {
 			continue;
 		}
 		GPUInstanceTable::Record record;
-		_gpu_instance_table_build_record(slot, record);
+		float prev_transform[12];
+		if (_gpu_instance_table_build_record(slot, record, prev_transform)) {
+			while (gpu_instance_prev_entries.size() <= slot) {
+				gpu_instance_prev_entries.push_back(UINT32_MAX);
+			}
+			uint32_t &entry = gpu_instance_prev_entries[slot];
+			if (entry == UINT32_MAX) {
+				entry = gpu_instance_prev_table.allocate();
+			}
+			if (entry < GPUInstanceTable::MAX_PREV_ENTRIES) {
+				gpu_instance_prev_table.set(entry, prev_transform);
+				record.gpu_flags |= (entry + 1) << GPUInstanceTable::GPU_FLAG_PREV_SHIFT;
+			} else {
+				ERR_PRINT_ONCE("Too many moving GPU instances: motion vectors of some are lost.");
+			}
+		} else {
+			_gpu_instance_table_release_prev(slot);
+		}
 		gpu_instance_table.set_record(slot, record);
 	}
 
 	gpu_instance_table.upload(validate == 2);
+	gpu_instance_prev_table.upload();
 	gpu_instance_table_checking = validate > 0;
 	const uint64_t frame = RSG::rasterizer->get_frame_number();
 	if (validate > 0 && frame % 30 == 0 && frame != gpu_instance_table_frame) {
@@ -4782,8 +4834,9 @@ RID RenderForwardClustered::_setup_render_pass_uniform_set(RenderListType p_rend
 		// (gpu_instance_data() in scene_forward_clustered_inc.glsl), and which
 		// members each draw reads (48, per bucket level).
 		const bool gpu = p_gpu_instances.is_valid() && gpu_instance_table.get_buffer().is_valid();
-		const RID gpu_buffers[5] = { gpu ? gpu_instance_table.get_buffer() : RID(), p_gpu_instance_ids, gpu ? p_gpu_instances.members : RID(), gpu ? p_gpu_instances.buckets : RID(), gpu ? p_gpu_instances.view : RID() };
-		for (uint32_t i = 0; i < 5; i++) {
+		const RID gpu_buffers[6] = { gpu ? gpu_instance_table.get_buffer() : RID(), p_gpu_instance_ids, gpu ? p_gpu_instances.members : RID(), gpu ? p_gpu_instances.buckets : RID(), gpu ? p_gpu_instances.view : RID(),
+			gpu ? gpu_instance_prev_table.get_buffer() : RID() };
+		for (uint32_t i = 0; i < 6; i++) {
 			RD::Uniform u;
 			u.binding = 47 + i;
 			u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;
@@ -5022,7 +5075,7 @@ RID RenderForwardClustered::_setup_sdfgi_render_pass_uniform_set(RID p_albedo_te
 	}
 	// The GPU instance path's bindings (see _setup_render_pass_uniform_set); SDFGI
 	// draws don't use it, but the shader declares them.
-	for (uint32_t binding : { 47u, 48u, 49u, 50u, 51u }) {
+	for (uint32_t binding : { 47u, 48u, 49u, 50u, 51u, 52u }) {
 		RD::Uniform u;
 		u.binding = binding;
 		u.uniform_type = RD::UNIFORM_TYPE_STORAGE_BUFFER;

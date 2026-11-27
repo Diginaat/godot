@@ -266,3 +266,65 @@ GPUInstanceTable::~GPUInstanceTable() {
 		scatter_shader.version_free(scatter_version);
 	}
 }
+
+uint32_t GPUInstancePrevTable::allocate() {
+	const uint32_t entry = slots.allocate();
+	if (entry >= entries.size()) {
+		entries.resize(entry + 1);
+	}
+	return entry;
+}
+
+void GPUInstancePrevTable::free(uint32_t p_entry) {
+	slots.free(p_entry);
+}
+
+void GPUInstancePrevTable::set(uint32_t p_entry, const float *p_transform) {
+	ERR_FAIL_UNSIGNED_INDEX(p_entry, entries.size());
+	memcpy(entries[p_entry].transform, p_transform, sizeof(Entry::transform));
+	dirty_begin = MIN(dirty_begin, p_entry);
+	dirty_end = MAX(dirty_end, p_entry + 1);
+}
+
+void GPUInstancePrevTable::upload() {
+	RD *rd = RD::get_singleton();
+	const uint32_t used = slots.get_capacity();
+	if (entries.size() > used) {
+		entries.resize(used); // Entries past the highest in use are free.
+	}
+	dirty_end = MIN(dirty_end, used);
+	if (buffer.is_null() || !gpu_buffer_fits(buffer_capacity, used, MIN_CAPACITY)) {
+		if (buffer.is_valid()) {
+			rd->free_rid(buffer); // RD keeps it until the frames that read it are done.
+		}
+		buffer_capacity = gpu_buffer_capacity(used, MIN_CAPACITY);
+		Vector<uint8_t> initial;
+		initial.resize(buffer_capacity * sizeof(Entry));
+		memset(initial.ptrw(), 0, initial.size());
+		if (used > 0) {
+			memcpy(initial.ptrw(), entries.ptr(), used * sizeof(Entry));
+		}
+		buffer = rd->storage_buffer_create(initial.size(), initial);
+		rd->set_resource_name(buffer, "GPU Instance Previous Transforms");
+	} else if (dirty_begin < dirty_end) {
+		rd->buffer_update(buffer, dirty_begin * sizeof(Entry), (dirty_end - dirty_begin) * sizeof(Entry), entries.ptr() + dirty_begin);
+	}
+	dirty_begin = UINT32_MAX;
+	dirty_end = 0;
+}
+
+void GPUInstancePrevTable::clear() {
+	slots = GPUInstanceSlots();
+	entries.clear();
+	dirty_begin = UINT32_MAX;
+	dirty_end = 0;
+	if (buffer.is_valid()) {
+		RD::get_singleton()->free_rid(buffer);
+		buffer = RID();
+	}
+	buffer_capacity = 0;
+}
+
+GPUInstancePrevTable::~GPUInstancePrevTable() {
+	clear();
+}

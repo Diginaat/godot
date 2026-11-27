@@ -35,9 +35,8 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-struct Record { // GPUInstanceTable::Record, 160 bytes.
+struct Record { // GPUInstanceTable::Record, 112 bytes.
 	vec4 transform[3];
-	vec4 prev_transform[3];
 	uint flags;
 	uint instance_uniforms_ofs;
 	uint layer_mask;

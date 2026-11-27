@@ -85,4 +85,5 @@ instances they draw.
 
 city_extreme is still 44 MB above stock: the instance table (35 MB), the
 member and ID lists, and the HZB. The table could drop the previous
-transform for instances that never move.
+transform for instances that never move: done in OD12
+([prev-transform-table](/project/prev-transform-table.md), 232 to 222 MB).

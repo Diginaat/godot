@@ -25,7 +25,8 @@ The largest single buffers (named for RenderDoc since 2026-11-27):
 | Buffer | Size per element | Elements | At 200k nodes |
 | --- | --- | --- | --- |
 | GPU Instances Instance Data (removed by OD10) | 176 B (`SceneState::InstanceData`) | one per member (instance x surface), written every frame | 55 MB |
-| GPU Instance Table | 160 B (`GPUInstanceTable::Record`) | one per slot | 35 MB |
+| GPU Instance Table | 112 B (`GPUInstanceTable::Record`; 160 B before OD12) | one per slot | 25 MB |
+| GPU Instance Previous Transforms (OD12) | 48 B (`GPUInstancePrevTable::Entry`) | one per instance that moved last frame | 12 KB to a few MB |
 | GPU Instances Members | 16 B | one per member | 5 MB |
 | IDs, phase 1/2 IDs, shadow IDs | 4 B | one per member, per pass list | 2.4-4.9 MB each |
 | HZB | 4 B (R32F) with mips | half the internal resolution, power-of-two padded | 2.7 MB at 720p, 5.3 MB at 1080p |

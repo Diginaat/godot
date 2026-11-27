@@ -278,6 +278,10 @@ straight.
     `view_buffer`. If upstream adds an `InstanceData` field, set it in
     `gpu_instance_data()` too. See
     [kb/project/gpu-instance-data-in-shader.md](kb/project/gpu-instance-data-in-shader.md).
+    The previous transform is not in the table record (OD12):
+    `GPUInstancePrevTable`, the entry in `gpu_flags` from bit 8, binding
+    52, and the compaction in `_update_gpu_instance_table()`. See
+    [kb/project/prev-transform-table.md](kb/project/prev-transform-table.md).
   - Memory given back after a large scene is unloaded (OD9 in
     [docs/optimization/DECISIONS.md](docs/optimization/DECISIONS.md)):
     lowest-first `GPUInstanceSlots` with `get_capacity()` as the highest

@@ -39,5 +39,10 @@
 - O2: reparent (1.05x stock) and deep (1.08x) measured; deep profiled.
   OD11: global transforms of dirty chains in a loop, deep 100k 18.7 to
   15.1 ms (stock 18.2). Reparent is already O(1) per call (1.3 us at
-  100k); nothing found to take. A gizmo flag for the transform walk was tried and
+  100k); nothing found to take.
+- O1: previous transforms out of the instance table record (OD12): 160
+  to 112 bytes per slot, a compacted side table for instances that moved.
+  city_extreme 232 to 222 MB (stock 188), churn_100k 131.5 to 120.3 MB.
+  The first version had a span leak (+5% GPU in dynamic_20k after another
+  case), fixed by compaction before commit. A gizmo flag for the transform walk was tried and
   dropped (REGRESSIONS.md).

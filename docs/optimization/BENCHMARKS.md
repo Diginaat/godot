@@ -69,6 +69,20 @@ Same session, builds alternated, two rounds (VRAM identical in both):
 Cold stall (`shader_bench.ps1 -Cold -Mv`): 44.9, 44.6 s before; 44.4,
 45.2 s after. Stock 4.7.2: town 167, forest 158, city_extreme 188 MB.
 
+### Previous transforms out of the instance table (OD12)
+
+Builds alternated, two rounds (VRAM identical in both); GPU p50 ranges:
+
+| Case | VRAM before / after (MB) | GPU p50 before / after (ms) |
+| --- | --- | --- |
+| town | 175 / 175 | 0.715-0.719 / 0.719-0.724 |
+| forest | 149 / 146 | 1.636-1.652 / 1.644-1.646 |
+| city_extreme | 232 / 222 | 3.375-3.379 / 3.369-3.426 |
+| small_1k | 69.9 / 69.9 | 0.167 / 0.167 |
+| dynamic_20k | 86.7 / 85.2 | 0.696-0.701 / 0.698-0.701 |
+| massive_100k | 107.0 / 101.8 | 0.890-0.909 / 0.888-0.910 |
+| churn_100k | 131.5 / 120.3 | 0.830-0.980 / 0.830-0.977 |
+
 ## O2: deep chains (OD11, 2026-11-27)
 
 `scene_bench.ps1`, 3 rounds, builds alternated (stock: same machine, 2 rounds):

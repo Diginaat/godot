@@ -1134,6 +1134,8 @@ protected:
 	/* GPU instance table (rendering/geometry/gpu_instance_table/*) */
 
 	GPUInstanceTable gpu_instance_table;
+	GPUInstancePrevTable gpu_instance_prev_table;
+	LocalVector<uint32_t> gpu_instance_prev_entries; // Indexed by slot; the slot's previous transform entry, or UINT32_MAX.
 	LocalVector<GeometryInstanceForwardClustered *> gpu_instance_owners; // Indexed by slot; null when free.
 	bool gpu_instance_table_active = false;
 	uint64_t gpu_instance_table_frame = UINT64_MAX; // Last frame a validation was requested.
@@ -1149,7 +1151,9 @@ protected:
 			gpu_instance_table.mark_dirty(p_slot);
 		}
 	}
-	void _gpu_instance_table_build_record(uint32_t p_slot, GPUInstanceTable::Record &r_record) const;
+	// Returns whether the previous transform (r_prev_transform) differs from the transform.
+	bool _gpu_instance_table_build_record(uint32_t p_slot, GPUInstanceTable::Record &r_record, float *r_prev_transform) const;
+	void _gpu_instance_table_release_prev(uint32_t p_slot);
 	void _update_gpu_instance_table();
 
 	/* GPU path for eligible instances (rendering/geometry/gpu_instances/*, gpu_instances.cpp) */

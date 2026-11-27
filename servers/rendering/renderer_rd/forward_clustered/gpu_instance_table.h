@@ -31,6 +31,7 @@
 #pragma once
 
 #include "servers/rendering/renderer_rd/forward_clustered/gpu_buffer_capacity.h"
+#include "servers/rendering/renderer_rd/forward_clustered/gpu_instance_slots.h"
 
 #include "core/templates/local_vector.h"
 #include "servers/rendering/renderer_rd/shaders/forward_clustered/gpu_instance_scatter.glsl.gen.h"
@@ -43,9 +44,13 @@
 // per-surface values (compressed AABB, UV scale) stay out of it.
 class GPUInstanceTable {
 public:
+	// The previous transform (motion vectors) is not in the record: an
+	// instance whose previous transform differs from its transform (moved
+	// last frame) has an entry in GPUInstancePrevTable, which gpu_flags
+	// points to; for every other one the previous transform is the
+	// transform (OD12 in docs/optimization/DECISIONS.md).
 	struct Record {
 		float transform[12]; // Transposed 3x4, as in the per-frame instance data.
-		float prev_transform[12];
 		uint32_t flags; // Instance base flags plus non-uniform scale.
 		uint32_t instance_uniforms_ofs;
 		uint32_t layer_mask;
@@ -53,16 +58,18 @@ public:
 		float lightmap_uv_scale[4];
 		// World bounds and per-instance bits for the GPU path (Phase 2).
 		float aabb_position[3];
-		uint32_t gpu_flags; // GPU_FLAG_*.
+		uint32_t gpu_flags; // GPU_FLAG_*; from bit GPU_FLAG_PREV_SHIFT on, the GPUInstancePrevTable entry plus one (0: none).
 		float aabb_size[3];
 		float lod_scale; // Model scale times LOD bias, as the CPU LOD choice uses it.
 	};
-	static_assert(sizeof(Record) == 160, "GPUInstanceTable::Record must stay 160 bytes (std430 layout).");
+	static_assert(sizeof(Record) == 112, "GPUInstanceTable::Record must stay 112 bytes (std430 layout).");
 
 	enum {
 		GPU_FLAG_MOVED = 1, // Moved this frame: the instance data gets the dynamic flag.
 		GPU_FLAG_CAN_SDFGI = 2, // Lit by SDFGI when the view uses it.
+		GPU_FLAG_PREV_SHIFT = 8,
 	};
+	static constexpr uint32_t MAX_PREV_ENTRIES = (1u << (32 - GPU_FLAG_PREV_SHIFT)) - 1;
 
 	static constexpr uint32_t MIN_CAPACITY = 1024;
 	// Up to this many contiguous runs are written with one buffer_update
@@ -132,4 +139,42 @@ public:
 	void free_buffer();
 
 	~GPUInstanceTable();
+};
+
+// Previous transforms of the instances that moved last frame (see
+// GPUInstanceTable::Record), one 48-byte entry each, lowest free entry
+// first so the buffer stays as small as the moving instances. The dirty
+// entries go up as one span: they are dense, and the shader reads only
+// the entries that records point to.
+class GPUInstancePrevTable {
+public:
+	struct Entry {
+		float transform[12]; // Transposed 3x4, as the record's transform.
+	};
+	static constexpr uint32_t MIN_CAPACITY = 256;
+
+private:
+	GPUInstanceSlots slots;
+	LocalVector<Entry> entries; // CPU mirror, indexed by entry.
+	uint32_t dirty_begin = UINT32_MAX;
+	uint32_t dirty_end = 0;
+	RID buffer;
+	uint32_t buffer_capacity = 0;
+
+public:
+	uint32_t allocate();
+	void free(uint32_t p_entry);
+	void set(uint32_t p_entry, const float *p_transform);
+	// Null for an entry not in the mirror (a stale record, validation self-test).
+	const Entry *get(uint32_t p_entry) const { return p_entry < entries.size() ? &entries[p_entry] : nullptr; }
+	uint32_t get_live_count() const { return slots.get_live_count(); }
+	uint32_t get_used_count() const { return slots.get_capacity(); } // One past the highest entry in use.
+	// Creates or resizes the buffer to the entries in use and writes the dirty ones.
+	void upload();
+	RID get_buffer() const { return buffer; }
+	uint64_t get_gpu_bytes() const { return uint64_t(buffer_capacity) * sizeof(Entry); }
+	// Drops every entry and the buffer (the table was turned off).
+	void clear();
+
+	~GPUInstancePrevTable();
 };

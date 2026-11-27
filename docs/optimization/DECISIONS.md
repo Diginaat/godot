@@ -134,3 +134,17 @@ and updates them top down in place, with the same local, top-level and
 `disable_scale` rules. scene_bench deep 100k 18.7 to 15.1 ms, deep 10k
 -7%, other scenarios within spread. A unit test covers chains over 64
 levels (it fails with the overflow step removed).
+
+## OD12 (2026-11-27): previous transforms only for instances that moved
+
+The instance table record carried a 48-byte previous transform for every
+slot, though it equals the transform for any instance that did not move
+last frame. `GPUInstancePrevTable` holds entries only for instances whose
+previous transform differs; the record (160 to 112 bytes) points to its
+entry from bit 8 of `gpu_flags`, and the scene shader (binding 52) falls
+back to the transform. The table is compacted when fewer than half its
+used entries are live: without that, entries of instances that stopped
+moving left holes and 2,000 movers uploaded 20,000 entries a frame.
+city_extreme 232 to 222 MB, churn_100k 131.5 to 120.3 MB, massive_100k
+107 to 102 MB; GPU time unchanged. Cost: one more storage buffer binding
+in the render pass set and one more 48-byte read for moved instances.
