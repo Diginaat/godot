@@ -255,6 +255,15 @@ straight.
     `GlobalPipelineData::use_ddgi_probe_capture`. If upstream adds
     ubershader pipeline constants, keep constant 1 free or move this one.
     See [kb/project/ubershader-cold-compile.md](kb/project/ubershader-cold-compile.md).
+  - The HZB reduction writes four levels per dispatch
+    (`mesh_hiz_reduce.glsl` with `LEVELS`, `MeshHiZ::reduce_pipelines[2][4]`,
+    the loop in `_build_hzb()`). See
+    [kb/project/hzb-fused-reduce.md](kb/project/hzb-fused-reduce.md).
+  - `Object::get_native()` and `set_native()` call getters and exactly
+    typed setters with `validated_call()` (`_property_accessor_validated()`,
+    `_property_value_validated()` in `core/object/object.cpp`). Upstream
+    changes there must keep the `call()` fallback. See
+    [kb/project/native-property-validated-call.md](kb/project/native-property-validated-call.md).
   - The process loop's prefetch in `SceneTree::_process_group()` (two
     stages: node lines 8 ahead, the script instance and a Node3D's local
     transform 4 ahead, through the address accessors in `Object` and
