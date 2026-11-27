@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-27 (occlusion cost measured)
+
+* **Added**: [GPU-path occlusion cost](/project/gpu-occlusion-cost.md):
+  why the fork's GPU time is above stock in open instance bench cases,
+  what occlusion and two-pass cost on the CPU, and what they save in
+  levels. Also records a dropped per-bucket cache.
+
 ## 2026-11-27 (dropped: smaller render list buffers)
 
 * **Updated**: [VRAM after unload](/project/vram-shrink-after-unload.md):

@@ -43,6 +43,7 @@
 * [Cluster LOD in shadow passes](/project/shadow-clod.md) - every cascade, spot and cube face selects its own cut with the error in shadow-map texels; shadow stage 9-11x faster, GPU frame 2.2-2.6x in shadow_clod_bench
 * [Compact CLOD command streams](/project/compact-clod-commands.md) - selection and HZB kernels append only drawn groups, passes draw with a GPU count; hzb_bench GPU frame 2.2-5.5x faster on Vulkan, 1.6-3.3x on D3D12
 * [Adaptive variable rate shading](/project/adaptive-vrs.md) - GPU picks each tile's shading rate from the previous frame; main-viewport default; 2-5% on the valley, 3.6x on an expensive-shader floor, ~47 dB PSNR
+* [What GPU-path occlusion costs and saves](/project/gpu-occlusion-cost.md) - open scenes pay 0.02-0.03 ms GPU, render CPU up to 0.3 ms (second depth pass recorded again); levels save 0.9-3.4 ms GPU; defaults kept
 * [GPU occlusion for CPU render list meshes](/project/mesh-occlusion.md) - HZB-tested indirect draws for every opaque CPU-list mesh (lightmapped, skinned, fading...); exact images, 20 of 20 hidden meshes skipped; batches kept local, street bench GPU frame 1.043 to 0.570 ms
 * [Resident CLOD raster](/project/resident-clod-raster.md) - native storage, viewport commands, original vertex/material pipelines and conventional fallback
 * [Cluster scene import](/project/cluster-scene-import.md) - final-source cook/cache, shared meshes, unsupported fallback and optimized shadows
