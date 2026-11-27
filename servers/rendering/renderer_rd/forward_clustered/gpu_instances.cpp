@@ -322,7 +322,7 @@ bool RenderForwardClustered::_gpu_instances_prepare_two_pass(GPUInstanceScenario
 		{ &p_scenario.phase1_buffer, &p_scenario.phase1_capacity, p_scenario.member_count, sizeof(uint32_t), false, "GPU Instances Phase 1" },
 	};
 	for (const Grow &grow : grows) {
-		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
+		if (gpu_buffer_fits(*grow.capacity, grow.needed, 64u) && grow.buffer->is_valid()) {
 			continue;
 		}
 		if (grow.buffer->is_valid()) {
@@ -725,7 +725,7 @@ void RenderForwardClustered::_gpu_instances_rebuild(GPUInstanceScenario &p_scena
 		{ &p_scenario.command_indices_buffer, &p_scenario.command_index_capacity, p_scenario.command_indices.size(), 16, sizeof(uint32_t), false, "GPU Instances Command Indices" },
 	};
 	for (const Grow &grow : grows) {
-		if (*grow.capacity >= grow.needed && grow.buffer->is_valid()) {
+		if (gpu_buffer_fits(*grow.capacity, grow.needed, grow.minimum) && grow.buffer->is_valid()) {
 			continue;
 		}
 		if (grow.buffer->is_valid()) {
@@ -930,7 +930,7 @@ bool RenderForwardClustered::_gpu_instances_begin_view(RenderDataRD *p_render_da
 			}
 		}
 	}
-	if (scenario->visible_capacity < words || scenario->visible_buffer.is_null()) {
+	if (!gpu_buffer_fits(scenario->visible_capacity, words, 64u) || scenario->visible_buffer.is_null()) {
 		if (scenario->visible_buffer.is_valid()) {
 			rd->free_rid(scenario->visible_buffer);
 		}

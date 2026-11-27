@@ -270,6 +270,14 @@ straight.
     `Node3D`), and `GDScriptInstance::notification()` returning before it
     builds the script chain when no script has `_notification()`. See
     [kb/project/process-loop-misses.md](kb/project/process-loop-misses.md).
+  - Memory given back after a large scene is unloaded (OD9 in
+    [docs/optimization/DECISIONS.md](docs/optimization/DECISIONS.md)):
+    lowest-first `GPUInstanceSlots` with `get_capacity()` as the highest
+    slot in use, `gpu_buffer_fits()` in `gpu_buffer_capacity.h`, the
+    shrink in `SceneState::grow_instance_buffer()`, and
+    `RenderingDevice::_trim_staging_blocks()` (upstream code; drop it if
+    upstream frees staging blocks itself). See
+    [kb/project/vram-shrink-after-unload.md](kb/project/vram-shrink-after-unload.md).
   - The weather module (`modules/weather/`: wind, `Weather`, profiles, effects),
     the wind in `GrassField3D`'s default material and
     `PhysXCloth3D.use_global_wind`. See [WEATHER.md](WEATHER.md).

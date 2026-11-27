@@ -1061,6 +1061,49 @@ Error RenderingDevice::_insert_staging_block(StagingBuffers &p_staging_buffers) 
 	return OK;
 }
 
+// Gives back blocks after a burst of uploads (a large scene loading grows the
+// ring up to max_size_mb, and the ring hands every block out in turn, so
+// none ever looks idle). Every 60 frames: when the ring holds more than
+// twice what the busiest of the last 300 frames needed for every frame in
+// flight, blocks no frame in flight can still read are freed down to that.
+void RenderingDevice::_trim_staging_blocks(StagingBuffers &p_staging_buffers) {
+	constexpr uint32_t WINDOWS = StagingBuffers::STAGING_TRIM_WINDOWS;
+	const uint32_t window = (frames_drawn / 60) % WINDOWS;
+	p_staging_buffers.peak_claims[window] = MAX(p_staging_buffers.peak_claims[window], p_staging_buffers.frame_claims);
+	p_staging_buffers.frame_claims = 0;
+	if (frames_drawn % 60 != 59) {
+		return;
+	}
+	uint32_t peak = 0;
+	for (uint32_t i = 0; i < WINDOWS; i++) {
+		peak = MAX(peak, p_staging_buffers.peak_claims[i]);
+	}
+	// The next window starts over.
+	p_staging_buffers.peak_claims[(window + 1) % WINDOWS] = 0;
+	const uint32_t needed = (peak + 1) * frames.size();
+	if (frames_drawn < 60 * WINDOWS || uint32_t(p_staging_buffers.blocks.size()) <= needed * 2) {
+		return;
+	}
+	Vector<StagingBufferBlock> kept;
+	int current = 0;
+	uint32_t removable = p_staging_buffers.blocks.size() - needed;
+	for (int i = 0; i < p_staging_buffers.blocks.size(); i++) {
+		const StagingBufferBlock &block = p_staging_buffers.blocks[i];
+		if (i != p_staging_buffers.current && removable > 0 && block.frame_used + frames.size() <= frames_drawn) {
+			driver->buffer_unmap(block.driver_id);
+			driver->buffer_free(block.driver_id);
+			removable--;
+			continue;
+		}
+		if (i == p_staging_buffers.current) {
+			current = kept.size();
+		}
+		kept.push_back(block);
+	}
+	p_staging_buffers.blocks = kept;
+	p_staging_buffers.current = current;
+}
+
 Error RenderingDevice::_staging_buffer_allocate(StagingBuffers &p_staging_buffers, uint32_t p_amount, uint32_t p_required_align, uint32_t &r_alloc_offset, uint32_t &r_alloc_size, StagingRequiredAction &r_required_action, bool p_can_segment) {
 	// Determine a block to use.
 
@@ -1109,6 +1152,7 @@ Error RenderingDevice::_staging_buffer_allocate(StagingBuffers &p_staging_buffer
 						RETURN_IF_ERROR(_insert_staging_block(p_staging_buffers));
 						// Claim for this frame.
 						p_staging_buffers.blocks.write[p_staging_buffers.current].frame_used = frames_drawn;
+						p_staging_buffers.frame_claims++;
 					} else {
 						// Ok, worst case scenario, all the staging buffers belong to this frame
 						// and this frame is not even done.
@@ -1126,6 +1170,7 @@ Error RenderingDevice::_staging_buffer_allocate(StagingBuffers &p_staging_buffer
 		} else if (p_staging_buffers.blocks[p_staging_buffers.current].frame_used <= frames_drawn - frames.size()) {
 			// This is an old block, which was already processed, let's reuse.
 			p_staging_buffers.blocks.write[p_staging_buffers.current].frame_used = frames_drawn;
+			p_staging_buffers.frame_claims++;
 			p_staging_buffers.blocks.write[p_staging_buffers.current].fill_amount = 0;
 		} else {
 			// This block may still be in use, let's not touch it unless we have to, so.. can we create a new one?
@@ -1134,6 +1179,7 @@ Error RenderingDevice::_staging_buffer_allocate(StagingBuffers &p_staging_buffer
 				RETURN_IF_ERROR(_insert_staging_block(p_staging_buffers));
 				// Claim for this frame.
 				p_staging_buffers.blocks.write[p_staging_buffers.current].frame_used = frames_drawn;
+				p_staging_buffers.frame_claims++;
 			} else {
 				// Oops, we are out of room and we can't create more.
 				// Let's flush older frames.
@@ -8528,6 +8574,8 @@ void RenderingDevice::_begin_frame(bool p_presented) {
 		upload_staging_buffers.current = (upload_staging_buffers.current + 1) % upload_staging_buffers.blocks.size();
 		upload_staging_buffers.used = false;
 	}
+	// Download blocks are left alone: pending readbacks can refer to them.
+	_trim_staging_blocks(upload_staging_buffers);
 
 	if (download_staging_buffers.used) {
 		download_staging_buffers.current = (download_staging_buffers.current + 1) % download_staging_buffers.blocks.size();

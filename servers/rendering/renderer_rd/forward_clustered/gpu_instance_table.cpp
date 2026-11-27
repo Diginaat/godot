@@ -48,6 +48,21 @@ void GPUInstanceTable::ensure_slot(uint32_t p_slot) {
 	memset(dirty_flags.ptr() + old_size, 0, dirty_flags.size() - old_size);
 }
 
+void GPUInstanceTable::truncate(uint32_t p_slot_count) {
+	if (p_slot_count >= records.size()) {
+		return;
+	}
+	records.resize(p_slot_count);
+	dirty_flags.resize(p_slot_count);
+	uint32_t kept = 0;
+	for (uint32_t slot : dirty_slots) {
+		if (slot < p_slot_count) {
+			dirty_slots[kept++] = slot;
+		}
+	}
+	dirty_slots.resize(kept);
+}
+
 void GPUInstanceTable::mark_dirty(uint32_t p_slot) {
 	ensure_slot(p_slot);
 	if (!dirty_flags[p_slot]) {
@@ -65,10 +80,10 @@ GPUInstanceTable::UploadStats GPUInstanceTable::upload(bool p_skip_one) {
 	UploadStats stats;
 	RD *rd = RD::get_singleton();
 
-	if (buffer.is_null() || buffer_capacity < records.size()) {
-		// Grow to a power of two and start from the whole mirror: one upload
-		// replaces every pending range. RD keeps the old buffer alive until
-		// the frames that read it have finished.
+	if (buffer.is_null() || !gpu_buffer_fits(buffer_capacity, records.size(), MIN_CAPACITY)) {
+		// Grow (or shrink, after the slots in use shrank) and start from the
+		// whole mirror: one upload replaces every pending range. RD keeps the
+		// old buffer alive until the frames that read it have finished.
 		free_buffer();
 		buffer_capacity = gpu_buffer_capacity(records.size(), MIN_CAPACITY);
 		Vector<uint8_t> initial;

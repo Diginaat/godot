@@ -28,3 +28,8 @@
   fixed costs. OD7 (HZB four levels per dispatch) took 0.008 ms off it.
 - O5: native property get and set through validated calls (OD8), script
   processing 100k 23.6 to 22.1 ms.
+- O1: VRAM after a large scene is unloaded (OD9). Slots, GPU instance
+  buffers, CPU list instance buffers and the upload staging ring shrink.
+  small_1k after massive_100k 300 to 115 MB (fresh 72), massive_100k
+  244 to 168 MB. A gizmo flag for the transform walk was tried and
+  dropped (REGRESSIONS.md).

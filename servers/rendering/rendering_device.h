@@ -175,11 +175,17 @@ private:
 		uint64_t max_size = 0;
 		BitField<RDD::BufferUsageBits> usage_bits = {};
 		bool used = false;
+		// Blocks claimed this frame, and the most any frame claimed in each of
+		// the last STAGING_TRIM_WINDOWS windows of 60 frames (_trim_staging_blocks()).
+		static constexpr uint32_t STAGING_TRIM_WINDOWS = 5;
+		uint32_t frame_claims = 0;
+		uint32_t peak_claims[STAGING_TRIM_WINDOWS] = {};
 	};
 
 	Error _staging_buffer_allocate(StagingBuffers &p_staging_buffers, uint32_t p_amount, uint32_t p_required_align, uint32_t &r_alloc_offset, uint32_t &r_alloc_size, StagingRequiredAction &r_required_action, bool p_can_segment = true);
 	void _staging_buffer_execute_required_action(StagingBuffers &p_staging_buffers, StagingRequiredAction p_required_action);
 	Error _insert_staging_block(StagingBuffers &p_staging_buffers);
+	void _trim_staging_blocks(StagingBuffers &p_staging_buffers);
 
 	StagingBuffers upload_staging_buffers;
 	StagingBuffers download_staging_buffers;

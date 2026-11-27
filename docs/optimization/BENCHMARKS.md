@@ -27,6 +27,20 @@ runs each, the same VRAM in both runs):
 The "OD1 only" runs come from a control build with the HZB change taken
 out.
 
+### After an unload (OD9)
+
+`instance_bench.gd --case=small_1k,massive_100k --table --gpu-instances
+--occlusion` (one process; massive_100k twice, then small_1k again),
+video / buffer MB:
+
+| Run | Before | After OD9 (Vulkan) | After OD9 (D3D12) |
+| --- | --- | --- | --- |
+| small_1k, fresh | 72.2 / 15.0 | 72.2 / 15.0 | 72.7 / 15.0 |
+| massive_100k, second run | 244.3 / 99.4 | 167.9 / 78.1 | 168.4 / 78.1 |
+| small_1k after massive_100k | 300 / 84-104 | 115.2 / 25.4 | 115.8 / 25.4 |
+
+GPU p50 unchanged: small_1k 0.166 ms, massive_100k 0.78-0.95 ms.
+
 ## O2 and O5: process loop (2026-11-27)
 
 `devtools/test/scene_bench.gd`, headless, frame ms, medians of 3 rounds

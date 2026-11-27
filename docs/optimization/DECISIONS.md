@@ -85,3 +85,23 @@ converted values, vararg binds, default arguments and returning setters
 keep `call()`. Done in core, not as compile-time calls in GDScript: a
 script on a subclass can meet a property registered again, which the
 per-object member lookup handles. scene_bench script 100k -6%.
+
+## OD9 (2026-11-27): buffers and the staging ring shrink after a large scene is gone
+
+GPU instance slots, the GPU instance buffers, the CPU render list instance
+buffers and the RenderingDevice upload staging ring only grew. A small
+scene after a 100,000-node one kept 228 MB of VRAM it did not use. Now:
+
+- Slots are taken lowest first, and the slot range ends at the highest
+  slot in use.
+- `gpu_buffer_fits()`: content-sized buffers over 16,384 elements are
+  recreated when under a quarter is needed, with the usual eighth of
+  headroom.
+- Render list instance buffers shrink after 120 frames under a quarter.
+- `_trim_staging_blocks()` frees upload staging blocks past twice the
+  busiest frame of the last 300, never one a frame in flight can read.
+
+The thresholds leave a factor of four (two for staging) between growing
+and shrinking, so steady content never resizes. The staging trim changes
+upstream code in `RenderingDevice`. small_1k after massive_100k 300 to
+115 MB; GPU time unchanged.

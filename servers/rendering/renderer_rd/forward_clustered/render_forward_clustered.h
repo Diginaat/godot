@@ -815,6 +815,12 @@ protected:
 
 		MultiUmaBuffer<1u> instance_buffer[RENDER_LIST_MAX] = { MultiUmaBuffer<1u>("RENDER_LIST_OPAQUE"), MultiUmaBuffer<1u>("RENDER_LIST_MOTION"), MultiUmaBuffer<1u>("RENDER_LIST_ALPHA"), MultiUmaBuffer<1u>("RENDER_LIST_SECONDARY") };
 		InstanceData *curr_gpu_ptr[RENDER_LIST_MAX] = {};
+		// Shrinking the instance buffers (grow_instance_buffer()): the most
+		// elements a frame needed, the frame, and how many frames in a row
+		// needed less than a quarter of the buffer.
+		uint32_t instance_buffer_peak[RENDER_LIST_MAX] = {};
+		uint64_t instance_buffer_peak_frame[RENDER_LIST_MAX] = {};
+		uint32_t instance_buffer_low_frames[RENDER_LIST_MAX] = {};
 
 		LightmapCaptureData *lightmap_captures = nullptr;
 		uint32_t max_lightmap_captures;

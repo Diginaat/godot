@@ -61,11 +61,38 @@ TEST_CASE("[GPUInstanceSlots] Freed slots are reused before the table grows") {
 	slots.free(3);
 	CHECK_FALSE(slots.is_allocated(1));
 	CHECK(slots.get_live_count() == 2);
-	// Last in, first out.
-	CHECK(slots.allocate() == 3);
+	// Lowest first.
 	CHECK(slots.allocate() == 1);
+	CHECK(slots.allocate() == 3);
 	CHECK(slots.allocate() == 4);
 	CHECK(slots.get_capacity() == 5);
+}
+
+TEST_CASE("[GPUInstanceSlots] Capacity shrinks to the highest slot in use") {
+	GPUInstanceSlots slots;
+	for (uint32_t i = 0; i < 100; i++) {
+		slots.allocate();
+	}
+	slots.free(99);
+	CHECK(slots.get_capacity() == 99);
+	for (uint32_t i = 0; i < 50; i++) {
+		slots.free(i);
+	}
+	// Slot 98 still holds the table at 99.
+	CHECK(slots.get_capacity() == 99);
+	for (uint32_t i = 50; i < 99; i++) {
+		slots.free(i);
+	}
+	CHECK(slots.get_capacity() == 0);
+	CHECK(slots.get_live_count() == 0);
+	// The next scene starts at 0 again, and generations go on.
+	for (uint32_t i = 0; i < 3; i++) {
+		CHECK(slots.allocate() == i);
+	}
+	CHECK(slots.get_capacity() == 3);
+	CHECK(slots.get_generation(0) == 3);
+	CHECK(slots.get_generation(99) == 2);
+	CHECK_FALSE(slots.is_allocated(99));
 }
 
 TEST_CASE("[GPUInstanceSlots] Generations change on every free and reuse") {
@@ -88,6 +115,8 @@ TEST_CASE("[GPUInstanceSlots] Churn never needs more than the peak") {
 		state = state * 1664525u + 1013904223u;
 		if (live.is_empty() || (state >> 16) % 3 != 0) {
 			live.push_back(slots.allocate());
+			// Freed slots are reused before new ones: never past the peak.
+			CHECK(live[live.size() - 1] <= peak);
 		} else {
 			const uint32_t pick = (state >> 8) % live.size();
 			slots.free(live[pick]);
@@ -97,10 +126,13 @@ TEST_CASE("[GPUInstanceSlots] Churn never needs more than the peak") {
 		peak = MAX(peak, live.size());
 		CHECK(slots.get_live_count() == live.size());
 	}
-	CHECK(slots.get_capacity() == peak);
+	uint32_t highest = 0;
 	for (uint32_t slot : live) {
 		CHECK(slots.is_allocated(slot));
+		highest = MAX(highest, slot + 1);
 	}
+	CHECK(slots.get_capacity() == highest);
+	CHECK(slots.get_capacity() <= peak);
 }
 
 TEST_CASE("[GPUInstanceSlots] Double free is rejected") {

@@ -931,6 +931,31 @@ uint32_t RenderForwardClustered::_setup_environment(const RenderDataRD *p_render
 }
 
 void RenderForwardClustered::SceneState::grow_instance_buffer(RenderListType p_render_list, uint32_t p_req_element_count, bool p_append) {
+	// Shrink a buffer that the last 120 frames used less than a quarter of
+	// (a large scene unloaded), at the frame's first fill, which copies
+	// nothing earlier. Shadow passes append, so a frame's need is its peak.
+	// Empty fills count too: a list that stays empty gives its buffer back.
+	const uint64_t frame = RSG::rasterizer->get_frame_number();
+	if (instance_buffer_peak_frame[p_render_list] != frame) {
+		const uint32_t capacity = instance_buffer[p_render_list].get_size(0u) / sizeof(SceneState::InstanceData);
+		const bool low = capacity > 4u * INSTANCE_DATA_BUFFER_MIN_SIZE && instance_buffer_peak[p_render_list] < capacity / 4;
+		instance_buffer_low_frames[p_render_list] = low ? instance_buffer_low_frames[p_render_list] + 1 : 0;
+		if (!p_append && instance_buffer_low_frames[p_render_list] >= 120) {
+			const uint32_t new_size = Math::nearest_power_of_2_templated(MAX(uint32_t(INSTANCE_DATA_BUFFER_MIN_SIZE), instance_buffer_peak[p_render_list]));
+			instance_buffer[p_render_list].uninit();
+			instance_buffer[p_render_list].set_storage_size(0u, new_size * sizeof(SceneState::InstanceData));
+			if (p_req_element_count == 0) {
+				// Nothing maps it below; the render pass binds it (as for an empty list).
+				instance_buffer[p_render_list].prepare_for_upload();
+			}
+			curr_gpu_ptr[p_render_list] = nullptr;
+			instance_buffer_low_frames[p_render_list] = 0;
+		}
+		instance_buffer_peak[p_render_list] = 0;
+		instance_buffer_peak_frame[p_render_list] = frame;
+	}
+	instance_buffer_peak[p_render_list] = MAX(instance_buffer_peak[p_render_list], p_req_element_count);
+
 	if (p_req_element_count > 0) {
 		if (instance_buffer[p_render_list].get_size(0u) < p_req_element_count * sizeof(SceneState::InstanceData)) {
 			instance_buffer[p_render_list].uninit();
@@ -2375,6 +2400,8 @@ void RenderForwardClustered::_update_gpu_instance_table() {
 	}
 
 	_update_dirty_geometry_instances(); // Base flags and uniform offsets current.
+	// Slots past the highest in use hold no instance (the table can shrink).
+	gpu_instance_table.truncate(gpu_instance_slots.get_capacity());
 	const int validate = GLOBAL_GET_CACHED(int, "rendering/geometry/gpu_instance_table/validate");
 	// Self-test: leave the highest dirty slot's record stale (the element
 	// check must notice); upload() drops the lowest one (the buffer check must).

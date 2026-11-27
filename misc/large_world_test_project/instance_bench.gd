@@ -229,9 +229,10 @@ func _measure(label: String) -> void:
 		viewport.get_render_info(Viewport.RENDER_INFO_TYPE_SHADOW, Viewport.RENDER_INFO_DRAW_CALLS_IN_FRAME),
 		viewport.get_render_info(Viewport.RENDER_INFO_TYPE_VISIBLE, Viewport.RENDER_INFO_OBJECTS_IN_FRAME),
 		viewport.get_render_info(Viewport.RENDER_INFO_TYPE_VISIBLE, Viewport.RENDER_INFO_PRIMITIVES_IN_FRAME)])
-	row.append("video_mib=%.1f buffer_mib=%.1f static_mib=%.1f" % [
+	row.append("video_mib=%.1f buffer_mib=%.1f texture_mib=%.1f static_mib=%.1f" % [
 		Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0,
 		Performance.get_monitor(Performance.RENDER_BUFFER_MEM_USED) / 1048576.0,
+		Performance.get_monitor(Performance.RENDER_TEXTURE_MEM_USED) / 1048576.0,
 		Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0])
 	if _percentile(samples.gpu, 0.5) <= 0.0 or _percentile(samples.render_cpu, 0.5) <= 0.0:
 		printerr("INSTANCE_BENCH_FAIL: %s has no CPU or GPU times" % label)
@@ -291,11 +292,12 @@ func _run() -> void:
 	var table := OS.get_cmdline_user_args().has("--table")
 	var gpu_instances := OS.get_cmdline_user_args().has("--gpu-instances")
 	var occlusion := OS.get_cmdline_user_args().has("--occlusion")
-	# --case=NAME runs only that case (profiling one case, e.g. with gpu_intervals.gd).
-	var only_case := ""
+	# --case=NAME[,NAME...] runs only those cases (profiling one case, e.g. with
+	# gpu_intervals.gd, or what one case leaves behind for the next).
+	var only_cases := PackedStringArray()
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--case="):
-			only_case = arg.get_slice("=", 1)
+			only_cases = arg.get_slice("=", 1).split(",")
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/occlusion", occlusion)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instance_table/enabled", table)
 	ProjectSettings.set_setting("rendering/geometry/gpu_instances/enabled", gpu_instances)
@@ -303,7 +305,7 @@ func _run() -> void:
 	for repeat in 1 if stages else 2:
 		for c in CASES.size():
 			var spec: Array = CASES[c if repeat == 0 else CASES.size() - 1 - c]
-			if not only_case.is_empty() and spec[0] != only_case:
+			if not only_cases.is_empty() and not only_cases.has(spec[0]):
 				continue
 			var started := Time.get_ticks_msec()
 			_build(spec)

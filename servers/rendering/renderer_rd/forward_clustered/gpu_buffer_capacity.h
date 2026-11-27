@@ -47,3 +47,14 @@ inline uint32_t gpu_buffer_capacity(uint32_t p_needed, uint32_t p_minimum = 1) {
 	const uint64_t capacity = (uint64_t(needed) + needed / 8 + 16383u) & ~uint64_t(16383u);
 	return uint32_t(MIN(capacity, uint64_t(UINT32_MAX)));
 }
+
+// Whether a buffer of p_capacity elements can stay for p_needed: big enough,
+// and, past 16,384 elements, not more than four times too big. A buffer that
+// fails is recreated at gpu_buffer_capacity(), which leaves at least 1/8 of
+// headroom, so content that shrinks gives its memory back (a large level
+// unloaded) without resizing back and forth. Only for buffers sized by the
+// scene's content, not by what one frame sees.
+inline bool gpu_buffer_fits(uint32_t p_capacity, uint32_t p_needed, uint32_t p_minimum = 1) {
+	const uint32_t needed = MAX(p_needed, MAX(p_minimum, 1u));
+	return p_capacity >= needed && (p_capacity <= 16384u || uint64_t(needed) * 4 >= p_capacity);
+}

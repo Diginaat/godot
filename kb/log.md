@@ -1,5 +1,13 @@
 # Update log
 
+## 2026-11-27 (VRAM after an unload, O1)
+
+* **Added**: [VRAM after an unload](/project/vram-shrink-after-unload.md):
+  lowest-first GPU instance slots, `gpu_buffer_fits()` shrink rule, CPU
+  render list instance buffers and the RenderingDevice upload staging
+  ring shrink. small_1k after massive_100k 300 to 115 MB (fresh 72),
+  massive_100k 244 to 168 MB.
+
 ## 2026-11-27 (native property access, O5)
 
 * **Added**: [native property access](/project/native-property-validated-call.md):

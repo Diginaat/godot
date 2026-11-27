@@ -110,6 +110,8 @@ public:
 	};
 
 	void ensure_slot(uint32_t p_slot);
+	// Drops the records from p_slot_count on (slots no longer in use).
+	void truncate(uint32_t p_slot_count);
 	void mark_dirty(uint32_t p_slot);
 	bool has_dirty() const { return !dirty_slots.is_empty(); }
 	bool is_dirty(uint32_t p_slot) const { return p_slot < dirty_flags.size() && dirty_flags[p_slot]; }
