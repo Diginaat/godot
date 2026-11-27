@@ -911,3 +911,15 @@ it on. `cluster_lod/occlusion_enabled`, `cluster_lod/shadows` and
 `cluster_lod/streaming/enabled` keep their defaults; they take effect only
 with `cluster_lod/enabled`. Projects that saved a value keep it. The
 large-world test project sets it to true, so the suite still covers CLOD.
+
+## D042 — Variable rate shading is off by default
+
+2026-11-27, at the maintainer's request. `rendering/vrs/mode` defaults to
+Disabled (0) again, as upstream; it was Adaptive (3) since G2
+(2026-11-24). Adaptive VRS stays available per project and per viewport.
+Measured the same day (`light_bench`, 1080p, RTX 5070): on Vulkan the
+adaptive pass about paid for itself (0 lights 0.243 ms with it, 0.238
+without); on D3D12 it cost 0.205 ms and the opaque pass took the same
+time with it as without, so the rate image did not lower the shading
+there.
+

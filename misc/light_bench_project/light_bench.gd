@@ -78,6 +78,15 @@ func _read_stages() -> void:
 	stages_ready.emit.call_deferred(stages)
 
 
+# --dump-ts: every GPU timestamp of the last retired frame, with the time to
+# the next one, to see where a pass's time goes.
+func _dump_timestamps(p_count: int) -> void:
+	var rd := RenderingServer.get_rendering_device()
+	for i in rd.get_captured_timestamps_count() - 1:
+		print("LIGHT_BENCH_TS: lights=%d %3d %.4f %s" % [p_count, i, (rd.get_captured_timestamp_gpu_time(i + 1) - rd.get_captured_timestamp_gpu_time(i)) / 1.0e6, rd.get_captured_timestamp_name(i)])
+	stages_ready.emit.call_deferred({})
+
+
 func _percentile(values: Array[float], fraction: float) -> float:
 	if values.is_empty():
 		return 0.0
@@ -106,5 +115,8 @@ func _run() -> void:
 			var stages: Dictionary = await stages_ready
 			if stages.has("opaque"):
 				opaque.append(stages.opaque)
+		if OS.get_cmdline_user_args().has("--dump-ts"):
+			RenderingServer.call_on_render_thread(_dump_timestamps.bind(count))
+			await stages_ready
 		print("LIGHT_BENCH: %s limit=%d lights=%d gpu_p50=%.3f gpu_p95=%.3f cpu_p50=%.3f opaque_p50=%.3f" % [driver, limit, count, _percentile(gpu, 0.5), _percentile(gpu, 0.95), _percentile(cpu, 0.5), _percentile(opaque, 0.5)])
 	get_tree().quit(0)

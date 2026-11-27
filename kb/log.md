@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-27 (VRS off by default)
+
+* **Changed**: `rendering/vrs/mode` defaults to Disabled (D042, the
+  maintainer's request). Measured: Adaptive costs 0.205 ms on D3D12 with
+  no opaque saving, and breaks even on Vulkan, in `light_bench`
+  ([adaptive VRS](/project/adaptive-vrs.md)).
+
 ## 2026-11-27 (skinned crowd)
 
 * **Added**: [skinned crowd costs](/project/skinned-crowd-costs.md) and

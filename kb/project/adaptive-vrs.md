@@ -10,10 +10,16 @@ generated: { by: claude-opus-5-5, at: 2026-11-24T00:00:00Z }
 # What
 
 `Viewport.VRS_ADAPTIVE` / `RenderingServer.VIEWPORT_VRS_ADAPTIVE`, threshold
-`rendering/vrs/adaptive_threshold` (0.1). `rendering/vrs/mode` defaults to
-Adaptive (3) in this build, so the main viewport uses it; SubViewports keep
-their own `vrs_mode` (Disabled by default). GPUs without attachment VRS
-ignore it.
+`rendering/vrs/adaptive_threshold` (0.1). `rendering/vrs/mode` defaulted to
+Adaptive (3) in this build from 2026-11-24; since 2026-11-27 it is Disabled
+again (D042), so a project opts in. SubViewports keep their own `vrs_mode`
+(Disabled by default). GPUs without attachment VRS ignore it.
+
+2026-11-27, `light_bench` at 1080p on an RTX 5070, GPU frame with Adaptive
+against Disabled: Vulkan 0.243 against 0.238 ms with no lights (the opaque
+pass 0.036 against 0.095 ms); D3D12 0.433 against 0.228 ms, with the same
+opaque pass time either way (the rate image does not seem to take effect
+there; under investigation).
 
 # How
 
