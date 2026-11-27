@@ -86,3 +86,24 @@ pipeline forced to the ubershader. With the shader made to ignore the
 entries, the motion vector comparison fails (about 900-1,000 values per
 frame differ), so the test covers the new path. `instance_table.ps1`
 (including its self-test), `large_world.ps1` and the smoke tests pass.
+
+# Then: no lightmap UV scale (OD13)
+
+The record's 16-byte lightmap UV scale had no reader either: the scene
+shader reads it only with `INSTANCE_FLAGS_USE_LIGHTMAP`, and the GPU path
+(the only reader of records) takes no lightmapped instances
+(`_gpu_instance_eligible()`). The record is now 96 bytes, three 32-byte
+sectors; `gpu_instance_data()` writes a constant. The element check no
+longer compares the field.
+
+| Case | VRAM OD12 / OD13 (MB) | GPU p50 OD12 / OD13 (ms) |
+| --- | --- | --- |
+| town | 175 / 174 | 0.721-0.723 / 0.724-0.784 |
+| forest | 146 / 145 | 1.637-1.655 / 1.640-1.656 |
+| city_extreme | 222 / 219 | 3.355-3.363 / 3.366-3.378 |
+| dynamic_20k | 85.2 / 84.7 | 0.696-0.701 / 0.694-0.698 |
+| massive_100k | 101.8 / 100.1 | 0.886-0.910 / 0.884-0.903 |
+| churn_100k | 120.3 / 116.6 | 0.828-0.974 / 0.826-0.971 |
+
+`gpu_instances.ps1` (Vulkan, D3D12), `instance_table.ps1`,
+`large_world.ps1` and the smoke tests pass.

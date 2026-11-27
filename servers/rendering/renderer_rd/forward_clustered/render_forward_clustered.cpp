@@ -2335,10 +2335,6 @@ bool RenderForwardClustered::_gpu_instance_table_build_record(uint32_t p_slot, G
 	r_record.flags = inst->base_flags | (inst->non_uniform_scale ? uint32_t(INSTANCE_DATA_FLAGS_NON_UNIFORM_SCALE) : 0u);
 	r_record.instance_uniforms_ofs = uint32_t(inst->shader_uniforms_offset);
 	r_record.layer_mask = inst->layer_mask;
-	r_record.lightmap_uv_scale[0] = inst->lightmap_uv_scale.position.x;
-	r_record.lightmap_uv_scale[1] = inst->lightmap_uv_scale.position.y;
-	r_record.lightmap_uv_scale[2] = inst->lightmap_uv_scale.size.x;
-	r_record.lightmap_uv_scale[3] = inst->lightmap_uv_scale.size.y;
 	for (uint32_t axis = 0; axis < 3; axis++) {
 		r_record.aabb_position[axis] = inst->transformed_aabb.position[axis];
 		r_record.aabb_size[axis] = inst->transformed_aabb.size[axis];
@@ -2375,7 +2371,6 @@ void RenderForwardClustered::_gpu_instance_table_check_element(const GeometryIns
 	const bool same = (prev_entry == 0 || prev != nullptr) &&
 			memcmp(record.transform, p_data.transform, sizeof(record.transform)) == 0 &&
 			memcmp(prev_transform, p_data.prev_transform, sizeof(record.transform)) == 0 &&
-			memcmp(record.lightmap_uv_scale, p_data.lightmap_uv_scale, sizeof(record.lightmap_uv_scale)) == 0 &&
 			record.instance_uniforms_ofs == p_data.instance_uniforms_ofs &&
 			record.layer_mask == p_data.layer_mask &&
 			(record.flags & ~p_data.flags) == 0 &&

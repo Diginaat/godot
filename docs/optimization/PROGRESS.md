@@ -44,5 +44,9 @@
   to 112 bytes per slot, a compacted side table for instances that moved.
   city_extreme 232 to 222 MB (stock 188), churn_100k 131.5 to 120.3 MB.
   The first version had a span leak (+5% GPU in dynamic_20k after another
-  case), fixed by compaction before commit. A gizmo flag for the transform walk was tried and
+  case), fixed by compaction before commit.
+- O1: no lightmap UV scale in the record (OD13): 112 to 96 bytes, city
+  222 to 219 MB. City buffers now (`--frames=300`): table 21 MB, upstream
+  cluster buffer 9.3 MB, members 5 MB, shadow IDs 4.9 MB, IDs and the two
+  phase ID buffers 2.4 MB each. A gizmo flag for the transform walk was tried and
   dropped (REGRESSIONS.md).

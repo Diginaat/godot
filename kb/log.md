@@ -1,5 +1,12 @@
 # Update log
 
+## 2026-11-27 (no lightmap UV scale in the instance table, O1)
+
+* **Updated**: [previous transform table](/project/prev-transform-table.md):
+  the record also drops its lightmap UV scale, which only lightmapped
+  instances read and the GPU path does not take (OD13); 112 to 96 bytes,
+  city_extreme 222 to 219 MB, churn_100k 120.3 to 116.6 MB.
+
 ## 2026-11-27 (previous transforms out of the instance table, O1)
 
 * **Added**: [previous transform table](/project/prev-transform-table.md):

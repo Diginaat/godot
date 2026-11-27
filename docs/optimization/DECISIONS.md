@@ -148,3 +148,13 @@ moving left holes and 2,000 movers uploaded 20,000 entries a frame.
 city_extreme 232 to 222 MB, churn_100k 131.5 to 120.3 MB, massive_100k
 107 to 102 MB; GPU time unchanged. Cost: one more storage buffer binding
 in the render pass set and one more 48-byte read for moved instances.
+
+## OD13 (2026-11-27): no lightmap UV scale in the instance table record
+
+The record's lightmap UV scale (16 bytes) is read by the scene shader
+only for instances with `INSTANCE_FLAGS_USE_LIGHTMAP`, and the GPU path,
+the only reader of records, takes no lightmapped instances. Dropped:
+112 to 96 bytes per slot (three 32-byte sectors). city_extreme 222 to
+219 MB, churn_100k 120.3 to 116.6 MB; GPU time within spread. If the GPU
+path ever takes lightmapped instances, the scale goes back (or into a
+side table like OD12's).

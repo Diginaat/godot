@@ -280,7 +280,9 @@ straight.
     [kb/project/gpu-instance-data-in-shader.md](kb/project/gpu-instance-data-in-shader.md).
     The previous transform is not in the table record (OD12):
     `GPUInstancePrevTable`, the entry in `gpu_flags` from bit 8, binding
-    52, and the compaction in `_update_gpu_instance_table()`. See
+    52, and the compaction in `_update_gpu_instance_table()`. No lightmap
+    UV scale in the record either (OD13): if the GPU path takes
+    lightmapped instances, it must come back. See
     [kb/project/prev-transform-table.md](kb/project/prev-transform-table.md).
   - Memory given back after a large scene is unloaded (OD9 in
     [docs/optimization/DECISIONS.md](docs/optimization/DECISIONS.md)):

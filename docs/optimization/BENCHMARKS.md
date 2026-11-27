@@ -83,6 +83,18 @@ Builds alternated, two rounds (VRAM identical in both); GPU p50 ranges:
 | massive_100k | 107.0 / 101.8 | 0.890-0.909 / 0.888-0.910 |
 | churn_100k | 131.5 / 120.3 | 0.830-0.980 / 0.830-0.977 |
 
+### No lightmap UV scale in the record (OD13)
+
+Same method; OD12 against OD13:
+
+| Case | VRAM (MB) | GPU p50 (ms) |
+| --- | --- | --- |
+| town | 175 / 174 | 0.721-0.723 / 0.724-0.784 |
+| forest | 146 / 145 | 1.637-1.655 / 1.640-1.656 |
+| city_extreme | 222 / 219 | 3.355-3.363 / 3.366-3.378 |
+| massive_100k | 101.8 / 100.1 | 0.886-0.910 / 0.884-0.903 |
+| churn_100k | 120.3 / 116.6 | 0.828-0.974 / 0.826-0.971 |
+
 ## O2: deep chains (OD11, 2026-11-27)
 
 `scene_bench.ps1`, 3 rounds, builds alternated (stock: same machine, 2 rounds):

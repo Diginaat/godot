@@ -48,21 +48,22 @@ public:
 	// instance whose previous transform differs from its transform (moved
 	// last frame) has an entry in GPUInstancePrevTable, which gpu_flags
 	// points to; for every other one the previous transform is the
-	// transform (OD12 in docs/optimization/DECISIONS.md).
+	// transform (OD12 in docs/optimization/DECISIONS.md). No lightmap UV
+	// scale either: the GPU path, the only reader, takes no lightmapped
+	// instances (OD13).
 	struct Record {
 		float transform[12]; // Transposed 3x4, as in the per-frame instance data.
 		uint32_t flags; // Instance base flags plus non-uniform scale.
 		uint32_t instance_uniforms_ofs;
 		uint32_t layer_mask;
 		uint32_t generation; // Slot generation; odd while the slot is in use.
-		float lightmap_uv_scale[4];
 		// World bounds and per-instance bits for the GPU path (Phase 2).
 		float aabb_position[3];
 		uint32_t gpu_flags; // GPU_FLAG_*; from bit GPU_FLAG_PREV_SHIFT on, the GPUInstancePrevTable entry plus one (0: none).
 		float aabb_size[3];
 		float lod_scale; // Model scale times LOD bias, as the CPU LOD choice uses it.
 	};
-	static_assert(sizeof(Record) == 112, "GPUInstanceTable::Record must stay 112 bytes (std430 layout).");
+	static_assert(sizeof(Record) == 96, "GPUInstanceTable::Record must stay 96 bytes (std430 layout).");
 
 	enum {
 		GPU_FLAG_MOVED = 1, // Moved this frame: the instance data gets the dynamic flag.

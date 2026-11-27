@@ -433,13 +433,12 @@ multimesh_visible_ids;
 // its instance table record, its member and bucket, and the view's flags
 // (gpu_instance_data()), as _fill_instance_data() would write it. No copy
 // per member is kept (OD10).
-struct GPUInstanceRecord { // GPUInstanceTable::Record, 112 bytes.
+struct GPUInstanceRecord { // GPUInstanceTable::Record, 96 bytes.
 	mat3x4 transform;
 	uint flags;
 	uint instance_uniforms_ofs;
 	uint layer_mask;
 	uint generation;
-	vec4 lightmap_uv_scale;
 	vec3 aabb_position;
 	uint gpu_flags;
 	vec3 aabb_size;
@@ -535,7 +534,7 @@ InstanceData gpu_instance_data(uint p_member) {
 	data.layer_mask = record.layer_mask;
 	uint prev_entry = record.gpu_flags >> GPU_INSTANCE_PREV_SHIFT;
 	data.prev_transform = prev_entry != 0u ? gpu_instance_prev.data[prev_entry - 1u] : record.transform;
-	data.lightmap_uv_scale = record.lightmap_uv_scale;
+	data.lightmap_uv_scale = vec4(0.0, 0.0, 1.0, 1.0); // Read only with INSTANCE_FLAGS_USE_LIGHTMAP; the GPU path takes no lightmapped instances.
 #ifdef USE_DOUBLE_PRECISION
 	data.model_precision = vec4(0.0);
 	data.prev_model_precision = vec4(0.0);
